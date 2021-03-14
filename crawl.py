@@ -37,7 +37,7 @@ def crawl():
 
 
 def fetch(url):
-    page_data = requests.get(url)
+    page_data = requests.get(url, timeout=10)
     return page_data.text
 
 
