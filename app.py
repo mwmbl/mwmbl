@@ -36,6 +36,8 @@ def complete(q: str):
     data = pd.read_sql(query, con, params=terms)
     results = data.apply(lambda row: f'{row.title} — {row.url}', axis=1)
     print("Results", results)
+    if len(results) == 0:
+        return []
     return [q, results.to_list()[:5]]
 
 
