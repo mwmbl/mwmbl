@@ -19,9 +19,29 @@ def search(s: str):
     return RedirectResponse(url)
 
 
+def complete_term(term):
+    con = sqlite3.connect(INDEX_PATH)
+    query = f"""
+        SELECT term, count(*)
+        FROM terms
+        WHERE term LIKE (? || '%')
+        LIMIT 1
+    """
+    result = con.execute(query, (term,))
+    completed = result.fetchone()
+    print("Completed", completed)
+    if len(completed) > 0:
+        return completed[0]
+    return None
+
+
 @app.get("/complete")
 def complete(q: str):
     terms = [x.lower() for x in q.split()]
+
+    completed = complete_term(terms[-1])
+    terms = terms[:-1] + [completed]
+
     con = sqlite3.connect(INDEX_PATH)
     in_part = ','.join('?'*len(terms))
     query = f"""
