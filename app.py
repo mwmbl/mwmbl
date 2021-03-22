@@ -27,7 +27,7 @@ def complete_term(term):
     query = f"""
         SELECT term
         FROM terms
-        WHERE term > ?
+        WHERE term >= ?
         ORDER BY term
         LIMIT 1
     """
