@@ -25,9 +25,10 @@ def search(s: str):
 def complete_term(term):
     con = sqlite3.connect(INDEX_PATH)
     query = f"""
-        SELECT term, count(*)
+        SELECT term
         FROM terms
-        WHERE term LIKE (? || '%')
+        WHERE term > ?
+        ORDER BY term
         LIMIT 1
     """
     result = con.execute(query, (term,))
@@ -42,8 +43,8 @@ def complete_term(term):
 def complete(q: str):
     terms = [x.lower() for x in q.split()]
 
-    # completed = complete_term(terms[-1])
-    # terms = terms[:-1] + [completed]
+    completed = complete_term(terms[-1])
+    terms = terms[:-1] + [completed]
 
     con = sqlite3.connect(INDEX_PATH)
     in_part = ','.join('?'*len(terms))
@@ -64,21 +65,8 @@ def complete(q: str):
         return []
     results_list = results.to_list()[:5]
     results_list = [q, results_list]
-    # , [], [], {
-    #     'google:suggestdetail': [
-    #         {'a': 'A', 't': x, 'q': 'p=v'}
-    #         for x in results_list]
-    # }]
     print("Results", results_list)
     return results_list
-
-    # titles = [x.strip() for x in data['title'].to_list()[:5]]
-    # urls = [x.strip() for x in data['url'].to_list()[:5]]
-    #
-    # # result = [q, titles, ['asd'] * 5, urls]
-    # result = [q, titles]
-    # print("Returning", result)
-    # return result
 
 
 @app.get('/')
