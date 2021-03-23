@@ -4,6 +4,7 @@ Create a search index
 import gzip
 import sqlite3
 from glob import glob
+from urllib.parse import unquote
 
 import bs4
 import justext
@@ -13,10 +14,13 @@ from paths import CRAWL_GLOB, INDEX_PATH
 
 NUM_INITIAL_TOKENS = 50
 
+HTTP_START = 'http://'
+HTTPS_START = 'https://'
+
 
 def is_content_token(nlp, token):
     lexeme = nlp.vocab[token.orth]
-    return lexeme.is_alpha and not token.is_stop
+    return (lexeme.is_alpha or lexeme.is_digit) and not token.is_stop
 
 
 def tokenize(nlp, cleaned_text):
@@ -34,58 +38,60 @@ def clean(content):
     return cleaned_text
 
 
-def index(tokens, url, title):
-    with sqlite3.connect(INDEX_PATH) as con:
+class Indexer:
+    def __init__(self, index_path):
+        self.index_path = index_path
+
+    def index(self, tokens, url, title):
+        with sqlite3.connect(self.index_path) as con:
+            con.execute("""
+                INSERT INTO pages (url, title)
+                VALUES (?, ?)
+            """, (url, title))
+
+            result = con.execute("""
+                SELECT last_insert_rowid()
+            """)
+            page_id = result.fetchone()[0]
+
+            con.executemany("""
+                INSERT INTO terms (term, page_id)
+                VALUES (?, ?)
+            """, [(term, page_id) for term in tokens])
+
+    def create_if_not_exists(self):
+        con = sqlite3.connect(self.index_path)
         con.execute("""
-            INSERT INTO pages (url, title)
-            VALUES (?, ?)
-        """, (url, title))
-
-        result = con.execute("""
-            SELECT last_insert_rowid()
+        CREATE TABLE IF NOT EXISTS pages (
+          id INTEGER PRIMARY KEY,
+          url TEXT UNIQUE,
+          title TEXT
+        )
         """)
-        page_id = result.fetchone()[0]
-        print("Created page with id", page_id)
 
-        con.executemany("""
-            INSERT INTO terms (term, page_id)
-            VALUES (?, ?)
-        """, [(term, page_id) for term in tokens])
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS terms (
+          term TEXT,
+          page_id INTEGER 
+        )
+        """)
 
+        con.execute("""
+        CREATE INDEX IF NOT EXISTS term_index ON terms (term)
+        """)
 
-def create_if_not_exists():
-    con = sqlite3.connect(INDEX_PATH)
-    con.execute("""
-    CREATE TABLE IF NOT EXISTS pages (
-      id INTEGER PRIMARY KEY,
-      url TEXT UNIQUE,
-      title TEXT
-    )
-    """)
-
-    con.execute("""
-    CREATE TABLE IF NOT EXISTS terms (
-      term TEXT,
-      page_id INTEGER 
-    )
-    """)
-
-    con.execute("""
-    CREATE INDEX IF NOT EXISTS term_index ON terms (term)
-    """)
-
-
-def page_indexed(url):
-    con = sqlite3.connect(INDEX_PATH)
-    result = con.execute("""
-        SELECT EXISTS(SELECT 1 FROM pages WHERE url=?)
-    """, (url,))
-    value = result.fetchone()[0]
-    return value == 1
+    def page_indexed(self, url):
+        con = sqlite3.connect(self.index_path)
+        result = con.execute("""
+            SELECT EXISTS(SELECT 1 FROM pages WHERE url=?)
+        """, (url,))
+        value = result.fetchone()[0]
+        return value == 1
 
 
 def run():
-    create_if_not_exists()
+    indexer = Indexer(INDEX_PATH)
+    indexer.create_if_not_exists()
     nlp = English()
     for path in glob(CRAWL_GLOB):
         print("Path", path)
@@ -93,7 +99,7 @@ def run():
             url = html_file.readline().strip()
             content = html_file.read()
 
-        if page_indexed(url):
+        if indexer.page_indexed(url):
             print("Page exists, skipping", url)
             continue
 
@@ -106,7 +112,33 @@ def run():
         print("URL", url)
         print("Tokens", tokens)
         print("Title", title)
-        index(tokens, url, title)
+        indexer.index(tokens, url, title)
+
+
+def prepare_url_for_tokenizing(url: str):
+    if url.startswith(HTTP_START):
+        url = url[len(HTTP_START):]
+    elif url.startswith(HTTPS_START):
+        url = url[len(HTTPS_START):]
+    for c in '/._':
+        if c in url:
+            url = url.replace(c, ' ')
+    return url
+
+
+def index_titles_and_urls(indexer, nlp, titles_and_urls):
+    indexer.create_if_not_exists()
+    for i, (title_cleaned, url) in enumerate(titles_and_urls):
+        title_tokens = tokenize(nlp, title_cleaned)
+        prepared_url = prepare_url_for_tokenizing(unquote(url))
+        url_tokens = tokenize(nlp, prepared_url)
+        tokens = title_tokens | url_tokens
+
+        if len(title_tokens) > 0:
+            indexer.index(tokens, url, title_cleaned)
+
+        if i % 1000 == 0:
+            print("Processed", i)
 
 
 if __name__ == '__main__':
