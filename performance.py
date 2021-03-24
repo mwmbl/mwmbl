@@ -20,7 +20,7 @@ def performance_test():
         print("No test index found, creating")
     indexer = Indexer(TEST_INDEX_PATH)
     titles_and_urls = get_wiki_titles_and_urls()
-    titles_and_urls_slice = islice(titles_and_urls, 1000)
+    titles_and_urls_slice = islice(titles_and_urls, 50000)
 
     start_time = datetime.now()
     index_titles_and_urls(indexer, nlp, titles_and_urls_slice)
@@ -31,6 +31,7 @@ def performance_test():
 
     print("Index time:", index_time)
     print("Index size", index_size)
+    print("Num tokens", indexer.get_num_tokens())
 
 
 if __name__ == '__main__':

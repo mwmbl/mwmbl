@@ -3,7 +3,10 @@ Create a search index
 """
 import gzip
 import sqlite3
+from dataclasses import dataclass
 from glob import glob
+from itertools import chain, count, islice
+from typing import List, Iterator
 from urllib.parse import unquote
 
 import bs4
@@ -16,6 +19,7 @@ NUM_INITIAL_TOKENS = 50
 
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
+BATCH_SIZE = 10000
 
 
 def is_content_token(nlp, token):
@@ -38,26 +42,42 @@ def clean(content):
     return cleaned_text
 
 
+@dataclass
+class Page:
+    tokens: List[str]
+    url: str
+    title: str
+
+
 class Indexer:
     def __init__(self, index_path):
         self.index_path = index_path
 
-    def index(self, tokens, url, title):
+    def index(self, pages: List[Page]):
         with sqlite3.connect(self.index_path) as con:
-            con.execute("""
-                INSERT INTO pages (url, title)
-                VALUES (?, ?)
-            """, (url, title))
+            cursor = con.execute("""
+                    SELECT max(id) FROM pages
+                """)
+            current_id = cursor.fetchone()[0]
+            if current_id is None:
+                first_page_id = 1
+            else:
+                first_page_id = current_id + 1
 
-            result = con.execute("""
-                SELECT last_insert_rowid()
-            """)
-            page_id = result.fetchone()[0]
+            page_ids = range(first_page_id, first_page_id + len(pages))
+            urls_titles_ids = ((page.url, page.title, page_id)
+                               for page, page_id in zip(pages, page_ids))
+            con.executemany("""
+                INSERT INTO pages (url, title, id)
+                VALUES (?, ?, ?)
+            """, urls_titles_ids)
 
+            tokens = chain(*([(term, page_id) for term in page.tokens]
+                             for page, page_id in zip(pages, page_ids)))
             con.executemany("""
                 INSERT INTO terms (term, page_id)
                 VALUES (?, ?)
-            """, [(term, page_id) for term in tokens])
+            """, tokens)
 
     def create_if_not_exists(self):
         con = sqlite3.connect(self.index_path)
@@ -87,6 +107,14 @@ class Indexer:
         """, (url,))
         value = result.fetchone()[0]
         return value == 1
+
+    def get_num_tokens(self):
+        con = sqlite3.connect(self.index_path)
+        cursor = con.execute("""
+            SELECT count(*) from terms
+        """)
+        num_terms = cursor.fetchone()[0]
+        return num_terms
 
 
 def run():
@@ -126,19 +154,32 @@ def prepare_url_for_tokenizing(url: str):
     return url
 
 
-def index_titles_and_urls(indexer, nlp, titles_and_urls):
-    indexer.create_if_not_exists()
+def get_pages(nlp, titles_and_urls):
     for i, (title_cleaned, url) in enumerate(titles_and_urls):
         title_tokens = tokenize(nlp, title_cleaned)
         prepared_url = prepare_url_for_tokenizing(unquote(url))
         url_tokens = tokenize(nlp, prepared_url)
         tokens = title_tokens | url_tokens
-
-        if len(title_tokens) > 0:
-            indexer.index(tokens, url, title_cleaned)
+        yield Page(list(tokens), url, title_cleaned)
 
         if i % 1000 == 0:
             print("Processed", i)
+
+
+def grouper(n: int, iterator: Iterator):
+    while True:
+        chunk = tuple(islice(iterator, n))
+        if not chunk:
+            return
+        yield chunk
+
+
+def index_titles_and_urls(indexer: Indexer, nlp, titles_and_urls):
+    indexer.create_if_not_exists()
+
+    pages = get_pages(nlp, titles_and_urls)
+    for chunk in grouper(BATCH_SIZE, pages):
+        indexer.index(list(chunk))
 
 
 if __name__ == '__main__':
