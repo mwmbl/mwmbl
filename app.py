@@ -33,7 +33,7 @@ def complete_term(term):
     """
     result = con.execute(query, (term,))
     completed = result.fetchone()
-    print("Completed", completed)
+    # print("Completed", completed)
     if len(completed) > 0:
         return completed[0]
     return None
@@ -49,24 +49,23 @@ def complete(q: str):
     con = sqlite3.connect(INDEX_PATH)
     in_part = ','.join('?'*len(terms))
     query = f"""
-        SELECT title, url, count(*), length(title)
+        SELECT title, url
         FROM terms INNER JOIN pages
         ON terms.page_id = pages.id
         WHERE term IN ({in_part})
         GROUP BY title, url
-        ORDER BY 3 DESC, 4
-        LIMIT 20
+        ORDER BY count(*) DESC, length(title)
+        LIMIT 5
     """
 
-    data = pd.read_sql(query, con, params=terms)
-    results = data.apply(lambda row: row.title.replace("\n", "") + ' — ' +
-                                     row.url.replace("\n", ""), axis=1)
+    data = con.execute(query, terms).fetchall()
+
+    results = [title.replace("\n", "") + ' — ' +
+               url.replace("\n", "") for title, url in data]
     if len(results) == 0:
         return []
-    results_list = results.to_list()[:5]
-    results_list = [q, results_list]
-    print("Results", results_list)
-    return results_list
+    # print("Results", results_list)
+    return [q, results]
 
 
 @app.get('/')

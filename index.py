@@ -116,6 +116,15 @@ class Indexer:
         num_terms = cursor.fetchone()[0]
         return num_terms
 
+    def get_random_terms(self, n):
+        con = sqlite3.connect(self.index_path)
+        cursor = con.execute("""
+            SELECT DISTINCT term FROM terms
+            ORDER BY random() LIMIT ?
+        """)
+        terms = [t[0] for t in cursor.fetchall()]
+        return terms
+
 
 def run():
     indexer = Indexer(INDEX_PATH)
