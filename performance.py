@@ -21,15 +21,15 @@ NUM_PAGES = 500
 def query_test():
     titles_and_urls = get_wiki_titles_and_urls()
 
-    # client = TestClient(app)
+    client = TestClient(app)
 
     start = datetime.now()
     hits = 0
     for title, url in islice(titles_and_urls, NUM_PAGES):
-        # result = client.get('/complete', params={'q': title})
-        # assert result.status_code == 200
-        # data = result.content.decode('utf8')
-        data = json.dumps(complete(title))
+        result = client.get('/complete', params={'q': title})
+        assert result.status_code == 200
+        data = result.content.decode('utf8')
+        # data = json.dumps(complete(title))
 
         if url in data:
             hits += 1
