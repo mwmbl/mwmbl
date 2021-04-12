@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, RedirectResponse
 
+from index import TinyIndex, PAGE_SIZE, NUM_PAGES
 from paths import INDEX_PATH
 
 app = FastAPI()
+tiny_index = TinyIndex(INDEX_PATH, NUM_PAGES, PAGE_SIZE)
 
 
 @app.get("/search")
@@ -43,28 +45,21 @@ def complete_term(term):
 def complete(q: str):
     terms = [x.lower() for x in q.split()]
 
-    completed = complete_term(terms[-1])
-    terms = terms[:-1] + [completed]
+    # completed = complete_term(terms[-1])
+    # terms = terms[:-1] + [completed]
 
-    con = sqlite3.connect(INDEX_PATH)
-    in_part = ','.join('?'*len(terms))
-    query = f"""
-        SELECT title, url
-        FROM terms INNER JOIN pages
-        ON terms.page_id = pages.id
-        WHERE term IN ({in_part})
-        GROUP BY title, url
-        ORDER BY count(*) DESC, length(title)
-        LIMIT 5
-    """
-
-    data = con.execute(query, terms).fetchall()
+    pages = []
+    for term in terms:
+        page = tiny_index.retrieve(term)
+        if page is not None:
+            pages += page
 
     results = [title.replace("\n", "") + ' — ' +
-               url.replace("\n", "") for title, url in data]
+               url.replace("\n", "") for title, url in pages]
     if len(results) == 0:
+        # print("No results")
         return []
-    # print("Results", results_list)
+    # print("Results", results)
     return [q, results]
 
 

@@ -15,7 +15,7 @@ from paths import TEST_INDEX_PATH
 from wiki import get_wiki_titles_and_urls
 
 
-NUM_DOCUMENTS = 10000
+NUM_DOCUMENTS = 500
 
 
 def query_test():
@@ -29,9 +29,9 @@ def query_test():
         result = client.get('/complete', params={'q': title})
         assert result.status_code == 200
         data = result.content.decode('utf8')
-        # data = json.dumps(complete(title))
+        # print("Data", data, url, sep='\n')
 
-        if url in data:
+        if title in data:
             hits += 1
 
     end = datetime.now()
@@ -61,7 +61,7 @@ def performance_test():
     print("Index size", index_size)
     # print("Num tokens", indexer.get_num_tokens())
 
-    # query_test()
+    query_test()
 
 
 if __name__ == '__main__':

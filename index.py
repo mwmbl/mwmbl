@@ -8,7 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from glob import glob
 from itertools import chain, count, islice
-from mmap import mmap
+from mmap import mmap, PROT_READ
 from typing import List, Iterator
 from urllib.parse import unquote
 
@@ -68,6 +68,14 @@ class TinyIndexBase:
         self.decompressor = ZstdDecompressor()
         self.mmap = None
 
+    def retrieve(self, token):
+        index = self._get_token_page_index(token)
+        return self._get_page(index)
+
+    def _get_token_page_index(self, token):
+        token_hash = mmh3.hash(token, signed=False)
+        return token_hash % self.num_pages
+
     def _get_page(self, i):
         """
         Get the page at index i, decompress and deserialise it using JSON
@@ -84,8 +92,8 @@ class TinyIndex(TinyIndexBase):
     def __init__(self, index_path, num_pages, page_size):
         super().__init__(num_pages, page_size)
         self.index_path = index_path
-        self.index_file = None
-        self.mmap = None
+        self.index_file = open(self.index_path, 'rb')
+        self.mmap = mmap(self.index_file.fileno(), 0, prot=PROT_READ)
 
 
 class TinyIndexer(TinyIndexBase):
@@ -95,6 +103,7 @@ class TinyIndexer(TinyIndexBase):
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
         self.index_file = None
+        self.mmap = None
 
     def __enter__(self):
         self.create_if_not_exists()
@@ -121,10 +130,6 @@ class TinyIndexer(TinyIndexBase):
             self._write_page(current_page, page_index)
         except ValueError:
             pass
-
-    def _get_token_page_index(self, token):
-        token_hash = mmh3.hash(token, signed=False)
-        return token_hash % self.num_pages
 
     def _write_page(self, data, i):
         """
