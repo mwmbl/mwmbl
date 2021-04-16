@@ -2,6 +2,7 @@
 Test the performance of the search in terms of compression and speed.
 """
 import json
+import numpy as np
 import os
 from datetime import datetime
 from itertools import islice
@@ -15,7 +16,8 @@ from paths import TEST_INDEX_PATH
 from wiki import get_wiki_titles_and_urls
 
 
-NUM_DOCUMENTS = 500
+NUM_DOCUMENTS = 30000
+NUM_PAGES_FOR_STATS = 10
 
 
 def query_test():
@@ -39,6 +41,16 @@ def query_test():
     print("Query time:", (end - start).total_seconds() / NUM_DOCUMENTS)
 
 
+def page_stats(indexer: TinyIndexer):
+    page_sizes = []
+    for i in range(NUM_PAGES):
+        page = indexer.get_page(i)
+        if page is not None:
+            page_sizes.append(len(page))
+    big_page_sizes = sorted(page_sizes)[-NUM_PAGES_FOR_STATS:]
+    return np.mean(big_page_sizes), np.std(big_page_sizes)
+
+
 def performance_test():
     nlp = English()
     try:
@@ -56,9 +68,13 @@ def performance_test():
         index_time = (stop_time - start_time).total_seconds()
         index_size = os.path.getsize(TEST_INDEX_PATH)
 
+        page_size_mean, page_size_std = page_stats(indexer)
+
     print("Indexed pages:", NUM_DOCUMENTS)
     print("Index time:", index_time)
-    print("Index size", index_size)
+    print("Index size:", index_size)
+    print("Mean docs per page:", page_size_mean)
+    print("Std err of docs per page:", page_size_std)
     # print("Num tokens", indexer.get_num_tokens())
 
     query_test()

@@ -70,13 +70,13 @@ class TinyIndexBase:
 
     def retrieve(self, token):
         index = self._get_token_page_index(token)
-        return self._get_page(index)
+        return self.get_page(index)
 
     def _get_token_page_index(self, token):
         token_hash = mmh3.hash(token, signed=False)
         return token_hash % self.num_pages
 
-    def _get_page(self, i):
+    def get_page(self, i):
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
@@ -122,7 +122,7 @@ class TinyIndexer(TinyIndexBase):
 
     def _index_document(self, document: Document, token: str):
         page_index = self._get_token_page_index(token)
-        current_page = self._get_page(page_index)
+        current_page = self.get_page(page_index)
         if current_page is None:
             current_page = []
         current_page.append([document.title, document.url])
