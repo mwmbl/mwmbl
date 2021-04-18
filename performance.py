@@ -17,7 +17,7 @@ from wiki import get_wiki_titles_and_urls
 NUM_DOCUMENTS = 30000
 NUM_PAGES_FOR_STATS = 10
 TEST_PAGE_SIZE = 512
-TEST_NUM_PAGES = 32
+TEST_NUM_PAGES = 1024
 
 
 def query_test():
@@ -42,13 +42,13 @@ def query_test():
 
 
 def page_stats(indexer: TinyIndexer):
-    page_sizes = []
+    pages_and_sizes = []
     for i in range(TEST_NUM_PAGES):
         page = indexer.get_page(i)
         if page is not None:
-            page_sizes.append(len(page))
-    big_page_sizes = sorted(page_sizes)[-NUM_PAGES_FOR_STATS:]
-    return np.mean(big_page_sizes), np.std(big_page_sizes)
+            pages_and_sizes.append((len(page), page))
+    big_page_sizes, big_pages = zip(*sorted(pages_and_sizes, reverse=True)[:NUM_PAGES_FOR_STATS])
+    return np.mean(big_page_sizes), np.std(big_page_sizes), big_pages
 
 
 def performance_test():
@@ -68,16 +68,26 @@ def performance_test():
         index_time = (stop_time - start_time).total_seconds()
         index_size = os.path.getsize(TEST_INDEX_PATH)
 
-        page_size_mean, page_size_std = page_stats(indexer)
+        page_size_mean, page_size_std, big_pages = page_stats(indexer)
 
     print("Indexed pages:", NUM_DOCUMENTS)
     print("Index time:", index_time)
     print("Index size:", index_size)
     print("Mean docs per page:", page_size_mean)
     print("Std err of docs per page:", page_size_std)
+    print("Big pages")
+    print_pages(big_pages)
     # print("Num tokens", indexer.get_num_tokens())
 
-    query_test()
+    # query_test()
+
+
+def print_pages(pages):
+    for page in pages:
+        for title, url in page:
+            print(title, url)
+        print()
+
 
 
 if __name__ == '__main__':
