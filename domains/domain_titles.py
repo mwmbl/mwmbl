@@ -1,14 +1,12 @@
 """
 Retrieve titles for each domain in the list of top domains
 """
-import csv
-import gzip
 import pickle
 from urllib.parse import urlsplit, urlunsplit
 
 import bs4
 import requests
-from persistqueue import SQLiteQueue, SQLiteAckQueue
+from persistqueue import SQLiteAckQueue
 
 from paths import DOMAINS_QUEUE_PATH, DOMAINS_TITLES_QUEUE_PATH
 
@@ -50,7 +48,7 @@ def retrieve_title(domain):
         result = get_redirect_no_cookies(original_url)
         status = result.status_code
         url = result.url
-    except RecursionError as e:
+    except (RecursionError, requests.exceptions.ConnectionError) as e:
         print("Error retrieving URL", str(e))
         status = None
         url = None
