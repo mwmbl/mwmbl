@@ -1,17 +1,15 @@
 """
 Retrieve titles for each domain in the list of top domains
 """
-import pickle
 from multiprocessing import Process
 from time import sleep
 from urllib.parse import urlsplit, urlunsplit
 
 import bs4
 import requests
-from persistqueue import SQLiteAckQueue
 
-from paths import DOMAINS_QUEUE_PATH, DOMAINS_TITLES_QUEUE_PATH
-
+from fsqueue import FSQueue, ZstdJsonSerializer
+from paths import DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
 
 NUM_PROCESSES = 10
 
@@ -35,21 +33,29 @@ def get_redirect_no_cookies(url, max_redirects=5):
 
 
 def get_domain_titles():
-    domains_queue = SQLiteAckQueue(DOMAINS_QUEUE_PATH)
-    titles_queue = SQLiteAckQueue(DOMAINS_TITLES_QUEUE_PATH, multithreading=True)
+    domains_queue = FSQueue(DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
+    titles_queue = FSQueue(DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, ZstdJsonSerializer())
     while True:
-        item = domains_queue.get()
+        items_id, items = domains_queue.get()
+        titles = retrieve_titles(items)
         # print("Item", item)
+        # print("Title", type(title))
+        # print("Title item", str(title_item))
+        # print("Dump", pickle.dumps(title_item))
+        titles_queue.put(titles)
+        domains_queue.done(items_id)
+        print("Done titles", len(titles))
+
+
+def retrieve_titles(items):
+    titles = []
+    for item in items:
         rank, domain = item
         print("Domain", domain, rank)
         status, title, url = retrieve_title(domain)
-        # print("Title", type(title))
         title_item = dict(rank=rank, domain=domain, status=status, url=url, title=title)
-        # print("Title item", str(title_item))
-        # print("Dump", pickle.dumps(title_item))
-        titles_queue.put(title_item)
-        domains_queue.ack(item)
-        print("Queued", titles_queue.size)
+        titles.append(title_item)
+    return titles
 
 
 def retrieve_title(domain):

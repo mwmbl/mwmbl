@@ -10,6 +10,6 @@ TEST_INDEX_PATH = os.path.join(DATA_DIR, 'index-test.tinysearch')
 WIKI_DATA_PATH = os.path.join(DATA_DIR, 'enwiki-20210301-pages-articles1.xml-p1p41242.bz2')
 WIKI_TITLES_PATH = os.path.join(DATA_DIR, 'abstract-titles-sorted.txt.gz')
 
-DOMAINS_QUEUE_PATH = os.path.join(DATA_DIR, 'domains-queue')
-DOMAINS_TITLES_QUEUE_PATH = os.path.join(DATA_DIR, 'domains-title-queue')
+DOMAINS_QUEUE_NAME = 'domains-queue-fs'
+DOMAINS_TITLES_QUEUE_NAME = 'domains-title-queue-fs'
 DOMAINS_PATH = os.path.join(DATA_DIR, 'top10milliondomains.csv.gz')

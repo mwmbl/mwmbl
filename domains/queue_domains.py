@@ -4,9 +4,10 @@ Add domains to the queue to be retrieved
 import csv
 import gzip
 
-from persistqueue import SQLiteQueue, SQLiteAckQueue
+from fsqueue import FSQueue, ZstdJsonSerializer
+from paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, DATA_DIR
 
-from paths import DOMAINS_QUEUE_PATH, DOMAINS_PATH
+BATCH_SIZE = 10000
 
 
 def get_domains():
@@ -17,12 +18,15 @@ def get_domains():
 
 
 def queue_domains():
-    queue = SQLiteAckQueue(DOMAINS_QUEUE_PATH)
+    queue = FSQueue(DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
     queued = 0
+    batch = []
     for rank, domain in get_domains():
-        queue.put((rank, domain))
+        batch.append((rank, domain))
         queued += 1
-        if queued % 1000 == 0:
+        if queued % BATCH_SIZE == 0:
+            queue.put(batch)
+            batch = []
             print("Queued:", queued)
 
 
