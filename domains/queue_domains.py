@@ -7,7 +7,7 @@ import gzip
 from fsqueue import FSQueue, ZstdJsonSerializer
 from paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, DATA_DIR
 
-BATCH_SIZE = 10000
+BATCH_SIZE = 250
 
 
 def get_domains():
