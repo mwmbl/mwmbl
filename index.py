@@ -1,24 +1,17 @@
 """
 Create a search index
 """
-import gzip
 import json
 import os
-import sqlite3
 from dataclasses import dataclass
-from glob import glob
-from itertools import chain, count, islice
+from itertools import islice
 from mmap import mmap, PROT_READ
 from typing import List, Iterator
 from urllib.parse import unquote
 
-import bs4
 import justext
 import mmh3
-from spacy.lang.en import English
 from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError
-
-from paths import CRAWL_GLOB, INDEX_PATH
 
 NUM_PAGES = 8192
 PAGE_SIZE = 512
@@ -160,32 +153,6 @@ class TinyIndexer(TinyIndexBase):
         raise NotImplementedError()
 
 
-def run():
-    indexer = TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE)
-    indexer.create_if_not_exists()
-    nlp = English()
-    for path in glob(CRAWL_GLOB):
-        print("Path", path)
-        with gzip.open(path, 'rt') as html_file:
-            url = html_file.readline().strip()
-            content = html_file.read()
-
-        if indexer.document_indexed(url):
-            print("Page exists, skipping", url)
-            continue
-
-        cleaned_text = clean(content)
-        try:
-            title = bs4.BeautifulSoup(content, features="lxml").find('title').string
-        except AttributeError:
-            title = cleaned_text[:80]
-        tokens = tokenize(nlp, cleaned_text)
-        print("URL", url)
-        print("Tokens", tokens)
-        print("Title", title)
-        indexer.index(tokens, url, title)
-
-
 def prepare_url_for_tokenizing(url: str):
     if url.startswith(HTTP_START):
         url = url[len(HTTP_START):]
@@ -224,6 +191,3 @@ def index_titles_and_urls(indexer: TinyIndexer, nlp, titles_and_urls):
     for chunk in grouper(BATCH_SIZE, pages):
         indexer.index(list(chunk))
 
-
-if __name__ == '__main__':
-    run()

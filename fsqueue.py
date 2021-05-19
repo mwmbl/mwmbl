@@ -95,3 +95,11 @@ class FSQueue:
         """
 
         self._move(item_id, FSState.LOCKED, FSState.DONE)
+
+    def unlock_all(self):
+        paths = sorted(Path(self._get_dir(FSState.LOCKED)).iterdir(), key=os.path.getmtime)
+
+        for path in paths:
+            # Try and lock the file
+            self._move(path.name, FSState.LOCKED, FSState.READY)
+
