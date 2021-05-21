@@ -10,24 +10,33 @@ from spacy.lang.en import English
 from starlette.testclient import TestClient
 
 from app import app
+from fsqueue import ZstdJsonSerializer
 from index import TinyIndexer, index_titles_and_urls
-from paths import TEST_INDEX_PATH
+from paths import TEST_INDEX_PATH, DATA_DIR
 from wiki import get_wiki_titles_and_urls
 
 NUM_DOCUMENTS = 30000
 NUM_PAGES_FOR_STATS = 10
 TEST_PAGE_SIZE = 512
 TEST_NUM_PAGES = 1024
+TEST_DATA_PATH = os.path.join(DATA_DIR, 'test-urls.zstd')
+
+
+def get_test_pages():
+    serializer = ZstdJsonSerializer()
+    with open(TEST_DATA_PATH, 'rb') as data_file:
+        data = serializer.deserialize(data_file.read())
+        return ((row['title'], row['url']) for row in data if row['title'] is not None)
 
 
 def query_test():
-    titles_and_urls = get_wiki_titles_and_urls()
+    titles_and_urls = get_test_pages()
 
     client = TestClient(app)
 
     start = datetime.now()
     hits = 0
-    for title, url in islice(titles_and_urls, NUM_DOCUMENTS):
+    for title, url in titles_and_urls:
         result = client.get('/complete', params={'q': title})
         assert result.status_code == 200
         data = result.content.decode('utf8')
@@ -58,11 +67,10 @@ def performance_test():
     except FileNotFoundError:
         print("No test index found, creating")
     with TinyIndexer(TEST_INDEX_PATH, TEST_NUM_PAGES, TEST_PAGE_SIZE) as indexer:
-        titles_and_urls = get_wiki_titles_and_urls()
-        titles_and_urls_slice = islice(titles_and_urls, NUM_DOCUMENTS)
+        titles_and_urls = get_test_pages()
 
         start_time = datetime.now()
-        index_titles_and_urls(indexer, nlp, titles_and_urls_slice)
+        index_titles_and_urls(indexer, nlp, titles_and_urls)
         stop_time = datetime.now()
 
         index_time = (stop_time - start_time).total_seconds()
@@ -79,7 +87,7 @@ def performance_test():
     print_pages(big_pages)
     # print("Num tokens", indexer.get_num_tokens())
 
-    # query_test()
+    query_test()
 
 
 def print_pages(pages):
