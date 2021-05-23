@@ -1,6 +1,7 @@
 import sqlite3
 from functools import lru_cache
 
+import Levenshtein
 import pandas as pd
 
 from fastapi import FastAPI
@@ -41,6 +42,10 @@ def complete_term(term):
     return None
 
 
+def order_results(query, results):
+    return sorted(results, key=lambda result: Levenshtein.distance(query, result[0]))
+
+
 @app.get("/complete")
 def complete(q: str):
     terms = [x.lower() for x in q.split()]
@@ -54,8 +59,9 @@ def complete(q: str):
         if page is not None:
             pages += page
 
+    ordered_results = order_results(q, pages)
     results = [title.replace("\n", "") + ' — ' +
-               url.replace("\n", "") for title, url in pages]
+               url.replace("\n", "") for title, url in ordered_results]
     if len(results) == 0:
         # print("No results")
         return []
