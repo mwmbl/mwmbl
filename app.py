@@ -57,7 +57,7 @@ def complete(q: str):
     for term in terms:
         page = tiny_index.retrieve(term)
         if page is not None:
-            pages += page
+            pages += [(title, url) for title, url in page if term in title.lower()]
 
     ordered_results = order_results(q, pages)
     results = [title.replace("\n", "") + ' — ' +
