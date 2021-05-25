@@ -40,11 +40,9 @@ def query_test():
     hits = 0
     count = 0
     for title, url in titles_and_urls:
-        print("Title", title, url)
         result = client.get('/complete', params={'q': title})
         assert result.status_code == 200
         data = result.json()
-        print("Data", data, url, sep='\n')
 
         hit = False
         if data:
@@ -55,6 +53,8 @@ def query_test():
 
         if hit:
             hits += 1
+        else:
+            print("Miss", data, title, url, sep='\n')
 
         count += 1
 

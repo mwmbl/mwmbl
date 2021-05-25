@@ -48,7 +48,7 @@ def order_results(query, results):
 
 @app.get("/complete")
 def complete(q: str):
-    terms = [x.lower() for x in q.split()]
+    terms = [x.lower() for x in q.replace('.', ' ').split()]
 
     # completed = complete_term(terms[-1])
     # terms = terms[:-1] + [completed]
