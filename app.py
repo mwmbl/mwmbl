@@ -2,8 +2,6 @@ import sqlite3
 from functools import lru_cache
 
 import Levenshtein
-import pandas as pd
-
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, RedirectResponse
