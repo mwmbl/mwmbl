@@ -3,6 +3,7 @@ Create a search index
 """
 import json
 import os
+from collections import Counter
 from dataclasses import dataclass
 from itertools import islice
 from mmap import mmap, PROT_READ
@@ -11,6 +12,7 @@ from urllib.parse import unquote
 
 import justext
 import mmh3
+import pandas as pd
 from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError
 
 NUM_PAGES = 8192
@@ -184,10 +186,19 @@ def grouper(n: int, iterator: Iterator):
         yield chunk
 
 
-def index_titles_and_urls(indexer: TinyIndexer, nlp, titles_and_urls):
+def index_titles_and_urls(indexer: TinyIndexer, nlp, titles_and_urls, terms_path):
     indexer.create_if_not_exists()
 
+    terms = Counter()
     pages = get_pages(nlp, titles_and_urls)
     for chunk in grouper(BATCH_SIZE, pages):
         indexer.index(list(chunk))
 
+        for page in chunk:
+            terms.update([t.lower() for t in page.tokens])
+
+    term_df = pd.DataFrame({
+        'term': terms.keys(),
+        'count': terms.values(),
+    })
+    term_df.to_csv(terms_path)

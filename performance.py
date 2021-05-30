@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 from app import app
 from fsqueue import ZstdJsonSerializer
 from index import TinyIndexer, index_titles_and_urls
-from paths import TEST_INDEX_PATH, DATA_DIR
+from paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
 from wiki import get_wiki_titles_and_urls
 
 NUM_DOCUMENTS = 30000
@@ -84,7 +84,7 @@ def performance_test():
         titles_and_urls = get_test_pages()
 
         start_time = datetime.now()
-        index_titles_and_urls(indexer, nlp, titles_and_urls)
+        index_titles_and_urls(indexer, nlp, titles_and_urls, TEST_TERMS_PATH)
         stop_time = datetime.now()
 
         index_time = (stop_time - start_time).total_seconds()
@@ -109,7 +109,6 @@ def print_pages(pages):
         for title, url in page:
             print(title, url)
         print()
-
 
 
 if __name__ == '__main__':
