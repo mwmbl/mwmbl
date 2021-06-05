@@ -3,17 +3,15 @@ Test the performance of the search in terms of compression and speed.
 """
 import os
 from datetime import datetime
-from itertools import islice
 
 import numpy as np
 from spacy.lang.en import English
 from starlette.testclient import TestClient
 
-from app import app
+import create_app
 from fsqueue import ZstdJsonSerializer
-from index import TinyIndexer, index_titles_and_urls
+from index import TinyIndexer, index_titles_and_urls, Document, TinyIndex
 from paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
-from wiki import get_wiki_titles_and_urls
 
 NUM_DOCUMENTS = 30000
 NUM_PAGES_FOR_STATS = 10
@@ -33,7 +31,9 @@ def get_test_pages():
 def query_test():
     titles_and_urls = get_test_pages()
     print(f"Got {len(titles_and_urls)} titles and URLs")
+    tiny_index = TinyIndex(TEST_INDEX_PATH, TEST_NUM_PAGES, TEST_PAGE_SIZE)
 
+    app = create_app.create(tiny_index)
     client = TestClient(app)
 
     start = datetime.now()
@@ -80,7 +80,7 @@ def performance_test():
         os.remove(TEST_INDEX_PATH)
     except FileNotFoundError:
         print("No test index found, creating")
-    with TinyIndexer(TEST_INDEX_PATH, TEST_NUM_PAGES, TEST_PAGE_SIZE) as indexer:
+    with TinyIndexer(Document, TEST_INDEX_PATH, TEST_NUM_PAGES, TEST_PAGE_SIZE) as indexer:
         titles_and_urls = get_test_pages()
 
         start_time = datetime.now()
@@ -106,6 +106,7 @@ def performance_test():
 
 def print_pages(pages):
     for page in pages:
+        print("Page", page)
         for title, url in page:
             print(title, url)
         print()

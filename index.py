@@ -3,11 +3,12 @@ Create a search index
 """
 import json
 import os
+from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, asdict, astuple
 from itertools import islice
 from mmap import mmap, PROT_READ
-from typing import List, Iterator
+from typing import List, Iterator, TypeVar, Generic, Iterable
 from urllib.parse import unquote
 
 import justext
@@ -47,8 +48,8 @@ def clean(content):
 
 @dataclass
 class Document:
-    url: str
     title: str
+    url: str
 
 
 @dataclass
@@ -57,19 +58,24 @@ class TokenizedDocument(Document):
 
 
 class TinyIndexBase:
-    def __init__(self, num_pages, page_size):
+    def __init__(self, item_type: type, num_pages: int, page_size: int):
+        self.item_type = item_type
         self.num_pages = num_pages
         self.page_size = page_size
         self.decompressor = ZstdDecompressor()
         self.mmap = None
 
-    def retrieve(self, token):
-        index = self._get_token_page_index(token)
-        return self.get_page(index)
+    def retrieve(self, key: str):
+        index = self._get_key_page_index(key)
+        page = self.get_page(index)
+        if page is None:
+            return []
+        print("REtrieve", self.index_path, page)
+        return self.convert_items(page)
 
-    def _get_token_page_index(self, token):
-        token_hash = mmh3.hash(token, signed=False)
-        return token_hash % self.num_pages
+    def _get_key_page_index(self, key):
+        key_hash = mmh3.hash(key, signed=False)
+        return key_hash % self.num_pages
 
     def get_page(self, i):
         """
@@ -82,18 +88,24 @@ class TinyIndexBase:
             return None
         return json.loads(decompressed_data.decode('utf8'))
 
+    def convert_items(self, items):
+        converted = [self.item_type(*item) for item in items]
+        # print("Converted", items, converted)
+        return converted
+
 
 class TinyIndex(TinyIndexBase):
     def __init__(self, index_path, num_pages, page_size):
-        super().__init__(num_pages, page_size)
+        super().__init__(Document, num_pages, page_size)
+        # print("REtrieve path", index_path)
         self.index_path = index_path
         self.index_file = open(self.index_path, 'rb')
         self.mmap = mmap(self.index_file.fileno(), 0, prot=PROT_READ)
 
 
 class TinyIndexer(TinyIndexBase):
-    def __init__(self, index_path, num_pages, page_size):
-        super().__init__(num_pages, page_size)
+    def __init__(self, item_type: type, index_path: str, num_pages: int, page_size: int):
+        super().__init__(item_type, num_pages, page_size)
         self.index_path = index_path
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
@@ -110,18 +122,24 @@ class TinyIndexer(TinyIndexBase):
         self.mmap.close()
         self.index_file.close()
 
-    def index(self, documents: List[TokenizedDocument]):
-        for document in documents:
-            for token in document.tokens:
-                self._index_document(document, token)
+    # def index(self, documents: List[TokenizedDocument]):
+    #     for document in documents:
+    #         for token in document.tokens:
+    #             self._index_document(document, token)
 
-    def _index_document(self, document: Document, token: str):
-        page_index = self._get_token_page_index(token)
+    def index(self, key: str, value):
+        print("Index", value)
+        assert type(value) == self.item_type, f"Can only index the specified type" \
+                                              f" ({self.item_type.__name__})"
+        page_index = self._get_key_page_index(key)
         current_page = self.get_page(page_index)
         if current_page is None:
             current_page = []
-        current_page.append([document.title, document.url])
+        value_tuple = astuple(value)
+        print("Value tuple", value_tuple)
+        current_page.append(value_tuple)
         try:
+            # print("Page", current_page)
             self._write_page(current_page, page_index)
         except ValueError:
             pass
@@ -145,15 +163,6 @@ class TinyIndexer(TinyIndexBase):
             with open(self.index_path, 'wb') as index_file:
                 index_file.write(b'\x00' * file_length)
 
-    def document_indexed(self, url):
-        raise NotImplementedError()
-
-    def get_num_tokens(self):
-        raise NotImplementedError()
-
-    def get_random_terms(self, n):
-        raise NotImplementedError()
-
 
 def prepare_url_for_tokenizing(url: str):
     if url.startswith(HTTP_START):
@@ -166,7 +175,7 @@ def prepare_url_for_tokenizing(url: str):
     return url
 
 
-def get_pages(nlp, titles_and_urls):
+def get_pages(nlp, titles_and_urls) -> Iterable[TokenizedDocument]:
     for i, (title_cleaned, url) in enumerate(titles_and_urls):
         title_tokens = tokenize(nlp, title_cleaned)
         prepared_url = prepare_url_for_tokenizing(unquote(url))
@@ -191,11 +200,10 @@ def index_titles_and_urls(indexer: TinyIndexer, nlp, titles_and_urls, terms_path
 
     terms = Counter()
     pages = get_pages(nlp, titles_and_urls)
-    for chunk in grouper(BATCH_SIZE, pages):
-        indexer.index(list(chunk))
-
-        for page in chunk:
-            terms.update([t.lower() for t in page.tokens])
+    for page in pages:
+        for token in page.tokens:
+            indexer.index(token, Document(url=page.url, title=page.title))
+        terms.update([t.lower() for t in page.tokens])
 
     term_df = pd.DataFrame({
         'term': terms.keys(),
