@@ -70,7 +70,7 @@ class TinyIndexBase:
         page = self.get_page(index)
         if page is None:
             return []
-        print("REtrieve", self.index_path, page)
+        # print("REtrieve", self.index_path, page)
         return self.convert_items(page)
 
     def _get_key_page_index(self, key):
@@ -128,7 +128,7 @@ class TinyIndexer(TinyIndexBase):
     #             self._index_document(document, token)
 
     def index(self, key: str, value):
-        print("Index", value)
+        # print("Index", value)
         assert type(value) == self.item_type, f"Can only index the specified type" \
                                               f" ({self.item_type.__name__})"
         page_index = self._get_key_page_index(key)
@@ -136,7 +136,7 @@ class TinyIndexer(TinyIndexBase):
         if current_page is None:
             current_page = []
         value_tuple = astuple(value)
-        print("Value tuple", value_tuple)
+        # print("Value tuple", value_tuple)
         current_page.append(value_tuple)
         try:
             # print("Page", current_page)

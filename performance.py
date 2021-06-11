@@ -20,6 +20,8 @@ TEST_NUM_PAGES = 1024
 TEST_DATA_PATH = os.path.join(DATA_DIR, 'test-urls.zstd')
 RECALL_AT_K = 3
 
+NUM_QUERY_CHARS = 10
+
 
 def get_test_pages():
     serializer = ZstdJsonSerializer()
@@ -40,7 +42,8 @@ def query_test():
     hits = 0
     count = 0
     for title, url in titles_and_urls:
-        result = client.get('/complete', params={'q': title})
+        query = title[:NUM_QUERY_CHARS]
+        result = client.get('/complete', params={'q': query})
         assert result.status_code == 200
         data = result.json()
 

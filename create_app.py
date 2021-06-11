@@ -23,7 +23,7 @@ def create(tiny_index: TinyIndex):
 
     def order_results(query, results: List[Document]):
         ordered_results = sorted(results, key=lambda result: Levenshtein.distance(query, result.title))
-        print("Order results", query, ordered_results, sep='\n')
+        # print("Order results", query, ordered_results, sep='\n')
         return ordered_results
 
     @app.get("/complete")
