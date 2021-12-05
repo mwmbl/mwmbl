@@ -15,9 +15,10 @@ from langdetect import detect
 from lxml.etree import ParserError
 from pyspark.sql import SparkSession, SQLContext
 from pyspark.sql.functions import col
-from pyspark.sql.types import StructType, StructField, StringType, LongType
+from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType
 from warcio import ArchiveIterator
 
+RECORDS_PATH = 's3://tinysearch/outputs/records'
 OUTPUT_PATH = 's3://tinysearch/outputs/index'
 
 MAX_URI_LENGTH = 150
@@ -35,6 +36,22 @@ index_schema = StructType([
     StructField("top", StringType(), False),
 ])
 
+
+output_schema = StructType([
+    StructField("uri", StringType(), False),
+    StructField("title", StringType(), False),
+    StructField("extract", StringType(), False),
+])
+
+
+record_schema = StructType([
+    StructField("url", StringType(), False),
+    StructField("warc_filename", StringType(), False),
+    StructField("warc_record_offset", IntegerType(), False),
+    StructField("warc_record_length", IntegerType(), False),
+])
+
+
 spark = SparkSession \
     .builder \
     .appName("Python Spark SQL basic example") \
@@ -43,7 +60,7 @@ spark = SparkSession \
 
 
 def run():
-    sqlc = SQLContext(sparkContext=spark)
+    # sqlc = SQLContext(sparkContext=spark)
 
     df = spark.read.load('s3://commoncrawl/cc-index/table/cc-main/warc/')
     df.createOrReplaceTempView('ccindex')
@@ -56,11 +73,13 @@ def run():
     sqldf = sqldf.filter(col('url_host_name').isin(list(DOMAINS.keys())))
     print("Got rows", sqldf.take(10))
     print("Num rows", sqldf.count())
-    sqldf = sqldf.sample(fraction=0.001)
-    warc_recs = sqldf.select("url", "warc_filename", "warc_record_offset", "warc_record_length").rdd
-    rdd = warc_recs.mapPartitions(fetch_process_warc_records)
-    output = sqlc.createDataFrame(rdd, schema=output_schema)
-    output.write.option('compression', 'gzip').format('json').mode('overwrite').save(OUTPUT_PATH)
+    sqldf = sqldf.sample(fraction=0.01)
+    sqldf.write.option('compression', 'gzip').format('json').mode('overwrite').save(RECORDS_PATH)
+
+    # warc_recs = sqldf.select("url", "warc_filename", "warc_record_offset", "warc_record_length").rdd
+    # rdd = warc_recs.mapPartitions(fetch_process_warc_records)
+    # output = sqlc.createDataFrame(rdd, schema=output_schema)
+    # output.write.option('compression', 'gzip').format('json').mode('overwrite').save(OUTPUT_PATH)
 
 
 def fetch_process_warc_records(rows):
@@ -130,13 +149,6 @@ def justext(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     revise_paragraph_classification(paragraphs, max_heading_distance)
 
     return paragraphs, title
-
-
-output_schema = StructType([
-    StructField("uri", StringType(), False),
-    StructField("title", StringType(), False),
-    StructField("extract", StringType(), False),
-])
 
 
 def process_record(record):
