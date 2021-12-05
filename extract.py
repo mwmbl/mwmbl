@@ -2,13 +2,10 @@
 Extract content from HTML files and store it as compressed JSON
 """
 
-import json
-import os
 from io import BytesIO
-from pathlib import Path
 from urllib.parse import urlparse
 
-import spacy as spacy
+import boto3
 from justext import get_stoplist
 from justext.core import LENGTH_LOW_DEFAULT, LENGTH_HIGH_DEFAULT, STOPWORDS_LOW_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, \
@@ -16,17 +13,10 @@ from justext.core import LENGTH_LOW_DEFAULT, LENGTH_HIGH_DEFAULT, STOPWORDS_LOW_
     ParagraphMaker, classify_paragraphs, revise_paragraph_classification
 from langdetect import detect
 from lxml.etree import ParserError
-from pyspark.sql import DataFrame
 from pyspark.sql import SparkSession, SQLContext
+from pyspark.sql.functions import col
 from pyspark.sql.types import StructType, StructField, StringType, LongType
-from pyspark.sql.functions import expr, col
-from pyspark import SparkFiles
-
-
-
-import boto3
 from warcio import ArchiveIterator
-
 
 OUTPUT_PATH = 's3://tinysearch/outputs/index'
 
@@ -37,9 +27,6 @@ NUM_EXTRACT_CHARS = 155
 NUM_PAGES = 1024
 MAX_RESULTS_PER_HASH = 200
 PAGE_SIZE = 4096
-
-
-nlp = spacy.load("en_core_web_sm", disable=['lemmatizer', 'ner'])
 
 
 index_schema = StructType([
