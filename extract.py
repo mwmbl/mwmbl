@@ -56,10 +56,10 @@ def run():
                             WHERE crawl = 'CC-MAIN-2021-43'
                             AND subset = 'warc'
                       ''')
-    sqldf = sqldf.filter(col('url_host_name').isin(list(DOMAINS.keys())))
-    print("Got rows", sqldf.take(10))
-    print("Num rows", sqldf.count())
     sqldf = sqldf.sample(fraction=0.01)
+    sqldf = sqldf.filter(col('url_host_name').isin(list(DOMAINS.keys())))
+    # print("Got rows", sqldf.take(10))
+    # print("Num rows", sqldf.count())
     sqldf.write.option('compression', 'gzip').format('json').mode('overwrite').save(RECORDS_PATH)
 
     # warc_recs = sqldf.select("url", "warc_filename", "warc_record_offset", "warc_record_length").rdd
