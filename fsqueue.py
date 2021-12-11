@@ -2,11 +2,12 @@
 Filesystem-based queue that uses os.rename as an atomic operation to ensure
 that items are handled correctly.
 """
-
+import gzip
 import json
 import os
 from abc import ABC
 from enum import Enum
+from typing import Union
 from uuid import uuid4
 from pathlib import Path
 
@@ -40,9 +41,19 @@ class ZstdJsonSerializer(Serializer):
         return json.loads(self.decompressor.decompress(serialized_item).decode('utf8'))
 
 
+class GzipJsonRowSerializer(Serializer):
+    def serialize(self, items: list[object]) -> bytes:
+        json_items = [json.dumps(item) for item in items]
+        return gzip.compress('\n'.join(json_items).encode('utf8'))
+
+    def deserialize(self, serialized_items: bytes) -> list[object]:
+        lines = gzip.decompress(serialized_items).decode('utf8')
+        return [json.loads(line) for line in lines.strip().split('\n')]
+
+
 class FSQueue:
-    def __init__(self, directory: str, name: str, serializer: Serializer):
-        self.directory = directory
+    def __init__(self, directory: Union[str, Path], name: str, serializer: Serializer):
+        self.directory = str(directory)
         self.name = name
         self.serializer = serializer
 
