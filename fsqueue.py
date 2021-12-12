@@ -91,13 +91,22 @@ class FSQueue:
         Get the next priority item from the queue, returning the item ID and the object
         """
 
-        paths = sorted(Path(self._get_dir(FSState.READY)).iterdir(), key=os.path.getmtime)
+        directory = self._get_dir(FSState.READY)
+        print("Getting directory", directory)
+        paths = list(Path(directory).iterdir())
+        print("Top paths", paths[:10])
 
         for path in paths:
             # Try and lock the file
-            self._move(path.name, FSState.READY, FSState.LOCKED)
+            try:
+                print("Moving file", path.name)
+                self._move(path.name, FSState.READY, FSState.LOCKED)
+            except FileNotFoundError:
+                print("File not found", path.name)
+                continue
 
             with open(self._get_path(FSState.LOCKED, path.name), 'rb') as item_file:
+                print("Opening file", path.name)
                 return path.name, self.serializer.deserialize(item_file.read())
 
     def done(self, item_id: str):

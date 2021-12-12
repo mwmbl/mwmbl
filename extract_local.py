@@ -2,7 +2,9 @@ import gzip
 import json
 import os
 from glob import glob
+from multiprocessing import Process, Lock
 from pathlib import Path
+from time import sleep
 
 from extract_process import fetch_process_warc_records
 from fsqueue import FSQueue, GzipJsonRowSerializer
@@ -11,6 +13,8 @@ DATA_DIR = Path(os.environ['HOME']) / 'data' / 'tinysearch'
 EXTRACTS_PATH = DATA_DIR / 'extracts'
 
 ARCHIVE_INFO_GLOB = 'outputs/records/*.gz'
+
+NUM_PROCESSES = 8
 
 
 def get_records():
@@ -25,17 +29,18 @@ def process(record):
     return list(fetch_process_warc_records([record]))
 
 
-def run():
+def run(lock: Lock):
     input_queue = FSQueue(DATA_DIR, 'records', GzipJsonRowSerializer())
     output_queue = FSQueue(DATA_DIR, 'search-items', GzipJsonRowSerializer())
 
-    input_queue.unlock_all()
-
     while True:
-        queue_item = input_queue.get()
+        with lock:
+            queue_item = input_queue.get()
         if queue_item is None:
+            print("All finished, stopping:", os.getpid())
             break
         item_id, records = queue_item
+        print("Got item: ", item_id, os.getpid())
         search_items = []
         for record in records:
             search_items += list(fetch_process_warc_records([record]))
@@ -44,5 +49,19 @@ def run():
         input_queue.done(item_id)
 
 
+def run_multiprocessing():
+    input_queue = FSQueue(DATA_DIR, 'records', GzipJsonRowSerializer())
+    input_queue.unlock_all()
+    processes = []
+    lock = Lock()
+    for i in range(NUM_PROCESSES):
+        new_process = Process(target=run, args=(lock,))
+        new_process.start()
+        processes.append(new_process)
+
+    for running_process in processes:
+        running_process.join()
+
+
 if __name__ == '__main__':
-    run()
+    run_multiprocessing()
