@@ -1,38 +1,32 @@
 """
-Index Wikipedia
+Index data downloaded from Common Crawl
 """
-import gzip
-import html
-from urllib.parse import quote
 
-from index import TinyIndexer, index_titles_and_urls, PAGE_SIZE, NUM_PAGES
-from paths import WIKI_TITLES_PATH, INDEX_PATH
+import spacy
 
-TEXT_TAGS = ['mediawiki', 'page', 'revision', 'text']
-TITLE_START = '<title>Wikipedia: '
-TITLE_END = '</title>\n'
+from fsqueue import FSQueue, GzipJsonRowSerializer
+from index import TinyIndexer, index_titles_and_urls, PAGE_SIZE, NUM_PAGES, Document
+from paths import INDEX_PATH, DATA_DIR, COMMON_CRAWL_TERMS_PATH
 
 
-def index_wiki():
+def index_common_craw_data():
     nlp = spacy.load("en_core_web_sm")
-    with TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE) as indexer:
-        titles_and_urls = get_wiki_titles_and_urls()
-        index_titles_and_urls(indexer, nlp, titles_and_urls)
+
+    with TinyIndexer(Document, INDEX_PATH, NUM_PAGES, PAGE_SIZE) as indexer:
+        titles_and_urls = get_common_crawl_titles_and_urls()
+        index_titles_and_urls(indexer, nlp, titles_and_urls, COMMON_CRAWL_TERMS_PATH)
 
 
-def get_wiki_titles_and_urls():
-    start_len = len(TITLE_START)
-    end_len = len(TITLE_END)
-    with gzip.open(WIKI_TITLES_PATH, 'rt') as wiki_titles_file:
-        wiki_titles_file.readline()
-        for raw_title in wiki_titles_file:
-            assert raw_title.startswith(TITLE_START)
-            assert raw_title.endswith(TITLE_END)
-            title = raw_title[start_len:-end_len]
-            unescaped_title = html.unescape(title)
-            url = 'https://en.wikipedia.org/wiki/' + quote(unescaped_title.replace(' ', '_'))
-            yield unescaped_title, url
+def get_common_crawl_titles_and_urls():
+    input_queue = FSQueue(DATA_DIR, 'search-items', GzipJsonRowSerializer())
+    while True:
+        next_item = input_queue.get()
+        if next_item is None:
+            break
+        item_id, items = next_item
+        for url, title, extract in items:
+            yield title, url
 
 
 if __name__ == '__main__':
-    index_wiki()
+    index_common_craw_data()

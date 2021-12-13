@@ -3,14 +3,10 @@ import json
 import os
 from glob import glob
 from multiprocessing import Process, Lock
-from pathlib import Path
-from time import sleep
 
 from extract_process import fetch_process_warc_records
 from fsqueue import FSQueue, GzipJsonRowSerializer
-
-DATA_DIR = Path(os.environ['HOME']) / 'data' / 'tinysearch'
-EXTRACTS_PATH = DATA_DIR / 'extracts'
+from paths import DATA_DIR
 
 ARCHIVE_INFO_GLOB = 'outputs/records/*.gz'
 
