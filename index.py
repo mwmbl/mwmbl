@@ -16,8 +16,11 @@ import mmh3
 import pandas as pd
 from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError
 
-NUM_PAGES = 8192
-PAGE_SIZE = 512
+# NUM_PAGES = 8192
+# PAGE_SIZE = 512
+NUM_PAGES = 25600
+PAGE_SIZE = 4096
+
 
 NUM_INITIAL_TOKENS = 50
 

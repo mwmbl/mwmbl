@@ -14,11 +14,18 @@ from pathlib import Path
 from zstandard import ZstdCompressor, ZstdDecompressor
 
 
+class FSQueueError(Exception):
+    def __init__(self, item_id, message):
+        super().__init__(message)
+        self.item_id = item_id
+
+
 class FSState(Enum):
     CREATING = 'creating'
     READY = 'ready'
     LOCKED = 'locked'
     DONE = 'done'
+    ERROR = 'error'
 
 
 class Serializer(ABC):
@@ -107,14 +114,22 @@ class FSQueue:
 
             with open(self._get_path(FSState.LOCKED, path.name), 'rb') as item_file:
                 print("Opening file", path.name)
-                return path.name, self.serializer.deserialize(item_file.read())
+                try:
+                    return path.name, self.serializer.deserialize(item_file.read())
+                except Exception as e:
+                    raise FSQueueError(path.name, 'Error deserializing item') from e
 
     def done(self, item_id: str):
         """
         Mark a task/file as done
         """
-
         self._move(item_id, FSState.LOCKED, FSState.DONE)
+
+    def error(self, item_id: str):
+        """
+        Mark a task/file as in error state
+        """
+        self._move(item_id, FSState.LOCKED, FSState.ERROR)
 
     def unlock_all(self):
         paths = sorted(Path(self._get_dir(FSState.LOCKED)).iterdir(), key=os.path.getmtime)
