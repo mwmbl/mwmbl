@@ -20,6 +20,9 @@ langdetect = "^1.0.9"
 zstandard = "^0.16.0"
 spacy = "^3.2.1"
 mmh3 = "^3.0.0"
+fastapi = "^0.70.1"
+Levenshtein = "^0.16.0"
+uvicorn = "^0.16.0"
 
 [tool.poetry.dependencies.en_core_web_sm]
 url= "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0-py3-none-any.whl"
