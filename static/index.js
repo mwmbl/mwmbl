@@ -3,6 +3,9 @@
 window.onload = (event) => {
     const searchInput = document.getElementById('search');
 
+    const length = searchInput.value.length;
+    searchInput.setSelectionRange(length, length);
+
     searchInput.addEventListener('keyup', (e) => {
         console.log(searchInput.value);
 
