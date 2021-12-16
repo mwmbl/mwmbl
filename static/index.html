@@ -1,21 +1,20 @@
 <html>
 <head>
 <title>Stoatally Different</title>
-<link rel="search"
+  <link href="/index.css" rel="stylesheet">
+  <link rel="search"
       type="application/opensearchdescription+xml"
       title="Stoatally Different"
       href="http://localhost:8000/plugin.xml">
-<script src="/index.js"></script>
+  <script src="/index.js"></script>
 </head>
 <body>
-Stoatally different.
+<div id="container">
+<!--  <form action="/search">-->
+    <input type="search" id="search" name="s" value="" autofocus/>
+<!--  </form>-->
 
-<form action="/search">
-  <input type="search" id="search" name="s" value="" autofocus/>
-</form>
-
-<div id="results">
-
+  <div id="results"></div>
 </div>
 </body>
 </html>
