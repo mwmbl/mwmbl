@@ -5,12 +5,17 @@
       type="application/opensearchdescription+xml"
       title="Stoatally Different"
       href="http://localhost:8000/plugin.xml">
+<script src="/index.js"></script>
 </head>
 <body>
 Stoatally different.
 
 <form action="/search">
-  <input type="search" name="s" />
+  <input type="search" id="search" name="s" />
 </form>
+
+<div id="results">
+
+</div>
 </body>
 </html>

@@ -1,3 +1,4 @@
+from logging import getLogger
 from typing import List
 
 import Levenshtein
@@ -8,22 +9,17 @@ from starlette.staticfiles import StaticFiles
 from index import TinyIndex, Document
 
 
+logger = getLogger(__name__)
+
+
 def create(tiny_index: TinyIndex):
     app = FastAPI()
 
     @app.get("/search")
     def search(s: str):
         results = get_results(s)
-        doc = ""
-        for result in results:
-            doc += f'<p><a href="{result.url}">{result.title}</a></p>\n'
-        return HTMLResponse(doc)
-
-        # if '—' in s:
-        #     url = s.split('—')[1].strip()
-        # else:
-        #     url = f'https://www.google.com/search?q={s}'
-        # return RedirectResponse(url)
+        logger.info("Return results: %r", results)
+        return results
 
     def order_results(query, results: List[Document]):
         ordered_results = sorted(results, key=lambda result: Levenshtein.distance(query, result.title))

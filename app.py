@@ -1,3 +1,5 @@
+import logging
+
 import uvicorn
 
 import create_app
@@ -7,6 +9,8 @@ from paths import INDEX_PATH
 
 tiny_index = TinyIndex(Document, INDEX_PATH, NUM_PAGES, PAGE_SIZE)
 app = create_app.create(tiny_index)
+
+logging.basicConfig()
 
 
 if __name__ == "__main__":
