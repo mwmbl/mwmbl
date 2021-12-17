@@ -29,3 +29,6 @@ a {
     text-decoration: none;
 }
 
+span .term {
+    font-weight: bold;
+}

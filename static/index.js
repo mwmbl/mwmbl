@@ -34,7 +34,7 @@ function addResult(title, url) {
    const par = document.createElement("p");
 
    const link = document.createElement("a");
-   const linkText = document.createTextNode(title);
+   const linkText = createBoldedSpan(title);
    link.appendChild(linkText);
    link.href = url;
 
@@ -42,4 +42,20 @@ function addResult(title, url) {
 
    const results = document.getElementById('results');
    results.appendChild(par);
+}
+
+function createBoldedSpan(title) {
+    span = document.createElement('span');
+    title.forEach(element => {
+        text = document.createTextNode(element.value);
+        if (element.is_bold) {
+            b = document.createElement('span');
+            b.classList.add('term');
+            b.appendChild(text);
+            span.appendChild(b);
+        } else {
+            span.appendChild(text);
+        }
+    });
+    return span;
 }
