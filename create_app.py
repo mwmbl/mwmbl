@@ -1,5 +1,6 @@
 import re
 from logging import getLogger
+from operator import itemgetter
 from typing import List
 
 import Levenshtein
@@ -11,6 +12,9 @@ from index import TinyIndex, Document
 
 
 logger = getLogger(__name__)
+
+
+SCORE_THRESHOLD = 0.25
 
 
 def create(tiny_index: TinyIndex):
@@ -49,12 +53,16 @@ def create(tiny_index: TinyIndex):
         match_length = sum(len(x) for x in match_strings)
 
         num_words = len(re.findall(r'\b\w+\b', r))
-        return match_length + 1./num_words
+        total_possible_match_length = sum(len(x) for x in terms)
+        return (match_length + 1./num_words) / (total_possible_match_length + 1)
 
     def order_results(terms: list[str], results: list[Document]):
-        ordered_results = sorted(results, key=lambda result: score_result(terms, result.title), reverse=True)
+        results_and_scores = [(score_result(terms, result.title), result) for result in results]
+        ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
+        filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
+        # ordered_results = sorted(results, key=lambda result: score_result(terms, result.title), reverse=True)
         # print("Order results", query, ordered_results, sep='\n')
-        return ordered_results
+        return filtered_results
 
     @app.get("/complete")
     def complete(q: str):
