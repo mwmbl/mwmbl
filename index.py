@@ -53,6 +53,7 @@ def clean(content):
 class Document:
     title: str
     url: str
+    extract: str
 
 
 @dataclass
@@ -181,13 +182,14 @@ def prepare_url_for_tokenizing(url: str):
     return url
 
 
-def get_pages(nlp, titles_and_urls) -> Iterable[TokenizedDocument]:
-    for i, (title_cleaned, url) in enumerate(titles_and_urls):
+def get_pages(nlp, titles_urls_and_extracts) -> Iterable[TokenizedDocument]:
+    for i, (title_cleaned, url, extract) in enumerate(titles_urls_and_extracts):
         title_tokens = tokenize(nlp, title_cleaned)
         prepared_url = prepare_url_for_tokenizing(unquote(url))
         url_tokens = tokenize(nlp, prepared_url)
-        tokens = title_tokens | url_tokens
-        yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned)
+        extract_tokens = tokenize(nlp, extract)
+        tokens = title_tokens | url_tokens | extract_tokens
+        yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract)
 
         if i % 1000 == 0:
             print("Processed", i)
@@ -201,14 +203,14 @@ def grouper(n: int, iterator: Iterator):
         yield chunk
 
 
-def index_titles_and_urls(indexer: TinyIndexer, nlp, titles_and_urls, terms_path):
+def index_titles_urls_and_extracts(indexer: TinyIndexer, nlp, titles_urls_and_extracts, terms_path):
     indexer.create_if_not_exists()
 
     terms = Counter()
-    pages = get_pages(nlp, titles_and_urls)
+    pages = get_pages(nlp, titles_urls_and_extracts)
     for page in pages:
         for token in page.tokens:
-            indexer.index(token, Document(url=page.url, title=page.title))
+            indexer.index(token, Document(url=page.url, title=page.title, extract=page.extract))
         terms.update([t.lower() for t in page.tokens])
 
     term_df = pd.DataFrame({

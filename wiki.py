@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from spacy.lang.en import English
 
-from index import TinyIndexer, index_titles_and_urls, PAGE_SIZE, NUM_PAGES
+from index import TinyIndexer, index_titles_urls_and_extracts, PAGE_SIZE, NUM_PAGES
 from paths import WIKI_TITLES_PATH, INDEX_PATH
 
 TEXT_TAGS = ['mediawiki', 'page', 'revision', 'text']
@@ -19,7 +19,7 @@ def index_wiki():
     nlp = English()
     with TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE) as indexer:
         titles_and_urls = get_wiki_titles_and_urls()
-        index_titles_and_urls(indexer, nlp, titles_and_urls)
+        index_titles_urls_and_extracts(indexer, nlp, titles_and_urls)
 
 
 def get_wiki_titles_and_urls():

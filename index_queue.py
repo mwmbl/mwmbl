@@ -4,7 +4,7 @@ Index items in the file-system queue
 from spacy.lang.en import English
 
 from fsqueue import FSQueue, ZstdJsonSerializer
-from index import TinyIndexer, NUM_PAGES, PAGE_SIZE, index_titles_and_urls
+from index import TinyIndexer, NUM_PAGES, PAGE_SIZE, index_titles_urls_and_extracts
 from paths import DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, INDEX_PATH
 
 
@@ -23,7 +23,7 @@ def index_queue_items():
     nlp = English()
     with TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE) as indexer:
         titles_and_urls = get_queue_items()
-        index_titles_and_urls(indexer, nlp, titles_and_urls)
+        index_titles_urls_and_extracts(indexer, nlp, titles_and_urls)
 
 
 if __name__ == '__main__':

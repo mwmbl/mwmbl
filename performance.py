@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 
 import create_app
 from fsqueue import ZstdJsonSerializer
-from index import TinyIndexer, index_titles_and_urls, Document, TinyIndex
+from index import TinyIndexer, index_titles_urls_and_extracts, Document, TinyIndex
 from paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
 
 NUM_DOCUMENTS = 30000
@@ -87,7 +87,7 @@ def performance_test():
         titles_and_urls = get_test_pages()
 
         start_time = datetime.now()
-        index_titles_and_urls(indexer, nlp, titles_and_urls, TEST_TERMS_PATH)
+        index_titles_urls_and_extracts(indexer, nlp, titles_and_urls, TEST_TERMS_PATH)
         stop_time = datetime.now()
 
         index_time = (stop_time - start_time).total_seconds()

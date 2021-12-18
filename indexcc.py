@@ -8,7 +8,7 @@ from logging import getLogger
 import spacy
 
 from fsqueue import FSQueue, GzipJsonRowSerializer, FSQueueError
-from index import TinyIndexer, index_titles_and_urls, PAGE_SIZE, NUM_PAGES, Document
+from index import TinyIndexer, index_titles_urls_and_extracts, PAGE_SIZE, NUM_PAGES, Document
 from paths import INDEX_PATH, DATA_DIR, COMMON_CRAWL_TERMS_PATH
 
 
@@ -20,11 +20,11 @@ def index_common_craw_data():
     nlp = spacy.load("en_core_web_sm")
 
     with TinyIndexer(Document, INDEX_PATH, NUM_PAGES, PAGE_SIZE) as indexer:
-        titles_and_urls = get_common_crawl_titles_and_urls()
-        index_titles_and_urls(indexer, nlp, titles_and_urls, COMMON_CRAWL_TERMS_PATH)
+        titles_urls_and_extracts = get_common_crawl_titles_urls_and_extracts()
+        index_titles_urls_and_extracts(indexer, nlp, titles_urls_and_extracts, COMMON_CRAWL_TERMS_PATH)
 
 
-def get_common_crawl_titles_and_urls():
+def get_common_crawl_titles_urls_and_extracts():
     input_queue = FSQueue(DATA_DIR, 'search-items', GzipJsonRowSerializer())
     input_queue.unlock_all()
     while True:
@@ -40,7 +40,7 @@ def get_common_crawl_titles_and_urls():
         item_id, items = next_item
         logger.info(f'Processing item {item_id}')
         for url, title, extract in items:
-            yield title, url
+            yield title, url, extract
         input_queue.done(item_id)
 
 
