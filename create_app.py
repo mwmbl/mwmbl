@@ -22,8 +22,7 @@ def create(tiny_index: TinyIndex):
 
         formatted_results = []
         for result in results:
-            term_patterns = [rf'\b{term}\b' for term in terms]
-            pattern = '|'.join(term_patterns)
+            pattern = get_query_regex(terms)
             title = result.title
             matches = re.finditer(pattern, title, re.IGNORECASE)
             all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(title)]
@@ -38,8 +37,22 @@ def create(tiny_index: TinyIndex):
         logger.info("Return results: %r", formatted_results)
         return formatted_results
 
-    def order_results(query, results: List[Document]):
-        ordered_results = sorted(results, key=lambda result: Levenshtein.distance(query, result.title))
+    def get_query_regex(terms):
+        term_patterns = [rf'\b{term}\b' for term in terms]
+        pattern = '|'.join(term_patterns)
+        return pattern
+
+    def score_result(terms, r):
+        query_regex = get_query_regex(terms)
+        matches = re.findall(query_regex, r, flags=re.IGNORECASE)
+        match_strings = {x.lower() for x in matches}
+        match_length = sum(len(x) for x in match_strings)
+
+        num_words = len(re.findall(r'\b\w+\b', r))
+        return match_length + 1./num_words
+
+    def order_results(terms: list[str], results: list[Document]):
+        ordered_results = sorted(results, key=lambda result: score_result(terms, result.title), reverse=True)
         # print("Order results", query, ordered_results, sep='\n')
         return ordered_results
 
@@ -63,7 +76,7 @@ def create(tiny_index: TinyIndex):
             items = tiny_index.retrieve(term)
             if items is not None:
                 pages += [item for item in items if term in item.title.lower()]
-        ordered_results = order_results(q, pages)
+        ordered_results = order_results(terms, pages)
         return ordered_results, terms
 
     @app.get('/')
