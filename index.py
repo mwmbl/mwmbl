@@ -89,11 +89,14 @@ class TinyIndexBase(Generic[T]):
         Get the page at index i, decompress and deserialise it using JSON
         """
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
+        zeros = page_data.count(b'\x00\x00\x00\x00') * 4
         try:
             decompressed_data = self.decompressor.decompress(page_data)
         except ZstdError:
             return None
-        return json.loads(decompressed_data.decode('utf8'))
+        results = json.loads(decompressed_data.decode('utf8'))
+        # print(f"Num results: {len(results)}, num zeros: {zeros}")
+        return results
 
     def convert_items(self, items) -> List[T]:
         converted = [self.item_factory(*item) for item in items]
@@ -128,11 +131,6 @@ class TinyIndexer(TinyIndexBase[T]):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.mmap.close()
         self.index_file.close()
-
-    # def index(self, documents: List[TokenizedDocument]):
-    #     for document in documents:
-    #         for token in document.tokens:
-    #             self._index_document(document, token)
 
     def index(self, key: str, value: T):
         # print("Index", value)

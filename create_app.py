@@ -1,15 +1,12 @@
 import re
 from logging import getLogger
 from operator import itemgetter
-from typing import List
 
-import Levenshtein
 from fastapi import FastAPI
-from starlette.responses import RedirectResponse, FileResponse, HTMLResponse
+from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
 from index import TinyIndex, Document
-
 
 logger = getLogger(__name__)
 
@@ -62,10 +59,8 @@ def create(tiny_index: TinyIndex):
     def order_results(terms: list[str], results: list[Document]):
         results_and_scores = [(score_result(terms, result), result) for result in results]
         ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
-        print("Ordered results", ordered_results)
+        # print("Ordered results", ordered_results)
         filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
-        # ordered_results = sorted(results, key=lambda result: score_result(terms, result.title), reverse=True)
-        # print("Order results", query, ordered_results, sep='\n')
         return filtered_results
 
     @app.get("/complete")
