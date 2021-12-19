@@ -28,7 +28,6 @@ def create(tiny_index: TinyIndex):
             matches = re.finditer(pattern, title_and_extract, re.IGNORECASE)
             all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(title_and_extract)]
             formatted_result = []
-            title_length = len(result.title)
             for i in range(len(all_spans) - 1):
                 is_bold = i % 2 == 1
                 start = all_spans[i]
@@ -45,16 +44,25 @@ def create(tiny_index: TinyIndex):
         return pattern
 
     def score_result(terms, result: Document):
-        print("Score result", result)
-        result_string = f"{result.title} {result.extract}"
+        result_string = f"{result.title.strip()} {result.extract.strip()}"
         query_regex = get_query_regex(terms)
-        matches = re.findall(query_regex, result_string, flags=re.IGNORECASE)
-        match_strings = {x.lower() for x in matches}
+        matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
+        match_strings = {x.group(0).lower() for x in matches}
         match_length = sum(len(x) for x in match_strings)
 
-        num_words = len(re.findall(r'\b\w+\b', result_string))
+        last_match_char = 1
+        seen_matches = set()
+        for match in matches:
+            value = match.group(0).lower()
+            if value not in seen_matches:
+                last_match_char = match.span()[1]
+                seen_matches.add(value)
+
+        # num_words = len(re.findall(r'\b\w+\b', result_string))
         total_possible_match_length = sum(len(x) for x in terms)
-        return (match_length + 1./num_words) / (total_possible_match_length + 1)
+        score = (match_length + 1./last_match_char) / (total_possible_match_length + 1)
+        # print("Score result", match_length, last_match_char, score, result.title)
+        return score
 
     def order_results(terms: list[str], results: list[Document]):
         results_and_scores = [(score_result(terms, result), result) for result in results]
