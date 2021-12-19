@@ -33,23 +33,32 @@ function clearResults() {
 function addResult(title, extract, url) {
    const par = document.createElement("p");
 
-   const link = document.createElement("a");
    const titleText = createBoldedSpan(title);
    titleText.classList.add('title');
    const extractText = createBoldedSpan(extract);
    extractText.classList.add('extract');
-   link.appendChild(titleText);
+   par.appendChild(titleText);
 
    separator = document.createTextNode(' - ')
-   link.appendChild(separator);
+   par.appendChild(separator);
 
-   link.appendChild(extractText);
+   par.appendChild(extractText);
+
+   const div = document.createElement("div");
+
+   const urlPar = document.createElement("p");
+   const urlText = document.createTextNode(url);
+   urlPar.appendChild(urlText);
+   urlPar.classList.add('url');
+   div.appendChild(urlPar);
+   div.appendChild(par);
+
+   const link = document.createElement("a");
+   link.appendChild(div);
    link.href = url;
 
-   par.appendChild(link);
-
    const results = document.getElementById('results');
-   results.appendChild(par);
+   results.appendChild(link);
 }
 
 function createBoldedSpan(title) {

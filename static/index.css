@@ -4,6 +4,17 @@ p {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin: 3px;
+}
+
+div {
+    margin-top: 30px;
+    margin-bottom: 30px;
+}
+
+.url {
+   margin-top: 0px;
+   font-size: 20px;
 }
 
 #container {
