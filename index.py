@@ -188,6 +188,7 @@ def get_pages(nlp, titles_urls_and_extracts) -> Iterable[TokenizedDocument]:
         prepared_url = prepare_url_for_tokenizing(unquote(url))
         url_tokens = tokenize(nlp, prepared_url)
         extract_tokens = tokenize(nlp, extract)
+        print("Extract tokens", extract_tokens)
         tokens = title_tokens | url_tokens | extract_tokens
         yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract)
 
