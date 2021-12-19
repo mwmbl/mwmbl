@@ -1,5 +1,9 @@
+html {
+    font-family: Verdana, Geneva, sans-serif;
+}
+
 p {
-    font-size: 30px;
+    font-size: 25px;
     width: 100%;
     white-space: nowrap;
     overflow: hidden;
@@ -18,7 +22,7 @@ div {
 }
 
 #container {
-  width: 2100px;
+  width: 1024px;
   margin: 0 auto;
 }
 
@@ -50,7 +54,8 @@ span .term {
 }
 
 .title {
-    color: black;
+    color: #1a0daa;
+    /* color: black; */
 }
 
 .extract {
