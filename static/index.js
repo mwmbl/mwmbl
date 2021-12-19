@@ -16,7 +16,7 @@ window.onload = (event) => {
             response.json().then(content => {
                 console.log(content);
                 content.forEach(element => {
-                    addResult(element.title, element.url);
+                    addResult(element.title, element.extract, element.url);
                 })
             });
         });
@@ -30,12 +30,20 @@ function clearResults() {
 }
 
 
-function addResult(title, url) {
+function addResult(title, extract, url) {
    const par = document.createElement("p");
 
    const link = document.createElement("a");
-   const linkText = createBoldedSpan(title);
-   link.appendChild(linkText);
+   const titleText = createBoldedSpan(title);
+   titleText.classList.add('title');
+   const extractText = createBoldedSpan(extract);
+   extractText.classList.add('extract');
+   link.appendChild(titleText);
+
+   separator = document.createTextNode(' - ')
+   link.appendChild(separator);
+
+   link.appendChild(extractText);
    link.href = url;
 
    par.appendChild(link);

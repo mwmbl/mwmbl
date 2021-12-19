@@ -24,16 +24,19 @@ def create(tiny_index: TinyIndex):
         formatted_results = []
         for result in results:
             pattern = get_query_regex(terms)
-            title_and_extract = f"{result.title} - {result.extract}"
-            matches = re.finditer(pattern, title_and_extract, re.IGNORECASE)
-            all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(title_and_extract)]
-            formatted_result = []
-            for i in range(len(all_spans) - 1):
-                is_bold = i % 2 == 1
-                start = all_spans[i]
-                end = all_spans[i + 1]
-                formatted_result.append({'value': title_and_extract[start:end], 'is_bold': is_bold})
-            formatted_results.append({'title': formatted_result, 'url': result.url})
+            formatted_result = {}
+            for content_type, content in [('title', result.title), ('extract', result.extract)]:
+                matches = re.finditer(pattern, content, re.IGNORECASE)
+                all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(content)]
+                content_result = []
+                for i in range(len(all_spans) - 1):
+                    is_bold = i % 2 == 1
+                    start = all_spans[i]
+                    end = all_spans[i + 1]
+                    content_result.append({'value': content[start:end], 'is_bold': is_bold})
+                formatted_result[content_type] = content_result
+            formatted_result['url'] = result.url
+            formatted_results.append(formatted_result)
 
         logger.info("Return results: %r", formatted_results)
         return formatted_results

@@ -1,5 +1,9 @@
 p {
     font-size: 30px;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #container {
@@ -27,8 +31,16 @@ p {
 
 a {
     text-decoration: none;
+    color: #555555;
 }
 
 span .term {
     font-weight: bold;
+}
+
+.title {
+    color: black;
+}
+
+.extract {
 }
