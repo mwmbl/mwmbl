@@ -39,17 +39,21 @@ window.onload = (event) => {
         } else if (e.key == 'ArrowUp') {
             selectPreviousItem();
         } else if (e.key == 'Enter') {
-            clickSelected();
-        }
+//            const form = document.getElementById('search-form');
+//            form.submit();
+//            event.preventDefault();
+       }
     });
 
     // Handle pressing enter
     const form = document.getElementById('search-form');
 
-    form.addEventListener( "submit", event => {
+    form.addEventListener("submit", event => {
         event.preventDefault();
         clickSelected();
     });
+
+    searchInput.focus();
 };
 
 
