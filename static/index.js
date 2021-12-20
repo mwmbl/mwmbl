@@ -1,6 +1,7 @@
 
 ts = {
-    selected: null
+    selected: null,
+    numItems: 0
 };
 
 window.onload = (event) => {
@@ -24,17 +25,28 @@ window.onload = (event) => {
                         addResult(element.title, element.extract, element.url, i);
                     };
                     ts.selected = null;
+                    ts.numItems = content.length;
                 });
             });
         }
     });
-    
-    document.addEventListener('keyup', (e) => {
+
+    // Handle moving the selected item up and down
+    document.addEventListener('keydown', (e) => {
+        console.log("Key press", e);
         if (e.key == 'ArrowDown') {
             selectNextItem();
         } else if (e.key == 'ArrowUp') {
             selectPreviousItem();
         }
+    });
+
+    // Handle pressing enter
+    const form = document.getElementById('search-form');
+
+    form.addEventListener( "submit", event => {
+        event.preventDefault();
+        clickSelected();
     });
 };
 
@@ -42,7 +54,7 @@ window.onload = (event) => {
 function selectNextItem() {
     if (ts.selected === null) {
         ts.selected = 0;
-    } else {
+    } else if (ts.selected < ts.numItems -1) {
         ts.selected++;
     }
 
@@ -50,11 +62,21 @@ function selectNextItem() {
 }
 
 
+function clickSelected() {
+    if (ts.selected !== null) {
+        const selectedResult = document.getElementById(ts.selected.toString());
+        selectedResult.click();
+    }
+}
+
+
 function selectPreviousItem() {
     if (ts.selected === null) {
-        ts.selected = 0;
-    } else {
+        return;
+    } else if (ts.selected > 0) {
         ts.selected--;
+    } else if (ts.selected == 0) {
+        ts.selected = null;
     }
 
     updateSelected();
@@ -67,8 +89,10 @@ function updateSelected() {
         child.classList.remove('selected');
     });
 
-    const selectedResult = document.getElementById(ts.selected.toString());
-    selectedResult.classList.add('selected');
+    if (ts.selected !== null) {
+        const selectedResult = document.getElementById(ts.selected.toString());
+        selectedResult.classList.add('selected');
+    }
 }
 
 
