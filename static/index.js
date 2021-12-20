@@ -38,6 +38,8 @@ window.onload = (event) => {
             selectNextItem();
         } else if (e.key == 'ArrowUp') {
             selectPreviousItem();
+        } else if (e.key == 'Enter') {
+            clickSelected();
         }
     });
 
