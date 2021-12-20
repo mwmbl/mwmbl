@@ -1,4 +1,7 @@
 
+ts = {
+    selected: null
+};
 
 window.onload = (event) => {
     const searchInput = document.getElementById('search');
@@ -17,18 +20,56 @@ window.onload = (event) => {
                 console.log(response);
                 response.json().then(content => {
                     console.log(content);
-                    content.forEach(element => {
-                        addResult(element.title, element.extract, element.url);
-                    })
+                    for (const [i, element] of content.entries()) {
+                        addResult(element.title, element.extract, element.url, i);
+                    };
+                    ts.selected = null;
                 });
             });
-        } else if (e.key == 'ArrowDown') {
-
+        }
+    });
+    
+    document.addEventListener('keyup', (e) => {
+        if (e.key == 'ArrowDown') {
+            selectNextItem();
         } else if (e.key == 'ArrowUp') {
-
+            selectPreviousItem();
         }
     });
 };
+
+
+function selectNextItem() {
+    if (ts.selected === null) {
+        ts.selected = 0;
+    } else {
+        ts.selected++;
+    }
+
+    updateSelected();
+}
+
+
+function selectPreviousItem() {
+    if (ts.selected === null) {
+        ts.selected = 0;
+    } else {
+        ts.selected--;
+    }
+
+    updateSelected();
+}
+
+
+function updateSelected() {
+    const results = document.querySelectorAll('.result');
+    results.forEach(child => {
+        child.classList.remove('selected');
+    });
+
+    const selectedResult = document.getElementById(ts.selected.toString());
+    selectedResult.classList.add('selected');
+}
 
 
 function clearResults() {
@@ -37,7 +78,7 @@ function clearResults() {
 }
 
 
-function addResult(title, extract, url) {
+function addResult(title, extract, url, id) {
    const par = document.createElement("p");
 
    const titleText = createBoldedSpan(title);
@@ -53,6 +94,7 @@ function addResult(title, extract, url) {
 
    const div = document.createElement("div");
    div.classList.add('result');
+   div.id = id.toString();
 
    const urlPar = document.createElement("p");
    const urlText = document.createTextNode(url);
