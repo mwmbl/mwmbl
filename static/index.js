@@ -7,19 +7,26 @@ window.onload = (event) => {
     searchInput.setSelectionRange(length, length);
 
     searchInput.addEventListener('keyup', (e) => {
-        console.log(searchInput.value);
+        console.log("Key", e.key);
+        if (e.key.length == 1 || e.key === 'Backspace') {
+            console.log(searchInput.value);
 
-        const encodedValue = encodeURIComponent(searchInput.value);
-        fetch('/search?s=' + encodedValue).then(response => {
-            clearResults();
-            console.log(response);
-            response.json().then(content => {
-                console.log(content);
-                content.forEach(element => {
-                    addResult(element.title, element.extract, element.url);
-                })
+            const encodedValue = encodeURIComponent(searchInput.value);
+            fetch('/search?s=' + encodedValue).then(response => {
+                clearResults();
+                console.log(response);
+                response.json().then(content => {
+                    console.log(content);
+                    content.forEach(element => {
+                        addResult(element.title, element.extract, element.url);
+                    })
+                });
             });
-        });
+        } else if (e.key == 'ArrowDown') {
+
+        } else if (e.key == 'ArrowUp') {
+
+        }
     });
 };
 
@@ -45,6 +52,7 @@ function addResult(title, extract, url) {
    par.appendChild(extractText);
 
    const div = document.createElement("div");
+   div.classList.add('result');
 
    const urlPar = document.createElement("p");
    const urlText = document.createTextNode(url);
