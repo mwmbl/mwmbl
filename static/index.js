@@ -36,8 +36,10 @@ window.onload = (event) => {
         console.log("Key press", e);
         if (e.key == 'ArrowDown') {
             selectNextItem();
+            e.preventDefault();
         } else if (e.key == 'ArrowUp') {
             selectPreviousItem();
+            e.preventDefault();
         } else if (e.key == 'Enter') {
 //            const form = document.getElementById('search-form');
 //            form.submit();
