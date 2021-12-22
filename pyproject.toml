@@ -6,26 +6,26 @@ authors = ["Daoud Clarke <daoud.clarke@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.9"
-botocore = "^1.23.20"
-boto3 = "^1.20.20"
-ujson = "^4.3.0"
-warcio = "^1.7.4"
-idna = "^3.3"
-beautifulsoup4 = "^4.10.0"
-lxml = "^4.6.4"
-jusText = "^3.0.0"
+# botocore = "^1.23.20"
+# boto3 = "^1.20.20"
+# ujson = "^4.3.0"
+# warcio = "^1.7.4"
+# idna = "^3.3"
+# beautifulsoup4 = "^4.10.0"
+# lxml = "^4.6.4"
+# jusText = "^3.0.0"
 pandas = "^1.3.4"
-pyspark = "^3.2.0"
-langdetect = "^1.0.9"
+# pyspark = "^3.2.0"
+# langdetect = "^1.0.9"
 zstandard = "^0.16.0"
-spacy = "^3.2.1"
+# spacy = "^3.2.1"
 mmh3 = "^3.0.0"
 fastapi = "^0.70.1"
-Levenshtein = "^0.16.0"
+# Levenshtein = "^0.16.0"
 uvicorn = "^0.16.0"
 
-[tool.poetry.dependencies.en_core_web_sm]
-url= "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0-py3-none-any.whl"
+# [tool.poetry.dependencies.en_core_web_sm]
+# url= "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0-py3-none-any.whl"
 
 [tool.poetry.dev-dependencies]
 

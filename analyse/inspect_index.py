@@ -1,4 +1,4 @@
-from index import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
+from tinysearchengine.indexer import TinyIndex, NUM_PAGES, PAGE_SIZE, Document
 from paths import INDEX_PATH
 
 

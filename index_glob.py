@@ -4,7 +4,8 @@ from glob import glob
 import bs4
 from spacy.lang.en import English
 
-from index import TinyIndexer, NUM_PAGES, PAGE_SIZE, clean, tokenize
+from index import tokenize
+from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
 from paths import INDEX_PATH, CRAWL_GLOB
 
 
@@ -36,3 +37,10 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+
+def clean(content):
+    text = justext.justext(content, justext.get_stoplist("English"))
+    pars = [par.text for par in text if not par.is_boilerplate]
+    cleaned_text = ' '.join(pars)
+    return cleaned_text

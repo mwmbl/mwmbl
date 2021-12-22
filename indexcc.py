@@ -8,7 +8,8 @@ from logging import getLogger
 import spacy
 
 from fsqueue import FSQueue, GzipJsonRowSerializer, FSQueueError
-from index import TinyIndexer, index_titles_urls_and_extracts, PAGE_SIZE, NUM_PAGES, Document
+from index import index_titles_urls_and_extracts
+from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE, Document
 from paths import INDEX_PATH, DATA_DIR, COMMON_CRAWL_TERMS_PATH
 
 

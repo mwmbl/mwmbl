@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
-from index import TinyIndex, Document
+from tinysearchengine.indexer import TinyIndex, Document
 
 logger = getLogger(__name__)
 
@@ -107,7 +107,7 @@ def create(tiny_index: TinyIndex):
 
     @app.get('/')
     def index():
-        return FileResponse('static/index.html')
+        return FileResponse('tinysearchengine/static/index.html')
 
-    app.mount('/', StaticFiles(directory="static"), name="static")
+    app.mount('/', StaticFiles(directory="tinysearchengine/static"), name="static")
     return app
