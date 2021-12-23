@@ -1,6 +1,7 @@
 import re
 from logging import getLogger
 from operator import itemgetter
+from pathlib import Path
 
 from fastapi import FastAPI
 from starlette.responses import FileResponse
@@ -11,6 +12,7 @@ from tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
+STATIC_FILES_PATH = Path(__file__).parent / 'static'
 SCORE_THRESHOLD = 0.25
 
 
@@ -107,7 +109,7 @@ def create(tiny_index: TinyIndex):
 
     @app.get('/')
     def index():
-        return FileResponse('tinysearchengine/static/index.html')
+        return FileResponse(STATIC_FILES_PATH / 'index.html')
 
-    app.mount('/', StaticFiles(directory="tinysearchengine/static"), name="static")
+    app.mount('/', StaticFiles(directory=STATIC_FILES_PATH), name="static")
     return app

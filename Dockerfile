@@ -27,7 +27,8 @@ FROM base as final
 
 #RUN apk add --no-cache libffi libpq
 COPY --from=builder /venv /venv
+COPY data /data
 #COPY docker-entrypoint.sh wsgi.py ./
 #CMD ["./docker-entrypoint.sh"]
 
-CMD ["/venv/bin/python", "-m", "tinysearchengine.app"]
+CMD ["/venv/bin/python", "-m", "tinysearchengine.app", "/data/index.tinysearch"]
