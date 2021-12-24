@@ -14,4 +14,4 @@ tiny_index = TinyIndex(Document, index_path, NUM_PAGES, PAGE_SIZE)
 app = create_app.create(tiny_index)
 
 if __name__ == "__main__":
-    uvicorn.run("tinysearchengine.app:app", host="127.0.0.1", port=8080, log_level="info")
+    uvicorn.run("tinysearchengine.app:app", host="0.0.0.0", port=8080, log_level="info")
