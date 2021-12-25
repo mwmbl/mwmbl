@@ -4,7 +4,7 @@ Mwmbl: No ads, no tracking, no cruft, no profit
 Mwmbl is a non-profit, ad-free, free-libre and free-lunch search
 engine with a focus on useability and speed. At the moment it is
 little more than an idea together with a [proof of concept
-implementation](https://tinysearchengine-oq4r5q2hsq-ue.a.run.app/) of
+implementation](https://mwmbl.org/) of
 the web front-end and search technology on a very small index. A
 crawler is still to be implemented.
 
