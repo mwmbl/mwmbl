@@ -10,26 +10,24 @@ window.onload = (event) => {
     const length = searchInput.value.length;
     searchInput.setSelectionRange(length, length);
 
-    searchInput.addEventListener('keyup', (e) => {
+    searchInput.oninput = e => {
         console.log("Key", e.key);
-        if (e.key.length == 1 || e.key === 'Backspace') {
-            console.log(searchInput.value);
+        console.log(searchInput.value);
 
-            const encodedValue = encodeURIComponent(searchInput.value);
-            fetch('/search?s=' + encodedValue).then(response => {
-                clearResults();
-                console.log(response);
-                response.json().then(content => {
-                    console.log(content);
-                    for (const [i, element] of content.entries()) {
-                        addResult(element.title, element.extract, element.url, i);
-                    };
-                    ts.selected = null;
-                    ts.numItems = content.length;
-                });
+        const encodedValue = encodeURIComponent(searchInput.value);
+        fetch('/search?s=' + encodedValue).then(response => {
+            clearResults();
+            console.log(response);
+            response.json().then(content => {
+                console.log(content);
+                for (const [i, element] of content.entries()) {
+                    addResult(element.title, element.extract, element.url, i);
+                };
+                ts.selected = null;
+                ts.numItems = content.length;
             });
-        }
-    });
+        });
+    };
 
     // Handle moving the selected item up and down
     document.addEventListener('keydown', (e) => {
