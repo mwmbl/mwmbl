@@ -99,11 +99,13 @@ How to contribute
 =================
 
 There are lots of ways to help:
+ - Give feedback/suggestions
  - Volunteer to test out the distributed crawler when it's ready
  - Help out with development of the engine itself
  - Donate some money towards hosting costs and/or founding an official
    non-profit organisation
 
 If you would like to help in any of these or other ways, thank you!
-Please email the main author (email address is in the git commit
-history).
+Please join our [Matrix chat
+server](https://matrix.to/#/#mwmbl:matrix.org) or email the main
+author (email address is in the git commit history).
