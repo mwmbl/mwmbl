@@ -3,8 +3,11 @@ html {
     background: #dcdced;
 }
 
+body {
+  font-size: 1.2rem;
+}
+
 p {
-    font-size: 25px;
     width: 100%;
     white-space: nowrap;
     overflow: hidden;
@@ -19,11 +22,12 @@ div {
 
 .url {
    margin-top: 0px;
-   font-size: 20px;
+   font-size: 1rem;
 }
 
-#container {
-  width: 1024px;
+.container {
+  width: 100%;
+  max-width: 1024px;
   margin: 0 auto;
 }
 
@@ -34,7 +38,7 @@ div {
 
     outline: none;
 
-    font-size: 50px;
+    font-size: inherit;
 
     border: 2px solid #ccc;
     border-width: 4px;
