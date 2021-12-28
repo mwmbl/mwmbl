@@ -11,9 +11,43 @@ zstandard = "^0.16.0"
 mmh3 = "^3.0.0"
 fastapi = "^0.70.1"
 uvicorn = "^0.16.0"
+# Optional dependencies do not get installed by default. Look under tool.poetry.extras section
+# to see which extras to use.
+botocore = {version= "==1.23.20", optional = true}
+boto3 = {version= "==1.20.20", optional = true}
+ujson = {version= "==4.3.0", optional = true}
+warcio = {version= "==1.7.4", optional = true}
+idna = {version= "==3.3", optional = true}
+beautifulsoup4 = {version= "==4.10.0", optional = true}
+lxml = {version= "==4.6.4", optional = true}
+jusText = {version= "==3.0.0", optional = true}
+langdetect = {version= "==1.0.9", optional = true}
+pyarrow = {version= "==6.0.0", optional = true}
+pyspark = {version= "==3.2.0", optional = true}
+Levenshtein = {version= "==0.16.0", optional = true}
+# en-core-web-sm requires a compatible version of spacy
+spacy = {version= "==3.2.1", optional = true}
+en-core-web-sm = {url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0.tar.gz", optional = true}
 
-# [tool.poetry.dependencies.en_core_web_sm]
-# url= "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0-py3-none-any.whl"
+
+[tool.poetry.extras]
+indexer = [
+    "botocore",
+    "boto3",
+    "ujson",
+    "warcio",
+    "idna",
+    "beautifulsoup4",
+    "lxml",
+    "jusText",
+    "langdetect",
+    "pyarrow",
+    "pyspark",
+    "Levenshtein",
+    # en-core-web-sm requires a compatible version of spacy
+    "spacy",
+    "en-core-web-sm",
+]
 
 [tool.poetry.dev-dependencies]
 # botocore = "^1.23.20"
