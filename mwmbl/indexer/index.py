@@ -10,7 +10,7 @@ import pandas as pd
 
 # NUM_PAGES = 8192
 # PAGE_SIZE = 512
-from tinysearchengine.indexer import TinyIndexer, Document, TokenizedDocument
+from mwmbl.tinysearchengine.indexer import TinyIndexer, Document, TokenizedDocument
 
 NUM_INITIAL_TOKENS = 50
 

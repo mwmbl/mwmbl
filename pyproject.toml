@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "tinysearchengine"
+name = "mwmbl"
 version = "0.1.0"
 description = ""
 authors = ["Daoud Clarke <daoud.clarke@gmail.com>"]

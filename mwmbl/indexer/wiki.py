@@ -7,9 +7,9 @@ from urllib.parse import quote
 
 from spacy.lang.en import English
 
-from indexer.index import index_titles_urls_and_extracts
-from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
-from indexer.paths import WIKI_TITLES_PATH, INDEX_PATH
+from .index import index_titles_urls_and_extracts
+from mwmbl.tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
+from .paths import WIKI_TITLES_PATH, INDEX_PATH
 
 TEXT_TAGS = ['mediawiki', 'page', 'revision', 'text']
 TITLE_START = '<title>Wikipedia: '

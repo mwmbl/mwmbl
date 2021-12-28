@@ -4,9 +4,9 @@ import os
 from glob import glob
 from multiprocessing import Process, Lock
 
-from extract_process import fetch_process_warc_records
-from fsqueue import FSQueue, GzipJsonRowSerializer
-from paths import DATA_DIR
+from .extract_process import fetch_process_warc_records
+from .fsqueue import FSQueue, GzipJsonRowSerializer
+from .paths import DATA_DIR
 
 ARCHIVE_INFO_GLOB = 'outputs/records/*.gz'
 

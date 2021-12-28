@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TypeVar, Generic, Callable, List
 
 import mmh3
-from zstandard import ZstdDecompressor
+from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 
 NUM_PAGES = 25600

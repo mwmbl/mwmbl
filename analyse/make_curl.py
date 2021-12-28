@@ -5,8 +5,8 @@ import os
 from itertools import islice
 from urllib.parse import quote
 
-from indexer.paths import DATA_DIR
-from indexer.wiki import get_wiki_titles_and_urls
+from mwmbl.indexer.paths import DATA_DIR
+from mwmbl.indexer.wiki import get_wiki_titles_and_urls
 
 URL_TEMPLATE = "http://localhost:8000/complete?q={}"
 CURL_FILE = os.path.join(DATA_DIR, "urls.curl")

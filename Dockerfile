@@ -31,4 +31,4 @@ COPY data /data
 #COPY docker-entrypoint.sh wsgi.py ./
 #CMD ["./docker-entrypoint.sh"]
 
-CMD ["/venv/bin/python", "-m", "tinysearchengine.app", "/data/index.tinysearch"]
+CMD ["/venv/bin/python", "-m", "mwmbl.tinysearchengine.app", "/data/index.tinysearch"]

@@ -4,8 +4,8 @@ Add domains to the queue to be retrieved
 import csv
 import gzip
 
-from indexer.fsqueue import FSQueue, ZstdJsonSerializer
-from indexer.paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, DATA_DIR
+from mwmbl.indexer.fsqueue import FSQueue, ZstdJsonSerializer
+from mwmbl.indexer.paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, DATA_DIR
 
 BATCH_SIZE = 250
 
