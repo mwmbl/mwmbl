@@ -1,0 +1,12 @@
+# Config for bootstrapping tinysearchengine.
+# Follows the schema/model defined by mwmbl.tinysearchengine.config.ConfigModel
+
+server_config:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "info"
+
+index_config:
+  index_path: data/index.tinysearch
+  num_pages: 25600
+  page_size: 4096
