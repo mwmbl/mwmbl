@@ -111,3 +111,13 @@ If you would like to help in any of these or other ways, thank you!
 Please join our [Matrix chat
 server](https://matrix.to/#/#mwmbl:matrix.org) or email the main
 author (email address is in the git commit history).
+
+Development
+===========
+
+Using Docker:
+
+1. Create a new folder called `data` in the root of the repository
+2. Download the [index file](https://storage.googleapis.com/mwmbl/index.tinysearch) and place it the new data folder
+3. Run `$ docker build . -t mwmbl`
+4. Run `$ docker run -p 8080:8080 mwmbl`
