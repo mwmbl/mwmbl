@@ -3,10 +3,10 @@ Index items in the file-system queue
 """
 from spacy.lang.en import English
 
-from fsqueue import FSQueue, ZstdJsonSerializer
-from index import index_titles_urls_and_extracts
-from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
-from paths import DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, INDEX_PATH
+from .fsqueue import FSQueue, ZstdJsonSerializer
+from .index import index_titles_urls_and_extracts
+from mwmbl.tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
+from .paths import DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, INDEX_PATH
 
 
 def get_queue_items():

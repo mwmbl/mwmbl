@@ -7,10 +7,10 @@ from logging import getLogger
 
 import spacy
 
-from fsqueue import FSQueue, GzipJsonRowSerializer, FSQueueError
-from index import index_titles_urls_and_extracts
-from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE, Document
-from paths import INDEX_PATH, DATA_DIR, COMMON_CRAWL_TERMS_PATH
+from .fsqueue import FSQueue, GzipJsonRowSerializer, FSQueueError
+from .index import index_titles_urls_and_extracts
+from mwmbl.tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE, Document
+from .paths import INDEX_PATH, DATA_DIR, COMMON_CRAWL_TERMS_PATH
 
 
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)

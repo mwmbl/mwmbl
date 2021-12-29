@@ -1,5 +1,5 @@
-from tinysearchengine.indexer import TinyIndex, NUM_PAGES, PAGE_SIZE, Document
-from indexer.paths import INDEX_PATH
+from mwmbl.tinysearchengine.indexer import TinyIndex, NUM_PAGES, PAGE_SIZE, Document
+from mwmbl.indexer.paths import INDEX_PATH
 
 
 def get_items():

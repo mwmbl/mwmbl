@@ -8,11 +8,11 @@ import numpy as np
 from spacy.lang.en import English
 from starlette.testclient import TestClient
 
-from tinysearchengine import create_app
-from indexer.fsqueue import ZstdJsonSerializer
-from indexer.index import index_titles_urls_and_extracts
-from tinysearchengine.indexer import TinyIndex, TinyIndexer, Document
-from indexer.paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
+from mwmbl.tinysearchengine import create_app
+from mwmbl.indexer.fsqueue import ZstdJsonSerializer
+from mwmbl.indexer.index import index_titles_urls_and_extracts
+from mwmbl.tinysearchengine.indexer import TinyIndex, TinyIndexer, Document
+from mwmbl.indexer.paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
 
 NUM_DOCUMENTS = 30000
 NUM_PAGES_FOR_STATS = 10

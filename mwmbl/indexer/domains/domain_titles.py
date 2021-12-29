@@ -8,8 +8,8 @@ from urllib.parse import urlsplit, urlunsplit
 import bs4
 import requests
 
-from indexer.fsqueue import FSQueue, ZstdJsonSerializer
-from indexer.paths import DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
+from mwmbl.indexer.fsqueue import FSQueue, ZstdJsonSerializer
+from mwmbl.indexer.paths import DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
 
 NUM_PROCESSES = 10
 

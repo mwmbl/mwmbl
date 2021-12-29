@@ -10,7 +10,7 @@ from traceback import print_tb, print_exc
 import pandas as pd
 import requests
 
-from paths import DATA_DIR, HN_TOP_PATH, CRAWL_PREFIX
+from .paths import DATA_DIR, HN_TOP_PATH, CRAWL_PREFIX
 
 
 def crawl():

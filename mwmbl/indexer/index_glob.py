@@ -4,12 +4,13 @@ from glob import glob
 import bs4
 from spacy.lang.en import English
 
-from index import tokenize
-from tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
-from paths import INDEX_PATH, CRAWL_GLOB
+from .index import tokenize
+from mwmbl.tinysearchengine.indexer import TinyIndexer, NUM_PAGES, PAGE_SIZE
+from .paths import INDEX_PATH, CRAWL_GLOB
 
 
 def run():
+    # TODO: item_factory argument is unfilled.
     indexer = TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE)
     indexer.create_if_not_exists()
     nlp = English()
