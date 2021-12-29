@@ -115,9 +115,13 @@ author (email address is in the git commit history).
 Development
 ===========
 
-Using Docker:
-
+### Using Docker
 1. Create a new folder called `data` in the root of the repository
 2. Download the [index file](https://storage.googleapis.com/mwmbl/index.tinysearch) and place it the new data folder
 3. Run `$ docker build . -t mwmbl`
 4. Run `$ docker run -p 8080:8080 mwmbl`
+
+### Local Testing
+1. Create and activate a python (3.9) environment using any tool you like e.g. poetry,venv, conda etc.
+2. Run `$ pip install .`
+3. Run `$ mwmbl-tinysearchengine --config config/tinysearchengine.yaml`

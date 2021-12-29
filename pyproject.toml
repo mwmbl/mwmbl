@@ -11,6 +11,8 @@ zstandard = "^0.16.0"
 mmh3 = "^3.0.0"
 fastapi = "^0.70.1"
 uvicorn = "^0.16.0"
+numpy = "==1.21.1"
+pyyaml = "==6.0"
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.
 botocore = {version= "==1.23.20", optional = true}
@@ -66,3 +68,6 @@ indexer = [
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+mwmbl-tinysearchengine = "mwmbl.tinysearchengine.app:main"
