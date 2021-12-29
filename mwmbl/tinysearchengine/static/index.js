@@ -10,7 +10,7 @@ window.onload = (event) => {
     const length = searchInput.value.length;
     searchInput.setSelectionRange(length, length);
 
-    searchInput.oninput = e => {
+    searchInput.oninput = debounce(e => {
         console.log("Key", e.key);
         console.log(searchInput.value);
 
@@ -27,7 +27,7 @@ window.onload = (event) => {
                 ts.numItems = content.length;
             });
         });
-    };
+    });
 
     // Handle moving the selected item up and down
     document.addEventListener('keydown', (e) => {
@@ -55,6 +55,15 @@ window.onload = (event) => {
 
     searchInput.focus();
 };
+
+
+function debounce(callback, timeout = 100){
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { callback.apply(this, args); }, timeout);
+    };
+}
 
 
 function selectNextItem() {
