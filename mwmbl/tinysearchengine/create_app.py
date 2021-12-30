@@ -2,11 +2,13 @@ import re
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
+from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
 logger = getLogger(__name__)
@@ -49,6 +51,9 @@ def create(tiny_index: TinyIndex):
         return pattern
 
     def score_result(terms, result: Document):
+        domain = urlparse(result.url).netloc
+        domain_score = DOMAINS.get(domain, 0.0)
+
         result_string = f"{result.title.strip()} {result.extract.strip()}"
         query_regex = get_query_regex(terms)
         matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
@@ -64,7 +69,7 @@ def create(tiny_index: TinyIndex):
                 seen_matches.add(value)
 
         total_possible_match_length = sum(len(x) for x in terms)
-        score = (match_length + 1./last_match_char) / (total_possible_match_length + 1)
+        score = 0.1*domain_score + 0.9*(match_length + 1./last_match_char) / (total_possible_match_length + 1)
         return score
 
     def order_results(terms: list[str], results: list[Document]):

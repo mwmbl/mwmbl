@@ -11,7 +11,7 @@ import pandas as pd
 
 DATA_DIR = Path(os.environ['HOME']) / 'data' / 'tinysearch'
 ALL_DOMAINS_PATH = DATA_DIR / 'hn-top-domains.csv'
-TOP_DOMAINS_PATH = 'hn-top-domains-filtered.py'
+TOP_DOMAINS_PATH = '../tinysearchengine/hn_top_domains_filtered.py'
 
 MIN_COUNT = 10
 PROBABILITY_THRESHOLD = 0.8

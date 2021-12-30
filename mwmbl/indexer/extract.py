@@ -11,10 +11,6 @@ from pyspark.sql.types import StructType, StructField, StringType, LongType, Int
 RECORDS_PATH = 's3://tinysearch/outputs/records'
 OUTPUT_PATH = 's3://tinysearch/outputs/index'
 
-NUM_PAGES = 1024
-MAX_RESULTS_PER_HASH = 200
-PAGE_SIZE = 4096
-
 
 index_schema = StructType([
     StructField("term_hash", LongType(), False),
