@@ -125,3 +125,10 @@ Development
 1. Create and activate a python (3.9) environment using any tool you like e.g. poetry,venv, conda etc.
 2. Run `$ pip install .`
 3. Run `$ mwmbl-tinysearchengine --config config/tinysearchengine.yaml`
+
+Frequently Asked Question
+=========================
+
+### How do you pronounce "mwmbl"?
+
+Like "mumble". I live in [Mumbles](https://en.wikipedia.org/wiki/Mumbles), which is spelt "Mwmbwls" in Welsh. But the intended meaning is "to mumble", as in "don't search, just mwmbl!"
