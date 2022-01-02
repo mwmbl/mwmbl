@@ -26,20 +26,24 @@ def main():
     * Initialize a FastAPI app instance
     * Starts uvicorn server using app instance
     """
-    args = setup_args()
-    config = parse_config_file(config_filename=args.config)
-
-    # Initialize TinyIndex using index config params
-    tiny_index = TinyIndex(
-        item_factory=Document,
-        **config.index_config.dict()
-    )
+    config, tiny_index = get_config_and_index()
 
     # Initialize FastApi instance
     app = create_app.create(tiny_index)
 
     # Initialize uvicorn server using global app instance and server config params
     uvicorn.run(app, **config.server_config.dict())
+
+
+def get_config_and_index():
+    args = setup_args()
+    config = parse_config_file(config_filename=args.config)
+    # Initialize TinyIndex using index config params
+    tiny_index = TinyIndex(
+        item_factory=Document,
+        **config.index_config.dict()
+    )
+    return config, tiny_index
 
 
 if __name__ == "__main__":

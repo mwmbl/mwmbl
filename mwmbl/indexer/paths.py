@@ -14,6 +14,7 @@ TEST_TERMS_PATH = os.path.join(DATA_DIR, 'index-terms.csv')
 WIKI_DATA_PATH = os.path.join(DATA_DIR, 'enwiki-20210301-pages-articles1.xml-p1p41242.bz2')
 WIKI_TITLES_PATH = os.path.join(DATA_DIR, 'abstract-titles-sorted.txt.gz')
 
+URLS_PATH = DATA_DIR / 'urls.sqlite3'
 DOMAINS_QUEUE_NAME = 'domains-queue-fs'
 DOMAINS_TITLES_QUEUE_NAME = 'domains-title-queue-fs'
 DOMAINS_PATH = os.path.join(DATA_DIR, 'top10milliondomains.csv.gz')
