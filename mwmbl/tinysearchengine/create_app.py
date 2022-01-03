@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
@@ -20,6 +21,13 @@ SCORE_THRESHOLD = 0.25
 
 def create(tiny_index: TinyIndex):
     app = FastAPI()
+    
+    # Allow CORS requests from any site
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/search")
     def search(s: str):
