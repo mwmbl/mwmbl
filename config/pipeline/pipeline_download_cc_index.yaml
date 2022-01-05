@@ -1,0 +1,34 @@
+conn_group_config:
+  - conn_name: "s3fs"
+    conn_type: "s3fs_conn"
+    conn_config:
+      s3fs_kwargs:
+        anon: True
+        use_listings_cache: True
+
+  - conn_name: "pas3fs"
+    conn_type: "pyarrow_s3fs_conn"
+    conn_config:
+      pyarrow_s3fs_kwargs:
+        anonymous: True
+
+pipeline:
+  pipeline_name: "download_cc_index"
+  pipeline_notes: "
+  - Download a local copy of the commoncrawl cc-index files.
+  - This is intended to make filtering a subset of the cc-index metadata easier.
+  - Approx. 8-10 GB of unused memory might be required to run this.
+  - Approx. 120 GB of disk space will be used after all the files are downloaded.
+    We recommend storing this data on an SSD hard disk.
+  - Validate config using: $ mwmbl-pipeline --config config/pipeline/pipeline_download_cc_index.yaml --validate-config 
+  - Run pipeline using: $ mwmbl-pipeline --config config/pipeline/pipeline_download_cc_index.yaml
+  "
+  pipeline_config:
+    op_group_config:
+      - op_type: "commoncrawl_download_cc_index"
+        op_config:
+          s3fs_conn_name: s3fs
+          pyarrow_s3fs_conn_name: pas3fs
+          s3_src_dir: "commoncrawl/cc-index/table/cc-main/warc/crawl=CC-MAIN-2021-43/subset=warc"
+          local_dest_dir: "data/cc-index/crawl=CC-MAIN-2021-43/subset=warc"
+          skip_existing: True

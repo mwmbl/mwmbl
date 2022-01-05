@@ -1,0 +1,12 @@
+conn_group_config:
+  - conn_name: "dummy"
+    conn_type: "none_conn"
+    conn_config: {}
+
+pipeline:
+  pipeline_name: "dummy_pipeline"
+  pipeline_notes: "A minimal pipeline that works but does not do anything."
+  pipeline_config:
+    op_group_config:
+      - op_type: "none_op"
+        op_config: {}
