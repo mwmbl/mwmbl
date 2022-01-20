@@ -6,8 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import FileResponse
-from starlette.staticfiles import StaticFiles
+
 
 from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -15,7 +14,6 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
-STATIC_FILES_PATH = Path(__file__).parent / 'static'
 SCORE_THRESHOLD = 0.25
 
 
@@ -110,10 +108,4 @@ def create(tiny_index: TinyIndex):
 
         ordered_results = order_results(terms, pages)
         return ordered_results, terms
-
-    @app.get('/')
-    def index():
-        return FileResponse(STATIC_FILES_PATH / 'index.html')
-
-    app.mount('/', StaticFiles(directory=STATIC_FILES_PATH), name="static")
     return app
