@@ -24,7 +24,8 @@ def is_content_token(nlp, token):
     return (lexeme.is_alpha or lexeme.is_digit) and not token.is_stop
 
 
-def tokenize(nlp, cleaned_text):
+def tokenize(nlp, input_text):
+    cleaned_text = input_text.encode('utf8', 'replace').decode('utf8')
     tokens = nlp.tokenizer(cleaned_text)
     content_tokens = [token for token in tokens[:NUM_INITIAL_TOKENS]
                       if is_content_token(nlp, token)]
