@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-
+from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
@@ -17,7 +17,7 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 
-def create(tiny_index: TinyIndex):
+def create(tiny_index: TinyIndex, completer: Completer):
     app = FastAPI()
     
     # Allow CORS requests from any site
@@ -95,6 +95,9 @@ def create(tiny_index: TinyIndex):
 
     def get_results(q):
         terms = [x.lower() for x in q.replace('.', ' ').split()]
+        if not q.endswith(' '):
+            terms[-1] = completer.complete(terms[-1])
+
         pages = []
         seen_items = set()
         for term in terms:

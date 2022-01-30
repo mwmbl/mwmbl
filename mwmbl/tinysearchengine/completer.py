@@ -1,4 +1,5 @@
 from bisect import bisect_left, bisect_right
+from datetime import datetime
 
 import pandas as pd
 from pandas import DataFrame
@@ -16,12 +17,16 @@ class Completer:
         start = bisect_left(self.terms, term, key=lambda x: x[:term_length])
         end = bisect_right(self.terms, term, key=lambda x: x[:term_length])
 
-        print("Start", self.terms[start])
-        print("End", self.terms[end])
-
+        matching_terms = zip(self.counts[start:end], self.terms[start:end])
+        top_count, top_term = max(matching_terms)
+        print("Top term", top_term, top_count)
+        return top_term
 
 
 if __name__ == '__main__':
     data = pd.read_csv('data/mwmbl-crawl-terms.csv')
     completer = Completer(data)
-    completer.complete('yo')
+    start = datetime.now()
+    completer.complete('fa')
+    end = datetime.now()
+    print("Time", end - start)

@@ -11,7 +11,6 @@ class ServerConfigModel(BaseModel):
 
 class IndexConfigModel(BaseModel):
     index_path: StrictStr = "data/index.tinysearch"
-    terms_path: StrictStr = "data/mwmbl-crawl-terms.csv"
     num_pages: StrictInt = 25600
     page_size: StrictInt = 4096
 
@@ -19,6 +18,7 @@ class IndexConfigModel(BaseModel):
 class ConfigModel(BaseModel):
     server_config: ServerConfigModel = Field(default_factory=ServerConfigModel)
     index_config: IndexConfigModel = Field(default_factory=IndexConfigModel)
+    terms_path: StrictStr = "data/mwmbl-crawl-terms.csv"
 
 
 def parse_config_file(config_filename: str) -> ConfigModel:
