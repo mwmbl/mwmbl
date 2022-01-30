@@ -31,9 +31,9 @@ def create(tiny_index: TinyIndex):
     def search(s: str):
         results, terms = get_results(s)
 
+        pattern = get_query_regex(terms)
         formatted_results = []
         for result in results:
-            pattern = get_query_regex(terms)
             formatted_result = {}
             for content_type, content in [('title', result.title), ('extract', result.extract)]:
                 matches = re.finditer(pattern, content, re.IGNORECASE)

@@ -12,8 +12,6 @@ import pandas as pd
 # PAGE_SIZE = 512
 from mwmbl.tinysearchengine.indexer import TinyIndexer, Document, TokenizedDocument
 
-NUM_INITIAL_TOKENS = 50
-
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
 BATCH_SIZE = 100
@@ -27,8 +25,10 @@ def is_content_token(nlp, token):
 def tokenize(nlp, input_text):
     cleaned_text = input_text.encode('utf8', 'replace').decode('utf8')
     tokens = nlp.tokenizer(cleaned_text)
-    content_tokens = [token for token in tokens[:NUM_INITIAL_TOKENS]
-                      if is_content_token(nlp, token)]
+    if input_text.endswith('…'):
+        # Discard the last two tokens since there will likely be a word cut in two
+        tokens = tokens[:-2]
+    content_tokens = [token for token in tokens if is_content_token(nlp, token)]
     lowered = {nlp.vocab[token.orth].text.lower() for token in content_tokens}
     return lowered
 
