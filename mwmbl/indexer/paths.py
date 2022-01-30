@@ -5,7 +5,6 @@ HOME = os.getenv('HOME')
 
 DATA_DIR = Path(os.environ['HOME']) / 'data' / 'tinysearch'
 COMMON_CRAWL_TERMS_PATH = DATA_DIR / 'common-craw-terms.csv'
-MWMBL_CRAWL_TERMS_PATH = DATA_DIR / 'mwmbl-craw-terms.csv'
 
 HN_TOP_PATH = os.path.join(DATA_DIR, 'hn-top.csv')
 CRAWL_PREFIX = 'crawl_'
@@ -20,6 +19,8 @@ DOMAINS_QUEUE_NAME = 'domains-queue-fs'
 DOMAINS_TITLES_QUEUE_NAME = 'domains-title-queue-fs'
 DOMAINS_PATH = os.path.join(DATA_DIR, 'top10milliondomains.csv.gz')
 
-INDEX_PATH = Path(__file__).parent.parent.parent / 'data' / 'index.tinysearch'
+LOCAL_DATA_DIR = Path(__file__).parent.parent.parent / 'data'
+INDEX_PATH = LOCAL_DATA_DIR / 'index.tinysearch'
+MWMBL_CRAWL_TERMS_PATH = LOCAL_DATA_DIR / 'mwmbl-crawl-terms.csv'
 
 TOP_DOMAINS_JSON_PATH = DATA_DIR / 'hn-top-domains.json'

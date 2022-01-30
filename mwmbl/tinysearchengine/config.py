@@ -11,6 +11,7 @@ class ServerConfigModel(BaseModel):
 
 class IndexConfigModel(BaseModel):
     index_path: StrictStr = "data/index.tinysearch"
+    terms_path: StrictStr = "data/mwmbl-crawl-terms.csv"
     num_pages: StrictInt = 25600
     page_size: StrictInt = 4096
 
