@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-
+from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
@@ -17,7 +17,7 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 
-def create(tiny_index: TinyIndex):
+def create(tiny_index: TinyIndex, completer: Completer):
     app = FastAPI()
     
     # Allow CORS requests from any site
@@ -31,9 +31,10 @@ def create(tiny_index: TinyIndex):
     def search(s: str):
         results, terms = get_results(s)
 
+        is_complete = s.endswith(' ')
+        pattern = get_query_regex(terms, is_complete)
         formatted_results = []
         for result in results:
-            pattern = get_query_regex(terms)
             formatted_result = {}
             for content_type, content in [('title', result.title), ('extract', result.extract)]:
                 matches = re.finditer(pattern, content, re.IGNORECASE)
@@ -51,17 +52,23 @@ def create(tiny_index: TinyIndex):
         logger.info("Return results: %r", formatted_results)
         return formatted_results
 
-    def get_query_regex(terms):
-        term_patterns = [rf'\b{term}\b' for term in terms]
+    def get_query_regex(terms, is_complete):
+        if not terms:
+            return ''
+
+        if is_complete:
+            term_patterns = [rf'\b{term}\b' for term in terms]
+        else:
+            term_patterns = [rf'\b{term}\b' for term in terms[:-1]] + [rf'\b{terms[-1]}']
         pattern = '|'.join(term_patterns)
         return pattern
 
-    def score_result(terms, result: Document):
+    def score_result(terms, result: Document, is_complete: bool):
         domain = urlparse(result.url).netloc
         domain_score = DOMAINS.get(domain, 0.0)
 
         result_string = f"{result.title.strip()} {result.extract.strip()}"
-        query_regex = get_query_regex(terms)
+        query_regex = get_query_regex(terms, is_complete)
         matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
         match_strings = {x.group(0).lower() for x in matches}
         match_length = sum(len(x) for x in match_strings)
@@ -78,8 +85,8 @@ def create(tiny_index: TinyIndex):
         score = 0.1*domain_score + 0.9*(match_length + 1./last_match_char) / (total_possible_match_length + 1)
         return score
 
-    def order_results(terms: list[str], results: list[Document]):
-        results_and_scores = [(score_result(terms, result), result) for result in results]
+    def order_results(terms: list[str], results: list[Document], is_complete: bool):
+        results_and_scores = [(score_result(terms, result, is_complete), result) for result in results]
         ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
         filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
         return filtered_results
@@ -95,9 +102,15 @@ def create(tiny_index: TinyIndex):
 
     def get_results(q):
         terms = [x.lower() for x in q.replace('.', ' ').split()]
+        is_complete = q.endswith(' ')
+        if len(terms) > 0 and not is_complete:
+            retrieval_terms = terms[:-1] + completer.complete(terms[-1])
+        else:
+            retrieval_terms = terms
+
         pages = []
         seen_items = set()
-        for term in terms:
+        for term in retrieval_terms:
             items = tiny_index.retrieve(term)
             if items is not None:
                 for item in items:
@@ -106,6 +119,6 @@ def create(tiny_index: TinyIndex):
                             pages.append(item)
                             seen_items.add(item.title)
 
-        ordered_results = order_results(terms, pages)
+        ordered_results = order_results(terms, pages, is_complete)
         return ordered_results, terms
     return app
