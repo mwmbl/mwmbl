@@ -8,5 +8,5 @@ server_config:
 
 index_config:
   index_path: data/index.tinysearch
-  num_pages: 25600
+  num_pages: 76800
   page_size: 4096

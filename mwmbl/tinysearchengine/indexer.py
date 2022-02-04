@@ -9,7 +9,7 @@ import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 
-NUM_PAGES = 25600
+NUM_PAGES = 76800
 PAGE_SIZE = 4096
 
 
