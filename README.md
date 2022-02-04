@@ -14,6 +14,19 @@ crawler is still to be implemented.
 Our vision is a community working to provide top quality search
 particularly for hackers, funded purely by donations.
 
+Crawling
+========
+
+**Update 2022-02-05:** We now have a distributed crawler that runs on
+our volunteers' machines! If you have Firefox you can help out by
+[installing our
+extension](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/). This
+will crawl the web in the background, retrieving one page a second. It
+does not use or access any of your personal data. Instead it crawls
+the web at random, using the top scoring sites on Hacker News as seed
+pages. After extracting a summary of each page, it batches these up
+and sends the data to a central server to be stored and indexed.
+
 Why a non-profit search engine?
 ===============================
 
@@ -87,26 +100,16 @@ single term and maintain an index smaller than the inverted index
 design. Well, that's the theory. This idea has yet to be tested out on
 a large scale.
 
-Crawling
-========
-
-Our current index is a small sample of the excellent Common Crawl,
-restricted to English content and domains which score highly on
-average in Hacker News submissions. It is likely for a variety of
-reasons that we will want to go beyond Common Crawl data at some
-point, so building a crawler becomes inevitable. We plan to start work
-on a distributed crawler, probably implemented as a browser extension
-that can be installed by volunteers.
-
 How to contribute
 =================
 
 There are lots of ways to help:
+ - [Help us crawl the
+   web](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/)
+ - [Donate some money](https://opencollective.com/mwmbl) towards
+   hosting costs and supporting our volunteers
  - Give feedback/suggestions
- - Volunteer to test out the distributed crawler when it's ready
  - Help out with development of the engine itself
- - Donate some money towards hosting costs and/or founding an official
-   non-profit organisation
 
 If you would like to help in any of these or other ways, thank you!
 Please join our [Matrix chat
@@ -123,7 +126,7 @@ Development
 4. Run `$ docker run -p 8080:8080 mwmbl`
 
 ### Local Testing
-1. Create and activate a python (3.9) environment using any tool you like e.g. poetry,venv, conda etc.
+1. Create and activate a python (3.10) environment using any tool you like e.g. poetry,venv, conda etc.
 2. Run `$ pip install .`
 3. Run `$ mwmbl-tinysearchengine --config config/tinysearchengine.yaml`
 
@@ -132,4 +135,7 @@ Frequently Asked Question
 
 ### How do you pronounce "mwmbl"?
 
-Like "mumble". I live in [Mumbles](https://en.wikipedia.org/wiki/Mumbles), which is spelt "Mwmbwls" in Welsh. But the intended meaning is "to mumble", as in "don't search, just mwmbl!"
+Like "mumble". I live in
+[Mumbles](https://en.wikipedia.org/wiki/Mumbles), which is spelt
+"Mwmbwls" in Welsh. But the intended meaning is "to mumble", as in
+"don't search, just mwmbl!"
