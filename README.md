@@ -1,7 +1,6 @@
 ![banner](docs/assets/images/banner_mwmbl.svg)
 
-Mwmbl: No ads, no tracking, no cruft, no profit
-===============================================
+# Mwmbl - **No ads, no tracking, no cruft, no profit**
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org?color=blue&label=Matrix&style=for-the-badge)](https://matrix.to/#/#mwmbl:matrix.org)
 
