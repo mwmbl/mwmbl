@@ -1,8 +1,11 @@
 import logging
 import argparse
+
+import pandas as pd
 import uvicorn
 
 from mwmbl.tinysearchengine import create_app
+from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, NUM_PAGES, PAGE_SIZE, Document
 from mwmbl.tinysearchengine.config import parse_config_file
 
@@ -28,8 +31,12 @@ def main():
     """
     config, tiny_index = get_config_and_index()
 
+    # Load term data
+    terms = pd.read_csv(config.terms_path)
+    completer = Completer(terms)
+
     # Initialize FastApi instance
-    app = create_app.create(tiny_index)
+    app = create_app.create(tiny_index, completer)
 
     # Initialize uvicorn server using global app instance and server config params
     uvicorn.run(app, **config.server_config.dict())

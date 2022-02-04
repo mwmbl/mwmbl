@@ -18,6 +18,7 @@ class IndexConfigModel(BaseModel):
 class ConfigModel(BaseModel):
     server_config: ServerConfigModel = Field(default_factory=ServerConfigModel)
     index_config: IndexConfigModel = Field(default_factory=IndexConfigModel)
+    terms_path: StrictStr = "data/mwmbl-crawl-terms.csv"
 
 
 def parse_config_file(config_filename: str) -> ConfigModel:

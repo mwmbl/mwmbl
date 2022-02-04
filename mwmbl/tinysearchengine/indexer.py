@@ -41,7 +41,6 @@ class TinyIndexBase(Generic[T]):
         page = self.get_page(index)
         if page is None:
             return []
-        # print("REtrieve", self.index_path, page)
         return self.convert_items(page)
 
     def _get_key_page_index(self, key):
@@ -53,25 +52,21 @@ class TinyIndexBase(Generic[T]):
         Get the page at index i, decompress and deserialise it using JSON
         """
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
-        zeros = page_data.count(b'\x00\x00\x00\x00') * 4
         try:
             decompressed_data = self.decompressor.decompress(page_data)
         except ZstdError:
             return None
         results = json.loads(decompressed_data.decode('utf8'))
-        # print(f"Num results: {len(results)}, num zeros: {zeros}")
         return results
 
     def convert_items(self, items) -> List[T]:
         converted = [self.item_factory(*item) for item in items]
-        # print("Converted", items, converted)
         return converted
 
 
 class TinyIndex(TinyIndexBase[T]):
     def __init__(self, item_factory: Callable[..., T], index_path, num_pages, page_size):
         super().__init__(item_factory, num_pages, page_size)
-        # print("REtrieve path", index_path)
         self.index_path = index_path
         self.index_file = open(self.index_path, 'rb')
         self.mmap = mmap(self.index_file.fileno(), 0, prot=PROT_READ)
