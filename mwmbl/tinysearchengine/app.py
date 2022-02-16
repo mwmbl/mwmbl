@@ -8,6 +8,7 @@ from mwmbl.tinysearchengine import create_app
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, NUM_PAGES, PAGE_SIZE, Document
 from mwmbl.tinysearchengine.config import parse_config_file
+from mwmbl.tinysearchengine.rank import Ranker
 
 logging.basicConfig()
 
@@ -35,8 +36,10 @@ def main():
     terms = pd.read_csv(config.terms_path)
     completer = Completer(terms)
 
+    ranker = Ranker(tiny_index, completer)
+
     # Initialize FastApi instance
-    app = create_app.create(tiny_index, completer)
+    app = create_app.create(ranker)
 
     # Initialize uvicorn server using global app instance and server config params
     uvicorn.run(app, **config.server_config.dict())

@@ -36,7 +36,7 @@ def query_test():
     print(f"Got {len(titles_and_urls)} titles and URLs")
     tiny_index = TinyIndex(Document, TEST_INDEX_PATH, TEST_NUM_PAGES, TEST_PAGE_SIZE)
 
-    app = create_app.create(tiny_index)
+    app = create_app.create()
     client = TestClient(app)
 
     start = datetime.now()
