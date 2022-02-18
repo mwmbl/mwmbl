@@ -1,15 +1,12 @@
 import json
 import os
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, asdict
 from io import UnsupportedOperation
 from mmap import mmap, PROT_READ, PROT_WRITE
-from pathlib import Path
-from struct import pack, unpack, calcsize
 from typing import TypeVar, Generic, Callable, List
 
 import mmh3
-from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
-
+from zstandard import ZstdDecompressor, ZstdCompressor
 
 VERSION = 1
 METADATA_CONSTANT = 'mwmbl-tiny-search'.encode('utf8')
@@ -43,11 +40,9 @@ class TinyIndexMetadata:
     item_factory: str
 
     def to_bytes(self) -> bytes:
-        result = METADATA_CONSTANT + pack(
-            METADATA_FORMAT, self.version, self.page_size, self.num_pages, self.item_factory.encode('utf8')
-        )
-        assert len(result) <= METADATA_SIZE
-        return result
+        metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode('utf8')
+        assert len(metadata_bytes) <= METADATA_SIZE
+        return metadata_bytes
 
     @staticmethod
     def from_bytes(data: bytes):
@@ -56,9 +51,8 @@ class TinyIndexMetadata:
         if metadata_constant != METADATA_CONSTANT:
             raise ValueError("This doesn't seem to be an index file")
 
-        actual_metadata_size = calcsize(METADATA_FORMAT)
-        values = unpack(METADATA_FORMAT, data[constant_length:constant_length+actual_metadata_size])
-        return TinyIndexMetadata(values[0], values[1], values[2], values[3].decode('utf8'))
+        values = json.loads(data[constant_length:].decode('utf8'))
+        return TinyIndexMetadata(**values)
 
 
 def _get_page_data(compressor, page_size, data):
@@ -84,7 +78,8 @@ class TinyIndex(Generic[T]):
         with open(index_path, 'rb') as index_file:
             metadata_page = index_file.read(METADATA_SIZE)
 
-        metadata = TinyIndexMetadata.from_bytes(metadata_page)
+        metadata_bytes = metadata_page.rstrip(b'\x00')
+        metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
             raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
                              f"does not match the passed item factory: '{item_factory.__name__}'")
@@ -129,7 +124,6 @@ class TinyIndex(Generic[T]):
         return converted
 
     def index(self, key: str, value: T):
-        # print("Index", value)
         assert type(value) == self.item_factory, f"Can only index the specified type" \
                                               f" ({self.item_factory.__name__})"
         page_index = self._get_key_page_index(key)
@@ -137,10 +131,8 @@ class TinyIndex(Generic[T]):
         if current_page is None:
             current_page = []
         value_tuple = astuple(value)
-        # print("Value tuple", value_tuple)
         current_page.append(value_tuple)
         try:
-            # print("Page", current_page)
             self._write_page(current_page, page_index)
         except ValueError:
             pass
