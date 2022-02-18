@@ -12,7 +12,7 @@ from .paths import INDEX_PATH, CRAWL_GLOB
 def run():
     # TODO: item_factory argument is unfilled.
     indexer = TinyIndexer(INDEX_PATH, NUM_PAGES, PAGE_SIZE)
-    indexer.create_if_not_exists()
+    indexer.create()
     nlp = English()
     for path in glob(CRAWL_GLOB):
         print("Path", path)

@@ -1,13 +1,20 @@
 import json
 import os
 from dataclasses import astuple, dataclass
-from mmap import mmap, PROT_READ
+from io import UnsupportedOperation
+from mmap import mmap, PROT_READ, PROT_WRITE
 from pathlib import Path
+from struct import pack, unpack, calcsize
 from typing import TypeVar, Generic, Callable, List
 
 import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
+
+VERSION = 1
+METADATA_CONSTANT = 'mwmbl-tiny-search'.encode('utf8')
+METADATA_FORMAT = 'IIIs'
+METADATA_SIZE = 4096
 
 NUM_PAGES = 76800
 PAGE_SIZE = 4096
@@ -28,20 +35,84 @@ class TokenizedDocument(Document):
 T = TypeVar('T')
 
 
-class TinyIndexBase(Generic[T]):
-    def __init__(self, item_factory: Callable[..., T], num_pages: int, page_size: int):
+@dataclass
+class TinyIndexMetadata:
+    version: int
+    page_size: int
+    num_pages: int
+    item_factory: str
+
+    def to_bytes(self) -> bytes:
+        result = METADATA_CONSTANT + pack(
+            METADATA_FORMAT, self.version, self.page_size, self.num_pages, self.item_factory.encode('utf8')
+        )
+        assert len(result) <= METADATA_SIZE
+        return result
+
+    @staticmethod
+    def from_bytes(data: bytes):
+        constant_length = len(METADATA_CONSTANT)
+        metadata_constant = data[:constant_length]
+        if metadata_constant != METADATA_CONSTANT:
+            raise ValueError("This doesn't seem to be an index file")
+
+        actual_metadata_size = calcsize(METADATA_FORMAT)
+        values = unpack(METADATA_FORMAT, data[constant_length:constant_length+actual_metadata_size])
+        return TinyIndexMetadata(values[0], values[1], values[2], values[3].decode('utf8'))
+
+
+def _get_page_data(compressor, page_size, data):
+    serialised_data = json.dumps(data)
+    compressed_data = compressor.compress(serialised_data.encode('utf8'))
+    return _pad_to_page_size(compressed_data, page_size)
+
+
+def _pad_to_page_size(data: bytes, page_size: int):
+    page_length = len(data)
+    if page_length > page_size:
+        raise ValueError(f"Data is too big ({page_length}) for page size ({page_size})")
+    padding = b'\x00' * (page_size - page_length)
+    page_data = data + padding
+    return page_data
+
+
+class TinyIndex(Generic[T]):
+    def __init__(self, item_factory: Callable[..., T], index_path, mode='r'):
+        if mode not in {'r', 'w'}:
+            raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
+
+        with open(index_path, 'rb') as index_file:
+            metadata_page = index_file.read(METADATA_SIZE)
+
+        metadata = TinyIndexMetadata.from_bytes(metadata_page)
+        if metadata.item_factory != item_factory.__name__:
+            raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
+                             f"does not match the passed item factory: '{item_factory.__name__}'")
+
         self.item_factory = item_factory
-        self.num_pages = num_pages
-        self.page_size = page_size
+        self.index_path = index_path
+        self.mode = mode
+
+        self.num_pages = metadata.num_pages
+        self.page_size = metadata.page_size
+        self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
+        self.index_file = None
         self.mmap = None
+
+    def __enter__(self):
+        self.index_file = open(self.index_path, 'r+b')
+        prot = PROT_READ if self.mode == 'r' else PROT_READ | PROT_WRITE
+        self.mmap = mmap(self.index_file.fileno(), 0, offset=METADATA_SIZE, prot=prot)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.mmap.close()
+        self.index_file.close()
 
     def retrieve(self, key: str) -> List[T]:
         index = self._get_key_page_index(key)
-        page = self.get_page(index)
-        if page is None:
-            return []
-        return self.convert_items(page)
+        return self.get_page(index)
 
     def _get_key_page_index(self, key):
         key_hash = mmh3.hash(key, signed=False)
@@ -52,44 +123,10 @@ class TinyIndexBase(Generic[T]):
         Get the page at index i, decompress and deserialise it using JSON
         """
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
-        try:
-            decompressed_data = self.decompressor.decompress(page_data)
-        except ZstdError:
-            return None
+        decompressed_data = self.decompressor.decompress(page_data)
         results = json.loads(decompressed_data.decode('utf8'))
-        return results
-
-    def convert_items(self, items) -> List[T]:
-        converted = [self.item_factory(*item) for item in items]
+        converted = [self.item_factory(*item) for item in results]
         return converted
-
-
-class TinyIndex(TinyIndexBase[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path, num_pages, page_size):
-        super().__init__(item_factory, num_pages, page_size)
-        self.index_path = index_path
-        self.index_file = open(self.index_path, 'rb')
-        self.mmap = mmap(self.index_file.fileno(), 0, prot=PROT_READ)
-
-
-class TinyIndexer(TinyIndexBase[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
-        super().__init__(item_factory, num_pages, page_size)
-        self.index_path = index_path
-        self.compressor = ZstdCompressor()
-        self.decompressor = ZstdDecompressor()
-        self.index_file = None
-        self.mmap = None
-
-    def __enter__(self):
-        self.create_if_not_exists()
-        self.index_file = open(self.index_path, 'r+b')
-        self.mmap = mmap(self.index_file.fileno(), 0)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.mmap.close()
-        self.index_file.close()
 
     def index(self, key: str, value: T):
         # print("Index", value)
@@ -113,16 +150,28 @@ class TinyIndexer(TinyIndexBase[T]):
         Serialise the data using JSON, compress it and store it at index i.
         If the data is too big, it will raise a ValueError and not store anything
         """
-        serialised_data = json.dumps(data)
-        compressed_data = self.compressor.compress(serialised_data.encode('utf8'))
-        page_length = len(compressed_data)
-        if page_length > self.page_size:
-            raise ValueError(f"Data is too big ({page_length}) for page size ({self.page_size})")
-        padding = b'\x00' * (self.page_size - page_length)
-        self.mmap[i * self.page_size:(i+1) * self.page_size] = compressed_data + padding
+        if self.mode != 'w':
+            raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-    def create_if_not_exists(self):
-        if not os.path.isfile(self.index_path):
-            file_length = self.num_pages * self.page_size
-            with open(self.index_path, 'wb') as index_file:
-                index_file.write(b'\x00' * file_length)
+        page_data = _get_page_data(self.compressor, self.page_size, data)
+        self.mmap[i * self.page_size:(i+1) * self.page_size] = page_data
+
+    @staticmethod
+    def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
+        if os.path.isfile(index_path):
+            raise FileExistsError("Index file already exists")
+
+        metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
+        metadata_bytes = metadata.to_bytes()
+        metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
+
+        compressor = ZstdCompressor()
+        page_bytes = _get_page_data(compressor, page_size, [])
+
+        with open(index_path, 'wb') as index_file:
+            index_file.write(metadata_padded)
+            for i in range(num_pages):
+                index_file.write(page_bytes)
+
+        return TinyIndex(item_factory, index_path=index_path)
+

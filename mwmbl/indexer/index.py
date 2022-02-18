@@ -67,7 +67,7 @@ def grouper(n: int, iterator: Iterator):
 
 
 def index_titles_urls_and_extracts(indexer: TinyIndexer, nlp, titles_urls_and_extracts, terms_path):
-    indexer.create_if_not_exists()
+    indexer.create()
 
     terms = Counter()
     pages = get_pages(nlp, titles_urls_and_extracts)
