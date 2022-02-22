@@ -10,7 +10,7 @@ import pandas as pd
 
 # NUM_PAGES = 8192
 # PAGE_SIZE = 512
-from mwmbl.tinysearchengine.indexer import TinyIndexer, Document, TokenizedDocument
+from mwmbl.tinysearchengine.indexer import Document, TokenizedDocument, TinyIndex
 
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
@@ -66,9 +66,7 @@ def grouper(n: int, iterator: Iterator):
         yield chunk
 
 
-def index_titles_urls_and_extracts(indexer: TinyIndexer, nlp, titles_urls_and_extracts, terms_path):
-    indexer.create()
-
+def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, terms_path):
     terms = Counter()
     pages = get_pages(nlp, titles_urls_and_extracts)
     for page in pages:

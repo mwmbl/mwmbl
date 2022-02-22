@@ -9,8 +9,7 @@ import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor
 
 VERSION = 1
-METADATA_CONSTANT = 'mwmbl-tiny-search'.encode('utf8')
-METADATA_FORMAT = 'IIIs'
+METADATA_CONSTANT = b'mwmbl-tiny-search'
 METADATA_SIZE = 4096
 
 NUM_PAGES = 76800
@@ -117,17 +116,19 @@ class TinyIndex(Generic[T]):
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
+        results = self._get_page_tuples(i)
+        return [self.item_factory(*item) for item in results]
+
+    def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
         decompressed_data = self.decompressor.decompress(page_data)
-        results = json.loads(decompressed_data.decode('utf8'))
-        converted = [self.item_factory(*item) for item in results]
-        return converted
+        return json.loads(decompressed_data.decode('utf8'))
 
     def index(self, key: str, value: T):
         assert type(value) == self.item_factory, f"Can only index the specified type" \
                                               f" ({self.item_factory.__name__})"
         page_index = self._get_key_page_index(key)
-        current_page = self.get_page(page_index)
+        current_page = self._get_page_tuples(page_index)
         if current_page is None:
             current_page = []
         value_tuple = astuple(value)
@@ -151,7 +152,7 @@ class TinyIndex(Generic[T]):
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
         if os.path.isfile(index_path):
-            raise FileExistsError("Index file already exists")
+            raise FileExistsError(f"Index file '{index_path}' already exists")
 
         metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
         metadata_bytes = metadata.to_bytes()
