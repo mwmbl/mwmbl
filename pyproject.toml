@@ -64,6 +64,7 @@ indexer = [
 # langdetect = "^1.0.9"
 # spacy = "^3.2.1"
 # Levenshtein = "^0.16.0"
+pytest = "^7.0.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
