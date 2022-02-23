@@ -12,13 +12,13 @@ from mwmbl.tinysearchengine import create_app
 from mwmbl.indexer.fsqueue import ZstdJsonSerializer
 from mwmbl.indexer.index import index_titles_urls_and_extracts
 from mwmbl.tinysearchengine.indexer import TinyIndex, TinyIndexer, Document
-from mwmbl.indexer.paths import TEST_INDEX_PATH, DATA_DIR, TEST_TERMS_PATH
+from mwmbl.indexer.paths import TEST_INDEX_PATH, TINYSEARCH_DATA_DIR, TEST_TERMS_PATH
 
 NUM_DOCUMENTS = 30000
 NUM_PAGES_FOR_STATS = 10
 TEST_PAGE_SIZE = 512
 TEST_NUM_PAGES = 1024
-TEST_DATA_PATH = os.path.join(DATA_DIR, 'test-urls.zstd')
+TEST_DATA_PATH = os.path.join(TINYSEARCH_DATA_DIR, 'test-urls.zstd')
 RECALL_AT_K = 3
 
 NUM_QUERY_CHARS = 10

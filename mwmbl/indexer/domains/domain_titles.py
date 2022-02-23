@@ -9,7 +9,7 @@ import bs4
 import requests
 
 from mwmbl.indexer.fsqueue import FSQueue, ZstdJsonSerializer
-from mwmbl.indexer.paths import DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
+from mwmbl.indexer.paths import TINYSEARCH_DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
 
 NUM_PROCESSES = 10
 
@@ -33,8 +33,8 @@ def get_redirect_no_cookies(url, max_redirects=5):
 
 
 def get_domain_titles():
-    domains_queue = FSQueue(DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
-    titles_queue = FSQueue(DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, ZstdJsonSerializer())
+    domains_queue = FSQueue(TINYSEARCH_DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
+    titles_queue = FSQueue(TINYSEARCH_DATA_DIR, DOMAINS_TITLES_QUEUE_NAME, ZstdJsonSerializer())
     while True:
         items_id, items = domains_queue.get()
         titles = retrieve_titles(items)

@@ -7,7 +7,7 @@ import spacy
 
 from mwmbl.indexer.fsqueue import FSQueue, GzipJsonBlobSerializer, FSQueueError
 from mwmbl.indexer.index import index_titles_urls_and_extracts
-from mwmbl.indexer.paths import INDEX_PATH, MWMBL_CRAWL_TERMS_PATH, DATA_DIR
+from mwmbl.indexer.paths import INDEX_PATH, MWMBL_CRAWL_TERMS_PATH, TINYSEARCH_DATA_DIR
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 
 
@@ -25,7 +25,7 @@ def index_mwmbl_crawl_data():
 
 
 def get_mwmbl_crawl_titles_urls_and_extracts():
-    input_queue = FSQueue(DATA_DIR, 'mwmbl-search-items', GzipJsonBlobSerializer())
+    input_queue = FSQueue(TINYSEARCH_DATA_DIR, 'mwmbl-search-items', GzipJsonBlobSerializer())
     input_queue.unlock_all()
     while True:
         try:

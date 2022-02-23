@@ -5,11 +5,11 @@ import os
 from itertools import islice
 from urllib.parse import quote
 
-from mwmbl.indexer.paths import DATA_DIR
+from mwmbl.indexer.paths import TINYSEARCH_DATA_DIR
 from mwmbl.indexer.wiki import get_wiki_titles_and_urls
 
 URL_TEMPLATE = "http://localhost:8000/complete?q={}"
-CURL_FILE = os.path.join(DATA_DIR, "urls.curl")
+CURL_FILE = os.path.join(TINYSEARCH_DATA_DIR, "urls.curl")
 
 
 def get_urls():

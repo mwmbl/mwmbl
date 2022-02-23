@@ -7,7 +7,7 @@ import json
 from collections import defaultdict, Counter
 from urllib.parse import urlparse
 
-CRAWL_GLOB = "../../data/mwmbl/b2/*/*/*/*/*/*.json.gz"
+from mwmbl.indexer.paths import CRAWL_GLOB
 
 
 def get_urls():
