@@ -2,8 +2,7 @@
 Create a search index
 """
 from collections import Counter
-from itertools import islice
-from typing import Iterator, Iterable
+from typing import Iterable
 from urllib.parse import unquote
 
 import pandas as pd
@@ -57,14 +56,6 @@ def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedD
 
         if i % 1000 == 0:
             print("Processed", i)
-
-
-def grouper(n: int, iterator: Iterator):
-    while True:
-        chunk = tuple(islice(iterator, n))
-        if not chunk:
-            return
-        yield chunk
 
 
 def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, link_counts, terms_path):
