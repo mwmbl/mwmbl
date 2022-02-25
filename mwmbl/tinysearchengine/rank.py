@@ -55,6 +55,9 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
 
 
 def _order_results(terms: list[str], results: list[Document], is_complete: bool):
+    if len(results) == 0:
+        return []
+
     max_score = max(result.score for result in results)
     results_and_scores = [(_score_result(terms, result, is_complete, max_score), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
