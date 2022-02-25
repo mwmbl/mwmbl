@@ -29,7 +29,7 @@ def _get_query_regex(terms, is_complete):
     return pattern
 
 
-def _score_result(terms, result: Document, is_complete: bool):
+def _score_result(terms, result: Document, is_complete: bool, max_score: float):
     domain = urlparse(result.url).netloc
     domain_score = DOMAINS.get(domain, 0.0)
 
@@ -48,12 +48,15 @@ def _score_result(terms, result: Document, is_complete: bool):
             seen_matches.add(value)
 
     total_possible_match_length = sum(len(x) for x in terms)
-    score = 0.1*domain_score + 0.9*(match_length + 1./last_match_char) / (total_possible_match_length + 1)
+    match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    # score = 0.1 * domain_score + 0.9
+    score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     return score
 
 
 def _order_results(terms: list[str], results: list[Document], is_complete: bool):
-    results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
+    max_score = max(result.score for result in results)
+    results_and_scores = [(_score_result(terms, result, is_complete, max_score), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
     return filtered_results
