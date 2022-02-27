@@ -14,7 +14,7 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
-SCORE_THRESHOLD = 0.25
+SCORE_THRESHOLD = 0.0
 
 
 def _get_query_regex(terms, is_complete):
@@ -49,9 +49,9 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
 
     total_possible_match_length = sum(len(x) for x in terms)
     match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
-    # score = 0.1 * domain_score + 0.9
-    # score = (0.01 + 0.99*match_score) * (0.01 + 0.99*(result.score / max_score))
-    score = 0.1 * match_score + 0.9 * (result.score / max_score)
+    score = 0.01 * domain_score + 0.99 * match_score
+    # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
+    # score = 0.01 * match_score + 0.99 * (result.score / max_score)
     return score
 
 
