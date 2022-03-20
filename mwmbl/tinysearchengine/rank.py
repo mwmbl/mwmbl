@@ -33,7 +33,19 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
     domain = urlparse(result.url).netloc
     domain_score = DOMAINS.get(domain, 0.0)
 
-    result_string = f"{result.title.strip()} {result.extract.strip()}"
+    last_match_char, match_length, total_possible_match_length = get_match_features(
+        terms, result.title, result.extract, is_complete)
+
+    match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    score = 0.01 * domain_score + 0.99 * match_score
+    # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
+    # score = 0.01 * match_score + 0.99 * (result.score / max_score)
+    return score
+
+
+def get_match_features(terms, title, extract, is_complete):
+    result_string = f"{title.strip()} {extract.strip()}"
+
     query_regex = _get_query_regex(terms, is_complete)
     print("Query regex", query_regex)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
@@ -49,11 +61,7 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
             seen_matches.add(value)
 
     total_possible_match_length = sum(len(x) for x in terms)
-    match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
-    score = 0.01 * domain_score + 0.99 * match_score
-    # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
-    # score = 0.01 * match_score + 0.99 * (result.score / max_score)
-    return score
+    return last_match_char, match_length, total_possible_match_length
 
 
 def _order_results(terms: list[str], results: list[Document], is_complete: bool):
