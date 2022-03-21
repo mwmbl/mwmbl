@@ -26,13 +26,23 @@ class ThresholdPredictor(BaseEstimator, RegressorMixin):
 
 def get_match_features_as_series(item: Series):
     terms = item['query'].lower().split()
-    last_match_char, match_length, total_possible_match_length = get_match_features(
-        terms, item['title'], item['extract'], True)
+    last_match_char_title, match_length_title, total_possible_match_length_title = get_match_features(
+        terms, item['title'], True, False)
+    last_match_char_extract, match_length_extract, total_possible_match_length_extract = get_match_features(
+        terms, item['extract'], True, False)
+    last_match_char_url, match_length_url, total_possible_match_length_url = get_match_features(
+        terms, item['title'], True, False)
     domain_score = get_domain_score(item['url'])
     return Series({
-        'last_match_char': last_match_char,
-        'match_length': match_length,
-        'total_possible_match_length': total_possible_match_length,
+        'last_match_char_title': last_match_char_title,
+        'match_length_title': match_length_title,
+        'total_possible_match_length_title': total_possible_match_length_title,
+        'last_match_char_extract': last_match_char_extract,
+        'match_length_extract': match_length_extract,
+        'total_possible_match_length_extract': total_possible_match_length_extract,
+        'last_match_char_url': last_match_char_url,
+        'match_length_url': match_length_url,
+        'total_possible_match_length_url': total_possible_match_length_url,
         'num_terms': len(terms),
         'domain_score': domain_score,
         'item_score': item['score'],

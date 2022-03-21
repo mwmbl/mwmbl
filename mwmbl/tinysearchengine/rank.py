@@ -17,14 +17,16 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.0
 
 
-def _get_query_regex(terms, is_complete):
+def _get_query_regex(terms, is_complete, is_url):
     if not terms:
         return ''
 
+    word_sep = r'\b' if is_url else ''
     if is_complete:
-        term_patterns = [rf'\b{re.escape(term)}\b' for term in terms]
+        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms]
     else:
-        term_patterns = [rf'\b{re.escape(term)}\b' for term in terms[:-1]] + [rf'\b{re.escape(terms[-1])}']
+        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms[:-1]] + [
+            rf'{word_sep}{re.escape(terms[-1])}']
     pattern = '|'.join(term_patterns)
     return pattern
 
@@ -32,8 +34,9 @@ def _get_query_regex(terms, is_complete):
 def _score_result(terms, result: Document, is_complete: bool, max_score: float):
     domain_score = get_domain_score(result.url)
 
+    result_string = f"{result.title.strip()} {result.extract.strip()}"
     last_match_char, match_length, total_possible_match_length = get_match_features(
-        terms, result.title, result.extract, is_complete)
+        terms, result_string, is_complete, False)
 
     match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
     score = 0.01 * domain_score + 0.99 * match_score
@@ -48,10 +51,8 @@ def get_domain_score(url):
     return domain_score
 
 
-def get_match_features(terms, title, extract, is_complete):
-    result_string = f"{title.strip()} {extract.strip()}"
-
-    query_regex = _get_query_regex(terms, is_complete)
+def get_match_features(terms, result_string, is_complete, is_url):
+    query_regex = _get_query_regex(terms, is_complete, is_url)
     print("Query regex", query_regex)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     match_strings = {x.group(0).lower() for x in matches}
