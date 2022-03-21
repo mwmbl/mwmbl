@@ -30,8 +30,7 @@ def _get_query_regex(terms, is_complete):
 
 
 def _score_result(terms, result: Document, is_complete: bool, max_score: float):
-    domain = urlparse(result.url).netloc
-    domain_score = DOMAINS.get(domain, 0.0)
+    domain_score = get_domain_score(result.url)
 
     last_match_char, match_length, total_possible_match_length = get_match_features(
         terms, result.title, result.extract, is_complete)
@@ -41,6 +40,12 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
     # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     # score = 0.01 * match_score + 0.99 * (result.score / max_score)
     return score
+
+
+def get_domain_score(url):
+    domain = urlparse(url).netloc
+    domain_score = DOMAINS.get(domain, 0.0)
+    return domain_score
 
 
 def get_match_features(terms, title, extract, is_complete):

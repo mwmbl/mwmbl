@@ -4,7 +4,7 @@ Learning to rank predictor
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 
-from mwmbl.tinysearchengine.rank import get_match_features
+from mwmbl.tinysearchengine.rank import get_match_features, get_domain_score
 
 
 class ThresholdPredictor(BaseEstimator, RegressorMixin):
@@ -28,11 +28,14 @@ def get_match_features_as_series(item: Series):
     terms = item['query'].lower().split()
     last_match_char, match_length, total_possible_match_length = get_match_features(
         terms, item['title'], item['extract'], True)
+    domain_score = get_domain_score(item['url'])
     return Series({
         'last_match_char': last_match_char,
         'match_length': match_length,
         'total_possible_match_length': total_possible_match_length,
         'num_terms': len(terms),
+        'domain_score': domain_score,
+        'item_score': item['score'],
     })
 
 
@@ -41,6 +44,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: DataFrame, y=None):
-        return X.apply(get_match_features_as_series, axis=1)
+        features = X.apply(get_match_features_as_series, axis=1)
+        print("Features", features.columns)
+        return features
 
 
