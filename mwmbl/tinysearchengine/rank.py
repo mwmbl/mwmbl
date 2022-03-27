@@ -1,4 +1,5 @@
 import re
+from abc import abstractmethod
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
@@ -70,7 +71,7 @@ def get_match_features(terms, result_string, is_complete, is_url):
     return last_match_char, match_length, total_possible_match_length
 
 
-def _order_results(terms: list[str], results: list[Document], is_complete: bool):
+def _order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
     if len(results) == 0:
         return []
 
@@ -86,11 +87,15 @@ class Ranker:
         self.tiny_index = tiny_index
         self.completer = completer
 
+    @abstractmethod
+    def order_results(self, terms, pages, is_complete):
+        pass
+
     def search(self, s: str):
         results, terms = self.get_results(s)
 
         is_complete = s.endswith(' ')
-        pattern = _get_query_regex(terms, is_complete)
+        pattern = _get_query_regex(terms, is_complete, False)
         formatted_results = []
         for result in results:
             formatted_result = {}
@@ -137,5 +142,11 @@ class Ranker:
                             pages.append(item)
                             seen_items.add(item.title)
 
-        ordered_results = _order_results(terms, pages, is_complete)
+        ordered_results = self.order_results(terms, pages, is_complete)
         return ordered_results, terms
+
+
+class HeuristicRanker(Ranker):
+    def order_results(self, terms, pages, is_complete):
+        return _order_results(terms, pages, is_complete)
+

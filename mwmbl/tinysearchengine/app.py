@@ -7,7 +7,7 @@ import uvicorn
 from mwmbl.tinysearchengine import create_app
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import Ranker
+from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logging.basicConfig()
 
@@ -37,7 +37,7 @@ def main():
     completer = Completer(terms)
 
     with TinyIndex(item_factory=Document, index_path=args.index) as tiny_index:
-        ranker = Ranker(tiny_index, completer)
+        ranker = HeuristicRanker(tiny_index, completer)
 
         # Initialize FastApi instance
         app = create_app.create(ranker)

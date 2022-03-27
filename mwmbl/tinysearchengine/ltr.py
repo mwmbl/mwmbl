@@ -31,7 +31,7 @@ def get_match_features_as_series(item: Series):
     last_match_char_extract, match_length_extract, total_possible_match_length_extract = get_match_features(
         terms, item['extract'], True, False)
     last_match_char_url, match_length_url, total_possible_match_length_url = get_match_features(
-        terms, item['title'], True, False)
+        terms, item['url'], True, False)
     domain_score = get_domain_score(item['url'])
     return Series({
         'last_match_char_title': last_match_char_title,
