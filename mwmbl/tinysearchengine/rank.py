@@ -71,7 +71,7 @@ def get_match_features(terms, result_string, is_complete, is_url):
     return last_match_char, match_length, total_possible_match_length
 
 
-def _order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
+def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
     if len(results) == 0:
         return []
 
@@ -148,5 +148,5 @@ class Ranker:
 
 class HeuristicRanker(Ranker):
     def order_results(self, terms, pages, is_complete):
-        return _order_results(terms, pages, is_complete)
+        return order_results(terms, pages, is_complete)
 
