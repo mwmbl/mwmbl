@@ -39,11 +39,15 @@ def _score_result(terms, result: Document, is_complete: bool, max_score: float):
     last_match_char, match_length, total_possible_match_length = get_match_features(
         terms, result_string, is_complete, False)
 
-    match_score = (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    match_score = score_match(last_match_char, match_length, total_possible_match_length)
     score = 0.01 * domain_score + 0.99 * match_score
     # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     # score = 0.01 * match_score + 0.99 * (result.score / max_score)
     return score
+
+
+def score_match(last_match_char, match_length, total_possible_match_length):
+    return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
 
 
 def get_domain_score(url):
@@ -54,7 +58,6 @@ def get_domain_score(url):
 
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = _get_query_regex(terms, is_complete, is_url)
-    print("Query regex", query_regex)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     match_strings = {x.group(0).lower() for x in matches}
     match_length = sum(len(x) for x in match_strings)

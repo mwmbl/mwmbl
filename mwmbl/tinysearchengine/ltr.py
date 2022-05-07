@@ -4,7 +4,7 @@ Learning to rank predictor
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 
-from mwmbl.tinysearchengine.rank import get_match_features, get_domain_score
+from mwmbl.tinysearchengine.rank import get_match_features, get_domain_score, score_match
 
 
 class ThresholdPredictor(BaseEstimator, RegressorMixin):
@@ -26,27 +26,19 @@ class ThresholdPredictor(BaseEstimator, RegressorMixin):
 
 def get_match_features_as_series(item: Series):
     terms = item['query'].lower().split()
-    last_match_char_title, match_length_title, total_possible_match_length_title = get_match_features(
-        terms, item['title'], True, False)
-    last_match_char_extract, match_length_extract, total_possible_match_length_extract = get_match_features(
-        terms, item['extract'], True, False)
-    last_match_char_url, match_length_url, total_possible_match_length_url = get_match_features(
-        terms, item['url'], True, False)
-    domain_score = get_domain_score(item['url'])
-    return Series({
-        'last_match_char_title': last_match_char_title,
-        'match_length_title': match_length_title,
-        'total_possible_match_length_title': total_possible_match_length_title,
-        'last_match_char_extract': last_match_char_extract,
-        'match_length_extract': match_length_extract,
-        'total_possible_match_length_extract': total_possible_match_length_extract,
-        'last_match_char_url': last_match_char_url,
-        'match_length_url': match_length_url,
-        'total_possible_match_length_url': total_possible_match_length_url,
-        'num_terms': len(terms),
-        'domain_score': domain_score,
-        'item_score': item['score'],
-    })
+    features = {}
+    for part in ['title', 'extract', 'url']:
+        last_match_char, match_length, total_possible_match_length = get_match_features(terms, item[part], True, False)
+        features[f'last_match_char_{part}'] = last_match_char
+        features[f'match_length_{part}'] = match_length
+        features[f'total_possible_match_length_{part}'] = total_possible_match_length
+        # features[f'score_{part}'] = score_match(last_match_char, match_length, total_possible_match_length)
+
+    features['num_terms'] = len(terms)
+    features['num_chars'] = len(' '.join(terms))
+    features['domain_score'] = get_domain_score(item['url'])
+    features['item_score'] = item['score']
+    return Series(features)
 
 
 class FeatureExtractor(BaseEstimator, TransformerMixin):
