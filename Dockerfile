@@ -39,4 +39,5 @@ COPY data /app/data
 COPY config /app/config
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
+# TODO: fix the arguments for the recent changes
 CMD ["/venv/bin/mwmbl-tinysearchengine", "--config",  "config/tinysearchengine.yaml"]

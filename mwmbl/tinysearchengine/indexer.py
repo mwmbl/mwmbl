@@ -12,7 +12,7 @@ VERSION = 1
 METADATA_CONSTANT = b'mwmbl-tiny-search'
 METADATA_SIZE = 4096
 
-NUM_PAGES = 76800
+NUM_PAGES = 128000
 PAGE_SIZE = 4096
 
 
@@ -21,6 +21,7 @@ class Document:
     title: str
     url: str
     extract: str
+    score: float
 
 
 @dataclass

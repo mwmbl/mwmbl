@@ -5,14 +5,16 @@ description = ""
 authors = ["Daoud Clarke <daoud.clarke@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.10"
-pandas = "^1.3.4"
+python = ">=3.10,<3.11"
+pandas = "^1.3.5"
+scipy = "^1.8.0"
+scikit-learn = "^1.0.2"
 zstandard = "^0.16.0"
 mmh3 = "^3.0.0"
 fastapi = "^0.70.1"
 uvicorn = "^0.16.0"
-numpy = "==1.21.1"
 pyyaml = "==6.0"
+
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.
 botocore = {version= "==1.23.20", optional = true}

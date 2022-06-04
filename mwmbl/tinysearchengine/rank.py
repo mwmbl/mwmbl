@@ -1,4 +1,5 @@
 import re
+from abc import abstractmethod
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
@@ -14,27 +15,49 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
-SCORE_THRESHOLD = 0.25
+SCORE_THRESHOLD = 0.0
 
 
-def _get_query_regex(terms, is_complete):
+def _get_query_regex(terms, is_complete, is_url):
     if not terms:
         return ''
 
+    word_sep = r'\b' if is_url else ''
     if is_complete:
-        term_patterns = [rf'\b{term}\b' for term in terms]
+        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms]
     else:
-        term_patterns = [rf'\b{term}\b' for term in terms[:-1]] + [rf'\b{terms[-1]}']
+        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms[:-1]] + [
+            rf'{word_sep}{re.escape(terms[-1])}']
     pattern = '|'.join(term_patterns)
     return pattern
 
 
-def _score_result(terms, result: Document, is_complete: bool):
-    domain = urlparse(result.url).netloc
-    domain_score = DOMAINS.get(domain, 0.0)
+def _score_result(terms, result: Document, is_complete: bool, max_score: float):
+    domain_score = get_domain_score(result.url)
 
     result_string = f"{result.title.strip()} {result.extract.strip()}"
-    query_regex = _get_query_regex(terms, is_complete)
+    last_match_char, match_length, total_possible_match_length = get_match_features(
+        terms, result_string, is_complete, False)
+
+    match_score = score_match(last_match_char, match_length, total_possible_match_length)
+    score = 0.01 * domain_score + 0.99 * match_score
+    # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
+    # score = 0.01 * match_score + 0.99 * (result.score / max_score)
+    return score
+
+
+def score_match(last_match_char, match_length, total_possible_match_length):
+    return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+
+
+def get_domain_score(url):
+    domain = urlparse(url).netloc
+    domain_score = DOMAINS.get(domain, 0.0)
+    return domain_score
+
+
+def get_match_features(terms, result_string, is_complete, is_url):
+    query_regex = _get_query_regex(terms, is_complete, is_url)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     match_strings = {x.group(0).lower() for x in matches}
     match_length = sum(len(x) for x in match_strings)
@@ -48,12 +71,15 @@ def _score_result(terms, result: Document, is_complete: bool):
             seen_matches.add(value)
 
     total_possible_match_length = sum(len(x) for x in terms)
-    score = 0.1*domain_score + 0.9*(match_length + 1./last_match_char) / (total_possible_match_length + 1)
-    return score
+    return last_match_char, match_length, total_possible_match_length
 
 
-def _order_results(terms: list[str], results: list[Document], is_complete: bool):
-    results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
+def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
+    if len(results) == 0:
+        return []
+
+    max_score = max(result.score for result in results)
+    results_and_scores = [(_score_result(terms, result, is_complete, max_score), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
     return filtered_results
@@ -64,11 +90,15 @@ class Ranker:
         self.tiny_index = tiny_index
         self.completer = completer
 
+    @abstractmethod
+    def order_results(self, terms, pages, is_complete):
+        pass
+
     def search(self, s: str):
-        results, terms = self._get_results(s)
+        results, terms = self.get_results(s)
 
         is_complete = s.endswith(' ')
-        pattern = _get_query_regex(terms, is_complete)
+        pattern = _get_query_regex(terms, is_complete, False)
         formatted_results = []
         for result in results:
             formatted_result = {}
@@ -89,14 +119,14 @@ class Ranker:
         return formatted_results
 
     def complete(self, q: str):
-        ordered_results, terms = self._get_results(q)
+        ordered_results, terms = self.get_results(q)
         results = [item.title.replace("\n", "") + ' — ' +
                    item.url.replace("\n", "") for item in ordered_results]
         if len(results) == 0:
             return []
         return [q, results]
 
-    def _get_results(self, q):
+    def get_results(self, q):
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
@@ -115,5 +145,11 @@ class Ranker:
                             pages.append(item)
                             seen_items.add(item.title)
 
-        ordered_results = _order_results(terms, pages, is_complete)
+        ordered_results = self.order_results(terms, pages, is_complete)
         return ordered_results, terms
+
+
+class HeuristicRanker(Ranker):
+    def order_results(self, terms, pages, is_complete):
+        return order_results(terms, pages, is_complete)
+

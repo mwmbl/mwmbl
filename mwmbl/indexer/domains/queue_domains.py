@@ -5,7 +5,7 @@ import csv
 import gzip
 
 from mwmbl.indexer.fsqueue import FSQueue, ZstdJsonSerializer
-from mwmbl.indexer.paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, DATA_DIR
+from mwmbl.indexer.paths import DOMAINS_PATH, DOMAINS_QUEUE_NAME, TINYSEARCH_DATA_DIR
 
 BATCH_SIZE = 250
 
@@ -18,7 +18,7 @@ def get_domains():
 
 
 def queue_domains():
-    queue = FSQueue(DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
+    queue = FSQueue(TINYSEARCH_DATA_DIR, DOMAINS_QUEUE_NAME, ZstdJsonSerializer())
     queued = 0
     batch = []
     for rank, domain in get_domains():

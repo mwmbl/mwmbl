@@ -10,7 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import Ranker
+from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logger = getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 
-def create(ranker: Ranker):
+def create(ranker: HeuristicRanker):
     app = FastAPI()
     
     # Allow CORS requests from any site

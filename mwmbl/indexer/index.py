@@ -2,15 +2,14 @@
 Create a search index
 """
 from collections import Counter
-from itertools import islice
-from typing import Iterator, Iterable
+from typing import Iterable
 from urllib.parse import unquote
 
 import pandas as pd
 
-# NUM_PAGES = 8192
-# PAGE_SIZE = 512
 from mwmbl.tinysearchengine.indexer import Document, TokenizedDocument, TinyIndex
+
+DEFAULT_SCORE = 0
 
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
@@ -44,7 +43,7 @@ def prepare_url_for_tokenizing(url: str):
     return url
 
 
-def get_pages(nlp, titles_urls_and_extracts) -> Iterable[TokenizedDocument]:
+def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedDocument]:
     for i, (title_cleaned, url, extract) in enumerate(titles_urls_and_extracts):
         title_tokens = tokenize(nlp, title_cleaned)
         prepared_url = prepare_url_for_tokenizing(unquote(url))
@@ -52,26 +51,19 @@ def get_pages(nlp, titles_urls_and_extracts) -> Iterable[TokenizedDocument]:
         extract_tokens = tokenize(nlp, extract)
         print("Extract tokens", extract_tokens)
         tokens = title_tokens | url_tokens | extract_tokens
-        yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract)
+        score = link_counts.get(url, DEFAULT_SCORE)
+        yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
 
         if i % 1000 == 0:
             print("Processed", i)
 
 
-def grouper(n: int, iterator: Iterator):
-    while True:
-        chunk = tuple(islice(iterator, n))
-        if not chunk:
-            return
-        yield chunk
-
-
-def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, terms_path):
+def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, link_counts, terms_path):
     terms = Counter()
-    pages = get_pages(nlp, titles_urls_and_extracts)
+    pages = get_pages(nlp, titles_urls_and_extracts, link_counts)
     for page in pages:
         for token in page.tokens:
-            indexer.index(token, Document(url=page.url, title=page.title, extract=page.extract))
+            indexer.index(token, Document(url=page.url, title=page.title, extract=page.extract, score=page.score))
         terms.update([t.lower() for t in page.tokens])
 
     term_df = pd.DataFrame({
