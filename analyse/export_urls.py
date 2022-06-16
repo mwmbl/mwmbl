@@ -4,7 +4,7 @@ Export the list of unique URLs to a SQLite file for analysis/evaluation.
 import sqlite3
 
 from mwmbl.indexer.paths import URLS_PATH
-from mwmbl.tinysearchengine.app import get_config_and_index
+from mwmbl.app import get_config_and_index
 
 
 def create_database():

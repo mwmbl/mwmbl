@@ -3,8 +3,11 @@ import logging
 
 import pandas as pd
 import uvicorn
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
-from mwmbl.tinysearchengine import create_app
+from mwmbl.crawler.app import router as crawler_router
+from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
@@ -21,7 +24,7 @@ def setup_args():
     return args
 
 
-def main():
+def run():
     """Main entrypoint for tinysearchengine.
 
     * Parses CLI args
@@ -40,11 +43,22 @@ def main():
         ranker = HeuristicRanker(tiny_index, completer)
 
         # Initialize FastApi instance
-        app = create_app.create(ranker)
+        app = FastAPI()
+
+        # Allow CORS requests from any site
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_headers=["*"],
+        )
+
+        search_router = search.create_router(ranker)
+        app.include_router(search_router)
+        app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
         uvicorn.run(app, host="0.0.0.0", port=8080)
 
 
 if __name__ == "__main__":
-    main()
+    run()
