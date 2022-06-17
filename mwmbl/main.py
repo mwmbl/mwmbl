@@ -1,5 +1,6 @@
 import argparse
 import logging
+from pathlib import Path
 
 import pandas as pd
 import uvicorn
@@ -9,17 +10,18 @@ from starlette.middleware.cors import CORSMiddleware
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logging.basicConfig()
 
 
+TERMS_PATH = Path(__file__).parent.parent / 'resources' / 'mwmbl-crawl-terms.csv'
+
+
 def setup_args():
-    """Read all the args."""
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
-    parser.add_argument("--index", help="Path to the tinysearchengine index file", required=True)
-    parser.add_argument("--terms", help="Path to the tinysearchengine terms CSV file", required=True)
+    parser.add_argument("--index", help="Path to the tinysearchengine index file", default="/data/index.tinysearch")
     args = parser.parse_args()
     return args
 
@@ -35,8 +37,13 @@ def run():
     """
     args = setup_args()
 
+    try:
+        TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+    except FileExistsError:
+        print("Index already exists")
+
     # Load term data
-    terms = pd.read_csv(args.terms)
+    terms = pd.read_csv(TERMS_PATH)
     completer = Completer(terms)
 
     with TinyIndex(item_factory=Document, index_path=args.index) as tiny_index:

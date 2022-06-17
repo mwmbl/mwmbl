@@ -33,9 +33,8 @@ FROM base as final
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
-# Working directory is /app
-# Copying data and config into /app so that relative (default) paths in the config work
-# COPY data /app/data
+# Set up a volume where the data will live
+VOLUME ["/data"]
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-CMD ["/venv/bin/mwmbl-tinysearchengine", "--index", "data/index.tinysearch", "--terms", "data/mwmbl-crawl-terms.csv"]
+CMD ["/venv/bin/mwmbl-tinysearchengine"]
