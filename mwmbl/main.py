@@ -16,9 +16,6 @@ from mwmbl.tinysearchengine.rank import HeuristicRanker
 logging.basicConfig()
 
 
-TERMS_PATH = Path(__file__).parent.parent / 'resources' / 'mwmbl-crawl-terms.csv'
-
-
 def setup_args():
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
     parser.add_argument("--index", help="Path to the tinysearchengine index file", default="/data/index.tinysearch")
@@ -42,9 +39,7 @@ def run():
     except FileExistsError:
         print("Index already exists")
 
-    # Load term data
-    terms = pd.read_csv(TERMS_PATH)
-    completer = Completer(terms)
+    completer = Completer()
 
     with TinyIndex(item_factory=Document, index_path=args.index) as tiny_index:
         ranker = HeuristicRanker(tiny_index, completer)
