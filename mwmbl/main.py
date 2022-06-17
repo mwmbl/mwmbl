@@ -58,7 +58,7 @@ def run():
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
-        uvicorn.run(app, host="0.0.0.0", port=8080)
+        uvicorn.run(app, host="0.0.0.0", port=5000)
 
 
 if __name__ == "__main__":
