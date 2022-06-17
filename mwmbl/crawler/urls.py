@@ -30,7 +30,7 @@ class URLDatabase:
         self.connection = None
 
     def __enter__(self):
-        self.connection = connect(user=os.environ["USER"])
+        self.connection = connect(os.environ["DATABASE_URL"])
         self.connection.__enter__()
         return self
 
