@@ -35,9 +35,7 @@ COPY --from=builder /venv /venv
 
 # Working directory is /app
 # Copying data and config into /app so that relative (default) paths in the config work
-COPY data /app/data
-COPY config /app/config
+# COPY data /app/data
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-# TODO: fix the arguments for the recent changes
-CMD ["/venv/bin/mwmbl-tinysearchengine", "--config",  "config/tinysearchengine.yaml"]
+CMD ["/venv/bin/mwmbl-tinysearchengine", "--index", "data/index.tinysearch", "--terms", "data/mwmbl-crawl-terms.csv"]
