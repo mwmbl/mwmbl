@@ -36,5 +36,7 @@ COPY --from=builder /venv /venv
 # Set up a volume where the data will live
 VOLUME ["/data"]
 
+EXPOSE 5000
+
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
 CMD ["/venv/bin/mwmbl-tinysearchengine"]
