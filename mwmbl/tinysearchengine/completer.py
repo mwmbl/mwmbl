@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 
-TERMS_PATH = Path(__file__).parent.parent.parent / 'resources' / 'mwmbl-crawl-terms.csv'
+TERMS_PATH = Path(__file__).parent.parent / 'resources' / 'mwmbl-crawl-terms.csv'
 
 
 class Completer:
