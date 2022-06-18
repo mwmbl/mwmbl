@@ -68,7 +68,7 @@ name = "blis"
 version = "0.7.7"
 description = "The Blis BLAS-like linear algebra library, as a self-contained C-extension."
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [package.dependencies]
@@ -111,7 +111,7 @@ name = "catalogue"
 version = "2.0.7"
 description = "Super lightweight function registries for your library"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [[package]]
@@ -168,7 +168,7 @@ name = "cymem"
 version = "2.0.6"
 description = "Manage calls to calloc/free through Cython"
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [[package]]
@@ -232,7 +232,7 @@ name = "jinja2"
 version = "3.1.2"
 description = "A very fast and expressive template engine."
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.7"
 
 [package.dependencies]
@@ -273,7 +273,7 @@ name = "langcodes"
 version = "3.3.0"
 description = "Tools for labeling human languages with IETF language tags"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.extras]
@@ -320,7 +320,7 @@ name = "markupsafe"
 version = "2.1.1"
 description = "Safely add untrusted strings to HTML/XML markup."
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.7"
 
 [[package]]
@@ -336,7 +336,7 @@ name = "murmurhash"
 version = "1.0.7"
 description = "Cython bindings for MurmurHash"
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [[package]]
@@ -379,7 +379,7 @@ name = "pathy"
 version = "0.6.1"
 description = "pathlib.Path subclasses for local and cloud bucket storage"
 category = "main"
-optional = true
+optional = false
 python-versions = ">= 3.6"
 
 [package.dependencies]
@@ -409,7 +409,7 @@ name = "preshed"
 version = "3.0.6"
 description = "Cython hash table that trusts the keys are pre-hashed"
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [package.dependencies]
@@ -637,7 +637,7 @@ name = "smart-open"
 version = "5.2.1"
 description = "Utils for streaming large files (S3, HDFS, GCS, Azure Blob Storage, gzip, bz2...)"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6,<4.0"
 
 [package.extras]
@@ -670,7 +670,7 @@ name = "spacy"
 version = "3.2.1"
 description = "Industrial-strength Natural Language Processing (NLP) in Python"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.dependencies]
@@ -721,7 +721,7 @@ name = "spacy-legacy"
 version = "3.0.9"
 description = "Legacy registered functions for spaCy backwards compatibility"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [[package]]
@@ -729,7 +729,7 @@ name = "spacy-loggers"
 version = "1.0.2"
 description = "Logging utilities for SpaCy"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.dependencies]
@@ -740,7 +740,7 @@ name = "srsly"
 version = "2.4.3"
 description = "Modern high-performance serialization utilities for Python"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.dependencies]
@@ -765,7 +765,7 @@ name = "thinc"
 version = "8.0.17"
 description = "A refreshing functional take on deep learning, compatible with your favorite libraries"
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.dependencies]
@@ -820,7 +820,7 @@ name = "tqdm"
 version = "4.64.0"
 description = "Fast, Extensible Progress Meter"
 category = "main"
-optional = true
+optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,>=2.7"
 
 [package.dependencies]
@@ -837,7 +837,7 @@ name = "typer"
 version = "0.4.1"
 description = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 category = "main"
-optional = true
+optional = false
 python-versions = ">=3.6"
 
 [package.dependencies]
@@ -910,7 +910,7 @@ name = "wasabi"
 version = "0.9.1"
 description = "A lightweight console printing and formatting toolkit"
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [[package]]
@@ -928,12 +928,12 @@ cffi = {version = ">=1.11", markers = "platform_python_implementation == \"PyPy\
 cffi = ["cffi (>=1.11)"]
 
 [extras]
-indexer = ["ujson", "warcio", "idna", "beautifulsoup4", "lxml", "jusText", "langdetect", "pyarrow", "pyspark", "Levenshtein", "spacy", "en-core-web-sm"]
+indexer = ["ujson", "warcio", "idna", "beautifulsoup4", "lxml", "jusText", "langdetect", "pyarrow", "pyspark", "Levenshtein", "en-core-web-sm"]
 
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.10,<3.11"
-content-hash = "0782bf407e18e268c5a53aede8595a60b1a545e4ed3709e87191f2bb1678e92c"
+content-hash = "cd17d671d8fa708240c3bf7bf5240bcf4bbcebea4538e5ad091bbcf9d10c5574"
 
 [metadata.files]
 anyio = [

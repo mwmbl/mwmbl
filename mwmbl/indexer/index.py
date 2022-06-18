@@ -45,17 +45,22 @@ def prepare_url_for_tokenizing(url: str):
 
 def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedDocument]:
     for i, (title_cleaned, url, extract) in enumerate(titles_urls_and_extracts):
-        title_tokens = tokenize(nlp, title_cleaned)
-        prepared_url = prepare_url_for_tokenizing(unquote(url))
-        url_tokens = tokenize(nlp, prepared_url)
-        extract_tokens = tokenize(nlp, extract)
-        print("Extract tokens", extract_tokens)
-        tokens = title_tokens | url_tokens | extract_tokens
         score = link_counts.get(url, DEFAULT_SCORE)
-        yield TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
+        yield tokenize_document(url, title_cleaned, extract, score, nlp)
 
         if i % 1000 == 0:
             print("Processed", i)
+
+
+def tokenize_document(url, title_cleaned, extract, score, nlp):
+    title_tokens = tokenize(nlp, title_cleaned)
+    prepared_url = prepare_url_for_tokenizing(unquote(url))
+    url_tokens = tokenize(nlp, prepared_url)
+    extract_tokens = tokenize(nlp, extract)
+    # print("Extract tokens", extract_tokens)
+    tokens = title_tokens | url_tokens | extract_tokens
+    document = TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
+    return document
 
 
 def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, link_counts, terms_path):
