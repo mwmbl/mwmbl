@@ -11,6 +11,8 @@ from psycopg2.extras import execute_values
 
 
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
+from mwmbl.database import Database
+
 REASSIGN_MIN_HOURS = 1
 BATCH_SIZE = 100
 
@@ -26,17 +28,8 @@ class URLStatus(Enum):
 
 
 class URLDatabase:
-    def __init__(self):
-        self.connection = None
-
-    def __enter__(self):
-        self.connection = connect(os.environ["DATABASE_URL"])
-        self.connection.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.connection.__exit__(exc_type, exc_val, exc_tb)
-        self.connection.close()
+    def __init__(self, connection):
+        self.connection = connection
 
     def create_tables(self):
         sql = """
@@ -111,11 +104,12 @@ class URLDatabase:
 
 
 if __name__ == "__main__":
-    with URLDatabase() as db:
-        db.create_tables()
+    with Database() as db:
+        url_db = URLDatabase(db.connection)
+        url_db.create_tables()
         # update_url_status(conn, [URLStatus("https://mwmbl.org", URLState.NEW, "test-user", datetime.now())])
-        # db.user_found_urls("Test user", ["a", "b", "c"], datetime.utcnow())
-        # db.user_found_urls("Another user", ["b", "c", "d"], datetime.utcnow())
-        # db.user_crawled_urls("Test user", ["c"], datetime.utcnow())
-        batch = db.get_new_batch_for_user('test user 4')
+        # url_db.user_found_urls("Test user", ["a", "b", "c"], datetime.utcnow())
+        # url_db.user_found_urls("Another user", ["b", "c", "d"], datetime.utcnow())
+        # url_db.user_crawled_urls("Test user", ["c"], datetime.utcnow())
+        batch = url_db.get_new_batch_for_user('test user 4')
         print("Batch", len(batch), batch)

@@ -13,6 +13,7 @@ from fastapi import HTTPException, APIRouter
 from pydantic import BaseModel
 
 from mwmbl.crawler.urls import URLDatabase
+from mwmbl.database import Database
 
 APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
 KEY_ID = os.environ['MWMBL_KEY_ID']
@@ -81,8 +82,9 @@ last_batch = None
 
 @router.on_event("startup")
 async def on_startup():
-    with URLDatabase() as db:
-        return db.create_tables()
+    with Database() as db:
+        url_db = URLDatabase(db.connection)
+        return url_db.create_tables()
 
 
 @router.post('/batches/')
@@ -132,8 +134,9 @@ def _get_user_id_hash(batch: Union[Batch, NewBatchRequest]):
 def request_new_batch(batch_request: NewBatchRequest):
     user_id_hash = _get_user_id_hash(batch_request)
 
-    with URLDatabase() as db:
-        return db.get_new_batch_for_user(user_id_hash)
+    with Database() as db:
+        url_db = URLDatabase(db.connection)
+        return url_db.get_new_batch_for_user(user_id_hash)
 
 
 @router.post('/batches/historical')
@@ -147,17 +150,18 @@ def create_historical_batch(batch: HashedBatch):
 
 
 def _record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str, timestamp: datetime):
-    with URLDatabase() as db:
+    with Database() as db:
+        url_db = URLDatabase(db.connection)
         found_urls = set()
         for item in batch.items:
             if item.content is not None:
                 found_urls |= set(item.content.links)
 
         if len(found_urls) > 0:
-            db.user_found_urls(user_id_hash, list(found_urls), timestamp)
+            url_db.user_found_urls(user_id_hash, list(found_urls), timestamp)
 
         crawled_urls = [item.url for item in batch.items]
-        db.user_crawled_urls(user_id_hash, crawled_urls, timestamp)
+        url_db.user_crawled_urls(user_id_hash, crawled_urls, timestamp)
 
 
 @router.get('/batches/{date_str}/users/{public_user_id}')
