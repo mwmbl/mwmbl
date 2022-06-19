@@ -1,0 +1,77 @@
+## This is/was the template from /root/dokku/plugins/nginx-vhosts/templates/nginx.ssl.conf
+## See the CORS section added below
+server {
+  listen      [::]:80;
+  listen      80;
+  server_name $NOSSL_SERVER_NAME;
+  return 301 https://$SSL_SERVER_NAME\$request_uri;
+}
+
+server {
+  listen      [::]:443 ssl spdy;
+  listen      443 ssl spdy;
+  server_name $SSL_SERVER_NAME;
+$SSL_DIRECTIVES
+
+  keepalive_timeout   70;
+  add_header          Alternate-Protocol  443:npn-spdy/2;
+  location    / {
+
+## Start CORS here.  See http://enable-cors.org/server_nginx.html for comments
+
+    if (\$http_origin ~* (^https?://.*\.$VHOST$)) {
+        set \$cors corson;
+    }
+    if (\$http_origin ~* (^http://(localhost|127.0.0.1)(:[0-9]+)?$)) {
+        set \$cors corson;
+    }
+
+    if (\$request_method = OPTIONS) {
+        set \$cors '\${cors}options';
+    }
+
+    if (\$request_method = GET) {
+        set \$cors '\${cors}get';
+    }
+    if (\$request_method = POST) {
+        set \$cors '\${cors}post';
+    }
+
+    if (\$cors = corsonget) {
+        add_header Access-Control-Allow-Origin \$http_origin;
+        add_header Access-Control-Allow-Credentials true;
+    }
+
+    if (\$cors = corsonpost) {
+        add_header Access-Control-Allow-Origin \$http_origin;
+        add_header Access-Control-Allow-Credentials true;
+    }
+
+    if (\$cors = corsonoptions) {
+        add_header Access-Control-Allow-Origin \$http_origin;
+        add_header Access-Control-Allow-Credentials true;
+
+        add_header Access-Control-Max-Age 1728000;
+
+        add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS';
+
+        add_header Access-Control-Allow-Headers 'Authorization,Content-Type,Accept,Origin,User-Agent,DNT,Cache-Control,X-Mx-ReqToken,Keep-Alive,X-Requested-With,If-Modified-Since';
+
+        add_header Content-Length 0;
+        add_header Content-Type 'text/plain charset=UTF-8';
+        return 204;
+    }
+### End CORS
+
+    proxy_pass  http://$APP;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$http_host;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$remote_addr;
+    proxy_set_header X-Forwarded-Port \$server_port;
+    proxy_set_header X-Request-Start \$msec;
+  }
+  include $DOKKU_ROOT/$APP/nginx.conf.d/*.conf;
+}

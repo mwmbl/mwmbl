@@ -33,6 +33,8 @@ FROM base as final
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
+ADD nginx.conf.sigil /app
+
 # Set up a volume where the data will live
 VOLUME ["/data"]
 
