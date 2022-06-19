@@ -179,11 +179,19 @@ def check_public_user_id(public_user_id):
 
 @router.get('/batches/{date_str}/users/{public_user_id}/batch/{batch_id}')
 def get_batch_from_id(date_str, public_user_id, batch_id):
+    url = get_batch_url(batch_id, date_str, public_user_id)
+    data = json.loads(gzip.decompress(requests.get(url).content))
+    return {
+        'url': url,
+        'batch': data,
+    }
+
+
+def get_batch_url(batch_id, date_str, public_user_id):
     check_date_str(date_str)
     check_public_user_id(public_user_id)
     url = f'{PUBLIC_URL_PREFIX}1/{VERSION}/{date_str}/1/{public_user_id}/{batch_id}{FILE_NAME_SUFFIX}'
-    data = json.loads(gzip.decompress(requests.get(url).content))
-    return data
+    return url
 
 
 @router.get('/latest-batch', response_model=list[HashedBatch])

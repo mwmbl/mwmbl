@@ -2,12 +2,10 @@ import argparse
 import logging
 from multiprocessing import Process
 
-import pandas as pd
 import uvicorn
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
 
-from mwmbl.crawler import historical
+from mwmbl import historical
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
