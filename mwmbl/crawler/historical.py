@@ -24,7 +24,6 @@ def run(index_path):
                 get_batch_time = datetime.now()
                 print("Get batch time", get_batch_time - start)
                 batch = HashedBatch.parse_obj(batch_dict)
-                print("Batch", batch)
                 create_historical_batch(batch)
                 create_historical_time = datetime.now()
                 print("Create historical time", create_historical_time - get_batch_time)

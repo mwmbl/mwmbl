@@ -1,11 +1,13 @@
 import argparse
 import logging
+from multiprocessing import Process
 
 import pandas as pd
 import uvicorn
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+from mwmbl.crawler import historical
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
@@ -37,6 +39,9 @@ def run():
         TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
     except FileExistsError:
         print("Index already exists")
+
+    historical_batch_process = Process(target=historical.run, args=(args.index,))
+    historical_batch_process.start()
 
     completer = Completer()
 
