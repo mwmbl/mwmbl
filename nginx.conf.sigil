@@ -87,36 +87,36 @@ server {
 
 ## Start CORS here.  See http://enable-cors.org/server_nginx.html for comments
 
-    if (\$http_origin ~* (^https?://.*\.$VHOST$)) {
-        set \$cors corson;
+    if ($http_origin ~* (^https?://.*\.$VHOST$)) {
+        set $cors corson;
     }
-    if (\$http_origin ~* (^http://(localhost|127.0.0.1)(:[0-9]+)?$)) {
-        set \$cors corson;
-    }
-
-    if (\$request_method = OPTIONS) {
-        set \$cors '\${cors}options';
+    if ($http_origin ~* (^http://(localhost|127.0.0.1)(:[0-9]+)?$)) {
+        set $cors corson;
     }
 
-    if (\$request_method = GET) {
-        set \$cors '\${cors}get';
-    }
-    if (\$request_method = POST) {
-        set \$cors '\${cors}post';
+    if ($request_method = OPTIONS) {
+        set $cors '${cors}options';
     }
 
-    if (\$cors = corsonget) {
-        add_header Access-Control-Allow-Origin \$http_origin;
+    if ($request_method = GET) {
+        set $cors '${cors}get';
+    }
+    if ($request_method = POST) {
+        set $cors '${cors}post';
+    }
+
+    if ($cors = corsonget) {
+        add_header Access-Control-Allow-Origin $http_origin;
         add_header Access-Control-Allow-Credentials true;
     }
 
-    if (\$cors = corsonpost) {
-        add_header Access-Control-Allow-Origin \$http_origin;
+    if ($cors = corsonpost) {
+        add_header Access-Control-Allow-Origin $http_origin;
         add_header Access-Control-Allow-Credentials true;
     }
 
-    if (\$cors = corsonoptions) {
-        add_header Access-Control-Allow-Origin \$http_origin;
+    if ($cors = corsonoptions) {
+        add_header Access-Control-Allow-Origin $http_origin;
         add_header Access-Control-Allow-Credentials true;
 
         add_header Access-Control-Max-Age 1728000;
