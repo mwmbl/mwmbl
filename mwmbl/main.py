@@ -19,7 +19,7 @@ logging.basicConfig()
 
 def setup_args():
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
-    parser.add_argument("--index", help="Path to the tinysearchengine index file", default="/data/index.tinysearch")
+    parser.add_argument("--index", help="Path to the tinysearchengine index file", default="/app/storage/index.tinysearch")
     args = parser.parse_args()
     return args
 
