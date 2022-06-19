@@ -51,12 +51,12 @@ def run():
         # Initialize FastApi instance
         app = FastAPI()
 
-        # Allow CORS requests from any site
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_headers=["*"],
-        )
+        # # Allow CORS requests from any site
+        # app.add_middleware(
+        #     CORSMiddleware,
+        #     allow_origins=["*"],
+        #     allow_headers=["*"],
+        # )
 
         search_router = search.create_router(ranker)
         app.include_router(search_router)
