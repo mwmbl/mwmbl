@@ -87,48 +87,33 @@ server {
 
 ## Start CORS here.  See http://enable-cors.org/server_nginx.html for comments
 
-    if ($http_origin ~* (^https?://.*\.$VHOST$)) {
-        set $cors corson;
-    }
-    if ($http_origin ~* (^http://(localhost|127.0.0.1)(:[0-9]+)?$)) {
-        set $cors corson;
-    }
-
-    if ($request_method = OPTIONS) {
-        set $cors '${cors}options';
-    }
-
-    if ($request_method = GET) {
-        set $cors '${cors}get';
-    }
-    if ($request_method = POST) {
-        set $cors '${cors}post';
-    }
-
-    if ($cors = corsonget) {
-        add_header Access-Control-Allow-Origin $http_origin;
-        add_header Access-Control-Allow-Credentials true;
-    }
-
-    if ($cors = corsonpost) {
-        add_header Access-Control-Allow-Origin $http_origin;
-        add_header Access-Control-Allow-Credentials true;
-    }
-
-    if ($cors = corsonoptions) {
-        add_header Access-Control-Allow-Origin $http_origin;
-        add_header Access-Control-Allow-Credentials true;
-
-        add_header Access-Control-Max-Age 1728000;
-
-        add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS';
-
-        add_header Access-Control-Allow-Headers 'Authorization,Content-Type,Accept,Origin,User-Agent,DNT,Cache-Control,X-Mx-ReqToken,Keep-Alive,X-Requested-With,If-Modified-Since';
-
-        add_header Content-Length 0;
-        add_header Content-Type 'text/plain charset=UTF-8';
+     if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' '*';
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        #
+        # Custom headers and headers various browsers *should* be OK with but aren't
+        #
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+        #
+        # Tell client that this pre-flight info is valid for 20 days
+        #
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Type' 'text/plain; charset=utf-8';
+        add_header 'Content-Length' 0;
         return 204;
-    }
+     }
+     if ($request_method = 'POST') {
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+     }
+     if ($request_method = 'GET') {
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+     }
 ### End CORS
 
     gzip on;
