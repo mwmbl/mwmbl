@@ -129,18 +129,18 @@ class TinyIndex(Generic[T]):
         assert type(value) == self.item_factory, f"Can only index the specified type" \
                                               f" ({self.item_factory.__name__})"
         page_index = self.get_key_page_index(key)
-        self.add_to_page(page_index, value)
+        try:
+            self.add_to_page(page_index, [value])
+        except ValueError:
+            pass
 
-    def add_to_page(self, page_index: int, value: T):
+    def add_to_page(self, page_index: int, values: list[T]):
         current_page = self._get_page_tuples(page_index)
         if current_page is None:
             current_page = []
-        value_tuple = astuple(value)
-        current_page.append(value_tuple)
-        try:
-            self._write_page(current_page, page_index)
-        except ValueError:
-            pass
+        value_tuples = [astuple(value) for value in values]
+        current_page += value_tuples
+        self._write_page(current_page, page_index)
 
     def _write_page(self, data, i):
         """

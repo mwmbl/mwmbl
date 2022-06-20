@@ -57,11 +57,15 @@ class IndexDatabase:
         ) 
         """
 
+        document_pages_index_sql = """
+        CREATE INDEX IF NOT EXISTS document_pages_page_index ON document_pages (page)
+        """
+
         with self.connection.cursor() as cursor:
             cursor.execute(batches_sql)
-            print("Creating documents table")
             cursor.execute(documents_sql)
             cursor.execute(document_pages_sql)
+            cursor.execute(document_pages_index_sql)
 
     def record_batches(self, batch_infos: list[BatchInfo]):
         sql = """
@@ -133,3 +137,24 @@ class IndexDatabase:
         print("Queuing", urls_and_page_indexes)
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, urls_and_page_indexes)
+
+    def get_queued_documents_for_page(self, page_index: int) -> list[Document]:
+        sql = """
+        SELECT d.url, title, extract, score
+        FROM document_pages p INNER JOIN documents d ON p.url = d.url
+        WHERE p.page = %(page_index)s
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, {'page_index': page_index})
+            results = cursor.fetchall()
+            return [Document(title, url, extract, score) for url, title, extract, score in results]
+
+    def clear_queued_documents_for_page(self, page_index: int):
+        sql = """
+        DELETE FROM document_pages
+        WHERE page = %(page_index)s
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, {'page_index': page_index})
