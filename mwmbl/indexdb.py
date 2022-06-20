@@ -15,6 +15,11 @@ class BatchStatus(Enum):
     INDEXED = 2   # The batch has been indexed and the local data has been deleted
 
 
+class DocumentStatus(Enum):
+    NEW = 0
+    PREPROCESSING = 1
+
+
 @dataclass
 class BatchInfo:
     url: str
@@ -40,13 +45,23 @@ class IndexDatabase:
             url VARCHAR PRIMARY KEY,
             title VARCHAR NOT NULL,
             extract VARCHAR NOT NULL,
-            score FLOAT NOT NULL
+            score FLOAT NOT NULL,
+            status INT NOT NULL
         )
+        """
+
+        document_pages_sql = """
+        CREATE TABLE IF NOT EXISTS document_pages (
+            url VARCHAR NOT NULL,
+            page INT NOT NULL
+        ) 
         """
 
         with self.connection.cursor() as cursor:
             cursor.execute(batches_sql)
+            print("Creating documents table")
             cursor.execute(documents_sql)
+            cursor.execute(document_pages_sql)
 
     def record_batches(self, batch_infos: list[BatchInfo]):
         sql = """
@@ -69,15 +84,52 @@ class IndexDatabase:
             results = cursor.fetchall()
             return [BatchInfo(url, user_id_hash, status) for url, user_id_hash, status in results]
 
+    def update_batch_status(self, batch_urls: list[str], status: BatchStatus):
+        sql = """
+        UPDATE batches SET status = %(status)s
+        WHERE url IN %(urls)s
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, {'status': status.value, 'urls': tuple(batch_urls)})
+
     def queue_documents(self, documents: list[Document]):
         sql = """
-        INSERT INTO documents (url, title, extract, score)
+        INSERT INTO documents (url, title, extract, score, status)
         VALUES %s
         ON CONFLICT (url) DO NOTHING
         """
 
         sorted_documents = sorted(documents, key=lambda x: x.url)
-        data = [(document.url, document.title, document.extract, document.score) for document in sorted_documents]
+        data = [(document.url, document.title, document.extract, document.score, DocumentStatus.NEW.value)
+                for document in sorted_documents]
 
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, data)
+
+    def get_documents_for_preprocessing(self):
+        sql = f"""
+        UPDATE documents SET status = {DocumentStatus.PREPROCESSING.value}
+        WHERE url IN (
+            SELECT url FROM documents
+            WHERE status = {DocumentStatus.NEW.value}
+            LIMIT 100
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING url, title, extract, score
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql)
+            results = cursor.fetchall()
+            print("Results", results)
+            return [Document(title, url, extract, score) for url, title, extract, score in results]
+
+    def queue_documents_for_page(self, urls_and_page_indexes: list[tuple[str, int]]):
+        sql = """
+        INSERT INTO document_pages (url, page) values %s
+        """
+
+        print("Queuing", urls_and_page_indexes)
+        with self.connection.cursor() as cursor:
+            execute_values(cursor, sql, urls_and_page_indexes)

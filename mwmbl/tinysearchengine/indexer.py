@@ -106,10 +106,10 @@ class TinyIndex(Generic[T]):
         self.index_file.close()
 
     def retrieve(self, key: str) -> List[T]:
-        index = self._get_key_page_index(key)
+        index = self.get_key_page_index(key)
         return self.get_page(index)
 
-    def _get_key_page_index(self, key):
+    def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
         return key_hash % self.num_pages
 
@@ -128,7 +128,10 @@ class TinyIndex(Generic[T]):
     def index(self, key: str, value: T):
         assert type(value) == self.item_factory, f"Can only index the specified type" \
                                               f" ({self.item_factory.__name__})"
-        page_index = self._get_key_page_index(key)
+        page_index = self.get_key_page_index(key)
+        self.add_to_page(page_index, value)
+
+    def add_to_page(self, page_index: int, value: T):
         current_page = self._get_page_tuples(page_index)
         if current_page is None:
             current_page = []
