@@ -1,11 +1,12 @@
 import argparse
 import logging
+import os
 from multiprocessing import Process
 
 import uvicorn
 from fastapi import FastAPI
 
-from mwmbl import historical
+from mwmbl.indexer import historical, retrieve, preprocess
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
@@ -23,23 +24,25 @@ def setup_args():
 
 
 def run():
-    """Main entrypoint for tinysearchengine.
-
-    * Parses CLI args
-    * Parses and validates config
-    * Initializes TinyIndex
-    * Initialize a FastAPI app instance
-    * Starts uvicorn server using app instance
-    """
     args = setup_args()
 
     try:
-        TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
-    except FileExistsError:
-        print("Index already exists")
+        existing_index = TinyIndex(item_factory=Document, index_path=args.index)
+        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != NUM_PAGES:
+            print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
+                  f"({existing_index.num_pages}) does not match - removing.")
+            os.remove(args.index)
+            existing_index = None
+    except FileNotFoundError:
+        existing_index = None
 
-    historical_batch_process = Process(target=historical.run, args=(args.index,))
-    historical_batch_process.start()
+    if existing_index is None:
+        print("Creating a new index")
+        TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+
+    Process(target=historical.run).start()
+    Process(target=retrieve.run).start()
+    Process(target=preprocess.run, args=(args.index,)).start()
 
     completer = Completer()
 
