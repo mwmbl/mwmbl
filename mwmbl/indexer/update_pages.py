@@ -18,21 +18,20 @@ def run_update(index_path):
         for i in range(indexer.num_pages):
             with Database() as db:
                 index_db = IndexDatabase(db.connection)
-                pages = index_db.get_queued_documents_for_page(i)
-                if len(pages) > 0:
-                    print("Pages", len(pages))
-                else:
+                documents = index_db.get_queued_documents_for_page(i)
+                print(f"Documents queued for page {i}: {len(documents)}")
+                if len(documents) == 0:
                     continue
 
                 for j in range(3):
                     try:
-                        indexer.add_to_page(i, pages)
+                        indexer.add_to_page(i, documents)
                         break
                     except ValueError:
-                        pages = pages[:len(pages)//2]
-                        if len(pages) == 0:
+                        documents = documents[:len(documents)//2]
+                        if len(documents) == 0:
                             break
-                        print(f"Not enough space, adding {len(pages)}")
+                        print(f"Not enough space, adding {len(documents)}")
                 index_db.clear_queued_documents_for_page(i)
 
 

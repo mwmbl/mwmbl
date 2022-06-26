@@ -12,7 +12,6 @@ from mwmbl.tinysearchengine.indexer import Document
 class BatchStatus(Enum):
     REMOTE = 0    # The batch only exists in long term storage
     LOCAL = 1     # We have a copy of the batch locally in Postgresql
-    INDEXED = 2   # The batch has been indexed and the local data has been deleted
 
 
 class DocumentStatus(Enum):
@@ -108,6 +107,7 @@ class IndexDatabase:
         data = [(document.url, document.title, document.extract, document.score, DocumentStatus.NEW.value)
                 for document in sorted_documents]
 
+        print("Queueing documents", len(data))
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, data)
 
@@ -126,7 +126,6 @@ class IndexDatabase:
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
             results = cursor.fetchall()
-            print("Results", results)
             return [Document(title, url, extract, score) for url, title, extract, score in results]
 
     def queue_documents_for_page(self, urls_and_page_indexes: list[tuple[str, int]]):
@@ -134,7 +133,7 @@ class IndexDatabase:
         INSERT INTO document_pages (url, page) values %s
         """
 
-        print("Queuing", urls_and_page_indexes)
+        print(f"Queuing {len(urls_and_page_indexes)} urls and page indexes")
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, urls_and_page_indexes)
 

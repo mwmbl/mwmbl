@@ -6,7 +6,7 @@ from multiprocessing import Process
 import uvicorn
 from fastapi import FastAPI
 
-from mwmbl.indexer import historical, retrieve, preprocess
+from mwmbl.indexer import historical, retrieve, preprocess, update_pages
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
@@ -43,6 +43,7 @@ def run():
     Process(target=historical.run).start()
     Process(target=retrieve.run).start()
     Process(target=preprocess.run, args=(args.index,)).start()
+    Process(target=update_pages.run, args=(args.index,)).start()
 
     completer = Completer()
 

@@ -4,14 +4,14 @@ import json
 import os
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Union
+from typing import Union
 from uuid import uuid4
 
 import boto3
 import requests
 from fastapi import HTTPException, APIRouter
-from pydantic import BaseModel
 
+from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.database import Database
 
@@ -41,40 +41,6 @@ def upload(data: bytes, name: str):
     bucket = get_bucket(name)
     result = bucket.put(Body=data)
     return result
-
-
-class ItemContent(BaseModel):
-    title: str
-    extract: str
-    links: list[str]
-
-
-class ItemError(BaseModel):
-    name: str
-    message: Optional[str]
-
-
-class Item(BaseModel):
-    url: str
-    status: Optional[int]
-    timestamp: int
-    content: Optional[ItemContent]
-    error: Optional[ItemError]
-
-
-class Batch(BaseModel):
-    user_id: str
-    items: list[Item]
-
-
-class NewBatchRequest(BaseModel):
-    user_id: str
-
-
-class HashedBatch(BaseModel):
-    user_id_hash: str
-    timestamp: int
-    items: list[Item]
 
 
 last_batch = None
@@ -232,7 +198,6 @@ def get_subfolders(prefix):
     items = client.list_objects(Bucket=BUCKET_NAME,
                                 Prefix=prefix,
                                 Delimiter='/')
-    print("Got items", items)
     item_keys = [item['Prefix'][len(prefix):].strip('/') for item in items['CommonPrefixes']]
     return item_keys
 

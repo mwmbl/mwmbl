@@ -7,15 +7,23 @@ import json
 from collections import defaultdict, Counter
 from urllib.parse import urlparse
 
-from mwmbl.indexer.paths import CRAWL_GLOB
+from mwmbl.crawler.batch import HashedBatch
+from mwmbl.indexer.paths import CRAWL_GLOB, MWMBL_DATA_DIR
+
+
+# TODO: remove this line - temporary override
+CRAWL_GLOB = str(MWMBL_DATA_DIR / "b2") + "/*/*/2022-06-23/*/*/*.json.gz"
 
 
 def get_urls():
     for path in glob.glob(CRAWL_GLOB):
         data = json.load(gzip.open(path))
-        user = data['user_id_hash']
-        for item in data['items']:
-            yield user, item['url']
+        batch = HashedBatch.parse_obj(data)
+        user = batch.user_id_hash
+        for item in batch.items:
+            if item.content is not None:
+                for url in item.content.links:
+                    yield user, url
 
 
 def analyse_urls(urls):

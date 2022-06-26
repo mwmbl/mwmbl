@@ -27,7 +27,7 @@ def run_preprocessing(index_path):
     with Database() as db:
         index_db = IndexDatabase(db.connection)
         documents = index_db.get_documents_for_preprocessing()
-        print(f"Got {len(documents)} documents")
+        print(f"Got {len(documents)} documents for preprocessing")
         if len(documents) == 0:
             sleep(10)
         with TinyIndex(Document, index_path, 'w') as indexer:

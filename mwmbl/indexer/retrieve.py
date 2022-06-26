@@ -9,7 +9,7 @@ from time import sleep
 
 import requests
 
-from mwmbl.crawler.app import HashedBatch
+from mwmbl.crawler.batch import HashedBatch
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase, BatchStatus
 from mwmbl.retry import retry_requests
@@ -26,21 +26,19 @@ def retrieve_batches():
     with Database() as db:
         index_db = IndexDatabase(db.connection)
         batches = index_db.get_batches_by_status(BatchStatus.REMOTE)
-        print("Batches", batches)
+        print(f"Found {len(batches)} remote batches")
         urls = [batch.url for batch in batches]
         pool = ThreadPool(NUM_THREADS)
         results = pool.imap_unordered(retrieve_batch, urls)
         for result in results:
             print("Processed batch with items:", result)
-
-        with Database() as db:
-            index_db = IndexDatabase(db.connection)
-            index_db.update_batch_status(urls, BatchStatus.LOCAL)
+        index_db.update_batch_status(urls, BatchStatus.LOCAL)
 
 
 def retrieve_batch(url):
     data = json.loads(gzip.decompress(retry_requests.get(url).content))
     batch = HashedBatch.parse_obj(data)
+    print(f"Retrieved batch with {len(batch.items)} items")
     queue_batch(batch)
     return len(batch.items)
 
