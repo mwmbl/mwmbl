@@ -40,10 +40,10 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
-    Process(target=historical.run).start()
-    Process(target=retrieve.run).start()
-    Process(target=preprocess.run, args=(args.index,)).start()
-    Process(target=update_pages.run, args=(args.index,)).start()
+    # Process(target=historical.run).start()
+    # Process(target=retrieve.run).start()
+    # Process(target=preprocess.run, args=(args.index,)).start()
+    # Process(target=update_pages.run, args=(args.index,)).start()
 
     completer = Completer()
 

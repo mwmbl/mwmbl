@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Union
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import boto3
@@ -60,6 +61,11 @@ def create_batch(batch: Batch):
 
     if len(batch.user_id) != USER_ID_LENGTH:
         raise HTTPException(400, f"User ID length is incorrect, should be {USER_ID_LENGTH} characters")
+
+    if len(batch.items) == 0:
+        return {
+            'status': 'ok',
+        }
 
     user_id_hash = _get_user_id_hash(batch)
 
@@ -122,6 +128,10 @@ def _record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str
         for item in batch.items:
             if item.content is not None:
                 found_urls |= set(item.content.links)
+
+        parsed_urls = [urlparse(url) for url in found_urls]
+        domains = {f'{p.scheme}://{p.netloc}' for p in parsed_urls}
+        found_urls |= domains
 
         if len(found_urls) > 0:
             url_db.user_found_urls(user_id_hash, list(found_urls), timestamp)
