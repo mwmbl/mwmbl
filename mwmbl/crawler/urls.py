@@ -37,7 +37,7 @@ class URLDatabase:
             url VARCHAR PRIMARY KEY,
             status INT NOT NULL DEFAULT 0,
             user_id_hash VARCHAR NOT NULL,
-            score INT NOT NULL DEFAULT 1,
+            score FLOAT NOT NULL DEFAULT 1,
             updated TIMESTAMP NOT NULL DEFAULT NOW()
         )
         """
@@ -47,17 +47,27 @@ class URLDatabase:
 
     def user_found_urls(self, user_id_hash: str, urls: list[str], timestamp: datetime):
         sql = f"""
-        INSERT INTO urls (url, status, user_id_hash, score, updated) values %s
-        ON CONFLICT (url) DO UPDATE SET 
-          status = CASE
-            WHEN excluded.status={URLStatus.NEW.value}
-              AND excluded.user_id_hash != urls.user_id_hash
-            THEN {URLStatus.CONFIRMED.value}
-            ELSE {URLStatus.NEW.value}
-          END,
-          user_id_hash=excluded.user_id_hash,
-          score=urls.score + 1,
-          updated=excluded.updated
+         INSERT INTO urls (url, status, user_id_hash, score, updated) values %s
+         ON CONFLICT (url) DO UPDATE SET
+           status = CASE
+             WHEN excluded.status={URLStatus.NEW.value}
+             WHEN urls.status={URLStatus.CRAWLED.value} THEN {URLStatus.CRAWLED.value}
+             WHEN urls.status={URLStatus.CONFIRMED.value} THEN {URLStatus.CONFIRMED.value}
+             WHEN urls.status={URLStatus.ASSIGNED.value} THEN {URLStatus.ASSIGNED.value}
+             WHEN urls.status={URLStatus.NEW.value}
+               AND excluded.user_id_hash != urls.user_id_hash
+             THEN {URLStatus.CONFIRMED.value}
+             ELSE {URLStatus.NEW.value}
+           END,
+           user_id_hash=excluded.user_id_hash,
+           user_id_hash = CASE
+             WHEN urls.status={URLStatus.ASSIGNED.value} THEN urls.user_id_hash ELSE excluded.user_id_hash
+           END,
+           score=urls.score + 1,
+           updated=excluded.updated
+           updated = CASE
+             WHEN urls.status={URLStatus.ASSIGNED.value} THEN urls.updated ELSE excluded.updated
+           END
         """
 
         data = [(url, URLStatus.NEW.value, user_id_hash, 1, timestamp) for url in urls]
@@ -84,7 +94,7 @@ class URLDatabase:
         UPDATE urls SET status = {URLStatus.ASSIGNED.value}, user_id_hash = %(user_id_hash)s, updated = %(now)s
         WHERE url IN (
           SELECT url FROM urls
-          WHERE status = {URLStatus.CONFIRMED.value} OR (
+          WHERE status IN ({URLStatus.CONFIRMED.value}, {URLStatus.NEW.value}) OR (
             status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
           )
           ORDER BY score DESC
