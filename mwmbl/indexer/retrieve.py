@@ -9,6 +9,7 @@ from time import sleep
 
 import requests
 
+from mwmbl.crawler.app import create_historical_batch
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase, BatchStatus
@@ -39,12 +40,14 @@ def retrieve_batch(url):
     data = json.loads(gzip.decompress(retry_requests.get(url).content))
     batch = HashedBatch.parse_obj(data)
     print(f"Retrieved batch with {len(batch.items)} items")
+    create_historical_batch(batch)
     queue_batch(batch)
     return len(batch.items)
 
 
 def queue_batch(batch: HashedBatch):
-    # TODO get the score from the URLs database
+    # TODO: get the score from the URLs database
+    # TODO: also queue documents for batches sent through the API
     documents = [Document(item.content.title, item.url, item.content.extract, 1)
                  for item in batch.items if item.content is not None]
     with Database() as db:

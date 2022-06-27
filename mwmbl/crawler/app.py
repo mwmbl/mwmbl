@@ -92,7 +92,7 @@ def create_batch(batch: Batch):
     data = gzip.compress(hashed_batch.json().encode('utf8'))
     upload(data, filename)
 
-    _record_urls_in_database(batch, user_id_hash, now)
+    record_urls_in_database(batch, user_id_hash, now)
 
     global last_batch
     last_batch = hashed_batch
@@ -124,10 +124,10 @@ def create_historical_batch(batch: HashedBatch):
     """
     user_id_hash = batch.user_id_hash
     batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=batch.timestamp)
-    _record_urls_in_database(batch, user_id_hash, batch_datetime)
+    record_urls_in_database(batch, user_id_hash, batch_datetime)
 
 
-def _record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str, timestamp: datetime):
+def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str, timestamp: datetime):
     with Database() as db:
         url_db = URLDatabase(db.connection)
         url_scores = defaultdict(float)
@@ -157,12 +157,36 @@ def _record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str
         #  - load some historical data as a starting point
 
 
+def get_batches_for_date(date_str):
+    check_date_str(date_str)
+    prefix = f'1/{VERSION}/{date_str}/1/'
+    cache_filename = prefix + 'batches.json.gz'
+    cache_url = PUBLIC_URL_PREFIX + cache_filename
+    try:
+        cached_batches = json.loads(gzip.decompress(requests.get(cache_url).content))
+        print(f"Got cached batches for {date_str}")
+        return cached_batches
+    except gzip.BadGzipFile:
+        pass
+
+    batches = get_batches_for_prefix(prefix)
+    result = {'batch_urls': [f'{PUBLIC_URL_PREFIX}{batch}' for batch in sorted(batches)]}
+    data = gzip.compress(json.dumps(result).encode('utf8'))
+    upload(data, cache_filename)
+    print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
+    return result
+
+
+def get_user_id_hash_from_url(url):
+    return url.split('/')[9]
+
+
 @router.get('/batches/{date_str}/users/{public_user_id}')
 def get_batches_for_date_and_user(date_str, public_user_id):
     check_date_str(date_str)
     check_public_user_id(public_user_id)
     prefix = f'1/{VERSION}/{date_str}/1/{public_user_id}/'
-    return get_batches_for_prefix(prefix)
+    return get_batch_ids_for_prefix(prefix)
 
 
 def check_public_user_id(public_user_id):
@@ -197,14 +221,20 @@ def get_batch_id_from_file_name(file_name: str):
     return file_name[:-len(FILE_NAME_SUFFIX)]
 
 
+def get_batch_ids_for_prefix(prefix):
+    filenames = get_batches_for_prefix(prefix)
+    filename_endings = sorted(filename.rsplit('/', 1)[1] for filename in filenames)
+    results = {'batch_ids': [get_batch_id_from_file_name(name) for name in filename_endings]}
+    return results
+
+
 def get_batches_for_prefix(prefix):
     s3 = boto3.resource('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
                         aws_secret_access_key=APPLICATION_KEY)
     bucket = s3.Bucket(BUCKET_NAME)
     items = bucket.objects.filter(Prefix=prefix)
-    file_names = sorted(item.key.rsplit('/', 1)[1] for item in items)
-    results = {'batch_ids': [get_batch_id_from_file_name(name) for name in file_names]}
-    return results
+    filenames = [item.key for item in items]
+    return filenames
 
 
 @router.get('/batches/{date_str}/users')
