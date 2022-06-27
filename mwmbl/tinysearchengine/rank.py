@@ -2,14 +2,10 @@ import re
 from abc import abstractmethod
 from logging import getLogger
 from operator import itemgetter
-from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
-
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
+from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
 logger = getLogger(__name__)

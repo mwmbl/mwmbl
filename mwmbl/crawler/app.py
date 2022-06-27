@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Union
 from urllib.parse import urlparse
@@ -13,8 +14,9 @@ import requests
 from fastapi import HTTPException, APIRouter
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
-from mwmbl.crawler.urls import URLDatabase
+from mwmbl.crawler.urls import URLDatabase, FoundURL
 from mwmbl.database import Database
+from mwmbl.hn_top_domains_filtered import DOMAINS
 
 APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
 KEY_ID = os.environ['MWMBL_KEY_ID']
@@ -27,6 +29,10 @@ VERSION = 'v1'
 DATE_REGEX = re.compile(r'\d{4}-\d{2}-\d{2}')
 PUBLIC_URL_PREFIX = f'https://f004.backblazeb2.com/file/{BUCKET_NAME}/'
 FILE_NAME_SUFFIX = '.json.gz'
+
+SCORE_FOR_ROOT_PATH = 0.1
+SCORE_FOR_DIFFERENT_DOMAIN = 1.0
+SCORE_FOR_SAME_DOMAIN = 0.01
 
 
 router = APIRouter(prefix="/crawler", tags=["crawler"])
@@ -124,20 +130,31 @@ def create_historical_batch(batch: HashedBatch):
 def _record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str, timestamp: datetime):
     with Database() as db:
         url_db = URLDatabase(db.connection)
-        found_urls = set()
+        url_scores = defaultdict(float)
         for item in batch.items:
             if item.content is not None:
-                found_urls |= set(item.content.links)
+                crawled_page_domain = urlparse(item.url).netloc
+                if crawled_page_domain not in DOMAINS:
+                    continue
 
-        parsed_urls = [urlparse(url) for url in found_urls]
-        domains = {f'{p.scheme}://{p.netloc}' for p in parsed_urls}
-        found_urls |= domains
+                for link in item.content.links:
+                    parsed_link = urlparse(link)
+                    score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
+                    url_scores[link] += score
+                    domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
+                    url_scores[domain] += SCORE_FOR_ROOT_PATH
 
+        found_urls = [FoundURL(url, user_id_hash, score, item.timestamp) for url, score in url_scores.items()]
         if len(found_urls) > 0:
-            url_db.user_found_urls(user_id_hash, list(found_urls), timestamp)
+            url_db.update_found_urls(found_urls)
 
         crawled_urls = [item.url for item in batch.items]
         url_db.user_crawled_urls(user_id_hash, crawled_urls, timestamp)
+
+        # TODO:
+        #  - test this code
+        #  - delete existing crawl data for change from INT to FLOAT
+        #  - load some historical data as a starting point
 
 
 @router.get('/batches/{date_str}/users/{public_user_id}')

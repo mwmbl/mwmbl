@@ -27,6 +27,14 @@ class URLStatus(Enum):
     CRAWLED = 3     # At least one user has crawled the URL
 
 
+@dataclass
+class FoundURL:
+    url: str
+    user_id_hash: str
+    score: float
+    timestamp: datetime
+
+
 class URLDatabase:
     def __init__(self, connection):
         self.connection = connection
@@ -45,7 +53,7 @@ class URLDatabase:
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
 
-    def user_found_urls(self, user_id_hash: str, urls: list[str], timestamp: datetime):
+    def update_found_urls(self, found_urls: list[FoundURL]):
         sql = f"""
          INSERT INTO urls (url, status, user_id_hash, score, updated) values %s
          ON CONFLICT (url) DO UPDATE SET
@@ -63,14 +71,15 @@ class URLDatabase:
            user_id_hash = CASE
              WHEN urls.status={URLStatus.ASSIGNED.value} THEN urls.user_id_hash ELSE excluded.user_id_hash
            END,
-           score=urls.score + 1,
+           score=urls.score + excluded.score,
            updated=excluded.updated
            updated = CASE
              WHEN urls.status={URLStatus.ASSIGNED.value} THEN urls.updated ELSE excluded.updated
            END
         """
 
-        data = [(url, URLStatus.NEW.value, user_id_hash, 1, timestamp) for url in urls]
+        data = [(found_url.url, URLStatus.NEW.value, found_url.user_id_hash, found_url.score, found_url.timestamp)
+                for found_url in found_urls]
 
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, data)
