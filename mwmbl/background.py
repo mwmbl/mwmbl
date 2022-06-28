@@ -6,5 +6,5 @@ from mwmbl.indexer.retrieve import retrieve_batches
 
 
 def run():
-    historical.run()
+    # historical.run()
     retrieve_batches()

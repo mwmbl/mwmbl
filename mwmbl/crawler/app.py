@@ -14,7 +14,7 @@ import requests
 from fastapi import HTTPException, APIRouter
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
-from mwmbl.crawler.urls import URLDatabase, FoundURL
+from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
 
@@ -123,8 +123,13 @@ def create_historical_batch(batch: HashedBatch):
     Update the database state of URL crawling for old data
     """
     user_id_hash = batch.user_id_hash
-    batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=batch.timestamp)
+    batch_datetime = get_datetime_from_timestamp(batch.timestamp)
     record_urls_in_database(batch, user_id_hash, batch_datetime)
+
+
+def get_datetime_from_timestamp(timestamp: int) -> datetime:
+    batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=timestamp)
+    return batch_datetime
 
 
 def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str, timestamp: datetime):
@@ -144,12 +149,14 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
                     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
                     url_scores[domain] += SCORE_FOR_ROOT_PATH
 
-        found_urls = [FoundURL(url, user_id_hash, score, item.timestamp) for url, score in url_scores.items()]
+        batch_datetime = get_datetime_from_timestamp(batch.timestamp)
+        found_urls = [FoundURL(url, user_id_hash, score, URLStatus.NEW, batch_datetime) for url, score in url_scores.items()]
         if len(found_urls) > 0:
             url_db.update_found_urls(found_urls)
 
-        crawled_urls = [item.url for item in batch.items]
-        url_db.user_crawled_urls(user_id_hash, crawled_urls, timestamp)
+        crawled_urls = [FoundURL(item.url, user_id_hash, 0.0, URLStatus.CRAWLED, batch_datetime)
+                        for item in batch.items]
+        url_db.update_found_urls(crawled_urls)
 
         # TODO:
         #  - test this code
