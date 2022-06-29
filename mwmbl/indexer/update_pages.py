@@ -15,23 +15,23 @@ def run_update(index_path):
         index_db.create_tables()
 
     with TinyIndex(Document, index_path, 'w') as indexer:
-        for i in range(indexer.num_pages):
-            with Database() as db:
-                index_db = IndexDatabase(db.connection)
+        with Database() as db:
+            index_db = IndexDatabase(db.connection)
+            pages_to_process = index_db.get_queued_pages()
+            print(f"Got {len(pages_to_process)} pages to process")
+            for i in pages_to_process:
                 documents = index_db.get_queued_documents_for_page(i)
                 print(f"Documents queued for page {i}: {len(documents)}")
-                if len(documents) == 0:
-                    continue
-
-                for j in range(3):
-                    try:
-                        indexer.add_to_page(i, documents)
-                        break
-                    except ValueError:
-                        documents = documents[:len(documents)//2]
-                        if len(documents) == 0:
+                if len(documents) > 0:
+                    for j in range(3):
+                        try:
+                            indexer.add_to_page(i, documents)
                             break
-                        print(f"Not enough space, adding {len(documents)}")
+                        except ValueError:
+                            documents = documents[:len(documents)//2]
+                            if len(documents) == 0:
+                                break
+                            print(f"Not enough space, adding {len(documents)}")
                 index_db.clear_queued_documents_for_page(i)
 
 

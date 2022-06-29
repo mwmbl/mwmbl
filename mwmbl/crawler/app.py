@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Union
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -159,9 +159,7 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
         url_db.update_found_urls(crawled_urls)
 
         # TODO:
-        #  - test this code
         #  - delete existing crawl data for change from INT to FLOAT
-        #  - load some historical data as a starting point
 
 
 def get_batches_for_date(date_str):
@@ -178,8 +176,10 @@ def get_batches_for_date(date_str):
 
     batches = get_batches_for_prefix(prefix)
     result = {'batch_urls': [f'{PUBLIC_URL_PREFIX}{batch}' for batch in sorted(batches)]}
-    data = gzip.compress(json.dumps(result).encode('utf8'))
-    upload(data, cache_filename)
+    if date_str != str(date.today()):
+        # Don't cache data from today since it may change
+        data = gzip.compress(json.dumps(result).encode('utf8'))
+        upload(data, cache_filename)
     print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
     return result
 

@@ -9,6 +9,7 @@ class Database:
 
     def __enter__(self):
         self.connection = connect(os.environ["DATABASE_URL"])
+        self.connection.set_session(autocommit=True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

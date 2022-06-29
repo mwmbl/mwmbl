@@ -8,6 +8,7 @@ from multiprocessing.pool import ThreadPool
 from time import sleep
 
 import requests
+from pydantic import ValidationError
 
 from mwmbl.crawler.app import create_historical_batch
 from mwmbl.crawler.batch import HashedBatch
@@ -26,22 +27,32 @@ def retrieve_batches():
 
     with Database() as db:
         index_db = IndexDatabase(db.connection)
-        batches = index_db.get_batches_by_status(BatchStatus.REMOTE)
-        print(f"Found {len(batches)} remote batches")
-        urls = [batch.url for batch in batches]
-        pool = ThreadPool(NUM_THREADS)
-        results = pool.imap_unordered(retrieve_batch, urls)
-        for result in results:
-            print("Processed batch with items:", result)
-        index_db.update_batch_status(urls, BatchStatus.LOCAL)
+
+        for i in range(100):
+            batches = index_db.get_batches_by_status(BatchStatus.REMOTE)
+            print(f"Found {len(batches)} remote batches")
+            if len(batches) == 0:
+                return
+            urls = [batch.url for batch in batches]
+            pool = ThreadPool(NUM_THREADS)
+            results = pool.imap_unordered(retrieve_batch, urls)
+            for result in results:
+                if result > 0:
+                    print("Processed batch with items:", result)
+            index_db.update_batch_status(urls, BatchStatus.LOCAL)
 
 
 def retrieve_batch(url):
     data = json.loads(gzip.decompress(retry_requests.get(url).content))
-    batch = HashedBatch.parse_obj(data)
-    print(f"Retrieved batch with {len(batch.items)} items")
-    create_historical_batch(batch)
-    queue_batch(batch)
+    try:
+        batch = HashedBatch.parse_obj(data)
+    except ValidationError:
+        print("Failed to validate batch", data)
+        raise
+    if len(batch.items) > 0:
+        print(f"Retrieved batch with {len(batch.items)} items")
+        create_historical_batch(batch)
+        queue_batch(batch)
     return len(batch.items)
 
 

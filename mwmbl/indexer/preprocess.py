@@ -26,15 +26,16 @@ def run_preprocessing(index_path):
     nlp = spacy.load("en_core_web_sm")
     with Database() as db:
         index_db = IndexDatabase(db.connection)
-        documents = index_db.get_documents_for_preprocessing()
-        print(f"Got {len(documents)} documents for preprocessing")
-        if len(documents) == 0:
-            sleep(10)
-        with TinyIndex(Document, index_path, 'w') as indexer:
-            for document in documents:
-                tokenized = tokenize_document(document.url, document.title, document.extract, 1, nlp)
-                page_indexes = [indexer.get_key_page_index(token) for token in tokenized.tokens]
-                index_db.queue_documents_for_page([(tokenized.url, i) for i in page_indexes])
+        for i in range(100):
+            documents = index_db.get_documents_for_preprocessing()
+            print(f"Got {len(documents)} documents for preprocessing")
+            if len(documents) == 0:
+                break
+            with TinyIndex(Document, index_path, 'w') as indexer:
+                for document in documents:
+                    tokenized = tokenize_document(document.url, document.title, document.extract, 1, nlp)
+                    page_indexes = [indexer.get_key_page_index(token) for token in tokenized.tokens]
+                    index_db.queue_documents_for_page([(tokenized.url, i) for i in page_indexes])
 
 
 if __name__ == '__main__':

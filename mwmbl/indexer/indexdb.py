@@ -117,7 +117,7 @@ class IndexDatabase:
         WHERE url IN (
             SELECT url FROM documents
             WHERE status = {DocumentStatus.NEW.value}
-            LIMIT 100
+            LIMIT 1000
             FOR UPDATE SKIP LOCKED
         )
         RETURNING url, title, extract, score
@@ -148,6 +148,16 @@ class IndexDatabase:
             cursor.execute(sql, {'page_index': page_index})
             results = cursor.fetchall()
             return [Document(title, url, extract, score) for url, title, extract, score in results]
+
+    def get_queued_pages(self) -> list[int]:
+        sql = """
+        SELECT DISTINCT page FROM document_pages ORDER BY page
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql)
+            results = cursor.fetchall()
+            return [x[0] for x in results]
 
     def clear_queued_documents_for_page(self, page_index: int):
         sql = """

@@ -60,6 +60,11 @@ class URLDatabase:
         get_urls_sql = """
           SELECT url FROM urls
           WHERE url in %(urls)s
+        """
+
+        lock_urls_sql = """
+          SELECT url FROM urls
+          WHERE url in %(urls)s
           FOR UPDATE SKIP LOCKED
         """
 
@@ -76,19 +81,27 @@ class URLDatabase:
            END
         """
 
-        urls_to_insert = [x.url for x in found_urls]
-        assert len(urls_to_insert) == len(set(urls_to_insert))
+        input_urls = [x.url for x in found_urls]
+        assert len(input_urls) == len(set(input_urls))
 
         with self.connection as connection:
             with connection.cursor() as cursor:
-                cursor.execute(get_urls_sql, {'urls': tuple(urls_to_insert)})
-                locked_urls = {x[0] for x in cursor.fetchall()}
-                if len(locked_urls) != len(urls_to_insert):
-                    print(f"Only got {len(locked_urls)} instead of {len(urls_to_insert)}")
+                cursor.execute(get_urls_sql, {'urls': tuple(input_urls)})
+                existing_urls = {x[0] for x in cursor.fetchall()}
+                new_urls = set(input_urls) - existing_urls
 
+                cursor.execute(lock_urls_sql, {'urls': tuple(input_urls)})
+                locked_urls = {x[0] for x in cursor.fetchall()}
+
+                urls_to_insert = new_urls | locked_urls
+
+                if len(urls_to_insert) != len(input_urls):
+                    print(f"Only got {len(locked_urls)} instead of {len(input_urls)}")
+
+                sorted_urls = sorted(found_urls, key=lambda x: x.url)
                 data = [
                     (found_url.url, found_url.status.value, found_url.user_id_hash, found_url.score, found_url.timestamp)
-                    for found_url in found_urls if found_url.url in locked_urls]
+                    for found_url in sorted_urls if found_url.url in urls_to_insert]
 
                 execute_values(cursor, insert_sql, data)
 
