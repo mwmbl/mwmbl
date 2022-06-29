@@ -95,7 +95,7 @@ def create_batch(batch: Batch):
     upload(data, filename)
 
     record_urls_in_database(batch, user_id_hash, now)
-    queue_batch(batch)
+    queue_batch(hashed_batch)
 
     global last_batch
     last_batch = hashed_batch
