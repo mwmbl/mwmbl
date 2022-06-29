@@ -7,15 +7,13 @@ import traceback
 from multiprocessing.pool import ThreadPool
 from time import sleep
 
-import requests
 from pydantic import ValidationError
 
-from mwmbl.crawler.app import create_historical_batch
+from mwmbl.crawler.app import create_historical_batch, queue_batch
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase, BatchStatus
 from mwmbl.retry import retry_requests
-from mwmbl.tinysearchengine.indexer import Document
 
 NUM_THREADS = 5
 
@@ -54,16 +52,6 @@ def retrieve_batch(url):
         create_historical_batch(batch)
         queue_batch(batch)
     return len(batch.items)
-
-
-def queue_batch(batch: HashedBatch):
-    # TODO: get the score from the URLs database
-    # TODO: also queue documents for batches sent through the API
-    documents = [Document(item.content.title, item.url, item.content.extract, 1)
-                 for item in batch.items if item.content is not None]
-    with Database() as db:
-        index_db = IndexDatabase(db.connection)
-        index_db.queue_documents(documents)
 
 
 def run():

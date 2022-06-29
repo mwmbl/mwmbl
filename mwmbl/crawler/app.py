@@ -17,6 +17,8 @@ from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.indexer.indexdb import IndexDatabase
+from mwmbl.tinysearchengine.indexer import Document
 
 APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
 KEY_ID = os.environ['MWMBL_KEY_ID']
@@ -93,6 +95,7 @@ def create_batch(batch: Batch):
     upload(data, filename)
 
     record_urls_in_database(batch, user_id_hash, now)
+    queue_batch(batch)
 
     global last_batch
     last_batch = hashed_batch
@@ -271,3 +274,13 @@ def status():
     return {
         'status': 'ok'
     }
+
+
+def queue_batch(batch: HashedBatch):
+    # TODO: get the score from the URLs database
+    # TODO: also queue documents for batches sent through the API
+    documents = [Document(item.content.title, item.url, item.content.extract, 1)
+                 for item in batch.items if item.content is not None]
+    with Database() as db:
+        index_db = IndexDatabase(db.connection)
+        index_db.queue_documents(documents)
