@@ -96,7 +96,7 @@ class URLDatabase:
                 urls_to_insert = new_urls | locked_urls
 
                 if len(urls_to_insert) != len(input_urls):
-                    print(f"Only got {len(locked_urls)} instead of {len(input_urls)} - {len(new_urls)} new")
+                    print(f"Only got {len(urls_to_insert)} instead of {len(input_urls)} - {len(new_urls)} new")
 
                 sorted_urls = sorted(found_urls, key=lambda x: x.url)
                 data = [
