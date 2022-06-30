@@ -152,12 +152,11 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
                     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
                     url_scores[domain] += SCORE_FOR_ROOT_PATH
 
-        batch_datetime = get_datetime_from_timestamp(batch.timestamp)
-        found_urls = [FoundURL(url, user_id_hash, score, URLStatus.NEW, batch_datetime) for url, score in url_scores.items()]
+        found_urls = [FoundURL(url, user_id_hash, score, URLStatus.NEW, timestamp) for url, score in url_scores.items()]
         if len(found_urls) > 0:
             url_db.update_found_urls(found_urls)
 
-        crawled_urls = [FoundURL(item.url, user_id_hash, 0.0, URLStatus.CRAWLED, batch_datetime)
+        crawled_urls = [FoundURL(item.url, user_id_hash, 0.0, URLStatus.CRAWLED, timestamp)
                         for item in batch.items]
         url_db.update_found_urls(crawled_urls)
 
