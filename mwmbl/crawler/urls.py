@@ -110,7 +110,7 @@ class URLDatabase:
         UPDATE urls SET status = {URLStatus.ASSIGNED.value}, user_id_hash = %(user_id_hash)s, updated = %(now)s
         WHERE url IN (
           SELECT url FROM urls
-          WHERE status IN ({URLStatus.CONFIRMED.value}, {URLStatus.NEW.value}) OR (
+          WHERE status = {URLStatus.NEW.value} OR (
             status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
           )
           ORDER BY score DESC
