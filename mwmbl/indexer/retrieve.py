@@ -46,7 +46,7 @@ def retrieve_batch(url):
         batch = HashedBatch.parse_obj(data)
     except ValidationError:
         print("Failed to validate batch", data)
-        raise
+        return 0
     if len(batch.items) > 0:
         print(f"Retrieved batch with {len(batch.items)} items")
         create_historical_batch(batch)
