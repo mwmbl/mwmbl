@@ -1,7 +1,7 @@
 import json
 
 from mwmbl.indexer.paths import TOP_DOMAINS_JSON_PATH
-from mwmbl.tinysearchengine.hn_top_domains_filtered import DOMAINS
+from mwmbl.hn_top_domains_filtered import DOMAINS
 
 
 def export_top_domains_to_json():

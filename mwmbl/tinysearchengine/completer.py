@@ -1,12 +1,17 @@
 from bisect import bisect_left, bisect_right
-from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
-from pandas import DataFrame
+
+
+TERMS_PATH = Path(__file__).parent.parent / 'resources' / 'mwmbl-crawl-terms.csv'
 
 
 class Completer:
-    def __init__(self, terms: DataFrame, num_matches: int = 3):
+    def __init__(self, num_matches: int = 3):
+        # Load term data
+        terms = pd.read_csv(TERMS_PATH)
+
         terms_dict = terms.sort_values('term').set_index('term')['count'].to_dict()
         self.terms = list(terms_dict.keys())
         self.counts = list(terms_dict.values())
@@ -26,12 +31,3 @@ class Completer:
 
         counts, terms = zip(*top_terms)
         return list(terms)
-
-
-if __name__ == '__main__':
-    data = pd.read_csv('data/mwmbl-crawl-terms.csv')
-    completer = Completer(data)
-    start = datetime.now()
-    completer.complete('fa')
-    end = datetime.now()
-    print("Time", end - start)

@@ -33,11 +33,12 @@ FROM base as final
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
-# Working directory is /app
-# Copying data and config into /app so that relative (default) paths in the config work
-COPY data /app/data
-COPY config /app/config
+ADD nginx.conf.sigil /app
+
+# Set up a volume where the data will live
+VOLUME ["/data"]
+
+EXPOSE 5000
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-# TODO: fix the arguments for the recent changes
-CMD ["/venv/bin/mwmbl-tinysearchengine", "--config",  "config/tinysearchengine.yaml"]
+CMD ["/venv/bin/mwmbl-tinysearchengine"]

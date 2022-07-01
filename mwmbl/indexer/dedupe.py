@@ -4,8 +4,9 @@ Dedupe pages that have been crawled more than once and prepare them for indexing
 import glob
 import gzip
 import json
+from itertools import islice
+from typing import Iterator
 
-from mwmbl.indexer.batch import grouper
 from mwmbl.indexer.fsqueue import FSQueue, GzipJsonBlobSerializer
 from mwmbl.indexer.paths import CRAWL_GLOB, TINYSEARCH_DATA_DIR
 
@@ -40,3 +41,11 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+
+def grouper(n: int, iterator: Iterator):
+    while True:
+        chunk = tuple(islice(iterator, n))
+        if not chunk:
+            return
+        yield chunk
