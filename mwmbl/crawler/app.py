@@ -35,6 +35,7 @@ FILE_NAME_SUFFIX = '.json.gz'
 SCORE_FOR_ROOT_PATH = 0.1
 SCORE_FOR_DIFFERENT_DOMAIN = 1.0
 SCORE_FOR_SAME_DOMAIN = 0.01
+UNKNOWN_DOMAIN_MULTIPLIER = 0.001
 
 
 router = APIRouter(prefix="/crawler", tags=["crawler"])
@@ -142,15 +143,13 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
         for item in batch.items:
             if item.content is not None:
                 crawled_page_domain = urlparse(item.url).netloc
-                if crawled_page_domain not in DOMAINS:
-                    continue
-
+                score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                 for link in item.content.links:
                     parsed_link = urlparse(link)
                     score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
-                    url_scores[link] += score
+                    url_scores[link] += score * score_multiplier
                     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
-                    url_scores[domain] += SCORE_FOR_ROOT_PATH
+                    url_scores[domain] += SCORE_FOR_ROOT_PATH * score_multiplier
 
         found_urls = [FoundURL(url, user_id_hash, score, URLStatus.NEW, timestamp) for url, score in url_scores.items()]
         if len(found_urls) > 0:
