@@ -13,7 +13,7 @@ SCORE_THRESHOLD = 0.25
 def create_router(ranker: HeuristicRanker) -> APIRouter:
     router = APIRouter(prefix="/search", tags=["search"])
 
-    @router.get("/")
+    @router.get("")
     def search(s: str):
         return ranker.search(s)
 
