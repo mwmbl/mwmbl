@@ -17,7 +17,7 @@ from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.indexer.indexdb import IndexDatabase
+from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
 from mwmbl.tinysearchengine.indexer import Document
 
 APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
@@ -35,6 +35,7 @@ FILE_NAME_SUFFIX = '.json.gz'
 SCORE_FOR_ROOT_PATH = 0.1
 SCORE_FOR_DIFFERENT_DOMAIN = 1.0
 SCORE_FOR_SAME_DOMAIN = 0.01
+UNKNOWN_DOMAIN_MULTIPLIER = 0.001
 
 
 router = APIRouter(prefix="/crawler", tags=["crawler"])
@@ -100,10 +101,18 @@ def create_batch(batch: Batch):
     global last_batch
     last_batch = hashed_batch
 
+    # Record the batch as being local so that we don't retrieve it again when the server restarts
+    batch_url = f'{PUBLIC_URL_PREFIX}{filename}'
+    infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL)]
+
+    with Database() as db:
+        index_db = IndexDatabase(db.connection)
+        index_db.record_batches(infos)
+
     return {
         'status': 'ok',
         'public_user_id': user_id_hash,
-        'url': f'{PUBLIC_URL_PREFIX}{filename}',
+        'url': batch_url,
     }
 
 
@@ -142,15 +151,13 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
         for item in batch.items:
             if item.content is not None:
                 crawled_page_domain = urlparse(item.url).netloc
-                if crawled_page_domain not in DOMAINS:
-                    continue
-
+                score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                 for link in item.content.links:
                     parsed_link = urlparse(link)
                     score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
-                    url_scores[link] += score
+                    url_scores[link] += score * score_multiplier
                     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
-                    url_scores[domain] += SCORE_FOR_ROOT_PATH
+                    url_scores[domain] += SCORE_FOR_ROOT_PATH * score_multiplier
 
         found_urls = [FoundURL(url, user_id_hash, score, URLStatus.NEW, timestamp) for url, score in url_scores.items()]
         if len(found_urls) > 0:
@@ -159,9 +166,6 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
         crawled_urls = [FoundURL(item.url, user_id_hash, 0.0, URLStatus.CRAWLED, timestamp)
                         for item in batch.items]
         url_db.update_found_urls(crawled_urls)
-
-        # TODO:
-        #  - delete existing crawl data for change from INT to FLOAT
 
 
 def get_batches_for_date(date_str):
