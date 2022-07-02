@@ -17,7 +17,7 @@ from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.indexer.indexdb import IndexDatabase
+from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
 from mwmbl.tinysearchengine.indexer import Document
 
 APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
@@ -101,10 +101,18 @@ def create_batch(batch: Batch):
     global last_batch
     last_batch = hashed_batch
 
+    # Record the batch as being local so that we don't retrieve it again when the server restarts
+    batch_url = f'{PUBLIC_URL_PREFIX}{filename}'
+    infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL)]
+
+    with Database() as db:
+        index_db = IndexDatabase(db.connection)
+        index_db.record_batches(infos)
+
     return {
         'status': 'ok',
         'public_user_id': user_id_hash,
-        'url': f'{PUBLIC_URL_PREFIX}{filename}',
+        'url': batch_url,
     }
 
 
@@ -158,9 +166,6 @@ def record_urls_in_database(batch: Union[Batch, HashedBatch], user_id_hash: str,
         crawled_urls = [FoundURL(item.url, user_id_hash, 0.0, URLStatus.CRAWLED, timestamp)
                         for item in batch.items]
         url_db.update_found_urls(crawled_urls)
-
-        # TODO:
-        #  - delete existing crawl data for change from INT to FLOAT
 
 
 def get_batches_for_date(date_str):
