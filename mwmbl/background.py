@@ -2,6 +2,7 @@
 Script that updates data in a background process.
 """
 from logging import getLogger
+from time import sleep
 
 from mwmbl.indexer import historical
 from mwmbl.indexer.preprocess import run_preprocessing
@@ -26,3 +27,4 @@ def run(index_path: str):
             run_update(index_path)
         except Exception:
             logger.exception("Error running index update")
+        sleep(10)
