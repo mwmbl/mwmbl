@@ -33,6 +33,10 @@ def run_update(index_path):
                                 break
                             print(f"Not enough space, adding {len(documents)}")
                 index_db.clear_queued_documents_for_page(i)
+            # All preprocessed documents should now have been indexed
+            # Clear documents that have now been preprocessed and indexed
+            num_cleared = index_db.clear_documents_for_preprocessing()
+            print(f"Indexed {num_cleared} documents")
 
 
 def run(index_path):

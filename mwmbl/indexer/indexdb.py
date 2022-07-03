@@ -128,6 +128,15 @@ class IndexDatabase:
             results = cursor.fetchall()
             return [Document(title, url, extract, score) for url, title, extract, score in results]
 
+    def clear_documents_for_preprocessing(self) -> int:
+        sql = f"""
+        DELETE FROM documents WHERE status = {DocumentStatus.PREPROCESSING.value}
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql)
+            return cursor.rowcount
+
     def queue_documents_for_page(self, urls_and_page_indexes: list[tuple[str, int]]):
         sql = """
         INSERT INTO document_pages (url, page) values %s
