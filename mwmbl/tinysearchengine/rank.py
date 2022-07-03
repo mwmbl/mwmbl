@@ -28,17 +28,25 @@ def _get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def _score_result(terms, result: Document, is_complete: bool, max_score: float):
+def _score_result(terms, result: Document, is_complete: bool):
     domain_score = get_domain_score(result.url)
 
-    result_string = f"{result.title.strip()} {result.extract.strip()}"
-    last_match_char, match_length, total_possible_match_length = get_match_features(
-        terms, result_string, is_complete, False)
+    parsed_url = urlparse(result.url)
+    domain = parsed_url.netloc
+    path = parsed_url.path
+    string_scores = []
+    for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (path, True)]:
+        last_match_char, match_length, total_possible_match_length = get_match_features(
+            terms, result_string, is_complete, is_url)
 
-    match_score = score_match(last_match_char, match_length, total_possible_match_length)
-    score = 0.01 * domain_score + 0.99 * match_score
+        new_score = score_match(last_match_char, match_length, total_possible_match_length)
+        string_scores.append(new_score)
+    title_score, extract_score, domain_score, path_score = string_scores
+
+    score = 0.01 * domain_score + 0.99 * (4 * title_score + extract_score + 4 * domain_score + path_score) * 0.1
     # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     # score = 0.01 * match_score + 0.99 * (result.score / max_score)
+    # print("Result", result, string_scores, score)
     return score
 
 
@@ -75,7 +83,7 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
         return []
 
     max_score = max(result.score for result in results)
-    results_and_scores = [(_score_result(terms, result, is_complete, max_score), result) for result in results]
+    results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
     return filtered_results
