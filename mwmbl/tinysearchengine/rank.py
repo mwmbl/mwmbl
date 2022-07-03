@@ -1,3 +1,4 @@
+import math
 import re
 from abc import abstractmethod
 from logging import getLogger
@@ -12,6 +13,7 @@ logger = getLogger(__name__)
 
 
 SCORE_THRESHOLD = 0.0
+LENGTH_PENALTY=0.01
 
 
 def _get_query_regex(terms, is_complete, is_url):
@@ -35,15 +37,17 @@ def _score_result(terms, result: Document, is_complete: bool):
     domain = parsed_url.netloc
     path = parsed_url.path
     string_scores = []
-    for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (path, True)]:
+    for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (domain, False), (path, True)]:
         last_match_char, match_length, total_possible_match_length = get_match_features(
             terms, result_string, is_complete, is_url)
 
         new_score = score_match(last_match_char, match_length, total_possible_match_length)
         string_scores.append(new_score)
-    title_score, extract_score, domain_score, path_score = string_scores
+    title_score, extract_score, domain_score, domain_split_score, path_score = string_scores
 
-    score = 0.01 * domain_score + 0.99 * (4 * title_score + extract_score + 4 * domain_score + path_score) * 0.1
+    length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
+    score = (0.01 * domain_score + 0.99 * (
+        4 * title_score + extract_score + 2 * domain_score + 2 * domain_split_score + path_score) * 0.1) * length_penalty
     # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     # score = 0.01 * match_score + 0.99 * (result.score / max_score)
     # print("Result", result, string_scores, score)
