@@ -1,8 +1,6 @@
 import gzip
 import hashlib
 import json
-import os
-import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta, date
 from typing import Union
@@ -18,25 +16,23 @@ from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
+from mwmbl.settings import (
+    ENDPOINT_URL,
+    KEY_ID,
+    APPLICATION_KEY,
+    BUCKET_NAME,
+    MAX_BATCH_SIZE,
+    USER_ID_LENGTH,
+    VERSION,
+    PUBLIC_URL_PREFIX,
+    UNKNOWN_DOMAIN_MULTIPLIER,
+    SCORE_FOR_SAME_DOMAIN,
+    SCORE_FOR_DIFFERENT_DOMAIN,
+    SCORE_FOR_ROOT_PATH,
+    PUBLIC_USER_ID_LENGTH,
+    FILE_NAME_SUFFIX,
+    DATE_REGEX)
 from mwmbl.tinysearchengine.indexer import Document
-
-APPLICATION_KEY = os.environ['MWMBL_APPLICATION_KEY']
-KEY_ID = os.environ['MWMBL_KEY_ID']
-ENDPOINT_URL = 'https://s3.us-west-004.backblazeb2.com'
-BUCKET_NAME = 'mwmbl-crawl'
-MAX_BATCH_SIZE = 100
-USER_ID_LENGTH = 36
-PUBLIC_USER_ID_LENGTH = 64
-VERSION = 'v1'
-DATE_REGEX = re.compile(r'\d{4}-\d{2}-\d{2}')
-PUBLIC_URL_PREFIX = f'https://f004.backblazeb2.com/file/{BUCKET_NAME}/'
-FILE_NAME_SUFFIX = '.json.gz'
-
-SCORE_FOR_ROOT_PATH = 0.1
-SCORE_FOR_DIFFERENT_DOMAIN = 1.0
-SCORE_FOR_SAME_DOMAIN = 0.01
-UNKNOWN_DOMAIN_MULTIPLIER = 0.001
-
 
 router = APIRouter(prefix="/crawler", tags=["crawler"])
 

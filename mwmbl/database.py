@@ -1,6 +1,6 @@
-import os
-
 from psycopg2 import connect
+
+from mwmbl.settings import DATABASE_URL
 
 
 class Database:
@@ -8,7 +8,7 @@ class Database:
         self.connection = None
 
     def __enter__(self):
-        self.connection = connect(os.environ["DATABASE_URL"])
+        self.connection = connect(DATABASE_URL)
         self.connection.set_session(autocommit=True)
         return self
 
