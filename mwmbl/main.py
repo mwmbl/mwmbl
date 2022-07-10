@@ -5,6 +5,7 @@ from multiprocessing import Process
 
 import uvicorn
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from mwmbl import background
 from mwmbl.indexer import historical, retrieve, preprocess, update_pages
@@ -41,11 +42,7 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
-    Process(target=background.run, args=(args.index,)).start()
-    # Process(target=historical.run).start()
-    # Process(target=retrieve.run).start()
-    # Process(target=preprocess.run, args=(args.index,)).start()
-    # Process(target=update_pages.run, args=(args.index,)).start()
+    # Process(target=background.run, args=(args.index,)).start()
 
     completer = Completer()
 
@@ -54,6 +51,16 @@ def run():
 
         # Initialize FastApi instance
         app = FastAPI()
+
+        origins = ["*"]
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
         search_router = search.create_router(ranker)
         app.include_router(search_router)
