@@ -9,14 +9,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA_DIR = Path(os.environ['HOME']) / 'data' / 'tinysearch'
-ALL_DOMAINS_PATH = DATA_DIR / 'hn-top-domains.csv'
-TOP_DOMAINS_PATH = '../hn_top_domains_filtered.py'
-
-MIN_COUNT = 10
-PROBABILITY_THRESHOLD = 0.8
-
-
 def get_top_domains():
     data = pd.read_csv(ALL_DOMAINS_PATH, index_col='domain')
     data = data[data.index.notnull()]
