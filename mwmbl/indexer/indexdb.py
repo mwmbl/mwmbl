@@ -104,7 +104,8 @@ class IndexDatabase:
         """
 
         sorted_documents = sorted(documents, key=lambda x: x.url)
-        data = [(document.url, document.title, document.extract, document.score, DocumentStatus.NEW.value)
+        data = [(document.url, clean_unicode(document.title), clean_unicode(document.extract),
+                 document.score, DocumentStatus.NEW.value)
                 for document in sorted_documents]
 
         print("Queueing documents", len(data))
@@ -176,3 +177,7 @@ class IndexDatabase:
 
         with self.connection.cursor() as cursor:
             cursor.execute(sql, {'page_index': page_index})
+
+
+def clean_unicode(s: str) -> str:
+    return s.encode('utf-8', 'ignore').decode('utf-8')
