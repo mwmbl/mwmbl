@@ -17,7 +17,8 @@ def run_update(index_path):
     with TinyIndex(Document, index_path, 'w') as indexer:
         with Database() as db:
             index_db = IndexDatabase(db.connection)
-            pages_to_process = index_db.get_queued_pages()
+            # pages_to_process = index_db.get_queued_pages()
+            pages_to_process = [278107]
             print(f"Got {len(pages_to_process)} pages to process")
             for i in pages_to_process:
                 documents = index_db.get_queued_documents_for_page(i)
