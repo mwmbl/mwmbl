@@ -13,18 +13,18 @@ logger = getLogger(__name__)
 
 
 def run(index_path: str):
-    historical.run()
+    # historical.run()
     while True:
-        try:
-            retrieve_batches()
-        except Exception:
-            logger.exception("Error retrieving batches")
+        # try:
+        #     retrieve_batches()
+        # except Exception:
+        #     logger.exception("Error retrieving batches")
         try:
             run_preprocessing(index_path)
         except Exception:
             logger.exception("Error preprocessing")
-        try:
-            run_update(index_path)
-        except Exception:
-            logger.exception("Error running index update")
+        # try:
+        #     run_update(index_path)
+        # except Exception:
+        #     logger.exception("Error running index update")
         sleep(10)

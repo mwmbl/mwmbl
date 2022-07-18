@@ -30,6 +30,7 @@ def run_update(index_path):
                         except ValueError:
                             documents = documents[:len(documents)//2]
                             if len(documents) == 0:
+                                print("No more space")
                                 break
                             print(f"Not enough space, adding {len(documents)}")
                 index_db.clear_queued_documents_for_page(i)

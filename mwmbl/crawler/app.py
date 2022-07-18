@@ -277,7 +277,6 @@ def status():
 
 def queue_batch(batch: HashedBatch):
     # TODO: get the score from the URLs database
-    # TODO: also queue documents for batches sent through the API
     documents = [Document(item.content.title, item.url, item.content.extract, 1)
                  for item in batch.items if item.content is not None]
     with Database() as db:

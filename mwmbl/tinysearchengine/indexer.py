@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import astuple, dataclass, asdict
 from io import UnsupportedOperation
+from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
 from typing import TypeVar, Generic, Callable, List
 
@@ -14,6 +15,9 @@ METADATA_SIZE = 4096
 
 NUM_PAGES = 5_120_000
 PAGE_SIZE = 4096
+
+
+logger = getLogger(__name__)
 
 
 @dataclass
@@ -92,6 +96,7 @@ class TinyIndex(Generic[T]):
         self.page_size = metadata.page_size
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
+        logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         self.index_file = None
         self.mmap = None
 
@@ -107,13 +112,14 @@ class TinyIndex(Generic[T]):
 
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
+        logger.debug(f"Retrieving index {index}")
         return self.get_page(index)
 
     def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
         return key_hash % self.num_pages
 
-    def get_page(self, i):
+    def get_page(self, i) -> list[T]:
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
@@ -123,6 +129,7 @@ class TinyIndex(Generic[T]):
     def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
         decompressed_data = self.decompressor.decompress(page_data)
+        # logger.debug(f"Decompressed data: {decompressed_data}")
         return json.loads(decompressed_data.decode('utf8'))
 
     def index(self, key: str, value: T):
