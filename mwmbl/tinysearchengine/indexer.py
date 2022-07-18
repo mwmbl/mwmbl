@@ -7,7 +7,7 @@ from mmap import mmap, PROT_READ, PROT_WRITE
 from typing import TypeVar, Generic, Callable, List
 
 import mmh3
-from zstandard import ZstdDecompressor, ZstdCompressor
+from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 VERSION = 1
 METADATA_CONSTANT = b'mwmbl-tiny-search'
@@ -128,7 +128,11 @@ class TinyIndex(Generic[T]):
 
     def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
-        decompressed_data = self.decompressor.decompress(page_data)
+        try:
+            decompressed_data = self.decompressor.decompress(page_data)
+        except ZstdError:
+            logger.exception(f"Error decompressing page data, content: {page_data}")
+            return []
         # logger.debug(f"Decompressed data: {decompressed_data}")
         return json.loads(decompressed_data.decode('utf8'))
 
