@@ -19,10 +19,10 @@ def run(index_path: str):
         #     retrieve_batches()
         # except Exception:
         #     logger.exception("Error retrieving batches")
-        # try:
-        #     run_preprocessing(index_path)
-        # except Exception:
-        #     logger.exception("Error preprocessing")
+        try:
+            run_preprocessing(index_path)
+        except Exception:
+            logger.exception("Error preprocessing")
         try:
             run_update(index_path)
         except Exception:
