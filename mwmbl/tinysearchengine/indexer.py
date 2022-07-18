@@ -36,6 +36,10 @@ class TokenizedDocument(Document):
 T = TypeVar('T')
 
 
+class PageError(Exception):
+    pass
+
+
 @dataclass
 class TinyIndexMetadata:
     version: int
@@ -68,7 +72,7 @@ def _get_page_data(compressor, page_size, data):
 def _pad_to_page_size(data: bytes, page_size: int):
     page_length = len(data)
     if page_length > page_size:
-        raise ValueError(f"Data is too big ({page_length}) for page size ({page_size})")
+        raise PageError(f"Data is too big ({page_length}) for page size ({page_size})")
     padding = b'\x00' * (page_size - page_length)
     page_data = data + padding
     return page_data
@@ -142,7 +146,7 @@ class TinyIndex(Generic[T]):
         page_index = self.get_key_page_index(key)
         try:
             self.add_to_page(page_index, [value])
-        except ValueError:
+        except PageError:
             pass
 
     def add_to_page(self, page_index: int, values: list[T]):
