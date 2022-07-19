@@ -6,7 +6,7 @@ from time import sleep
 
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PageError
 
 
 def run_update(index_path):
@@ -23,13 +23,14 @@ def run_update(index_path):
                 documents = index_db.get_queued_documents_for_page(i)
                 print(f"Documents queued for page {i}: {len(documents)}")
                 if len(documents) > 0:
-                    for j in range(3):
+                    for j in range(20):
                         try:
                             indexer.add_to_page(i, documents)
                             break
-                        except ValueError:
+                        except PageError:
                             documents = documents[:len(documents)//2]
                             if len(documents) == 0:
+                                print("No more space")
                                 break
                             print(f"Not enough space, adding {len(documents)}")
                 index_db.clear_queued_documents_for_page(i)

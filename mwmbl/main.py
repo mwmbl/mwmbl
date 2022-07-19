@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import sys
 from multiprocessing import Process
 
 import uvicorn
@@ -14,7 +15,7 @@ from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-logging.basicConfig()
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
 
 def setup_args():

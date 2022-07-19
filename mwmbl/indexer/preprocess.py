@@ -2,6 +2,7 @@
 Preprocess local documents for indexing.
 """
 import traceback
+from logging import getLogger
 from time import sleep
 
 import spacy
@@ -10,6 +11,9 @@ from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+
+
+logger = getLogger(__name__)
 
 
 def run(index_path):
@@ -34,7 +38,9 @@ def run_preprocessing(index_path):
             with TinyIndex(Document, index_path, 'w') as indexer:
                 for document in documents:
                     tokenized = tokenize_document(document.url, document.title, document.extract, 1, nlp)
+                    logger.debug(f"Tokenized: {tokenized}")
                     page_indexes = [indexer.get_key_page_index(token) for token in tokenized.tokens]
+                    logger.debug(f"Page indexes: {page_indexes}")
                     index_db.queue_documents_for_page([(tokenized.url, i) for i in page_indexes])
 
 
