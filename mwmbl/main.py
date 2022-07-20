@@ -9,7 +9,6 @@ import uvicorn
 from fastapi import FastAPI
 
 from mwmbl import background
-from mwmbl.indexer import historical, retrieve, preprocess, update_pages
 from mwmbl.crawler.app import router as crawler_router
 from mwmbl.indexer.paths import INDEX_NAME
 from mwmbl.tinysearchengine import search
