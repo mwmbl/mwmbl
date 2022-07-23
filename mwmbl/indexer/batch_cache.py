@@ -26,12 +26,13 @@ class BatchCache:
         os.makedirs(repo_path, exist_ok=True)
         self.path = repo_path
 
-    def get(self, num_batches) -> dict[str, HashedBatch]:
+    def get_cached(self, batch_urls: list[str]) -> dict[str, HashedBatch]:
         batches = {}
-        for path in os.listdir(self.path):
-            batch = HashedBatch.parse_file(path)
-            while len(batches) < num_batches:
-                batches[path] = batch
+        for url in batch_urls:
+            path = self.get_path_from_url(url)
+            data = gzip.GzipFile(path).read()
+            batch = HashedBatch.parse_raw(data)
+            batches[url] = batch
         return batches
 
     def retrieve_batches(self, num_thousand_batches=10):
@@ -43,7 +44,7 @@ class BatchCache:
             index_db = IndexDatabase(db.connection)
 
             for i in range(num_thousand_batches):
-                batches = index_db.get_batches_by_status(BatchStatus.REMOTE)
+                batches = index_db.get_batches_by_status(BatchStatus.REMOTE, 100)
                 print(f"Found {len(batches)} remote batches")
                 if len(batches) == 0:
                     return

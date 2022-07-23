@@ -16,7 +16,7 @@ from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
 def setup_args():
@@ -42,7 +42,7 @@ def run():
 
     if existing_index is None:
         print("Creating a new index")
-        TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
     Process(target=background.run, args=(args.data,)).start()
 

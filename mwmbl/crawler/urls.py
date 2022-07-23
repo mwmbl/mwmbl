@@ -128,6 +128,17 @@ class URLDatabase:
 
         return [result[0] for result in results]
 
+    def get_url_scores(self, urls: list[str]) -> dict[str, float]:
+        sql = f"""
+        SELECT url, score FROM urls WHERE url IN %(urls)s
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, {'urls': tuple(urls)})
+            results = cursor.fetchall()
+
+        return {result[0]: result[1] for result in results}
+
 
 if __name__ == "__main__":
     with Database() as db:

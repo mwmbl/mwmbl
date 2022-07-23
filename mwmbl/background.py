@@ -5,7 +5,7 @@ from logging import getLogger
 from pathlib import Path
 from time import sleep
 
-from mwmbl.indexer import historical
+from mwmbl.indexer import historical, index_batches
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_PATH, BATCH_DIR_NAME
 from mwmbl.indexer.preprocess import run_preprocessing
@@ -20,15 +20,11 @@ def run(data_path: str):
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
     while True:
         try:
-            batch_cache.retrieve_batches()
+            batch_cache.retrieve_batches(1)
         except Exception:
             logger.exception("Error retrieving batches")
         try:
-            run_preprocessing(index_path)
+            index_batches.run(batch_cache, index_path)
         except Exception:
-            logger.exception("Error preprocessing")
-        try:
-            run_update(index_path)
-        except Exception:
-            logger.exception("Error running index update")
+            logger.exception("Error indexing batches")
         sleep(10)

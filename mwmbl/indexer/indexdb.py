@@ -77,13 +77,13 @@ class IndexDatabase:
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, data)
 
-    def get_batches_by_status(self, status: BatchStatus) -> list[BatchInfo]:
+    def get_batches_by_status(self, status: BatchStatus, num_batches=1000) -> list[BatchInfo]:
         sql = """
-        SELECT * FROM batches WHERE status = %(status)s LIMIT 1000
+        SELECT * FROM batches WHERE status = %(status)s LIMIT %(num_batches)s
         """
 
         with self.connection.cursor() as cursor:
-            cursor.execute(sql, {'status': status.value})
+            cursor.execute(sql, {'status': status.value, 'num_batches': num_batches})
             results = cursor.fetchall()
             return [BatchInfo(url, user_id_hash, status) for url, user_id_hash, status in results]
 
