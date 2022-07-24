@@ -9,14 +9,15 @@ import uvicorn
 from fastapi import FastAPI
 
 from mwmbl import background
-from mwmbl.crawler.app import router as crawler_router
-from mwmbl.indexer.paths import INDEX_NAME
+from mwmbl.crawler import app as crawler
+from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
 
 def setup_args():
@@ -56,6 +57,9 @@ def run():
 
         search_router = search.create_router(ranker)
         app.include_router(search_router)
+
+        batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
+        crawler_router = crawler.get_router(batch_cache)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params

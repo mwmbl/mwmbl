@@ -35,26 +35,24 @@ class BatchCache:
             batches[url] = batch
         return batches
 
-    def retrieve_batches(self, num_thousand_batches=10):
+    def retrieve_batches(self, num_batches=1000):
         with Database() as db:
             index_db = IndexDatabase(db.connection)
             index_db.create_tables()
 
         with Database() as db:
             index_db = IndexDatabase(db.connection)
-
-            for i in range(num_thousand_batches):
-                batches = index_db.get_batches_by_status(BatchStatus.REMOTE, 100)
-                print(f"Found {len(batches)} remote batches")
-                if len(batches) == 0:
-                    return
-                urls = [batch.url for batch in batches]
-                pool = ThreadPool(self.num_threads)
-                results = pool.imap_unordered(self.retrieve_batch, urls)
-                for result in results:
-                    if result > 0:
-                        print("Processed batch with items:", result)
-                index_db.update_batch_status(urls, BatchStatus.LOCAL)
+            batches = index_db.get_batches_by_status(BatchStatus.REMOTE, num_batches)
+            print(f"Found {len(batches)} remote batches")
+            if len(batches) == 0:
+                return
+            urls = [batch.url for batch in batches]
+            pool = ThreadPool(self.num_threads)
+            results = pool.imap_unordered(self.retrieve_batch, urls)
+            for result in results:
+                if result > 0:
+                    print("Processed batch with items:", result)
+            index_db.update_batch_status(urls, BatchStatus.LOCAL)
 
     def retrieve_batch(self, url):
         data = json.loads(gzip.decompress(retry_requests.get(url).content))
