@@ -2,29 +2,27 @@
 Script that updates data in a background process.
 """
 from logging import getLogger
+from pathlib import Path
 from time import sleep
 
-from mwmbl.indexer import historical
-from mwmbl.indexer.preprocess import run_preprocessing
-from mwmbl.indexer.retrieve import retrieve_batches
-from mwmbl.indexer.update_pages import run_update
+from mwmbl.indexer import index_batches, historical
+from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.paths import INDEX_PATH, BATCH_DIR_NAME
 
 logger = getLogger(__name__)
 
 
-def run(index_path: str):
-    historical.run()
+def run(data_path: str):
+    # historical.run()
+    index_path = Path(data_path) / INDEX_PATH
+    batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
     while True:
         try:
-            retrieve_batches()
+            batch_cache.retrieve_batches(1000)
         except Exception:
             logger.exception("Error retrieving batches")
         try:
-            run_preprocessing(index_path)
+            index_batches.run(batch_cache, index_path)
         except Exception:
-            logger.exception("Error preprocessing")
-        try:
-            run_update(index_path)
-        except Exception:
-            logger.exception("Error running index update")
+            logger.exception("Error indexing batches")
         sleep(10)

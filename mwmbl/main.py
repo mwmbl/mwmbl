@@ -1,26 +1,29 @@
 import argparse
 import logging
 import os
+import sys
 from multiprocessing import Process
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from mwmbl import background
-from mwmbl.indexer import historical, retrieve, preprocess, update_pages
-from mwmbl.crawler.app import router as crawler_router
+from mwmbl.crawler import app as crawler
+from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-logging.basicConfig()
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
 
 def setup_args():
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
-    parser.add_argument("--index", help="Path to the tinysearchengine index file", default="/app/storage/index.tinysearch")
+    parser.add_argument("--data", help="Path to the tinysearchengine index file", default="/app/storage/")
     args = parser.parse_args()
     return args
 
@@ -28,8 +31,9 @@ def setup_args():
 def run():
     args = setup_args()
 
+    index_path = Path(args.data) / INDEX_NAME
     try:
-        existing_index = TinyIndex(item_factory=Document, index_path=args.index)
+        existing_index = TinyIndex(item_factory=Document, index_path=index_path)
         if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != NUM_PAGES:
             print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
                   f"({existing_index.num_pages}) does not match - removing.")
@@ -40,13 +44,13 @@ def run():
 
     if existing_index is None:
         print("Creating a new index")
-        TinyIndex.create(item_factory=Document, index_path=args.index, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
-    # Process(target=background.run, args=(args.index,)).start()
+    Process(target=background.run, args=(args.data,)).start()
 
     completer = Completer()
 
-    with TinyIndex(item_factory=Document, index_path=args.index) as tiny_index:
+    with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
         ranker = HeuristicRanker(tiny_index, completer)
 
         # Initialize FastApi instance
@@ -64,6 +68,9 @@ def run():
 
         search_router = search.create_router(ranker)
         app.include_router(search_router)
+
+        batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
+        crawler_router = crawler.get_router(batch_cache)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params

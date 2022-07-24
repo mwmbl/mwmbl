@@ -21,9 +21,13 @@ class URLStatus(Enum):
     """
     URL state update is idempotent and can only progress forwards.
     """
-    NEW = 0         # One user has identified this URL
-    ASSIGNED = 2    # The crawler has given the URL to a user to crawl
-    CRAWLED = 3     # At least one user has crawled the URL
+    NEW = 0                   # One user has identified this URL
+    ASSIGNED = 10             # The crawler has given the URL to a user to crawl
+    ERROR_TIMEOUT = 20        # Timeout while retrieving
+    ERROR_404 = 30            # 404 response
+    ERROR_OTHER = 40          # Some other error
+    ERROR_ROBOTS_DENIED = 50  # Robots disallow this page
+    CRAWLED = 100             # At least one user has crawled the URL
 
 
 @dataclass
@@ -127,6 +131,17 @@ class URLDatabase:
             results = cursor.fetchall()
 
         return [result[0] for result in results]
+
+    def get_url_scores(self, urls: list[str]) -> dict[str, float]:
+        sql = f"""
+        SELECT url, score FROM urls WHERE url IN %(urls)s
+        """
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, {'urls': tuple(urls)})
+            results = cursor.fetchall()
+
+        return {result[0]: result[1] for result in results}
 
 
 if __name__ == "__main__":

@@ -1,19 +1,23 @@
 import json
 import os
 from dataclasses import astuple, dataclass, asdict
-from io import UnsupportedOperation
+from io import UnsupportedOperation, BytesIO
+from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
 from typing import TypeVar, Generic, Callable, List
 
 import mmh3
-from zstandard import ZstdDecompressor, ZstdCompressor
+from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 VERSION = 1
 METADATA_CONSTANT = b'mwmbl-tiny-search'
 METADATA_SIZE = 4096
 
-NUM_PAGES = 512000
+NUM_PAGES = 5_120_000
 PAGE_SIZE = 4096
+
+
+logger = getLogger(__name__)
 
 
 @dataclass
@@ -30,6 +34,10 @@ class TokenizedDocument(Document):
 
 
 T = TypeVar('T')
+
+
+class PageError(Exception):
+    pass
 
 
 @dataclass
@@ -55,16 +63,28 @@ class TinyIndexMetadata:
         return TinyIndexMetadata(**values)
 
 
-def _get_page_data(compressor, page_size, data):
-    serialised_data = json.dumps(data)
-    compressed_data = compressor.compress(serialised_data.encode('utf8'))
+def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
+    bytes_io = BytesIO()
+    stream_writer = compressor.stream_writer(bytes_io, write_size=128)
+
+    num_fitting = 0
+    for i, item in enumerate(items):
+        serialised_data = json.dumps(item) + '\n'
+        stream_writer.write(serialised_data.encode('utf8'))
+        stream_writer.flush()
+        if len(bytes_io.getvalue()) > page_size:
+            break
+        num_fitting = i + 1
+
+    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
+    assert len(compressed_data) < page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
 
 def _pad_to_page_size(data: bytes, page_size: int):
     page_length = len(data)
     if page_length > page_size:
-        raise ValueError(f"Data is too big ({page_length}) for page size ({page_size})")
+        raise PageError(f"Data is too big ({page_length}) for page size ({page_size})")
     padding = b'\x00' * (page_size - page_length)
     page_data = data + padding
     return page_data
@@ -92,6 +112,7 @@ class TinyIndex(Generic[T]):
         self.page_size = metadata.page_size
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
+        logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         self.index_file = None
         self.mmap = None
 
@@ -107,13 +128,14 @@ class TinyIndex(Generic[T]):
 
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
+        logger.debug(f"Retrieving index {index}")
         return self.get_page(index)
 
     def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
         return key_hash % self.num_pages
 
-    def get_page(self, i):
+    def get_page(self, i) -> list[T]:
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
@@ -122,7 +144,12 @@ class TinyIndex(Generic[T]):
 
     def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
-        decompressed_data = self.decompressor.decompress(page_data)
+        try:
+            decompressed_data = self.decompressor.decompress(page_data)
+        except ZstdError:
+            logger.exception(f"Error decompressing page data, content: {page_data}")
+            return []
+        # logger.debug(f"Decompressed data: {decompressed_data}")
         return json.loads(decompressed_data.decode('utf8'))
 
     def index(self, key: str, value: T):
@@ -131,7 +158,7 @@ class TinyIndex(Generic[T]):
         page_index = self.get_key_page_index(key)
         try:
             self.add_to_page(page_index, [value])
-        except ValueError:
+        except PageError:
             pass
 
     def add_to_page(self, page_index: int, values: list[T]):
@@ -142,15 +169,20 @@ class TinyIndex(Generic[T]):
         current_page += value_tuples
         self._write_page(current_page, page_index)
 
-    def _write_page(self, data, i):
+    def store_in_page(self, page_index: int, values: list[T]):
+        value_tuples = [astuple(value) for value in values]
+        self._write_page(value_tuples, page_index)
+
+    def _write_page(self, data, i: int):
         """
         Serialise the data using JSON, compress it and store it at index i.
-        If the data is too big, it will raise a ValueError and not store anything
+        If the data is too big, it will store the first items in the list and discard the rest.
         """
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
         page_data = _get_page_data(self.compressor, self.page_size, data)
+        logger.debug(f"Got page data of length {len(page_data)}")
         self.mmap[i * self.page_size:(i+1) * self.page_size] = page_data
 
     @staticmethod

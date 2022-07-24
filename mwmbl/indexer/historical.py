@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
-from mwmbl.crawler.app import get_user_id_hashes_for_date, get_batches_for_date_and_user, get_batch_url, \
-    get_batches_for_date, get_user_id_hash_from_url
+from mwmbl.crawler.app import get_batches_for_date
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import BatchInfo, BatchStatus, IndexDatabase
 
@@ -19,6 +18,10 @@ def run():
             print("Historical batches for date", date_str, len(batch_urls))
             infos = [BatchInfo(url, get_user_id_hash_from_url(url), BatchStatus.REMOTE) for url in batch_urls]
             index_db.record_batches(infos)
+
+
+def get_user_id_hash_from_url(url):
+    return url.split('/')[9]
 
 
 if __name__ == '__main__':
