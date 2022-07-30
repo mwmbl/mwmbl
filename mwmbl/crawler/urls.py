@@ -2,6 +2,7 @@
 Database storing info on URLs
 """
 import os
+import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,7 +15,7 @@ from psycopg2.extras import execute_values
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 from mwmbl.database import Database
 
-REASSIGN_MIN_HOURS = 1
+REASSIGN_MIN_HOURS = 5
 BATCH_SIZE = 100
 
 
@@ -120,6 +121,9 @@ class URLDatabase:
                 execute_values(cursor, insert_sql, data)
 
     def get_new_batch_for_user(self, user_id_hash: str):
+        timeout_seconds = random.randint(10, 20)
+        timeout_sql = f"SET statement_timeout = '{timeout_seconds}s'"
+
         sql = f"""
         UPDATE urls SET status = {URLStatus.ASSIGNED.value}, user_id_hash = %(user_id_hash)s, updated = %(now)s
         WHERE url IN (
@@ -137,6 +141,7 @@ class URLDatabase:
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
         with self.connection.cursor() as cursor:
+            cursor.execute(timeout_sql)
             cursor.execute(sql, {'user_id_hash': user_id_hash, 'min_updated_date': min_updated_date, 'now': now})
             results = cursor.fetchall()
 
