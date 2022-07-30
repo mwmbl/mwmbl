@@ -18,7 +18,7 @@ def run(data_path: str):
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
     while True:
         try:
-            batch_cache.retrieve_batches(1000)
+            batch_cache.retrieve_batches(num_batches=10000)
         except Exception:
             logger.exception("Error retrieving batches")
         try:
