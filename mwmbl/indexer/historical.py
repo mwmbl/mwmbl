@@ -4,7 +4,7 @@ from mwmbl.crawler.app import get_batches_for_date
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import BatchInfo, BatchStatus, IndexDatabase
 
-DAYS = 10
+DAYS = 20
 
 
 def run():

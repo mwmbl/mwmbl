@@ -13,11 +13,6 @@ class BatchStatus(Enum):
     INDEXED = 2
 
 
-class DocumentStatus(Enum):
-    NEW = 0
-    PREPROCESSING = 1
-
-
 @dataclass
 class BatchInfo:
     url: str
@@ -38,32 +33,8 @@ class IndexDatabase:
         )
         """
 
-        documents_sql = """
-        CREATE TABLE IF NOT EXISTS documents (
-            url VARCHAR PRIMARY KEY,
-            title VARCHAR NOT NULL,
-            extract VARCHAR NOT NULL,
-            score FLOAT NOT NULL,
-            status INT NOT NULL
-        )
-        """
-
-        document_pages_sql = """
-        CREATE TABLE IF NOT EXISTS document_pages (
-            url VARCHAR NOT NULL,
-            page INT NOT NULL
-        ) 
-        """
-
-        document_pages_index_sql = """
-        CREATE INDEX IF NOT EXISTS document_pages_page_index ON document_pages (page)
-        """
-
         with self.connection.cursor() as cursor:
             cursor.execute(batches_sql)
-            cursor.execute(documents_sql)
-            cursor.execute(document_pages_sql)
-            cursor.execute(document_pages_index_sql)
 
     def record_batches(self, batch_infos: list[BatchInfo]):
         sql = """
