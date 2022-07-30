@@ -36,7 +36,7 @@ def run():
         if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != NUM_PAGES:
             print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
                   f"({existing_index.num_pages}) does not match - removing.")
-            os.remove(args.index)
+            os.remove(index_path)
             existing_index = None
     except FileNotFoundError:
         existing_index = None
