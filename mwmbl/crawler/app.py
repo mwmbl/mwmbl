@@ -2,6 +2,8 @@ import gzip
 import hashlib
 import json
 from datetime import datetime, timezone, date
+from multiprocessing import Queue
+from queue import Empty
 from typing import Union
 from uuid import uuid4
 
@@ -10,7 +12,7 @@ import requests
 from fastapi import HTTPException, APIRouter
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
-from mwmbl.crawler.urls import URLDatabase
+from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
@@ -43,7 +45,7 @@ def upload(data: bytes, name: str):
 last_batch = None
 
 
-def get_router(batch_cache: BatchCache):
+def get_router(batch_cache: BatchCache, url_queue: Queue):
     router = APIRouter(prefix="/crawler", tags=["crawler"])
 
     @router.on_event("startup")
@@ -104,12 +106,19 @@ def get_router(batch_cache: BatchCache):
         }
 
     @router.post('/batches/new')
-    def request_new_batch(batch_request: NewBatchRequest):
+    def request_new_batch(batch_request: NewBatchRequest) -> list[str]:
         user_id_hash = _get_user_id_hash(batch_request)
+        try:
+            urls = url_queue.get(block=False)
+        except Empty:
+            return []
 
+        found_urls = [FoundURL(url, user_id_hash, 0.0, URLStatus.ASSIGNED, datetime.utcnow()) for url in urls]
         with Database() as db:
             url_db = URLDatabase(db.connection)
-            return url_db.get_new_batch_for_user(user_id_hash)
+            url_db.update_found_urls(found_urls)
+
+        return urls
 
     @router.get('/batches/{date_str}/users/{public_user_id}')
     def get_batches_for_date_and_user(date_str, public_user_id):

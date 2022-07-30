@@ -2,7 +2,7 @@ import argparse
 import logging
 import os
 import sys
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 from pathlib import Path
 
 import uvicorn
@@ -45,7 +45,8 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
-    Process(target=background.run, args=(args.data,)).start()
+    url_queue = Queue()
+    Process(target=background.run, args=(args.data, url_queue)).start()
 
     completer = Completer()
 
@@ -59,7 +60,7 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache)
+        crawler_router = crawler.get_router(batch_cache, url_queue)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
