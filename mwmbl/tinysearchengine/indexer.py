@@ -1,7 +1,7 @@
 import json
 import os
 from dataclasses import astuple, dataclass, asdict
-from io import UnsupportedOperation
+from io import UnsupportedOperation, BytesIO
 from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
 from typing import TypeVar, Generic, Callable, List
@@ -13,7 +13,7 @@ VERSION = 1
 METADATA_CONSTANT = b'mwmbl-tiny-search'
 METADATA_SIZE = 4096
 
-NUM_PAGES = 5_120_000
+NUM_PAGES = 10_240_000
 PAGE_SIZE = 4096
 
 
@@ -63,9 +63,21 @@ class TinyIndexMetadata:
         return TinyIndexMetadata(**values)
 
 
-def _get_page_data(compressor, page_size, data):
-    serialised_data = json.dumps(data)
-    compressed_data = compressor.compress(serialised_data.encode('utf8'))
+def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
+    bytes_io = BytesIO()
+    stream_writer = compressor.stream_writer(bytes_io, write_size=128)
+
+    num_fitting = 0
+    for i, item in enumerate(items):
+        serialised_data = json.dumps(item) + '\n'
+        stream_writer.write(serialised_data.encode('utf8'))
+        stream_writer.flush()
+        if len(bytes_io.getvalue()) > page_size:
+            break
+        num_fitting = i + 1
+
+    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
+    assert len(compressed_data) < page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
 
@@ -157,15 +169,20 @@ class TinyIndex(Generic[T]):
         current_page += value_tuples
         self._write_page(current_page, page_index)
 
-    def _write_page(self, data, i):
+    def store_in_page(self, page_index: int, values: list[T]):
+        value_tuples = [astuple(value) for value in values]
+        self._write_page(value_tuples, page_index)
+
+    def _write_page(self, data, i: int):
         """
         Serialise the data using JSON, compress it and store it at index i.
-        If the data is too big, it will raise a ValueError and not store anything
+        If the data is too big, it will store the first items in the list and discard the rest.
         """
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
         page_data = _get_page_data(self.compressor, self.page_size, data)
+        logger.debug(f"Got page data of length {len(page_data)}")
         self.mmap[i * self.page_size:(i+1) * self.page_size] = page_data
 
     @staticmethod

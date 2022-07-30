@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Iterable
 
 from psycopg2 import connect
 from psycopg2.extras import execute_values
@@ -21,9 +22,22 @@ class URLStatus(Enum):
     """
     URL state update is idempotent and can only progress forwards.
     """
-    NEW = 0         # One user has identified this URL
-    ASSIGNED = 2    # The crawler has given the URL to a user to crawl
-    CRAWLED = 3     # At least one user has crawled the URL
+    NEW = 0                   # One user has identified this URL
+    ASSIGNED = 10             # The crawler has given the URL to a user to crawl
+    ERROR_TIMEOUT = 20        # Timeout while retrieving
+    ERROR_404 = 30            # 404 response
+    ERROR_OTHER = 40          # Some other error
+    ERROR_ROBOTS_DENIED = 50  # Robots disallow this page
+    CRAWLED = 100             # At least one user has crawled the URL
+
+
+def batch(items: list, batch_size):
+    """
+    Adapted from https://stackoverflow.com/a/8290508
+    """
+    length = len(items)
+    for ndx in range(0, length, batch_size):
+        yield items[ndx:min(ndx + batch_size, length)]
 
 
 @dataclass
@@ -127,6 +141,20 @@ class URLDatabase:
             results = cursor.fetchall()
 
         return [result[0] for result in results]
+
+    def get_url_scores(self, urls: list[str]) -> dict[str, float]:
+        sql = f"""
+        SELECT url, score FROM urls WHERE url IN %(urls)s
+        """
+
+        url_scores = {}
+        for url_batch in batch(urls, 10000):
+            with self.connection.cursor() as cursor:
+                cursor.execute(sql, {'urls': tuple(url_batch)})
+                results = cursor.fetchall()
+                url_scores.update({result[0]: result[1] for result in results})
+
+        return url_scores
 
 
 if __name__ == "__main__":
