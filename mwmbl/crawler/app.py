@@ -26,7 +26,7 @@ from mwmbl.settings import (
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
     DATE_REGEX)
-from mwmbl.tinysearchengine.indexer import Document
+
 
 def get_bucket(name):
     s3 = boto3.resource('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
