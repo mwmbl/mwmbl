@@ -7,14 +7,14 @@ from time import sleep
 
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.paths import INDEX_PATH, BATCH_DIR_NAME
+from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 
 logger = getLogger(__name__)
 
 
 def run(data_path: str):
-    # historical.run()
-    index_path = Path(data_path) / INDEX_PATH
+    historical.run()
+    index_path = Path(data_path) / INDEX_NAME
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
     while True:
         try:
