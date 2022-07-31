@@ -70,7 +70,7 @@ def index_pages(index_path, page_documents):
             existing_documents = indexer.get_page(page)
             seen_urls = set()
             seen_titles = set()
-            sorted_documents = sorted(documents + existing_documents, key=lambda x: x.score)
+            sorted_documents = sorted(documents + existing_documents, key=lambda x: x.score, reverse=True)
             for document in sorted_documents:
                 if document.title in seen_titles or document.url in seen_urls:
                     continue
@@ -78,7 +78,6 @@ def index_pages(index_path, page_documents):
                 seen_urls.add(document.url)
                 seen_titles.add(document.title)
             indexer.store_in_page(page, new_documents)
-            logger.debug(f"Wrote page {page} with {len(new_documents)} documents")
 
 
 def preprocess_documents(documents, index_path, nlp):

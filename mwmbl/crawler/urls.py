@@ -145,8 +145,6 @@ class URLDatabase:
 
         return [result[0] for result in results]
 
-
-
     def get_url_scores(self, urls: list[str]) -> dict[str, float]:
         sql = f"""
         SELECT url, score FROM urls WHERE url IN %(urls)s
