@@ -138,7 +138,7 @@ class Ranker:
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
-            retrieval_terms = terms[:-1] + self.completer.complete(terms[-1])
+            retrieval_terms = terms + self.completer.complete(terms[-1])
         else:
             retrieval_terms = terms
 
