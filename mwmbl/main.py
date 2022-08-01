@@ -23,6 +23,8 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 def setup_args():
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
     parser.add_argument("--data", help="Path to the tinysearchengine index file", default="/app/storage/")
+    parser.add_argument("--no-background", help="Disable running the background script to collect data",
+                        action='store_true')
     args = parser.parse_args()
     return args
 
@@ -46,7 +48,9 @@ def run():
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
     url_queue = Queue()
-    Process(target=background.run, args=(args.data, url_queue)).start()
+
+    if not args.no_background:
+        Process(target=background.run, args=(args.data, url_queue)).start()
 
     completer = Completer()
 
