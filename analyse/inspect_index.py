@@ -29,7 +29,7 @@ def store():
 
 def get_items():
     with TinyIndex(Document, INDEX_PATH) as tiny_index:
-        items = tiny_index.retrieve('search')
+        items = tiny_index.retrieve('wikipedia')
         if items:
             for item in items:
                 print("Items", item)

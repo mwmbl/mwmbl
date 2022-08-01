@@ -2,7 +2,7 @@ import argparse
 import logging
 import os
 import sys
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 from pathlib import Path
 
 import uvicorn
@@ -24,6 +24,8 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 def setup_args():
     parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
     parser.add_argument("--data", help="Path to the tinysearchengine index file", default="/app/storage/")
+    parser.add_argument("--no-background", help="Disable running the background script to collect data",
+                        action='store_true')
     args = parser.parse_args()
     return args
 
@@ -37,7 +39,7 @@ def run():
         if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != NUM_PAGES:
             print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
                   f"({existing_index.num_pages}) does not match - removing.")
-            os.remove(args.index)
+            os.remove(index_path)
             existing_index = None
     except FileNotFoundError:
         existing_index = None
@@ -46,7 +48,10 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
-    Process(target=background.run, args=(args.data,)).start()
+    url_queue = Queue()
+
+    if not args.no_background:
+        Process(target=background.run, args=(args.data, url_queue)).start()
 
     completer = Completer()
 
@@ -70,7 +75,7 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache)
+        crawler_router = crawler.get_router(batch_cache, url_queue)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
