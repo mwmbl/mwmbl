@@ -31,7 +31,7 @@ def _get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def _score_result(terms, result: Document, is_complete: bool):
+def _score_result(terms: list[str], result: Document, is_complete: bool):
     domain_score = get_domain_score(result.url)
 
     parsed_url = urlparse(result.url)
@@ -60,6 +60,30 @@ def _score_result(terms, result: Document, is_complete: bool):
 def score_match(last_match_char, match_length, total_possible_match_length):
     # return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
     return MATCH_EXPONENT ** (match_length - total_possible_match_length) / last_match_char
+
+
+def get_features(terms, title, url, extract, score, is_complete):
+    features = {}
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
+    path = parsed_url.path
+    for part, name, is_url in [(title, 'title', False),
+                               (extract, 'extract', False),
+                               (domain, 'domain', True),
+                               (domain, 'domain_tokenized', False),
+                               (path, 'path', True)]:
+        last_match_char, match_length, total_possible_match_length = get_match_features(terms, part, is_complete, is_url)
+        features[f'last_match_char_{name}'] = last_match_char
+        features[f'match_length_{name}'] = match_length
+        features[f'total_possible_match_length_{name}'] = total_possible_match_length
+        # features[f'score_{part}'] = score_match(last_match_char, match_length, total_possible_match_length)
+    features['num_terms'] = len(terms)
+    features['num_chars'] = len(' '.join(terms))
+    features['domain_score'] = get_domain_score(url)
+    features['path_length'] = len(path)
+    features['domain_length'] = len(domain)
+    features['item_score'] = score
+    return features
 
 
 def get_domain_score(url):
@@ -165,4 +189,3 @@ class Ranker:
 class HeuristicRanker(Ranker):
     def order_results(self, terms, pages, is_complete):
         return order_results(terms, pages, is_complete)
-
