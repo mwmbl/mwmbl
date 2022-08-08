@@ -76,7 +76,7 @@ def get_features(terms, title, url, extract, score, is_complete):
         features[f'last_match_char_{name}'] = last_match_char
         features[f'match_length_{name}'] = match_length
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
-        # features[f'score_{part}'] = score_match(last_match_char, match_length, total_possible_match_length)
+        features[f'score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
     features['num_terms'] = len(terms)
     features['num_chars'] = len(' '.join(terms))
     features['domain_score'] = get_domain_score(url)
@@ -94,7 +94,6 @@ def get_domain_score(url):
 
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = _get_query_regex(terms, is_complete, is_url)
-    print("Result string", result_string)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     match_strings = {x.group(0).lower() for x in matches}
     match_length = sum(len(x) for x in match_strings)
