@@ -13,7 +13,8 @@ logger = getLogger(__name__)
 
 
 SCORE_THRESHOLD = 0.0
-LENGTH_PENALTY=0.01
+LENGTH_PENALTY = 0.01
+MATCH_EXPONENT = 1.5
 
 
 def _get_query_regex(terms, is_complete, is_url):
@@ -37,11 +38,13 @@ def _score_result(terms, result: Document, is_complete: bool):
     domain = parsed_url.netloc
     path = parsed_url.path
     string_scores = []
+    logger.debug(f"Item: {result}")
     for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (domain, False), (path, True)]:
         last_match_char, match_length, total_possible_match_length = get_match_features(
             terms, result_string, is_complete, is_url)
 
         new_score = score_match(last_match_char, match_length, total_possible_match_length)
+        logger.debug(f"Item score: {new_score}, result {result_string}")
         string_scores.append(new_score)
     title_score, extract_score, domain_score, domain_split_score, path_score = string_scores
 
@@ -55,7 +58,8 @@ def _score_result(terms, result: Document, is_complete: bool):
 
 
 def score_match(last_match_char, match_length, total_possible_match_length):
-    return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    # return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    return MATCH_EXPONENT ** (match_length - total_possible_match_length) / last_match_char
 
 
 def get_domain_score(url):
@@ -66,6 +70,7 @@ def get_domain_score(url):
 
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = _get_query_regex(terms, is_complete, is_url)
+    print("Result string", result_string)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     match_strings = {x.group(0).lower() for x in matches}
     match_length = sum(len(x) for x in match_strings)
@@ -138,9 +143,9 @@ class Ranker:
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
-            retrieval_terms = terms + self.completer.complete(terms[-1])
+            retrieval_terms = set(terms + self.completer.complete(terms[-1]))
         else:
-            retrieval_terms = terms
+            retrieval_terms = set(terms)
 
         pages = []
         seen_items = set()

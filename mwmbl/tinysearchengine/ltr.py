@@ -37,6 +37,7 @@ def get_match_features_as_series(item: Series):
     features['num_terms'] = len(terms)
     features['num_chars'] = len(' '.join(terms))
     features['domain_score'] = get_domain_score(item['url'])
+    features['url_length'] = len(item['url'])
     features['item_score'] = item['score']
     return Series(features)
 
