@@ -1,13 +1,13 @@
 import argparse
 import logging
 import os
+import pickle
 import sys
 from multiprocessing import Process, Queue
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
 
 from mwmbl import background
 from mwmbl.crawler import app as crawler
@@ -16,9 +16,12 @@ from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
-from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+
+
+MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
 
 
 def setup_args():
@@ -56,7 +59,9 @@ def run():
     completer = Completer()
 
     with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
-        ranker = HeuristicRanker(tiny_index, completer)
+        # ranker = HeuristicRanker(tiny_index, completer)
+        model = pickle.load(open(MODEL_PATH, 'rb'))
+        ranker = LTRRanker(model, tiny_index, completer)
 
         # Initialize FastApi instance
         app = FastAPI()
