@@ -27,6 +27,7 @@ class ThresholdPredictor(BaseEstimator, RegressorMixin):
 def get_features_as_series(item: Series):
     terms = item['query'].lower().split()
     features = get_features(terms, item['title'], item['url'], item['extract'], item['score'], True)
+    # features_filtered = {k: v for k, v in features.items() if 'match_score' not in k}
     return Series(features)
 
 
