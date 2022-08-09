@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 
 SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.01
-MATCH_EXPONENT = 1.5
+MATCH_EXPONENT = 2
 
 
 def _get_query_regex(terms, is_complete, is_url):
@@ -32,25 +32,30 @@ def _get_query_regex(terms, is_complete, is_url):
 
 
 def _score_result(terms: list[str], result: Document, is_complete: bool):
-    domain_score = get_domain_score(result.url)
-
-    parsed_url = urlparse(result.url)
-    domain = parsed_url.netloc
-    path = parsed_url.path
-    string_scores = []
-    logger.debug(f"Item: {result}")
-    for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (domain, False), (path, True)]:
-        last_match_char, match_length, total_possible_match_length = get_match_features(
-            terms, result_string, is_complete, is_url)
-
-        new_score = score_match(last_match_char, match_length, total_possible_match_length)
-        logger.debug(f"Item score: {new_score}, result {result_string}")
-        string_scores.append(new_score)
-    title_score, extract_score, domain_score, domain_split_score, path_score = string_scores
+    features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
+    # domain_score = get_domain_score(result.url)
+    #
+    # parsed_url = urlparse(result.url)
+    # domain = parsed_url.netloc
+    # path = parsed_url.path
+    # string_scores = []
+    # logger.debug(f"Item: {result}")
+    # for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (domain, False), (path, True)]:
+    #     last_match_char, match_length, total_possible_match_length = get_match_features(
+    #         terms, result_string, is_complete, is_url)
+    #
+    #     new_score = score_match(last_match_char, match_length, total_possible_match_length)
+    #     logger.debug(f"Item score: {new_score}, result {result_string}")
+    #     string_scores.append(new_score)
+    # title_score, extract_score, domain_score, domain_split_score, path_score = string_scores
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    score = (0.01 * domain_score + 0.99 * (
-        4 * title_score + extract_score + 2 * domain_score + 2 * domain_split_score + path_score) * 0.1) * length_penalty
+    score = (
+        4 * features['match_score_title']
+        + features['match_score_extract'] +
+        2 * features['match_score_domain'] +
+        2 * features['match_score_domain_tokenized']
+        + features['match_score_path']) * length_penalty / 10
     # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
     # score = 0.01 * match_score + 0.99 * (result.score / max_score)
     # print("Result", result, string_scores, score)
@@ -76,7 +81,7 @@ def get_features(terms, title, url, extract, score, is_complete):
         features[f'last_match_char_{name}'] = last_match_char
         features[f'match_length_{name}'] = match_length
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
-        features[f'score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
+        features[f'match_score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
     features['num_terms'] = len(terms)
     features['num_chars'] = len(' '.join(terms))
     features['domain_score'] = get_domain_score(url)
