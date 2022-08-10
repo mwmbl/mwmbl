@@ -4,7 +4,7 @@ Learning to rank predictor
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 
-from mwmbl.tinysearchengine.rank import get_match_features, get_domain_score, score_match
+from mwmbl.tinysearchengine.rank import get_features
 
 
 class ThresholdPredictor(BaseEstimator, RegressorMixin):
@@ -24,20 +24,10 @@ class ThresholdPredictor(BaseEstimator, RegressorMixin):
         return predictions
 
 
-def get_match_features_as_series(item: Series):
+def get_features_as_series(item: Series):
     terms = item['query'].lower().split()
-    features = {}
-    for part in ['title', 'extract', 'url']:
-        last_match_char, match_length, total_possible_match_length = get_match_features(terms, item[part], True, False)
-        features[f'last_match_char_{part}'] = last_match_char
-        features[f'match_length_{part}'] = match_length
-        features[f'total_possible_match_length_{part}'] = total_possible_match_length
-        # features[f'score_{part}'] = score_match(last_match_char, match_length, total_possible_match_length)
-
-    features['num_terms'] = len(terms)
-    features['num_chars'] = len(' '.join(terms))
-    features['domain_score'] = get_domain_score(item['url'])
-    features['item_score'] = item['score']
+    features = get_features(terms, item['title'], item['url'], item['extract'], item['score'], True)
+    # features_filtered = {k: v for k, v in features.items() if 'match_score' not in k}
     return Series(features)
 
 
@@ -46,7 +36,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: DataFrame, y=None):
-        features = X.apply(get_match_features_as_series, axis=1)
+        features = X.apply(get_features_as_series, axis=1)
         print("Features", features.columns)
         return features
 

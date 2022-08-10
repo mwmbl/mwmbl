@@ -13,7 +13,9 @@ logger = getLogger(__name__)
 
 
 SCORE_THRESHOLD = 0.0
-LENGTH_PENALTY=0.01
+LENGTH_PENALTY = 0.04
+MATCH_EXPONENT = 2
+DOMAIN_SCORE_SMOOTHING = 50
 
 
 def _get_query_regex(terms, is_complete, is_url):
@@ -30,32 +32,50 @@ def _get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def _score_result(terms, result: Document, is_complete: bool):
-    domain_score = get_domain_score(result.url)
-
-    parsed_url = urlparse(result.url)
-    domain = parsed_url.netloc
-    path = parsed_url.path
-    string_scores = []
-    for result_string, is_url in [(result.title, False), (result.extract, False), (domain, True), (domain, False), (path, True)]:
-        last_match_char, match_length, total_possible_match_length = get_match_features(
-            terms, result_string, is_complete, is_url)
-
-        new_score = score_match(last_match_char, match_length, total_possible_match_length)
-        string_scores.append(new_score)
-    title_score, extract_score, domain_score, domain_split_score, path_score = string_scores
+def _score_result(terms: list[str], result: Document, is_complete: bool):
+    features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    score = (0.01 * domain_score + 0.99 * (
-        4 * title_score + extract_score + 2 * domain_score + 2 * domain_split_score + path_score) * 0.1) * length_penalty
-    # score = (0.1 + 0.9*match_score) * (0.1 + 0.9*(result.score / max_score))
-    # score = 0.01 * match_score + 0.99 * (result.score / max_score)
-    # print("Result", result, string_scores, score)
+    score = (
+        4 * features['match_score_title']
+        + features['match_score_extract'] +
+        2 * features['match_score_domain'] +
+        2 * features['match_score_domain_tokenized']
+        + features['match_score_path']) * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+    # best_match_score = max(features[f'match_score_{name}'] for name in ['title', 'extract', 'domain', 'domain_tokenized'])
+    # score = best_match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING)
     return score
 
 
 def score_match(last_match_char, match_length, total_possible_match_length):
-    return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    # return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
+    return MATCH_EXPONENT ** (match_length - total_possible_match_length) / last_match_char
+
+
+def get_features(terms, title, url, extract, score, is_complete):
+    features = {}
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
+    path = parsed_url.path
+    for part, name, is_url in [(title, 'title', False),
+                               (extract, 'extract', False),
+                               (domain, 'domain', True),
+                               (domain, 'domain_tokenized', False),
+                               (path, 'path', True)]:
+        last_match_char, match_length, total_possible_match_length, match_terms = \
+            get_match_features(terms, part, is_complete, is_url)
+        features[f'last_match_char_{name}'] = last_match_char
+        features[f'match_length_{name}'] = match_length
+        features[f'total_possible_match_length_{name}'] = total_possible_match_length
+        features[f'match_score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
+        features[f'match_terms_{name}'] = match_terms
+    features['num_terms'] = len(terms)
+    features['num_chars'] = len(' '.join(terms))
+    features['domain_score'] = get_domain_score(url)
+    features['path_length'] = len(path)
+    features['domain_length'] = len(domain)
+    features['item_score'] = score
+    return features
 
 
 def get_domain_score(url):
@@ -67,19 +87,21 @@ def get_domain_score(url):
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = _get_query_regex(terms, is_complete, is_url)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
-    match_strings = {x.group(0).lower() for x in matches}
-    match_length = sum(len(x) for x in match_strings)
+    # match_strings = {x.group(0).lower() for x in matches}
+    # match_length = sum(len(x) for x in match_strings)
 
     last_match_char = 1
     seen_matches = set()
+    match_length = 0
     for match in matches:
         value = match.group(0).lower()
         if value not in seen_matches:
             last_match_char = match.span()[1]
             seen_matches.add(value)
+            match_length += len(value)
 
     total_possible_match_length = sum(len(x) for x in terms)
-    return last_match_char, match_length, total_possible_match_length
+    return last_match_char, match_length, total_possible_match_length, len(seen_matches)
 
 
 def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
@@ -138,9 +160,9 @@ class Ranker:
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
-            retrieval_terms = terms[:-1] + self.completer.complete(terms[-1])
+            retrieval_terms = set(terms + self.completer.complete(terms[-1]))
         else:
-            retrieval_terms = terms
+            retrieval_terms = set(terms)
 
         pages = []
         seen_items = set()
@@ -160,4 +182,3 @@ class Ranker:
 class HeuristicRanker(Ranker):
     def order_results(self, terms, pages, is_complete):
         return order_results(terms, pages, is_complete)
-
