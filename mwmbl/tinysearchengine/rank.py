@@ -125,7 +125,7 @@ class Ranker:
         pass
 
     def search(self, s: str):
-        results, terms = self.get_results(s)
+        results, terms, _ = self.get_results(s)
 
         is_complete = s.endswith(' ')
         pattern = _get_query_regex(terms, is_complete, False)
@@ -149,19 +149,20 @@ class Ranker:
         return formatted_results
 
     def complete(self, q: str):
-        ordered_results, terms = self.get_results(q)
-        results = [item.title.replace("\n", "") + ' — ' +
-                   item.url.replace("\n", "") for item in ordered_results]
-        if len(results) == 0:
-            return []
-        return [q, results]
+        ordered_results, terms, completions = self.get_results(q)
+        filtered_completions = [c for c in completions if c != terms[-1]]
+        urls = [item.url for item in ordered_results[:5] if all(term in item.url for term in terms)][:1]
+        completed = [' '.join(terms[:-1] + [t]) for t in filtered_completions]
+        return [q, urls + completed]
 
     def get_results(self, q):
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
-            retrieval_terms = set(terms + self.completer.complete(terms[-1]))
+            completions = self.completer.complete(terms[-1])
+            retrieval_terms = set(terms + completions)
         else:
+            completions = []
             retrieval_terms = set(terms)
 
         pages = []
@@ -176,7 +177,7 @@ class Ranker:
                             seen_items.add(item.title)
 
         ordered_results = self.order_results(terms, pages, is_complete)
-        return ordered_results, terms
+        return ordered_results, terms, completions
 
 
 class HeuristicRanker(Ranker):
