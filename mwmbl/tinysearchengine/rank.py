@@ -12,6 +12,7 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
+MATCH_SCORE_THRESHOLD = 0.0
 SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
@@ -37,15 +38,20 @@ def _score_result(terms: list[str], result: Document, is_complete: bool):
     features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    score = (
-        4 * features['match_score_title']
-        + features['match_score_extract'] +
-        2 * features['match_score_domain'] +
-        2 * features['match_score_domain_tokenized']
-        + features['match_score_path']) * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+    match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
+        'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
+
+    max_match_terms = max(features[f'match_terms_{name}']
+                          for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
+    if max_match_terms <= len(terms) / 2:
+        return 0.0
+
+    if match_score > MATCH_SCORE_THRESHOLD:
+        return match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+
     # best_match_score = max(features[f'match_score_{name}'] for name in ['title', 'extract', 'domain', 'domain_tokenized'])
     # score = best_match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING)
-    return score
+    return 0.0
 
 
 def score_match(last_match_char, match_length, total_possible_match_length):
@@ -109,7 +115,6 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     if len(results) == 0:
         return []
 
-    max_score = max(result.score for result in results)
     results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]

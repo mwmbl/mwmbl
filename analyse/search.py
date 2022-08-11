@@ -18,7 +18,7 @@ def run():
     with TinyIndex(Document, INDEX_PATH) as tiny_index:
         completer = Completer()
         ranker = HeuristicRanker(tiny_index, completer)
-        items = ranker.search('google')
+        items = ranker.search('jasper fforde')
         print()
         if items:
             for i, item in enumerate(islice(items, 10)):
