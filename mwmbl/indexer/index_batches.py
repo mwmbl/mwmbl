@@ -23,6 +23,9 @@ from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 logger = getLogger(__name__)
 
 
+EXCLUDED_DOMAINS = {'web.archive.org'}
+
+
 def get_documents_from_batches(batches: Iterable[HashedBatch]) -> Iterable[tuple[str, str, str]]:
     for batch in batches:
         for item in batch.items:
@@ -123,6 +126,9 @@ def record_urls_in_database(batches: Iterable[HashedBatch]):
                     crawled_page_domain = urlparse(item.url).netloc
                     score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                     for link in item.content.links:
+                        if parsed_link.netloc in EXCLUDED_DOMAINS:
+                            continue
+
                         parsed_link = urlparse(link)
                         score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
                         url_scores[link] += score * score_multiplier
