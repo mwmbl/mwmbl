@@ -156,10 +156,15 @@ class Ranker:
 
     def complete(self, q: str):
         ordered_results, terms, completions = self.get_results(q)
-        filtered_completions = [c for c in completions if c != terms[-1]]
-        urls = [item.url[len(HTTPS_STRING):].rstrip('/') for item in ordered_results[:5]
+        if len(ordered_results) == 0:
+            # There are no results so suggest Google searches instead
+            adjusted_completions = ["search: google.com " + c for c in completions]
+        else:
+            adjusted_completions = [c for c in completions if c != terms[-1]]
+
+        urls = ["go: " + item.url[len(HTTPS_STRING):].rstrip('/') for item in ordered_results[:5]
                 if item.url.startswith(HTTPS_STRING) and all(term in item.url for term in terms)][:1]
-        completed = [' '.join(terms[:-1] + [t]) for t in filtered_completions]
+        completed = [' '.join(terms[:-1] + [t]) for t in adjusted_completions]
         return [q, urls + completed]
 
     def get_results(self, q):
