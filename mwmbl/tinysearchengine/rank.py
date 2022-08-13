@@ -12,10 +12,12 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 logger = getLogger(__name__)
 
 
+MATCH_SCORE_THRESHOLD = 0.0
 SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
 DOMAIN_SCORE_SMOOTHING = 50
+HTTPS_STRING = 'https://'
 
 
 def _get_query_regex(terms, is_complete, is_url):
@@ -36,15 +38,20 @@ def _score_result(terms: list[str], result: Document, is_complete: bool):
     features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    score = (
-        4 * features['match_score_title']
-        + features['match_score_extract'] +
-        2 * features['match_score_domain'] +
-        2 * features['match_score_domain_tokenized']
-        + features['match_score_path']) * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+    match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
+        'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
+
+    max_match_terms = max(features[f'match_terms_{name}']
+                          for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
+    if max_match_terms <= len(terms) / 2:
+        return 0.0
+
+    if match_score > MATCH_SCORE_THRESHOLD:
+        return match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+
     # best_match_score = max(features[f'match_score_{name}'] for name in ['title', 'extract', 'domain', 'domain_tokenized'])
     # score = best_match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING)
-    return score
+    return 0.0
 
 
 def score_match(last_match_char, match_length, total_possible_match_length):
@@ -108,7 +115,6 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     if len(results) == 0:
         return []
 
-    max_score = max(result.score for result in results)
     results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
@@ -125,7 +131,7 @@ class Ranker:
         pass
 
     def search(self, s: str):
-        results, terms = self.get_results(s)
+        results, terms, _ = self.get_results(s)
 
         is_complete = s.endswith(' ')
         pattern = _get_query_regex(terms, is_complete, False)
@@ -149,19 +155,28 @@ class Ranker:
         return formatted_results
 
     def complete(self, q: str):
-        ordered_results, terms = self.get_results(q)
-        results = [item.title.replace("\n", "") + ' — ' +
-                   item.url.replace("\n", "") for item in ordered_results]
-        if len(results) == 0:
-            return []
-        return [q, results]
+        ordered_results, terms, completions = self.get_results(q)
+        if len(ordered_results) == 0:
+            # There are no results so suggest Google searches instead
+            adjusted_completions = set(completions + [q])
+            completed = ["search: google.com " + ' '.join(terms[:-1] + [t]) for t in adjusted_completions]
+            return [q, completed]
+        else:
+            adjusted_completions = [c for c in completions if c != terms[-1]]
+
+            urls = ["go: " + item.url[len(HTTPS_STRING):].rstrip('/') for item in ordered_results[:5]
+                    if item.url.startswith(HTTPS_STRING) and all(term in item.url for term in terms)][:1]
+            completed = [' '.join(terms[:-1] + [t]) for t in adjusted_completions]
+            return [q, urls + completed]
 
     def get_results(self, q):
         terms = [x.lower() for x in q.replace('.', ' ').split()]
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
-            retrieval_terms = set(terms + self.completer.complete(terms[-1]))
+            completions = self.completer.complete(terms[-1])
+            retrieval_terms = set(terms + completions)
         else:
+            completions = []
             retrieval_terms = set(terms)
 
         pages = []
@@ -176,7 +191,7 @@ class Ranker:
                             seen_items.add(item.title)
 
         ordered_results = self.order_results(terms, pages, is_complete)
-        return ordered_results, terms
+        return ordered_results, terms, completions
 
 
 class HeuristicRanker(Ranker):
