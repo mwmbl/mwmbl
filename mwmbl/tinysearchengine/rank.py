@@ -158,8 +158,9 @@ class Ranker:
         ordered_results, terms, completions = self.get_results(q)
         if len(ordered_results) == 0:
             # There are no results so suggest Google searches instead
-            adjusted_completions = set(completions + [q])
-            completed = ["search: google.com " + ' '.join(terms[:-1] + [t]) for t in adjusted_completions]
+            completion_queries = [' '.join(terms[:-1] + [t]) for t in completions]
+            adjusted_completions = completion_queries if q in completion_queries else [q] + completion_queries
+            completed = ["search: google.com " + t for t in adjusted_completions]
             return [q, completed]
         else:
             adjusted_completions = [c for c in completions if c != terms[-1]]
