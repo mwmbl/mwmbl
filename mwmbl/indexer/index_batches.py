@@ -8,6 +8,7 @@ from typing import Iterable
 from urllib.parse import urlparse
 
 import spacy
+from spacy import Language
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
@@ -49,21 +50,21 @@ def run(batch_cache: BatchCache, index_path: str):
 
         record_urls_in_database(batch_data.values())
 
-        document_tuples = list(get_documents_from_batches(batch_data.values()))
-        urls = [url for title, url, extract in document_tuples]
-
-        logger.info(f"Got {len(urls)} document tuples")
-
         url_db = URLDatabase(db.connection)
-        url_scores = url_db.get_url_scores(urls)
-
-        logger.info(f"Got {len(url_scores)} scores")
-        documents = [Document(title, url, extract, url_scores.get(url, 1.0)) for title, url, extract in document_tuples]
-
-        page_documents = preprocess_documents(documents, index_path, nlp)
-        index_pages(index_path, page_documents)
+        index_batches(batch_data.values(), index_path, nlp, url_db)
         logger.info("Indexed pages")
         index_db.update_batch_status([batch.url for batch in batches], BatchStatus.INDEXED)
+
+
+def index_batches(batch_data: Iterable[HashedBatch], index_path: str, nlp: Language, url_db: URLDatabase):
+    document_tuples = list(get_documents_from_batches(batch_data))
+    urls = [url for title, url, extract in document_tuples]
+    logger.info(f"Got {len(urls)} document tuples")
+    url_scores = url_db.get_url_scores(urls)
+    logger.info(f"Got {len(url_scores)} scores")
+    documents = [Document(title, url, extract, url_scores.get(url, 1.0)) for title, url, extract in document_tuples]
+    page_documents = preprocess_documents(documents, index_path, nlp)
+    index_pages(index_path, page_documents)
 
 
 def index_pages(index_path, page_documents):

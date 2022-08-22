@@ -1,8 +1,10 @@
 import logging
 import sys
 
+import numpy as np
 import spacy
 
+from analyse.index_local import EVALUATE_INDEX_PATH
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.paths import INDEX_PATH
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -35,16 +37,24 @@ def get_items():
                 print("Items", item)
 
 
-def run():
-    with TinyIndex(Document, INDEX_PATH) as tiny_index:
-        for i in range(100000):
+def run(index_path):
+    with TinyIndex(Document, index_path) as tiny_index:
+        sizes = {}
+        for i in range(tiny_index.num_pages):
             page = tiny_index.get_page(i)
-            for item in page:
-                if ' search' in item.title:
-                    print("Page", i, item)
+            if page:
+                sizes[i] = len(page)
+            if len(page) > 50:
+                print("Page", len(page), page)
+            # for item in page:
+            #     if ' search' in item.title:
+            #         print("Page", i, item)
+        print("Max", max(sizes.values()))
+        print("Top", sorted(sizes.values())[-100:])
+        print("Mean", np.mean(list(sizes.values())))
 
 
 if __name__ == '__main__':
     # store()
-    # run()
-    get_items()
+    run(EVALUATE_INDEX_PATH)
+    # get_items()
