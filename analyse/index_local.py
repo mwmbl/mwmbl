@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 import spacy
 
@@ -41,10 +42,16 @@ def run():
     TinyIndex.create(item_factory=Document, index_path=EVALUATE_INDEX_PATH, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
 
     batches = get_batches()
+
+    start = datetime.now()
     with Database() as db:
         nlp = spacy.load("en_core_web_sm")
         url_db = URLDatabase(db.connection)
         index_batches(batches, EVALUATE_INDEX_PATH, nlp, url_db)
+    end = datetime.now()
+
+    total_time = (end - start).total_seconds()
+    print("total_seconds:", total_time)
 
 
 if __name__ == '__main__':

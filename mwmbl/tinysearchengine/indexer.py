@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import astuple, dataclass, asdict
+from dataclasses import dataclass, asdict
 from io import UnsupportedOperation, BytesIO
 from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
@@ -18,6 +18,10 @@ PAGE_SIZE = 4096
 
 
 logger = getLogger(__name__)
+
+
+def astuple(dc):
+    return tuple(dc.__dict__.values())
 
 
 @dataclass

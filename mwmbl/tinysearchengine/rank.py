@@ -5,6 +5,7 @@ from logging import getLogger
 from operator import itemgetter
 from urllib.parse import urlparse
 
+from mwmbl.indexer.index import tokenize
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -171,7 +172,7 @@ class Ranker:
             return [q, urls + completed]
 
     def get_results(self, q):
-        terms = [x.lower() for x in q.replace('.', ' ').split()]
+        terms = tokenize(q)
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
             completions = self.completer.complete(terms[-1])
