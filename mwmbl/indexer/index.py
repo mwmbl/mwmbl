@@ -38,13 +38,12 @@ STOPWORDS = set("0,1,2,3,4,5,6,7,8,9,a,A,about,above,across,after,again,against,
 def tokenize(input_text):
     cleaned_text = input_text.encode('utf8', 'replace').decode('utf8')
     tokens = cleaned_text.lower().split()
-    # tokens = nlp.tokenizer(cleaned_text)
     if input_text.endswith('…'):
         # Discard the last two tokens since there will likely be a word cut in two
         tokens = tokens[:-2]
-    content_tokens = [token for token in tokens if not token in STOPWORDS]
-    # lowered = {nlp.vocab[token.orth].text.lower() for token in content_tokens}
-    return content_tokens
+    # content_tokens = [token for token in tokens if not token in STOPWORDS]
+    # return content_tokens
+    return tokens
 
 
 def prepare_url_for_tokenizing(url: str):
