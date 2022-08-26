@@ -5,7 +5,7 @@ from logging import getLogger
 from operator import itemgetter
 from urllib.parse import urlparse
 
-from mwmbl.indexer.index import tokenize
+from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -35,7 +35,7 @@ def _get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def _score_result(terms: list[str], result: Document, is_complete: bool):
+def score_result(terms: list[str], result: Document, is_complete: bool):
     features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
@@ -116,7 +116,7 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     if len(results) == 0:
         return []
 
-    results_and_scores = [(_score_result(terms, result, is_complete), result) for result in results]
+    results_and_scores = [(score_result(terms, result, is_complete), result) for result in results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
     return filtered_results
@@ -181,16 +181,18 @@ class Ranker:
             completions = []
             retrieval_terms = set(terms)
 
+        bigrams = set(get_bigrams(len(terms), terms))
+
         pages = []
         seen_items = set()
-        for term in retrieval_terms:
+        for term in retrieval_terms | bigrams:
             items = self.tiny_index.retrieve(term)
             if items is not None:
                 for item in items:
-                    if term in item.title.lower() or term in item.extract.lower():
-                        if item.title not in seen_items:
-                            pages.append(item)
-                            seen_items.add(item.title)
+                    # if term in item.title.lower() or term in item.extract.lower():
+                    if item.title not in seen_items:
+                        pages.append(item)
+                        seen_items.add(item.title)
 
         ordered_results = self.order_results(terms, pages, is_complete)
         return ordered_results, terms, completions

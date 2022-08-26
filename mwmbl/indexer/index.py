@@ -8,12 +8,15 @@ from urllib.parse import unquote
 import pandas as pd
 
 from mwmbl.tinysearchengine.indexer import Document, TokenizedDocument, TinyIndex
+from mwmbl.tokenizer import tokenize, get_bigrams
 
 DEFAULT_SCORE = 0
 
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
 BATCH_SIZE = 100
+NUM_FIRST_TOKENS = 3
+NUM_BIGRAMS = 5
 
 
 STOPWORDS = set("0,1,2,3,4,5,6,7,8,9,a,A,about,above,across,after,again,against,all,almost,alone,along,already,also," \
@@ -33,17 +36,6 @@ STOPWORDS = set("0,1,2,3,4,5,6,7,8,9,a,A,about,above,across,after,again,against,
             "we're,were,weren't,we've,what,what's,when,when's,where,where's,whether,which,while,who,whole,whom,who's," \
             "whose,why,why's,will,with,within,without,won't,would,wouldn't,x,X,y,Y,yet,you,you'd,you'll,your,you're," \
             "yours,yourself,yourselves,you've,z,Z".split(','))
-
-
-def tokenize(input_text):
-    cleaned_text = input_text.encode('utf8', 'replace').decode('utf8')
-    tokens = cleaned_text.lower().split()
-    if input_text.endswith('…'):
-        # Discard the last two tokens since there will likely be a word cut in two
-        tokens = tokens[:-2]
-    # content_tokens = [token for token in tokens if not token in STOPWORDS]
-    # return content_tokens
-    return tokens
 
 
 def prepare_url_for_tokenizing(url: str):
@@ -66,13 +58,23 @@ def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedD
             print("Processed", i)
 
 
+def get_index_tokens(tokens):
+    first_tokens = tokens[:NUM_FIRST_TOKENS]
+    bigrams = get_bigrams(NUM_BIGRAMS, tokens)
+    return set(first_tokens + bigrams)
+
+
 def tokenize_document(url, title_cleaned, extract, score, nlp):
     title_tokens = tokenize(title_cleaned)
     prepared_url = prepare_url_for_tokenizing(unquote(url))
     url_tokens = tokenize(prepared_url)
     extract_tokens = tokenize(extract)
     # print("Extract tokens", extract_tokens)
-    tokens = set(title_tokens) | set(url_tokens) | set(extract_tokens)
+    tokens = get_index_tokens(title_tokens) | get_index_tokens(url_tokens) | get_index_tokens(extract_tokens)
+    # doc = Document(title_cleaned, url, extract, score)
+    # token_scores = {token: score_result([token], doc, True) for token in tokens}
+    # high_scoring_tokens = [k for k, v in token_scores.items() if v > 0.5]
+    # print("High scoring", len(high_scoring_tokens), token_scores, doc)
     document = TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
     return document
 
