@@ -2,32 +2,25 @@
 Index batches that are stored locally.
 """
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
 from logging import getLogger
-from typing import Iterable
-from urllib.parse import urlparse
+from typing import Collection, Iterable
 
 import spacy
+from mwmbl.indexer import process_batch
 from spacy import Language
 
 from mwmbl.crawler.batch import HashedBatch, Item
-from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
+from mwmbl.crawler.urls import URLDatabase, URLStatus
 from mwmbl.database import Database
-from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
-from mwmbl.indexer.indexdb import BatchStatus, IndexDatabase
-from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, SCORE_FOR_SAME_DOMAIN, SCORE_FOR_DIFFERENT_DOMAIN, \
-    SCORE_FOR_ROOT_PATH
+from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 logger = getLogger(__name__)
 
 
-EXCLUDED_DOMAINS = {'web.archive.org'}
-
-
-def get_documents_from_batches(batches: Iterable[HashedBatch]) -> Iterable[tuple[str, str, str]]:
+def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[tuple[str, str, str]]:
     for batch in batches:
         for item in batch.items:
             if item.content is not None:
@@ -35,28 +28,18 @@ def get_documents_from_batches(batches: Iterable[HashedBatch]) -> Iterable[tuple
 
 
 def run(batch_cache: BatchCache, index_path: str):
-    nlp = spacy.load("en_core_web_sm")
-    with Database() as db:
-        index_db = IndexDatabase(db.connection)
 
-        logger.info("Getting local batches")
-        batches = index_db.get_batches_by_status(BatchStatus.LOCAL, 10000)
-        logger.info(f"Got {len(batches)} batch urls")
-        if len(batches) == 0:
-            return
+    def process(batches: Collection[HashedBatch]):
+        with Database() as db:
+            nlp = spacy.load("en_core_web_sm")
+            url_db = URLDatabase(db.connection)
+            index_batches(batches, index_path, nlp, url_db)
+            logger.info("Indexed pages")
 
-        batch_data = batch_cache.get_cached([batch.url for batch in batches])
-        logger.info(f"Got {len(batch_data)} cached batches")
-
-        record_urls_in_database(batch_data.values())
-
-        url_db = URLDatabase(db.connection)
-        index_batches(batch_data.values(), index_path, nlp, url_db)
-        logger.info("Indexed pages")
-        index_db.update_batch_status([batch.url for batch in batches], BatchStatus.INDEXED)
+    process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, process)
 
 
-def index_batches(batch_data: Iterable[HashedBatch], index_path: str, nlp: Language, url_db: URLDatabase):
+def index_batches(batch_data: Collection[HashedBatch], index_path: str, nlp: Language, url_db: URLDatabase):
     document_tuples = list(get_documents_from_batches(batch_data))
     urls = [url for title, url, extract in document_tuples]
     logger.info(f"Got {len(urls)} document tuples")
@@ -106,49 +89,6 @@ def get_url_error_status(item: Item):
         elif item.error.name == 'RobotsDenied':
             return URLStatus.ERROR_ROBOTS_DENIED
     return URLStatus.ERROR_OTHER
-
-
-def record_urls_in_database(batches: Iterable[HashedBatch]):
-    with Database() as db:
-        url_db = URLDatabase(db.connection)
-        url_scores = defaultdict(float)
-        url_users = {}
-        url_timestamps = {}
-        url_statuses = defaultdict(lambda: URLStatus.NEW)
-        for batch in batches:
-            for item in batch.items:
-                timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
-                url_timestamps[item.url] = timestamp
-                url_users[item.url] = batch.user_id_hash
-                if item.content is None:
-                    url_statuses[item.url] = get_url_error_status(item)
-                else:
-                    url_statuses[item.url] = URLStatus.CRAWLED
-                    crawled_page_domain = urlparse(item.url).netloc
-                    score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
-                    for link in item.content.links:
-                        if parsed_link.netloc in EXCLUDED_DOMAINS:
-                            continue
-
-                        parsed_link = urlparse(link)
-                        score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
-                        url_scores[link] += score * score_multiplier
-                        url_users[link] = batch.user_id_hash
-                        url_timestamps[link] = timestamp
-                        domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
-                        url_scores[domain] += SCORE_FOR_ROOT_PATH * score_multiplier
-                        url_users[domain] = batch.user_id_hash
-                        url_timestamps[domain] = timestamp
-
-        found_urls = [FoundURL(url, url_users[url], url_scores[url], url_statuses[url], url_timestamps[url])
-                      for url in url_scores.keys() | url_statuses.keys()]
-
-        url_db.update_found_urls(found_urls)
-
-
-def get_datetime_from_timestamp(timestamp: float) -> datetime:
-    batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=timestamp)
-    return batch_datetime
 
 
 # TODO: clean unicode at some point
