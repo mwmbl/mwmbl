@@ -8,9 +8,10 @@ from psycopg2.extras import execute_values
 
 
 class BatchStatus(Enum):
-    REMOTE = 0    # The batch only exists in long term storage
-    LOCAL = 1     # We have a copy of the batch locally in Postgresql
-    INDEXED = 2
+    REMOTE = 0           # The batch only exists in long term storage
+    LOCAL = 10           # We have a copy of the batch locally in Postgresql
+    URLS_UPDATED = 20    # We've updated URLs from the batch
+    INDEXED = 30         # The batch has been indexed
 
 
 @dataclass

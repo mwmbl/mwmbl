@@ -6,7 +6,7 @@ from multiprocessing import Queue
 from pathlib import Path
 from time import sleep
 
-from mwmbl.indexer import index_batches, historical
+from mwmbl.indexer import index_batches, historical, update_urls
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 from mwmbl.url_queue import update_url_queue, initialize_url_queue
@@ -28,6 +28,10 @@ def run(data_path: str, url_queue: Queue):
             batch_cache.retrieve_batches(num_batches=10000)
         except Exception:
             logger.exception("Error retrieving batches")
+        try:
+            update_urls.run(batch_cache)
+        except Exception:
+            logger.exception("Error updating URLs")
         try:
             index_batches.run(batch_cache, index_path)
         except Exception:
