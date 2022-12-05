@@ -2,7 +2,7 @@
 
 # Mwmbl - **No ads, no tracking, no cruft, no profit**
 
-[![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org?color=blue&label=Matrix&style=for-the-badge)](https://matrix.to/#/#mwmbl:matrix.org)
+[![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
 
 Mwmbl is a non-profit, ad-free, free-libre and free-lunch search
 engine with a focus on useability and speed. At the moment it is
