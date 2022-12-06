@@ -12,6 +12,7 @@ from mwmbl import background
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
+from mwmbl.platform import user
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
@@ -71,6 +72,9 @@ def run():
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
         crawler_router = crawler.get_router(batch_cache, url_queue)
         app.include_router(crawler_router)
+
+        user_router = user.create_router()
+        app.include_router(user_router)
 
         # Initialize uvicorn server using global app instance and server config params
         uvicorn.run(app, host="0.0.0.0", port=5000)
