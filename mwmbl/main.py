@@ -14,7 +14,7 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, NUM_PAGES, PAGE_SIZE
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -24,9 +24,10 @@ MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
 
 
 def setup_args():
-    parser = argparse.ArgumentParser(description="mwmbl-tinysearchengine")
-    parser.add_argument("--data", help="Path to the tinysearchengine index file", default="/app/storage/")
-    parser.add_argument("--no-background", help="Disable running the background script to collect data",
+    parser = argparse.ArgumentParser(description="Mwmbl API server and background task processor")
+    parser.add_argument("--num-pages", help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
+    parser.add_argument("--data", help="Path to the data folder for storing index and cached batches", default="./devdata")
+    parser.add_argument("--background", help="Enable running the background tasks to process batches",
                         action='store_true')
     args = parser.parse_args()
     return args
@@ -38,7 +39,7 @@ def run():
     index_path = Path(args.data) / INDEX_NAME
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
-        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != NUM_PAGES:
+        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != args.num_pages:
             print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
                   f"({existing_index.num_pages}) does not match - removing.")
             os.remove(index_path)
@@ -48,11 +49,11 @@ def run():
 
     if existing_index is None:
         print("Creating a new index")
-        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=args.num_pages, page_size=PAGE_SIZE)
 
     url_queue = Queue()
 
-    if not args.no_background:
+    if args.background:
         Process(target=background.run, args=(args.data, url_queue)).start()
 
     completer = Completer()

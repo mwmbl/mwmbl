@@ -26,4 +26,4 @@ def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchSta
 
         process(batch_data.values())
 
-        index_db.update_batch_status([batch.url for batch in batches], end_status)
+        index_db.update_batch_status(list(batch_data.keys()), end_status)
