@@ -21,9 +21,18 @@ def create_router() -> APIRouter:
 
     @router.post("/register")
     def register_user(register: Register) -> Response:
-        request = requests.post(urljoin(LEMMY_URL, "api/v3/user/register"), json=register.json())
-        print("Request", request)
-        # TODO: add in missing fields with null values from here: https://join-lemmy.org/api/classes/Register.html
+        lemmy_register = {
+            "username": register.username,
+            "email": register.email,
+            "password": register.password,
+            "password_verify": register.password_verify,
+            "answer": None,
+            "captcha_answer": None,
+            "captcha_uuid": None,
+            "honeypot": None,
+            "show_nsfw": False,
+        }
+        request = requests.post(urljoin(LEMMY_URL, "api/v3/user/register"), json=lemmy_register)
         return Response(content=request.content, status_code=request.status_code, media_type="text/json")
 
     return router
