@@ -119,14 +119,6 @@ author (email address is in the git commit history).
 Development
 ===========
 
-### Using Docker
-
-WARNING: this uses production settings and creates a **very** large index (around 40Gb)
-
-1. Create a new folder called `data` in the root of the repository
-2. Run `$ docker build . -t mwmbl`
-3. Run `$ docker run -p 8080:8080 mwmbl`
-
 ### Local Testing
 
 This will run against a local test database without running background
@@ -141,6 +133,15 @@ your configuration.
 3. Run `poetry install` to install dependencies
 4. Run `poetry shell` in the root directory to enter the virtual environment
 5. Run `$ DATABASE_URL="postgres://username@" python -m mwmbl.main` replacing "username" with your username.
+
+### Using Dokku
+
+Note: this method is not recommended as it is more involved, and your index will not have any data in it unless you 
+set up a crawler to crawl to your server. You will need to set  up your own Backblaze or S3 equivalent storage, or 
+have access to the production keys, which we probably won't give you.
+
+Follow the [deployment instructions](https://github.com/mwmbl/mwmbl/wiki/Deployment)
+
 
 Frequently Asked Question
 =========================
