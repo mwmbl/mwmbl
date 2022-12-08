@@ -16,6 +16,11 @@ class Register(BaseModel):
     password_verify: str
 
 
+class Login(BaseModel):
+    username_or_email: str
+    password: str
+
+
 def create_router() -> APIRouter:
     router = APIRouter(prefix="/user", tags=["user"])
 
@@ -33,6 +38,11 @@ def create_router() -> APIRouter:
             "show_nsfw": False,
         }
         request = requests.post(urljoin(LEMMY_URL, "api/v3/user/register"), json=lemmy_register)
+        return Response(content=request.content, status_code=request.status_code, media_type="text/json")
+
+    @router.post("/login")
+    def register_user(login: Login) -> Response:
+        request = requests.post(urljoin(LEMMY_URL, "api/v3/user/login"), json=login.dict())
         return Response(content=request.content, status_code=request.status_code, media_type="text/json")
 
     return router
