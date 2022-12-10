@@ -1,3 +1,4 @@
+import json
 import os
 from urllib.parse import urljoin
 
@@ -6,7 +7,10 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
+from mwmbl.tokenizer import tokenize
+
 LEMMY_URL = os.environ["LEMMY_URL"]
+RESULT_URL = "https://mwmbl.org/?q="
 
 
 class Register(BaseModel):
@@ -53,18 +57,25 @@ def create_router() -> APIRouter:
         request = requests.post(urljoin(LEMMY_URL, "api/v3/user/login"), json=login.dict())
         return Response(content=request.content, status_code=request.status_code, media_type="text/json")
 
-    @router.post("/query/create")
+    @router.post("/curation/begin")
     def user_begin_curate(begin_curate: BeginCurate):
+        # TODO: check if there is already a post for this user and query combination.
+        #       If there is, just post the new original urls.
+        body = json.dumps({'original_urls': begin_curate.original_urls}, indent=2)
+        tokens = tokenize(begin_curate.query)
+        url = RESULT_URL + "+".join(tokens)
         create_post = {
             "auth": begin_curate.auth,
-            "body": None,
+            "body": body,
             "community_id": community_id,
             "honeypot": None,
             "language_id": None,
-            "name": None,
+            "name": begin_curate.query,
             "nsfw": None,
-            "url": None,
+            "url": url,
         }
+        request = requests.post(urljoin(LEMMY_URL, "api/v3/post"), json=create_post)
+        return Response(content=request.content, status_code=request.status_code, media_type="text/json")
 
     return router
 
