@@ -41,4 +41,4 @@ VOLUME ["/data"]
 EXPOSE 5000
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-CMD ["/venv/bin/mwmbl-tinysearchengine"]
+CMD ["/venv/bin/mwmbl-tinysearchengine", "--num-pages", "10240000", "--background"]
