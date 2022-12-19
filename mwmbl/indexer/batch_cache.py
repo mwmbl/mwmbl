@@ -6,6 +6,7 @@ We store them in a directory on the local machine.
 import gzip
 import json
 import os
+from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -19,6 +20,9 @@ from mwmbl.indexer.indexdb import IndexDatabase, BatchStatus
 from mwmbl.retry import retry_requests
 
 
+logger = getLogger(__name__)
+
+
 class BatchCache:
     num_threads = 20
 
@@ -30,7 +34,11 @@ class BatchCache:
         batches = {}
         for url in batch_urls:
             path = self.get_path_from_url(url)
-            data = gzip.GzipFile(path).read()
+            try:
+                data = gzip.GzipFile(path).read()
+            except FileNotFoundError:
+                logger.exception(f"Missing batch file: {path}")
+                continue
             batch = HashedBatch.parse_raw(data)
             batches[url] = batch
         return batches

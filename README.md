@@ -119,16 +119,29 @@ author (email address is in the git commit history).
 Development
 ===========
 
-### Using Docker
-1. Create a new folder called `data` in the root of the repository
-2. Download the [index file](https://storage.googleapis.com/mwmbl/index.tinysearch) and place it the new data folder
-3. Run `$ docker build . -t mwmbl`
-4. Run `$ docker run -p 8080:8080 mwmbl`
-
 ### Local Testing
-1. Create and activate a python (3.10) environment using any tool you like e.g. poetry,venv, conda etc.
-2. Run `$ pip install .`
-3. Run `$ mwmbl-tinysearchengine --config config/tinysearchengine.yaml`
+
+This will run against a local test database without running background
+tasks to update batches etc.
+
+This is the simplest way to configure postgres, but you can set it up
+how you like as long as the `DATABASE_URL` you give is correct for
+your configuration.
+
+1. Install postgres and create a user for your current username
+2. Install [poetry](https://python-poetry.org/docs/#installation)
+3. Run `poetry install` to install dependencies
+4. Run `poetry shell` in the root directory to enter the virtual environment
+5. Run `$ DATABASE_URL="postgres://username@" python -m mwmbl.main` replacing "username" with your username.
+
+### Using Dokku
+
+Note: this method is not recommended as it is more involved, and your index will not have any data in it unless you 
+set up a crawler to crawl to your server. You will need to set  up your own Backblaze or S3 equivalent storage, or 
+have access to the production keys, which we probably won't give you.
+
+Follow the [deployment instructions](https://github.com/mwmbl/mwmbl/wiki/Deployment)
+
 
 Frequently Asked Question
 =========================
