@@ -83,18 +83,17 @@ def create_router() -> APIRouter:
 
     @router.post("/curation/begin")
     def user_begin_curate(begin_curate: BeginCurate):
-        body = json.dumps({"original_urls": begin_curate.original_urls}, indent=2)
-        tokens = tokenize(begin_curate.query)
-        url = RESULT_URL + "+".join(tokens)
+        results = begin_curate.dict()["results"]
+        body = json.dumps({"original_results": results}, indent=2)
         create_post = {
             "auth": begin_curate.auth,
             "body": body,
             "community_id": community_id,
             "honeypot": None,
             "language_id": None,
-            "name": begin_curate.query,
+            "name": begin_curate.url,
             "nsfw": None,
-            "url": url,
+            "url": begin_curate.url,
         }
         request = requests.post(urljoin(LEMMY_URL, "api/v3/post"), json=create_post)
         if request.status_code != 200:
