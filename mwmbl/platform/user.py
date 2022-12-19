@@ -36,16 +36,16 @@ class Curation(BaseModel):
 
 
 class CurateMove(Curation):
-    url_old_index: int
-    url_new_index: int
+    old_index: int
+    new_index: int
 
 
 class CurateDelete(Curation):
-    url_delete_index: int
+    delete_index: int
 
 
 class CurateAdd(Curation):
-    url_insert_index: int
+    insert_index: int
     url: str
 
 
@@ -91,7 +91,11 @@ def create_router() -> APIRouter:
             "url": url,
         }
         request = requests.post(urljoin(LEMMY_URL, "api/v3/post"), json=create_post)
-        return Response(content=request.content, status_code=request.status_code, media_type="text/json")
+        if request.status_code != 200:
+            return Response(content=request.content, status_code=request.status_code, media_type="text/json")
+        data = request.json()
+        curation_id = data["post_view"]["post"]["id"]
+        return {"curation_id": curation_id}
 
     @router.post("/curation/move")
     def user_move_result(curate_move: CurateMove):

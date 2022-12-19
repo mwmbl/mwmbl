@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from mwmbl import background
 from mwmbl.crawler import app as crawler
@@ -65,6 +66,14 @@ def run():
 
         # Initialize FastApi instance
         app = FastAPI()
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
         search_router = search.create_router(ranker)
         app.include_router(search_router)
