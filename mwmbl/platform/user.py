@@ -24,10 +24,16 @@ class Login(BaseModel):
     password: str
 
 
+class Result(BaseModel):
+    url: str
+    title: str
+    extract: str
+
+
 class BeginCurate(BaseModel):
     auth: str
-    query: str
-    original_urls: list[str]
+    url: str
+    results: list[Result]
 
 
 class Curation(BaseModel):
