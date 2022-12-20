@@ -1,5 +1,6 @@
 import json
 import os
+from typing import TypeVar, Generic
 from urllib.parse import urljoin
 
 import requests
@@ -36,23 +37,27 @@ class BeginCurate(BaseModel):
     results: list[Result]
 
 
-class Curation(BaseModel):
-    auth: str
-    curation_id: int
-
-
-class CurateMove(Curation):
+class CurateMove(BaseModel):
     old_index: int
     new_index: int
 
 
-class CurateDelete(Curation):
+class CurateDelete(BaseModel):
     delete_index: int
 
 
-class CurateAdd(Curation):
+class CurateAdd(BaseModel):
     insert_index: int
     url: str
+
+
+T = TypeVar('T',  CurateAdd, CurateDelete, CurateMove)
+
+
+class Curation(BaseModel, Generic[T]):
+    auth: str
+    curation_id: int
+    curation: T
 
 
 def create_router() -> APIRouter:
@@ -103,19 +108,19 @@ def create_router() -> APIRouter:
         return {"curation_id": curation_id}
 
     @router.post("/curation/move")
-    def user_move_result(curate_move: CurateMove):
+    def user_move_result(curate_move: Curation[CurateMove]):
         return _create_comment("curate_move", curate_move)
 
     @router.post("/curation/delete")
-    def user_delete_result(curate_delete: CurateDelete):
+    def user_delete_result(curate_delete: Curation[CurateDelete]):
         return _create_comment("curate_delete", curate_delete)
 
     @router.post("/curation/add")
-    def user_add_result(curate_add: CurateAdd):
+    def user_add_result(curate_add: Curation[CurateAdd]):
         return _create_comment("curate_add", curate_add)
 
     def _create_comment(curation_type: str, curation: Curation):
-        content = json.dumps({curation_type: curation.dict()}, indent=2)
+        content = json.dumps({curation_type: curation.curation.dict()}, indent=2)
         create_comment = {
             "auth": curation.auth,
             "content": json.dumps(content, indent=2),
