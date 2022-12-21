@@ -51,7 +51,12 @@ class CurateAdd(BaseModel):
     url: str
 
 
-T = TypeVar('T',  CurateAdd, CurateDelete, CurateMove)
+class CurateValidate(BaseModel):
+    validate_index: int
+    is_validated: bool
+
+
+T = TypeVar('T',  CurateAdd, CurateDelete, CurateMove, CurateValidate)
 
 
 class Curation(BaseModel, Generic[T]):
@@ -118,6 +123,10 @@ def create_router() -> APIRouter:
     @router.post("/curation/add")
     def user_add_result(curate_add: Curation[CurateAdd]):
         return _create_comment("curate_add", curate_add)
+
+    @router.post("/curation/validate")
+    def user_add_result(curate_validate: Curation[CurateValidate]):
+        return _create_comment("curate_validate", curate_validate)
 
     def _create_comment(curation_type: str, curation: Curation):
         content = json.dumps({curation_type: curation.curation.dict()}, indent=2)
