@@ -8,8 +8,12 @@ from typing import Union
 from uuid import uuid4
 
 import boto3
+import justext
 import requests
 from fastapi import HTTPException, APIRouter
+from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
+    LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
+    STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
@@ -27,7 +31,7 @@ from mwmbl.settings import (
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
-    DATE_REGEX)
+    DATE_REGEX, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS)
 
 
 def get_bucket(name):
@@ -45,6 +49,32 @@ def upload(data: bytes, name: str):
 last_batch = None
 
 
+def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
+        length_high=LENGTH_HIGH_DEFAULT, stopwords_low=STOPWORDS_LOW_DEFAULT,
+        stopwords_high=STOPWORDS_HIGH_DEFAULT, max_link_density=MAX_LINK_DENSITY_DEFAULT,
+        max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT, no_headings=NO_HEADINGS_DEFAULT,
+        encoding=None, default_encoding=DEFAULT_ENCODING,
+        enc_errors=DEFAULT_ENC_ERRORS):
+    """
+    Converts an HTML page into a list of classified paragraphs. Each paragraph
+    is represented as instance of class ˙˙justext.paragraph.Paragraph˙˙.
+    """
+    dom = html_to_dom(html_text, default_encoding, encoding, enc_errors)
+
+    titles = dom.xpath("//title")
+    title = titles[0].text if len(titles) > 0 else None
+
+    dom = preprocessor(dom)
+
+    paragraphs = ParagraphMaker.make_paragraphs(dom)
+
+    classify_paragraphs(paragraphs, stoplist, length_low, length_high,
+        stopwords_low, stopwords_high, max_link_density, no_headings)
+    revise_paragraph_classification(paragraphs, max_heading_distance)
+
+    return paragraphs, title
+
+
 def get_router(batch_cache: BatchCache, url_queue: Queue):
     router = APIRouter(prefix="/crawler", tags=["crawler"])
 
@@ -53,6 +83,22 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
         with Database() as db:
             url_db = URLDatabase(db.connection)
             return url_db.create_tables()
+
+    @router.get('/fetch')
+    def fetch_url(url: str):
+        response = requests.get(url)
+        paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
+        good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
+
+        extract = ' '.join([p.text for p in good_paragraphs])
+        if len(extract) > NUM_EXTRACT_CHARS:
+            extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
+
+        return {
+            'url': url,
+            'title': title,
+            'extract': extract,
+        }
 
     @router.post('/batches/')
     def create_batch(batch: Batch):

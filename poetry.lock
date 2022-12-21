@@ -176,7 +176,7 @@ name = "en-core-web-sm"
 version = "3.2.0"
 description = "English pipeline optimized for CPU. Components: tok2vec, tagger, parser, senter, ner, attribute_ruler, lemmatizer."
 category = "main"
-optional = true
+optional = false
 python-versions = "*"
 
 [package.dependencies]
@@ -185,6 +185,7 @@ spacy = ">=3.2.0,<3.3.0"
 [package.source]
 type = "url"
 url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0.tar.gz"
+
 [[package]]
 name = "fastapi"
 version = "0.70.1"
@@ -928,12 +929,12 @@ cffi = {version = ">=1.11", markers = "platform_python_implementation == \"PyPy\
 cffi = ["cffi (>=1.11)"]
 
 [extras]
-indexer = ["ujson", "warcio", "idna", "beautifulsoup4", "lxml", "jusText", "langdetect", "pyarrow", "pyspark", "Levenshtein", "en-core-web-sm"]
+indexer = ["ujson", "warcio", "idna", "beautifulsoup4", "lxml", "jusText", "langdetect", "pyarrow", "pyspark", "Levenshtein"]
 
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.10,<3.11"
-content-hash = "cd17d671d8fa708240c3bf7bf5240bcf4bbcebea4538e5ad091bbcf9d10c5574"
+content-hash = "073bb40814f94368f5a6658acbff4b0b7cf720644593f016d1a28f7a6f86042d"
 
 [metadata.files]
 anyio = [
