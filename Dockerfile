@@ -14,8 +14,6 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
     POETRY_VERSION=1.1.12
 
 
-RUN apt update && apt install -y postgresql-client
-
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
 RUN python -m venv /venv
@@ -32,6 +30,8 @@ RUN /venv/bin/pip install pip --upgrade && \
     /venv/bin/pip install .
 
 FROM base as final
+
+RUN apt update && apt install -y postgresql-client
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
