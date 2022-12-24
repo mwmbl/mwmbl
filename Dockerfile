@@ -13,6 +13,9 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_VERSION=1.1.12
 
+
+RUN apt update && apt install -y postgresql-client
+
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
 RUN python -m venv /venv
