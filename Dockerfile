@@ -31,8 +31,6 @@ RUN /venv/bin/pip install pip --upgrade && \
 
 FROM base as final
 
-RUN apt update && apt install -y postgresql-client
-
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
