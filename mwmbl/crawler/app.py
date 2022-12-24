@@ -18,6 +18,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
+from mwmbl.format import format_result
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
 from mwmbl.settings import (
@@ -32,6 +33,7 @@ from mwmbl.settings import (
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
     DATE_REGEX, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS)
+from mwmbl.tinysearchengine.indexer import Document
 
 
 def get_bucket(name):
@@ -85,7 +87,7 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
             return url_db.create_tables()
 
     @router.get('/fetch')
-    def fetch_url(url: str):
+    def fetch_url(url: str, query: str):
         response = requests.get(url)
         paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
         good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
@@ -94,11 +96,8 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
         if len(extract) > NUM_EXTRACT_CHARS:
             extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
-        return {
-            'url': url,
-            'title': title,
-            'extract': extract,
-        }
+        result = Document(title=title, url=url, extract=extract, score=0.0)
+        return format_result(result, query)
 
     @router.post('/batches/')
     def create_batch(batch: Batch):
