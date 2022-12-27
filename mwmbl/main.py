@@ -25,7 +25,7 @@ MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Mwmbl API server and background task processor")
-    parser.add_argument("--num-pages", help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
+    parser.add_argument("--num-pages", type=int, help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
     parser.add_argument("--data", help="Path to the data folder for storing index and cached batches", default="./devdata")
     parser.add_argument("--background", help="Enable running the background tasks to process batches",
                         action='store_true')
