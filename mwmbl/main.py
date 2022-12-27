@@ -40,14 +40,9 @@ def run():
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
         if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != args.num_pages:
-            print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
-                  f"({existing_index.num_pages}) does not match - removing.")
-            os.remove(index_path)
-            existing_index = None
+            raise ValueError(f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+                             f"({existing_index.num_pages}) do not match")
     except FileNotFoundError:
-        existing_index = None
-
-    if existing_index is None:
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=args.num_pages, page_size=PAGE_SIZE)
 
