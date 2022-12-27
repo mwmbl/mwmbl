@@ -31,9 +31,6 @@ langdetect = {version= "==1.0.9", optional = true}
 pyarrow = {version= "==6.0.0", optional = true}
 pyspark = {version= "==3.2.0", optional = true}
 Levenshtein = {version= "==0.16.0", optional = true}
-# en-core-web-sm requires a compatible version of spacy
-en-core-web-sm = {url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0.tar.gz"}
-
 
 [tool.poetry.extras]
 indexer = [
@@ -47,7 +44,6 @@ indexer = [
     "pyarrow",
     "pyspark",
     "Levenshtein",
-    # en-core-web-sm requires a compatible version of spacy
 ]
 
 [tool.poetry.dev-dependencies]
