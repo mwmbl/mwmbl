@@ -24,7 +24,7 @@ def run(data_path: str, url_queue: Queue):
         url_db.create_tables()
 
     initialize_url_queue(url_queue)
-    # historical.run()
+    historical.run()
     index_path = Path(data_path) / INDEX_NAME
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
 
@@ -33,7 +33,6 @@ def run(data_path: str, url_queue: Queue):
             update_url_queue(url_queue)
         except Exception:
             logger.exception("Error updating URL queue")
-        return
         try:
             batch_cache.retrieve_batches(num_batches=10000)
         except Exception:
