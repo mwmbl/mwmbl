@@ -6,6 +6,8 @@ from multiprocessing import Queue
 from pathlib import Path
 from time import sleep
 
+from mwmbl.crawler.urls import URLDatabase
+from mwmbl.database import Database
 from mwmbl.indexer import index_batches, historical, update_urls
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
@@ -15,10 +17,17 @@ logger = getLogger(__name__)
 
 
 def run(data_path: str, url_queue: Queue):
+    logger.info("Started background process")
+
+    with Database() as db:
+        url_db = URLDatabase(db.connection)
+        url_db.create_tables()
+
     initialize_url_queue(url_queue)
     historical.run()
     index_path = Path(data_path) / INDEX_NAME
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
+
     while True:
         try:
             update_url_queue(url_queue)
