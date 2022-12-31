@@ -10,11 +10,13 @@ logger = getLogger(__name__)
 
 
 MAX_QUEUE_SIZE = 5000
+MIN_QUEUE_SIZE = 1000
 
 
 def update_url_queue(url_queue: Queue):
+    logger.info("Updating URL queue")
     current_size = url_queue.qsize()
-    if current_size >= MAX_QUEUE_SIZE:
+    if current_size >= MIN_QUEUE_SIZE:
         logger.info(f"Skipping queue update, current size {current_size}")
         return
 

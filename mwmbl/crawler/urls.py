@@ -4,15 +4,20 @@ Database storing info on URLs
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from logging import getLogger
 
 from psycopg2.extras import execute_values
 
-
+from mwmbl.hn_top_domains_filtered import DOMAINS
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 from mwmbl.utils import batch
 
 REASSIGN_MIN_HOURS = 5
 BATCH_SIZE = 100
+MAX_TOP_DOMAIN_URLS = 10
+
+
+logger = getLogger(__name__)
 
 
 class URLStatus(Enum):
@@ -43,6 +48,8 @@ class URLDatabase:
         self.connection = connection
 
     def create_tables(self):
+        logger.info("Creating URL tables")
+
         sql = """
         CREATE TABLE IF NOT EXISTS urls (
             url VARCHAR PRIMARY KEY,
@@ -53,8 +60,19 @@ class URLDatabase:
         )
         """
 
+        index_sql = """
+        CREATE INDEX IF NOT EXISTS host_index
+            ON urls(substring(url FROM '.*://([^/]*)'), score)
+        """
+
+        view_sql = """
+        CREATE OR REPLACE VIEW url_and_hosts AS SELECT *, substring(url FROM '.*://([^/]*)') AS host FROM urls
+        """
+
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
+            cursor.execute(index_sql)
+            cursor.execute(view_sql)
 
     def update_found_urls(self, found_urls: list[FoundURL]):
         if len(found_urls) == 0:
@@ -109,27 +127,40 @@ class URLDatabase:
                 execute_values(cursor, insert_sql, data)
 
     def get_urls_for_crawling(self, num_urls: int):
+        start = datetime.utcnow()
+        logger.info("Getting URLs for crawling")
+
+        work_mem = "SET work_mem = '512MB'"
+
         sql = f"""
         UPDATE urls SET status = {URLStatus.QUEUED.value}, updated = %(now)s
         WHERE url IN (
-          SELECT url FROM urls
-          WHERE status IN ({URLStatus.NEW.value}) OR (
-            status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
-          )
-          ORDER BY score DESC
-          LIMIT %(num_urls)s
-          FOR UPDATE SKIP LOCKED
+          SELECT url FROM (
+              SELECT url, host, score, rank() OVER (PARTITION BY host ORDER BY score DESC) AS pos
+              FROM url_and_hosts
+              WHERE host IN %(domains)s
+              AND status IN ({URLStatus.NEW.value}) OR (
+                  status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
+              )
+          ) u
+          WHERE pos < {MAX_TOP_DOMAIN_URLS}
         )
         RETURNING url
         """
 
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
+        domains = tuple(DOMAINS.keys())
         with self.connection.cursor() as cursor:
-            cursor.execute(sql, {'min_updated_date': min_updated_date, 'now': now, 'num_urls': num_urls})
+            cursor.execute(work_mem)
+            cursor.execute(sql, {'min_updated_date': min_updated_date, 'now': now, 'num_urls': num_urls, 'domains': domains})
             results = cursor.fetchall()
 
-        return [result[0] for result in results]
+        total_time_seconds = (datetime.now() - start).total_seconds()
+        results = [result[0] for result in results]
+        logger.info(f"Got {len(results)} in {total_time_seconds} seconds")
+
+        return results
 
     def get_urls(self, status: URLStatus, num_urls: int):
         sql = f"""

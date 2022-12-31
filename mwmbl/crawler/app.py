@@ -48,12 +48,6 @@ last_batch = None
 def get_router(batch_cache: BatchCache, url_queue: Queue):
     router = APIRouter(prefix="/crawler", tags=["crawler"])
 
-    @router.on_event("startup")
-    async def on_startup():
-        with Database() as db:
-            url_db = URLDatabase(db.connection)
-            return url_db.create_tables()
-
     @router.post('/batches/')
     def create_batch(batch: Batch):
         if len(batch.items) > MAX_BATCH_SIZE:
