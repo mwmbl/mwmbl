@@ -15,7 +15,9 @@ from mwmbl.utils import batch
 
 REASSIGN_MIN_HOURS = 5
 BATCH_SIZE = 100
-MAX_TOP_DOMAIN_URLS = 10
+MAX_URLS_PER_TOP_DOMAIN = 100
+MAX_TOP_DOMAINS = 500
+MAX_OTHER_DOMAINS = 50000
 
 
 logger = getLogger(__name__)
@@ -134,12 +136,20 @@ class URLDatabase:
         work_mem = "SET work_mem = '512MB'"
 
         select_sql = f"""
-            SELECT (array_agg(url order by score desc))[:100] FROM url_and_hosts
+            SELECT (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
             WHERE host IN %(domains)s
                AND status IN ({URLStatus.NEW.value}) OR (
                    status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
                )
             GROUP BY host
+        """
+
+        others_sql = f"""
+            SELECT DISTINCT ON (host) url FROM (
+                SELECT * FROM url_and_hosts
+                WHERE status=0
+                ORDER BY score DESC LIMIT {MAX_OTHER_DOMAINS}) u
+            ORDER BY host
         """
 
         update_sql = f"""
@@ -149,8 +159,7 @@ class URLDatabase:
 
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
-        domains = tuple(random.sample(DOMAINS.keys(), 500))
-        # domains = tuple(DOMAINS.keys())
+        domains = tuple(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS))
         logger.info(f"Getting URLs for domains {domains}")
         with self.connection.cursor() as cursor:
             cursor.execute(work_mem)
@@ -161,11 +170,18 @@ class URLDatabase:
         results = []
         for result in agg_results:
             results += result[0]
+        logger.info(f"Got {len(results)} top domain results")
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(others_sql)
+            other_results = cursor.fetchall()
+            other_results_list = [result[0] for result in other_results]
+            logger.info(f"Got {len(other_results_list)} results from all domains")
+            results += other_results_list
 
         with self.connection.cursor() as cursor:
             cursor.execute(update_sql,
                            {'now': now, 'urls': tuple(results)})
-            print("Results", agg_results)
 
         total_time_seconds = (datetime.now() - start).total_seconds()
         logger.info(f"Got {len(results)} in {total_time_seconds} seconds")
