@@ -136,7 +136,7 @@ class URLDatabase:
         work_mem = "SET work_mem = '512MB'"
 
         select_sql = f"""
-            SELECT (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
+            SELECT host, (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
             WHERE host IN %(domains)s
                 AND status IN ({URLStatus.NEW.value}) OR (
                     status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
@@ -161,7 +161,8 @@ class URLDatabase:
 
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
-        domains = tuple(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS))
+        domain_sample = set(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS))
+        domains = tuple(domain_sample)
         logger.info(f"Getting URLs for domains {domains}")
         with self.connection.cursor() as cursor:
             cursor.execute(work_mem)
@@ -171,12 +172,14 @@ class URLDatabase:
             logger.info(f"Agg results: {agg_results}")
 
         results = []
-        for result in agg_results:
-            results += result[0]
+        for host, urls in agg_results:
+            # There seems to be a bug in psql where we can get things we didn't ask for...
+            if host in domain_sample:
+                results += urls
         logger.info(f"Got {len(results)} top domain results")
 
         with self.connection.cursor() as cursor:
-            cursor.execute(others_sql)
+            cursor.execute(others_sql, {'min_updated_date': min_updated_date})
             other_results = cursor.fetchall()
             other_results_list = [result[0] for result in other_results]
             logger.info(f"Got {len(other_results_list)} results from all domains")
