@@ -129,7 +129,7 @@ class URLDatabase:
 
                 execute_values(cursor, insert_sql, data)
 
-    def get_urls_for_crawling(self, num_urls: int):
+    def get_urls_for_crawling(self):
         start = datetime.utcnow()
         logger.info("Getting URLs for crawling")
 
@@ -138,24 +138,26 @@ class URLDatabase:
         select_sql = f"""
             SELECT (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
             WHERE host IN %(domains)s
-               AND status IN ({URLStatus.NEW.value}) OR (
-                   status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
-               )
+                AND status IN ({URLStatus.NEW.value}) OR (
+                    status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
+                )
             GROUP BY host
         """
 
         others_sql = f"""
             SELECT DISTINCT ON (host) url FROM (
                 SELECT * FROM url_and_hosts
-                WHERE status=0
+                WHERE status IN ({URLStatus.NEW.value}) OR (
+                   status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
+                )
                 ORDER BY score DESC LIMIT {MAX_OTHER_DOMAINS}) u
             ORDER BY host
         """
 
         update_sql = f"""
-         UPDATE urls SET status = {URLStatus.QUEUED.value}, updated = %(now)s
-         WHERE url IN %(urls)s
-         """
+            UPDATE urls SET status = {URLStatus.QUEUED.value}, updated = %(now)s
+            WHERE url IN %(urls)s
+        """
 
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
@@ -166,6 +168,7 @@ class URLDatabase:
             cursor.execute(select_sql,
                            {'min_updated_date': min_updated_date, 'domains': domains})
             agg_results = cursor.fetchall()
+            logger.info(f"Agg results: {agg_results}")
 
         results = []
         for result in agg_results:

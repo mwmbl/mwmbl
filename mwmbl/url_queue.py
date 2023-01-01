@@ -20,10 +20,9 @@ def update_url_queue(url_queue: Queue):
         logger.info(f"Skipping queue update, current size {current_size}")
         return
 
-    num_urls_to_fetch = (MAX_QUEUE_SIZE - current_size) * BATCH_SIZE
     with Database() as db:
         url_db = URLDatabase(db.connection)
-        urls = url_db.get_urls_for_crawling(num_urls_to_fetch)
+        urls = url_db.get_urls_for_crawling()
         queue_batches(url_queue, urls)
         logger.info(f"Queued {len(urls)} urls, current queue size: {url_queue.qsize()}")
 
