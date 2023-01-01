@@ -49,7 +49,7 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
     router = APIRouter(prefix="/crawler", tags=["crawler"])
 
     @router.post('/batches/')
-    def create_batch(batch: Batch):
+    def post_batch(batch: Batch):
         if len(batch.items) > MAX_BATCH_SIZE:
             raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
 

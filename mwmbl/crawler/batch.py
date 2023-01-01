@@ -7,6 +7,7 @@ class ItemContent(BaseModel):
     title: str
     extract: str
     links: list[str]
+    extra_links: Optional[list[str]]
 
 
 class ItemError(BaseModel):
