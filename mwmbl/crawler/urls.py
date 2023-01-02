@@ -139,16 +139,16 @@ class URLDatabase:
         select_sql = f"""
             SELECT host, (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
             WHERE host IN %(domains)s
-                AND status IN ({URLStatus.NEW.value}) OR (
+                AND (status = {URLStatus.NEW.value} OR (
                     status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
-                )
+                ))
             GROUP BY host
         """
 
         others_sql = f"""
             SELECT DISTINCT ON (host) url FROM (
                 SELECT * FROM url_and_hosts
-                WHERE status IN ({URLStatus.NEW.value}) OR (
+                WHERE status = {URLStatus.NEW.value} OR (
                    status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
                 )
                 ORDER BY score DESC LIMIT {MAX_OTHER_DOMAINS}) u
@@ -174,9 +174,8 @@ class URLDatabase:
 
         results = []
         for host, urls in agg_results:
-            # There seems to be a bug in psql where we can get things we didn't ask for...
-            if host in domain_sample:
-                results += urls
+            results += urls
+
         logger.info(f"Got {len(results)} top domain results")
 
         with self.connection.cursor() as cursor:
