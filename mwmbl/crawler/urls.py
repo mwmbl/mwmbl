@@ -10,6 +10,7 @@ from logging import getLogger
 from psycopg2.extras import execute_values
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.settings import CORE_DOMAINS
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 from mwmbl.utils import batch
 
@@ -161,7 +162,7 @@ class URLDatabase:
 
         now = datetime.utcnow()
         min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
-        domain_sample = set(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS))
+        domain_sample = set(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS)) | CORE_DOMAINS
         domains = tuple(domain_sample)
         logger.info(f"Getting URLs for domains {domains}")
         with self.connection.cursor() as cursor:
