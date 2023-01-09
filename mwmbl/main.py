@@ -8,7 +8,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-from mwmbl import background
+from mwmbl import background, url_queue
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
@@ -46,10 +46,11 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=args.num_pages, page_size=PAGE_SIZE)
 
-    url_queue = Queue()
+    queue = Queue()
 
     if args.background:
-        Process(target=background.run, args=(args.data, url_queue)).start()
+        Process(target=background.run, args=(args.data,)).start()
+        Process(target=url_queue.run, args=(queue,)).start()
 
     completer = Completer()
 
@@ -65,7 +66,7 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache, url_queue)
+        crawler_router = crawler.get_router(batch_cache, queue)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params

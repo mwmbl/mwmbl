@@ -1,5 +1,6 @@
 from logging import getLogger
 from multiprocessing import Queue
+from time import sleep
 
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus
 from mwmbl.database import Database
@@ -13,11 +14,18 @@ MAX_QUEUE_SIZE = 5000
 MIN_QUEUE_SIZE = 1000
 
 
+def run(url_queue: Queue):
+    initialize_url_queue(url_queue)
+    while True:
+        update_url_queue(url_queue)
+
+
 def update_url_queue(url_queue: Queue):
     logger.info("Updating URL queue")
     current_size = url_queue.qsize()
     if current_size >= MIN_QUEUE_SIZE:
-        logger.info(f"Skipping queue update, current size {current_size}")
+        logger.info(f"Skipping queue update, current size {current_size}, sleeping for 10 seconds")
+        sleep(10)
         return
 
     with Database() as db:
