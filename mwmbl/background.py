@@ -21,15 +21,15 @@ def run(data_path: str):
         url_db = URLDatabase(db.connection)
         url_db.create_tables()
 
-    historical.run()
+    # historical.run()
     index_path = Path(data_path) / INDEX_NAME
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
 
     while True:
-        try:
-            batch_cache.retrieve_batches(num_batches=10000)
-        except Exception:
-            logger.exception("Error retrieving batches")
+        # try:
+        #     batch_cache.retrieve_batches(num_batches=10000)
+        # except Exception:
+        #     logger.exception("Error retrieving batches")
         try:
             update_urls.run(batch_cache)
         except Exception:
