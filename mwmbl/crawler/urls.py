@@ -78,7 +78,7 @@ class URLDatabase:
             cursor.execute(index_sql)
             cursor.execute(view_sql)
 
-    def update_found_urls(self, found_urls: list[FoundURL]):
+    def update_found_urls(self, found_urls: list[FoundURL]) -> list[FoundURL]:
         if len(found_urls) == 0:
             return
 
@@ -104,6 +104,7 @@ class URLDatabase:
            updated = CASE
              WHEN urls.status > excluded.status THEN urls.updated ELSE excluded.updated
            END
+        RETURNING (url, user_id_hash, score, status, timestamp)
         """
 
         input_urls = [x.url for x in found_urls]
@@ -129,6 +130,9 @@ class URLDatabase:
                     for found_url in sorted_urls if found_url.url in urls_to_insert]
 
                 execute_values(cursor, insert_sql, data)
+                results = cursor.fetchall()
+                updated = [FoundURL(*result) for result in results]
+                return updated
 
     def get_urls_for_crawling(self):
         start = datetime.utcnow()
