@@ -80,7 +80,7 @@ class URLDatabase:
 
     def update_found_urls(self, found_urls: list[FoundURL]) -> list[FoundURL]:
         if len(found_urls) == 0:
-            return
+            return []
 
         get_urls_sql = """
           SELECT url FROM urls
@@ -104,7 +104,7 @@ class URLDatabase:
            updated = CASE
              WHEN urls.status > excluded.status THEN urls.updated ELSE excluded.updated
            END
-        RETURNING (url, user_id_hash, score, status, timestamp)
+        RETURNING url, user_id_hash, score, status, updated
         """
 
         input_urls = [x.url for x in found_urls]
@@ -112,6 +112,7 @@ class URLDatabase:
 
         with self.connection as connection:
             with connection.cursor() as cursor:
+                logger.info(f"Input URLs: {len(input_urls)}")
                 cursor.execute(get_urls_sql, {'urls': tuple(input_urls)})
                 existing_urls = {x[0] for x in cursor.fetchall()}
                 new_urls = set(input_urls) - existing_urls
@@ -120,6 +121,7 @@ class URLDatabase:
                 locked_urls = {x[0] for x in cursor.fetchall()}
 
                 urls_to_insert = new_urls | locked_urls
+                logger.info(f"URLs to insert: {len(urls_to_insert)}")
 
                 if len(urls_to_insert) != len(input_urls):
                     print(f"Only got {len(urls_to_insert)} instead of {len(input_urls)} - {len(new_urls)} new")
@@ -129,8 +131,10 @@ class URLDatabase:
                     (found_url.url, found_url.status.value, found_url.user_id_hash, found_url.score, found_url.timestamp)
                     for found_url in sorted_urls if found_url.url in urls_to_insert]
 
-                execute_values(cursor, insert_sql, data)
-                results = cursor.fetchall()
+                logger.info(f"Data: {len(data)}")
+                results = execute_values(cursor, insert_sql, data, fetch=True)
+                # results = cursor.fetchall()
+                logger.info(f"Results: {len(results)}")
                 updated = [FoundURL(*result) for result in results]
                 return updated
 

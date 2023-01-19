@@ -10,13 +10,13 @@ logger = getLogger(__name__)
 
 
 def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchStatus,
-        process: Callable[[Collection[HashedBatch]], None]):
+        process: Callable[[Collection[HashedBatch], ...], None], *args):
 
     with Database() as db:
         index_db = IndexDatabase(db.connection)
 
         logger.info(f"Getting batches with status {start_status}")
-        batches = index_db.get_batches_by_status(start_status, 10000)
+        batches = index_db.get_batches_by_status(start_status, 1000)
         logger.info(f"Got {len(batches)} batch urls")
         if len(batches) == 0:
             return
@@ -24,6 +24,6 @@ def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchSta
         batch_data = batch_cache.get_cached([batch.url for batch in batches])
         logger.info(f"Got {len(batch_data)} cached batches")
 
-        process(batch_data.values())
+        process(batch_data.values(), *args)
 
         index_db.update_batch_status(list(batch_data.keys()), end_status)

@@ -51,7 +51,7 @@ def run():
     queued_batches = Queue()
 
     if args.background:
-        Process(target=background.run, args=(args.data,)).start()
+        Process(target=background.run, args=(args.data, new_item_queue)).start()
         Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
 
     completer = Completer()

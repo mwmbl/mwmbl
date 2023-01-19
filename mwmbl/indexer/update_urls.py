@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
+from multiprocessing import Queue
 from typing import Iterable, Collection
 from urllib.parse import urlparse
 
@@ -18,11 +19,11 @@ from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, EXCLUDED_DOMAINS, SCORE_FO
 logger = getLogger(__name__)
 
 
-def run(batch_cache: BatchCache):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, process=record_urls_in_database)
+def run(batch_cache: BatchCache, new_item_queue: Queue):
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, new_item_queue)
 
 
-def record_urls_in_database(batches: Collection[HashedBatch]):
+def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Queue):
     logger.info(f"Recording URLs in database for {len(batches)} batches")
     with Database() as db:
         url_db = URLDatabase(db.connection)
@@ -53,7 +54,11 @@ def record_urls_in_database(batches: Collection[HashedBatch]):
         found_urls = [FoundURL(url, url_users[url], url_scores[url], url_statuses[url], url_timestamps[url])
                       for url in url_scores.keys() | url_statuses.keys()]
 
-        url_db.update_found_urls(found_urls)
+        # TODO: why does this number not match the new items number below? at all.
+        logger.info(f"Found URLs, {len(found_urls)}")
+        urls = url_db.update_found_urls(found_urls)
+        new_item_queue.put(urls)
+        logger.info(f"Put {len(urls)} new items in the URL queue")
 
 
 def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool):

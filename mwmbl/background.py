@@ -2,6 +2,7 @@
 Script that updates data in a background process.
 """
 from logging import getLogger
+from multiprocessing import Queue
 from pathlib import Path
 from time import sleep
 
@@ -14,7 +15,7 @@ from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 logger = getLogger(__name__)
 
 
-def run(data_path: str):
+def run(data_path: str, new_item_queue: Queue):
     logger.info("Started background process")
 
     with Database() as db:
@@ -31,7 +32,7 @@ def run(data_path: str):
         # except Exception:
         #     logger.exception("Error retrieving batches")
         try:
-            update_urls.run(batch_cache)
+            update_urls.run(batch_cache, new_item_queue)
         except Exception:
             logger.exception("Error updating URLs")
         try:
