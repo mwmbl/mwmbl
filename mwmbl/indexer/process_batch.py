@@ -24,6 +24,10 @@ def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchSta
         batch_data = batch_cache.get_cached([batch.url for batch in batches])
         logger.info(f"Got {len(batch_data)} cached batches")
 
+        missing_batches = {batch.url for batch in batches} - batch_data.keys()
+        logger.info(f"Got {len(missing_batches)} missing batches")
+        index_db.update_batch_status(list(missing_batches), BatchStatus.REMOTE)
+
         process(batch_data.values(), *args)
 
         index_db.update_batch_status(list(batch_data.keys()), end_status)

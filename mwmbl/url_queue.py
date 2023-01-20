@@ -1,10 +1,14 @@
+import os
+import pickle
 import random
+import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from logging import getLogger
 from multiprocessing import Queue
+from pathlib import Path
 from queue import Empty
 from time import sleep
 from typing import KeysView, Union
@@ -28,6 +32,8 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
+
+DOMAIN_REGEX = re.compile(r".*://([^/]*)")
 
 
 @dataclass
@@ -66,6 +72,11 @@ class URLQueue:
         return num_processed
 
     def _process_found_urls(self, found_urls: list[FoundURL]):
+        logger.info("Processing found URLs")
+        # with open(Path(os.environ["HOME"]) / "data" / "mwmbl" / "found-urls.pickle", "wb") as output_file:
+        #     pickle.dump(found_urls, output_file)
+        # logger.info("Dumped")
+
         min_updated_date = datetime.utcnow() - timedelta(hours=REASSIGN_MIN_HOURS)
 
         logger.info(f"Found URLS: {len(found_urls)}")
@@ -87,9 +98,11 @@ class URLQueue:
 
     def _sort_urls(self, valid_urls: list[FoundURL]):
         for found_url in valid_urls:
-            domain = urlparse(found_url.url).hostname
+            domain = DOMAIN_REGEX.search(found_url.url)[0]
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
             url_store[domain].append(URLScore(found_url.url, found_url.score))
+
+        logger.info(f"URL store updated: {len(self._top_urls)} top domains, {len(self._other_urls)} other domains")
 
         _sort_and_limit_urls(self._top_urls, MAX_TOP_URLS)
         _sort_and_limit_urls(self._other_urls, MAX_OTHER_URLS)
@@ -125,7 +138,6 @@ def _sort_and_limit_urls(domain_urls: dict[str, list[str]], max_urls: int):
 def _add_urls(domains: Union[set[str], KeysView], domain_urls: dict[str, list[URLScore]], urls: list[str], max_urls: int):
     for domain in list(domains & domain_urls.keys()):
         new_urls = domain_urls[domain][:max_urls]
-        logger.info(f"Adding URLs {new_urls}")
         urls += [url_score.url for url_score in new_urls]
         new_domain_urls = domain_urls[domain][max_urls:]
         if len(new_domain_urls) > 0:

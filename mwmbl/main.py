@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from multiprocessing import Process, Queue
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-from mwmbl import background, url_queue
+from mwmbl import background
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
@@ -16,9 +15,10 @@ from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
-from mwmbl.url_queue import URLQueue, update_queue_continuously
+from mwmbl.url_queue import update_queue_continuously
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+FORMAT = '%(levelname)s %(name)s %(asctime)s %(message)s'
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=FORMAT)
 
 
 MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
