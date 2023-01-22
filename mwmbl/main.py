@@ -11,6 +11,7 @@ from mwmbl import background
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
+from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
@@ -18,7 +19,7 @@ from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.url_queue import update_queue_continuously
 
 FORMAT = '%(levelname)s %(name)s %(asctime)s %(message)s'
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=FORMAT)
 
 
 MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
@@ -51,8 +52,9 @@ def run():
     queued_batches = Queue()
 
     if args.background:
-        Process(target=background.run, args=(args.data, new_item_queue)).start()
+        Process(target=background.run, args=(args.data,)).start()
         Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
+        Process(target=update_urls_continuously, args=(args.data, new_item_queue)).start()
 
     completer = Completer()
 

@@ -1,25 +1,17 @@
-import os
-import pickle
-import random
-import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from logging import getLogger
 from multiprocessing import Queue
-from pathlib import Path
 from queue import Empty
-from time import sleep
 from typing import KeysView, Union
-from urllib.parse import urlparse
 
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus, FoundURL, REASSIGN_MIN_HOURS
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS as TOP_DOMAINS
 from mwmbl.settings import CORE_DOMAINS
-from mwmbl.utils import batch
-
+from mwmbl.utils import batch, get_domain
 
 logger = getLogger(__name__)
 
@@ -32,8 +24,6 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
-
-DOMAIN_REGEX = re.compile(r".*://([^/]*)")
 
 
 @dataclass
@@ -72,7 +62,7 @@ class URLQueue:
         return num_processed
 
     def _process_found_urls(self, found_urls: list[FoundURL]):
-        logger.info("Processing found URLs")
+        logger.info(f"Processing found URLs: {found_urls[:1000]}")
         # with open(Path(os.environ["HOME"]) / "data" / "mwmbl" / "found-urls.pickle", "wb") as output_file:
         #     pickle.dump(found_urls, output_file)
         # logger.info("Dumped")
@@ -98,7 +88,7 @@ class URLQueue:
 
     def _sort_urls(self, valid_urls: list[FoundURL]):
         for found_url in valid_urls:
-            domain = DOMAIN_REGEX.search(found_url.url)[0]
+            domain = get_domain(found_url.url)
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
             url_store[domain].append(URLScore(found_url.url, found_url.score))
 
@@ -126,8 +116,12 @@ class URLQueue:
             self._queued_batches.put(url_batch, block=False)
 
     @property
-    def num_queued_batches(self):
+    def num_queued_batches(self) -> int:
         return self._queued_batches.qsize()
+
+    @property
+    def num_top_domains(self) -> int:
+        return len(self._top_urls)
 
 
 def _sort_and_limit_urls(domain_urls: dict[str, list[str]], max_urls: int):
@@ -151,7 +145,8 @@ def update_queue_continuously(new_item_queue: Queue, queued_batches: Queue):
     queue.initialize()
     while True:
         num_processed = queue.update()
-        logger.info(f"Queue update, num processed: {num_processed}, queue size: {queue.num_queued_batches}")
+        logger.info(f"Queue update, num processed: {num_processed}, queue size: {queue.num_queued_batches}, num top "
+                    f"domains: {queue.num_top_domains}")
         if num_processed == 0:
             time.sleep(5)
 
