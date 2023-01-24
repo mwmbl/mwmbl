@@ -64,15 +64,6 @@ class URLDatabase:
         )
         """
 
-        # index_sql = """
-        # CREATE INDEX IF NOT EXISTS host_index
-        #     ON urls(substring(url FROM '.*://([^/]*)'), score)
-        # """
-        #
-        # view_sql = """
-        # CREATE OR REPLACE VIEW url_and_hosts AS SELECT *, substring(url FROM '.*://([^/]*)') AS host FROM urls
-        # """
-
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
             # cursor.execute(index_sql)
@@ -133,7 +124,6 @@ class URLDatabase:
 
                 logger.info(f"Data: {len(data)}")
                 results = execute_values(cursor, insert_sql, data, fetch=True)
-                # results = cursor.fetchall()
                 logger.info(f"Results: {len(results)}")
                 updated = [FoundURL(*result) for result in results]
                 return updated

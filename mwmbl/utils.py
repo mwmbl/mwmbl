@@ -13,5 +13,7 @@ def batch(items: list, batch_size):
 
 
 def get_domain(url):
-    domain = DOMAIN_REGEX.search(url)[0]
-    return domain
+    results = DOMAIN_REGEX.match(url)
+    if results is None or len(results.groups()) == 0:
+        raise ValueError(f"Unable to parse domain from URL {url}")
+    return results.group(1)

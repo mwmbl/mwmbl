@@ -24,7 +24,7 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
-
+MIN_TOP_DOMAINS = 5
 
 @dataclass
 class URLScore:
@@ -62,11 +62,6 @@ class URLQueue:
         return num_processed
 
     def _process_found_urls(self, found_urls: list[FoundURL]):
-        logger.info(f"Processing found URLs: {found_urls[:1000]}")
-        # with open(Path(os.environ["HOME"]) / "data" / "mwmbl" / "found-urls.pickle", "wb") as output_file:
-        #     pickle.dump(found_urls, output_file)
-        # logger.info("Dumped")
-
         min_updated_date = datetime.utcnow() - timedelta(hours=REASSIGN_MIN_HOURS)
 
         logger.info(f"Found URLS: {len(found_urls)}")
@@ -76,7 +71,7 @@ class URLQueue:
 
         self._sort_urls(valid_urls)
         logger.info(f"Queue size: {self.num_queued_batches}")
-        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) > 0:
+        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) > MIN_TOP_DOMAINS:
             total_top_urls = sum(len(urls) for urls in self._top_urls.values())
             logger.info(f"Total top URLs stored: {total_top_urls}")
 
@@ -88,7 +83,10 @@ class URLQueue:
 
     def _sort_urls(self, valid_urls: list[FoundURL]):
         for found_url in valid_urls:
-            domain = get_domain(found_url.url)
+            try:
+                domain = get_domain(found_url.url)
+            except ValueError:
+                continue
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
             url_store[domain].append(URLScore(found_url.url, found_url.score))
 
@@ -99,7 +97,7 @@ class URLQueue:
 
         # Keep only the top "other" domains, ranked by the top item for that domain
         top_other_urls = sorted(self._other_urls.items(), key=lambda x: x[1][0].score, reverse=True)[:MAX_OTHER_DOMAINS]
-        self._other_urls = dict(top_other_urls)
+        self._other_urls = defaultdict(list, dict(top_other_urls))
 
     def _batch_urls(self):
         urls = []

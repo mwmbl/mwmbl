@@ -56,7 +56,11 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
                     url_statuses[item.url] = get_url_error_status(item)
                 else:
                     url_statuses[item.url] = URLStatus.CRAWLED
-                    crawled_page_domain = get_domain(item.url)
+                    try:
+                        crawled_page_domain = get_domain(item.url)
+                    except ValueError:
+                        logger.info(f"Couldn't parse URL {item.url}")
+                        continue
                     score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                     for link in item.content.links:
                         process_link(batch, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
