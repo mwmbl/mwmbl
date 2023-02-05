@@ -30,10 +30,10 @@ def run(data_path: str):
             batch_cache.retrieve_batches(num_batches=10000)
         except Exception:
             logger.exception("Error retrieving batches")
-        try:
-            update_urls.run(batch_cache)
-        except Exception:
-            logger.exception("Error updating URLs")
+        # try:
+        #     update_urls.run(batch_cache)
+        # except Exception:
+        #     logger.exception("Error updating URLs")
         try:
             index_batches.run(batch_cache, index_path)
         except Exception:

@@ -50,7 +50,7 @@ def run():
 
     if args.background:
         Process(target=background.run, args=(args.data,)).start()
-        Process(target=url_queue.run, args=(queue,)).start()
+        # Process(target=url_queue.run, args=(queue,)).start()
 
     completer = Completer()
 
