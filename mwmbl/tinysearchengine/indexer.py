@@ -122,7 +122,7 @@ class TinyIndex(Generic[T]):
     def __enter__(self):
         self.index_file = open(self.index_path, 'r+b')
         prot = PROT_READ if self.mode == 'r' else PROT_READ | PROT_WRITE
-        self.mmap = mmap(self.index_file.fileno(), 0, offset=METADATA_SIZE, prot=prot)
+        self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -146,7 +146,7 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        page_data = self.mmap[i * self.page_size:(i + 1) * self.page_size]
+        page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
         try:
             decompressed_data = self.decompressor.decompress(page_data)
         except ZstdError:
@@ -186,7 +186,7 @@ class TinyIndex(Generic[T]):
 
         page_data = _get_page_data(self.compressor, self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size:(i+1) * self.page_size] = page_data
+        self.mmap[i * self.page_size:(i+1) * self.page_size + METADATA_SIZE] = page_data
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
