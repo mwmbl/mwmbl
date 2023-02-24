@@ -186,7 +186,7 @@ class TinyIndex(Generic[T]):
 
         page_data = _get_page_data(self.compressor, self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
