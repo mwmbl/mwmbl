@@ -64,23 +64,14 @@ class URLDatabase:
         )
         """
 
-        index_sql = """
-        CREATE INDEX IF NOT EXISTS host_index
-            ON urls(substring(url FROM '.*://([^/]*)'), score)
-        """
-
-        view_sql = """
-        CREATE OR REPLACE VIEW url_and_hosts AS SELECT *, substring(url FROM '.*://([^/]*)') AS host FROM urls
-        """
-
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
-            cursor.execute(index_sql)
-            cursor.execute(view_sql)
+            # cursor.execute(index_sql)
+            # cursor.execute(view_sql)
 
-    def update_found_urls(self, found_urls: list[FoundURL]):
+    def update_found_urls(self, found_urls: list[FoundURL]) -> list[FoundURL]:
         if len(found_urls) == 0:
-            return
+            return []
 
         get_urls_sql = """
           SELECT url FROM urls
@@ -104,6 +95,7 @@ class URLDatabase:
            updated = CASE
              WHEN urls.status > excluded.status THEN urls.updated ELSE excluded.updated
            END
+        RETURNING url, user_id_hash, score, status, updated
         """
 
         input_urls = [x.url for x in found_urls]
@@ -111,6 +103,7 @@ class URLDatabase:
 
         with self.connection as connection:
             with connection.cursor() as cursor:
+                logger.info(f"Input URLs: {len(input_urls)}")
                 cursor.execute(get_urls_sql, {'urls': tuple(input_urls)})
                 existing_urls = {x[0] for x in cursor.fetchall()}
                 new_urls = set(input_urls) - existing_urls
@@ -119,6 +112,7 @@ class URLDatabase:
                 locked_urls = {x[0] for x in cursor.fetchall()}
 
                 urls_to_insert = new_urls | locked_urls
+                logger.info(f"URLs to insert: {len(urls_to_insert)}")
 
                 if len(urls_to_insert) != len(input_urls):
                     print(f"Only got {len(urls_to_insert)} instead of {len(input_urls)} - {len(new_urls)} new")
@@ -128,72 +122,11 @@ class URLDatabase:
                     (found_url.url, found_url.status.value, found_url.user_id_hash, found_url.score, found_url.timestamp)
                     for found_url in sorted_urls if found_url.url in urls_to_insert]
 
-                execute_values(cursor, insert_sql, data)
-
-    def get_urls_for_crawling(self):
-        start = datetime.utcnow()
-        logger.info("Getting URLs for crawling")
-
-        work_mem = "SET work_mem = '512MB'"
-
-        select_sql = f"""
-            SELECT host, (array_agg(url order by score desc))[:{MAX_URLS_PER_TOP_DOMAIN}] FROM url_and_hosts
-            WHERE host IN %(domains)s
-                AND (status = {URLStatus.NEW.value} OR (
-                    status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
-                ))
-            GROUP BY host
-        """
-
-        others_sql = f"""
-            SELECT DISTINCT ON (host) url FROM (
-                SELECT * FROM url_and_hosts
-                WHERE status = {URLStatus.NEW.value} OR (
-                   status = {URLStatus.ASSIGNED.value} AND updated < %(min_updated_date)s
-                )
-                ORDER BY score DESC LIMIT {MAX_OTHER_DOMAINS}) u
-            ORDER BY host
-        """
-
-        update_sql = f"""
-            UPDATE urls SET status = {URLStatus.QUEUED.value}, updated = %(now)s
-            WHERE url IN %(urls)s
-        """
-
-        now = datetime.utcnow()
-        min_updated_date = now - timedelta(hours=REASSIGN_MIN_HOURS)
-        domain_sample = set(random.sample(DOMAINS.keys(), MAX_TOP_DOMAINS)) | CORE_DOMAINS
-        domains = tuple(domain_sample)
-        logger.info(f"Getting URLs for domains {domains}")
-        with self.connection.cursor() as cursor:
-            cursor.execute(work_mem)
-            cursor.execute(select_sql,
-                           {'min_updated_date': min_updated_date, 'domains': domains})
-            agg_results = cursor.fetchall()
-            logger.info(f"Agg results: {agg_results}")
-
-        results = []
-        for host, urls in agg_results:
-            results += urls
-
-        logger.info(f"Got {len(results)} top domain results")
-
-        with self.connection.cursor() as cursor:
-            cursor.execute(others_sql, {'min_updated_date': min_updated_date})
-            other_results = cursor.fetchall()
-            other_results_list = [result[0] for result in other_results]
-            logger.info(f"Got {len(other_results_list)} results from all domains")
-            results += other_results_list
-
-        with self.connection.cursor() as cursor:
-            cursor.execute(update_sql,
-                           {'now': now, 'urls': tuple(results)})
-
-        total_time_seconds = (datetime.now() - start).total_seconds()
-        logger.info(f"Got {len(results)} in {total_time_seconds} seconds")
-
-        random.shuffle(results)
-        return results
+                logger.info(f"Data: {len(data)}")
+                results = execute_values(cursor, insert_sql, data, fetch=True)
+                logger.info(f"Results: {len(results)}")
+                updated = [FoundURL(*result) for result in results]
+                return updated
 
     def get_urls(self, status: URLStatus, num_urls: int):
         sql = f"""

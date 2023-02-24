@@ -7,7 +7,7 @@ from time import sleep
 
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.database import Database
-from mwmbl.indexer import index_batches, historical, update_urls
+from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 
@@ -30,10 +30,6 @@ def run(data_path: str):
             batch_cache.retrieve_batches(num_batches=10000)
         except Exception:
             logger.exception("Error retrieving batches")
-        try:
-            update_urls.run(batch_cache)
-        except Exception:
-            logger.exception("Error updating URLs")
         try:
             index_batches.run(batch_cache, index_path)
         except Exception:

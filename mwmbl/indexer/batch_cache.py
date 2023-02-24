@@ -51,7 +51,7 @@ class BatchCache:
         with Database() as db:
             index_db = IndexDatabase(db.connection)
             batches = index_db.get_batches_by_status(BatchStatus.REMOTE, num_batches)
-            print(f"Found {len(batches)} remote batches")
+            logger.info(f"Found {len(batches)} remote batches")
             if len(batches) == 0:
                 return
             urls = [batch.url for batch in batches]
@@ -60,7 +60,7 @@ class BatchCache:
             total_processed = 0
             for result in results:
                 total_processed += result
-            print("Processed batches with items:", total_processed)
+            logger.info(f"Processed batches with {total_processed} items")
             index_db.update_batch_status(urls, BatchStatus.LOCAL)
 
     def retrieve_batch(self, url):
@@ -68,7 +68,7 @@ class BatchCache:
         try:
             batch = HashedBatch.parse_obj(data)
         except ValidationError:
-            print("Failed to validate batch", data)
+            logger.info(f"Failed to validate batch {data}")
             return 0
         if len(batch.items) > 0:
             self.store(batch, url)
@@ -76,7 +76,7 @@ class BatchCache:
 
     def store(self, batch, url):
         path = self.get_path_from_url(url)
-        print(f"Storing local batch at {path}")
+        logger.debug(f"Storing local batch at {path}")
         os.makedirs(path.parent, exist_ok=True)
         with open(path, 'wb') as output_file:
             data = gzip.compress(batch.json().encode('utf8'))

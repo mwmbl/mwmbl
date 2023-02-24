@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from multiprocessing import Process, Queue
 from pathlib import Path
@@ -8,16 +7,19 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-from mwmbl import background, url_queue
+from mwmbl import background
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
+from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.url_queue import update_queue_continuously
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+FORMAT = '%(levelname)s %(name)s %(asctime)s %(message)s'
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=FORMAT)
 
 
 MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
@@ -47,11 +49,13 @@ def run():
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=args.num_pages, page_size=PAGE_SIZE)
 
-    queue = Queue()
+    new_item_queue = Queue()
+    queued_batches = Queue()
 
     if args.background:
         Process(target=background.run, args=(args.data,)).start()
-        Process(target=url_queue.run, args=(queue,)).start()
+        Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
+        Process(target=update_urls_continuously, args=(args.data, new_item_queue)).start()
 
     completer = Completer()
 
@@ -67,7 +71,7 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache, queue)
+        crawler_router = crawler.get_router(batch_cache, queued_batches)
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
