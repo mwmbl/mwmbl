@@ -29,6 +29,7 @@ def setup_args():
     parser = argparse.ArgumentParser(description="Mwmbl API server and background task processor")
     parser.add_argument("--num-pages", type=int, help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
     parser.add_argument("--data", help="Path to the data folder for storing index and cached batches", default="./devdata")
+    parser.add_argument("--port", type=int, help="Port for the server to listen at", default=5000)
     parser.add_argument("--background", help="Enable running the background tasks to process batches",
                         action='store_true')
     args = parser.parse_args()
@@ -74,7 +75,7 @@ def run():
         app.include_router(crawler_router)
 
         # Initialize uvicorn server using global app instance and server config params
-        uvicorn.run(app, host="0.0.0.0", port=5000)
+        uvicorn.run(app, host="0.0.0.0", port=args.port)
 
 
 if __name__ == "__main__":
