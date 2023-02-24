@@ -24,7 +24,6 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
-MIN_TOP_DOMAINS = 5
 
 @dataclass
 class URLScore:
@@ -33,7 +32,7 @@ class URLScore:
 
 
 class URLQueue:
-    def __init__(self, new_item_queue: Queue, queued_batches: Queue):
+    def __init__(self, new_item_queue: Queue, queued_batches: Queue, min_top_domains: int = 5):
         """
         new_item_queue: each item in the queue is a list of FoundURLs
         queued_batches: each item in the queue is a list of URLs (strings)
@@ -42,6 +41,7 @@ class URLQueue:
         self._queued_batches = queued_batches
         self._other_urls = defaultdict(list)
         self._top_urls = defaultdict(list)
+        self._min_top_domains = min_top_domains
 
     def initialize(self):
         with Database() as db:
@@ -71,7 +71,7 @@ class URLQueue:
 
         self._sort_urls(valid_urls)
         logger.info(f"Queue size: {self.num_queued_batches}")
-        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) > MIN_TOP_DOMAINS:
+        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) > self._min_top_domains:
             total_top_urls = sum(len(urls) for urls in self._top_urls.values())
             logger.info(f"Total top URLs stored: {total_top_urls}")
 
