@@ -16,7 +16,7 @@ def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchSta
         index_db = IndexDatabase(db.connection)
 
         logger.info(f"Getting batches with status {start_status}")
-        batches = index_db.get_batches_by_status(start_status, 1000)
+        batches = index_db.get_batches_by_status(start_status, 10000)
         logger.info(f"Got {len(batches)} batch urls")
         if len(batches) == 0:
             return
