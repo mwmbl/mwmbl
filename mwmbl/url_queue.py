@@ -25,6 +25,7 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
+INITIALIZE_URLS = 10000
 
 
 random = Random(1)
@@ -43,11 +44,12 @@ class URLQueue:
         self._min_top_domains = min_top_domains
 
     def initialize(self):
+        logger.info(f"Initializing URL queue")
         with Database() as db:
             url_db = URLDatabase(db.connection)
-            urls = url_db.get_urls(URLStatus.NEW, MAX_QUEUE_SIZE * BATCH_SIZE)
-            self._queue_urls(urls)
-            logger.info(f"Initialized URL queue with {len(urls)} urls, current queue size: {self.num_queued_batches}")
+            found_urls = url_db.get_urls(URLStatus.NEW, INITIALIZE_URLS)
+            self._process_found_urls(found_urls)
+        logger.info(f"Initialized URL queue with {len(found_urls)} urls, current queue size: {self.num_queued_batches}")
 
     def update(self):
         num_processed = 0

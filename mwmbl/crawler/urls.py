@@ -128,9 +128,9 @@ class URLDatabase:
                 updated = [FoundURL(*result) for result in results]
                 return updated
 
-    def get_urls(self, status: URLStatus, num_urls: int):
+    def get_urls(self, status: URLStatus, num_urls: int) -> list[FoundURL]:
         sql = f"""
-        SELECT url FROM urls
+        SELECT url, status, user_id_hash, score, updated FROM urls
         WHERE status = %(status)s
         ORDER BY score DESC
         LIMIT %(num_urls)s
@@ -140,7 +140,7 @@ class URLDatabase:
             cursor.execute(sql, {'status': status.value, 'num_urls': num_urls})
             results = cursor.fetchall()
 
-        return [result[0] for result in results]
+        return [FoundURL(url, user_id_hash, score, status, updated) for url, status, user_id_hash, score, updated in results]
 
     def get_url_scores(self, urls: list[str]) -> dict[str, float]:
         sql = f"""
