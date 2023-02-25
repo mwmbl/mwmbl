@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from logging import getLogger
 from multiprocessing import Queue
 from queue import Empty
+from random import Random
 from typing import KeysView, Union
 
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus, FoundURL, REASSIGN_MIN_HOURS
@@ -24,6 +25,9 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
+
+
+random = Random(1)
 
 
 class URLQueue:
@@ -105,6 +109,7 @@ class URLQueue:
         self._queue_urls(urls)
 
     def _queue_urls(self, valid_urls: list[str]):
+        random.shuffle(valid_urls)
         for url_batch in batch(valid_urls, BATCH_SIZE):
             self._queued_batches.put(url_batch, block=False)
 
