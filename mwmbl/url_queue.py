@@ -45,7 +45,7 @@ class URLQueue:
     def initialize(self):
         with Database() as db:
             url_db = URLDatabase(db.connection)
-            urls = url_db.get_urls(URLStatus.QUEUED, MAX_QUEUE_SIZE * BATCH_SIZE)
+            urls = url_db.get_urls(URLStatus.NEW, MAX_QUEUE_SIZE * BATCH_SIZE)
             self._queue_urls(urls)
             logger.info(f"Initialized URL queue with {len(urls)} urls, current queue size: {self.num_queued_batches}")
 
