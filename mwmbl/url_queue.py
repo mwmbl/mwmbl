@@ -25,6 +25,7 @@ MAX_URLS_PER_CORE_DOMAIN = 1000
 MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
+INITIALIZE_URLS = 10000
 
 
 random = Random(1)
@@ -41,13 +42,15 @@ class URLQueue:
         self._other_urls = defaultdict(dict)
         self._top_urls = defaultdict(dict)
         self._min_top_domains = min_top_domains
+        assert min_top_domains > 0, "Need a minimum greater than 0 to prevent a never-ending loop"
 
     def initialize(self):
+        logger.info(f"Initializing URL queue")
         with Database() as db:
             url_db = URLDatabase(db.connection)
-            urls = url_db.get_urls(URLStatus.NEW, MAX_QUEUE_SIZE * BATCH_SIZE)
-            self._queue_urls(urls)
-            logger.info(f"Initialized URL queue with {len(urls)} urls, current queue size: {self.num_queued_batches}")
+            found_urls = url_db.get_urls(URLStatus.NEW, INITIALIZE_URLS)
+            self._process_found_urls(found_urls)
+        logger.info(f"Initialized URL queue with {len(found_urls)} urls, current queue size: {self.num_queued_batches}")
 
     def update(self):
         num_processed = 0
@@ -70,7 +73,7 @@ class URLQueue:
 
         self._sort_urls(valid_urls)
         logger.info(f"Queue size: {self.num_queued_batches}")
-        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) > self._min_top_domains:
+        while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) >= self._min_top_domains:
             total_top_urls = sum(len(urls) for urls in self._top_urls.values())
             logger.info(f"Total top URLs stored: {total_top_urls}")
 
@@ -95,8 +98,8 @@ class URLQueue:
         _sort_and_limit_urls(self._other_urls, MAX_OTHER_URLS)
 
         # Keep only the top "other" domains, ranked by the top item for that domain
-        top_other_urls = sorted(self._other_urls.items(), key=lambda x: x[1][0].score, reverse=True)[:MAX_OTHER_DOMAINS]
-        self._other_urls = defaultdict(list, dict(top_other_urls))
+        top_other_urls = sorted(self._other_urls.items(), key=lambda x: next(iter(x[1].values())), reverse=True)[:MAX_OTHER_DOMAINS]
+        self._other_urls = defaultdict(dict, dict(top_other_urls))
 
     def _batch_urls(self):
         urls = []
