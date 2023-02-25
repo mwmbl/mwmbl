@@ -25,11 +25,6 @@ MAX_URLS_PER_TOP_DOMAIN = 100
 MAX_URLS_PER_OTHER_DOMAIN = 5
 MAX_OTHER_DOMAINS = 10000
 
-@dataclass
-class URLScore:
-    url: str
-    score: float
-
 
 class URLQueue:
     def __init__(self, new_item_queue: Queue, queued_batches: Queue, min_top_domains: int = 5):
@@ -39,8 +34,8 @@ class URLQueue:
         """
         self._new_item_queue = new_item_queue
         self._queued_batches = queued_batches
-        self._other_urls = defaultdict(list)
-        self._top_urls = defaultdict(list)
+        self._other_urls = defaultdict(dict)
+        self._top_urls = defaultdict(dict)
         self._min_top_domains = min_top_domains
 
     def initialize(self):
@@ -88,7 +83,7 @@ class URLQueue:
             except ValueError:
                 continue
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
-            url_store[domain].append(URLScore(found_url.url, found_url.score))
+            url_store[domain][found_url.url] = found_url.score
 
         logger.info(f"URL store updated: {len(self._top_urls)} top domains, {len(self._other_urls)} other domains")
 
@@ -122,18 +117,17 @@ class URLQueue:
         return len(self._top_urls)
 
 
-def _sort_and_limit_urls(domain_urls: dict[str, list[str]], max_urls: int):
+def _sort_and_limit_urls(domain_urls: dict[str, dict[str, float]], max_urls: int):
     for domain, urls in domain_urls.items():
-        domain_urls[domain] = sorted(urls, key=lambda url_score: url_score.score, reverse=True)[:max_urls]
+        domain_urls[domain] = dict(sorted(urls.items(), key=lambda url_score: url_score[1], reverse=True)[:max_urls])
 
 
-def _add_urls(domains: Union[set[str], KeysView], domain_urls: dict[str, list[URLScore]], urls: list[str], max_urls: int):
+def _add_urls(domains: Union[set[str], KeysView], domain_urls: dict[str, dict[str, float]], urls: list[str], max_urls: int):
     for domain in list(domains & domain_urls.keys()):
-        new_urls = domain_urls[domain][:max_urls]
-        urls += [url_score.url for url_score in new_urls]
-        new_domain_urls = domain_urls[domain][max_urls:]
+        urls += list(domain_urls[domain].keys())[:max_urls]
+        new_domain_urls = list(domain_urls[domain].items())[max_urls:]
         if len(new_domain_urls) > 0:
-            domain_urls[domain] = new_domain_urls
+            domain_urls[domain] = dict(new_domain_urls)
         else:
             del domain_urls[domain]
 
