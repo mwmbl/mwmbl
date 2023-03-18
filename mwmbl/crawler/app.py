@@ -2,8 +2,7 @@ import gzip
 import hashlib
 import json
 from datetime import datetime, timezone, date
-from multiprocessing import Queue
-from queue import Empty
+from queue import Queue, Empty
 from typing import Union
 from uuid import uuid4
 
@@ -34,6 +33,7 @@ from mwmbl.settings import (
     FILE_NAME_SUFFIX,
     DATE_REGEX, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS)
 from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.url_queue import URLQueue
 
 
 def get_bucket(name):
@@ -77,7 +77,7 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-def get_router(batch_cache: BatchCache, url_queue: Queue):
+def get_router(batch_cache: BatchCache, queued_batches: Queue):
     router = APIRouter(prefix="/crawler", tags=["crawler"])
 
     @router.on_event("startup")
@@ -100,7 +100,7 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
         return format_result(result, query)
 
     @router.post('/batches/')
-    def create_batch(batch: Batch):
+    def post_batch(batch: Batch):
         if len(batch.items) > MAX_BATCH_SIZE:
             raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
 
@@ -154,7 +154,7 @@ def get_router(batch_cache: BatchCache, url_queue: Queue):
     def request_new_batch(batch_request: NewBatchRequest) -> list[str]:
         user_id_hash = _get_user_id_hash(batch_request)
         try:
-            urls = url_queue.get(block=False)
+            urls = queued_batches.get(block=False)
         except Empty:
             return []
 

@@ -59,6 +59,9 @@ class IndexDatabase:
             return [BatchInfo(url, user_id_hash, status) for url, user_id_hash, status in results]
 
     def update_batch_status(self, batch_urls: list[str], status: BatchStatus):
+        if not batch_urls:
+            return
+
         sql = """
         UPDATE batches SET status = %(status)s
         WHERE url IN %(urls)s

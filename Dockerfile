@@ -13,6 +13,7 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_VERSION=1.1.12
 
+
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
 RUN python -m venv /venv
@@ -25,10 +26,15 @@ COPY mwmbl /app/mwmbl
 # Use pip to install the mwmbl python package
 # PEP 518, PEP 517 and others have allowed for a standardized python packaging API, which allows
 # pip to be able to install poetry packages.
-RUN /venv/bin/pip install pip --upgrade && \
-    /venv/bin/pip install .
+# en-core-web-sm requires a compatible version of spacy
+RUN /venv/bin/pip install pip wheel --upgrade && \
+    /venv/bin/pip install . && \
+    /venv/bin/python -m spacy download en_core_web_sm-3.2.0 --direct && \
+    /venv/bin/python -m spacy validate
 
 FROM base as final
+
+RUN apt-get update && apt-get install -y postgresql-client
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
@@ -41,4 +47,4 @@ VOLUME ["/data"]
 EXPOSE 5000
 
 # Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-CMD ["/venv/bin/mwmbl-tinysearchengine", "--num-pages", "10240000", "--background"]
+CMD ["/venv/bin/mwmbl-tinysearchengine", "--num-pages", "10240000", "--background", "--data", "/app/storage"]

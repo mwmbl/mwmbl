@@ -8,11 +8,12 @@ Mwmbl is a non-profit, ad-free, free-libre and free-lunch search
 engine with a focus on useability and speed. At the moment it is
 little more than an idea together with a [proof of concept
 implementation](https://mwmbl.org/) of
-the web front-end and search technology on a very small index. A
-crawler is still to be implemented.
+the web front-end and search technology on a small index.
 
 Our vision is a community working to provide top quality search
 particularly for hackers, funded purely by donations.
+
+![mwmbl](https://user-images.githubusercontent.com/1283077/218265959-be4220b4-dcf0-47ab-acd3-f06df0883b52.gif)
 
 Crawling
 ========

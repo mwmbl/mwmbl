@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from multiprocessing import Process, Queue
 from pathlib import Path
@@ -14,12 +13,15 @@ from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.platform import user
+from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
 from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.url_queue import update_queue_continuously
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+FORMAT = '%(levelname)s %(name)s %(asctime)s %(message)s'
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=FORMAT)
 
 
 MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
@@ -27,8 +29,9 @@ MODEL_PATH = Path(__file__).parent / 'resources' / 'model.pickle'
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Mwmbl API server and background task processor")
-    parser.add_argument("--num-pages", help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
+    parser.add_argument("--num-pages", type=int, help="Number of pages of memory (4096 bytes) to use for the index", default=2560)
     parser.add_argument("--data", help="Path to the data folder for storing index and cached batches", default="./devdata")
+    parser.add_argument("--port", type=int, help="Port for the server to listen at", default=5000)
     parser.add_argument("--background", help="Enable running the background tasks to process batches",
                         action='store_true')
     args = parser.parse_args()
@@ -42,21 +45,19 @@ def run():
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
         if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != args.num_pages:
-            print(f"Existing index page sizes ({existing_index.page_size}) and number of pages "
-                  f"({existing_index.num_pages}) does not match - removing.")
-            os.remove(index_path)
-            existing_index = None
+            raise ValueError(f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+                             f"({existing_index.num_pages}) do not match")
     except FileNotFoundError:
-        existing_index = None
-
-    if existing_index is None:
         print("Creating a new index")
         TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=args.num_pages, page_size=PAGE_SIZE)
 
-    url_queue = Queue()
+    new_item_queue = Queue()
+    queued_batches = Queue()
 
     if args.background:
-        Process(target=background.run, args=(args.data, url_queue)).start()
+        Process(target=background.run, args=(args.data,)).start()
+        Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
+        Process(target=update_urls_continuously, args=(args.data, new_item_queue)).start()
 
     completer = Completer()
 
@@ -80,14 +81,14 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache, url_queue)
+        crawler_router = crawler.get_router(batch_cache, queued_batches)
         app.include_router(crawler_router)
 
         user_router = user.create_router()
         app.include_router(user_router)
 
         # Initialize uvicorn server using global app instance and server config params
-        uvicorn.run(app, host="0.0.0.0", port=5000)
+        uvicorn.run(app, host="0.0.0.0", port=args.port)
 
 
 if __name__ == "__main__":

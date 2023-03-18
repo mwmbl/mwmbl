@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "mwmbl",
+            "type": "python",
+            "request": "launch",
+            "module": "mwmbl.main",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "stopOnEntry": false,
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
