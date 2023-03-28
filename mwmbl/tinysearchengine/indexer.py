@@ -80,11 +80,11 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
     if size > page_size:
         # We cannot fit this much data into a page
         # Reduce the hi boundary, and try again
-        return _binary_search_fitting_size(compressor,page_size,items,lo,mid-1)
+        return _binary_search_fitting_size(compressor, page_size, items, lo, mid-1)
     else:
         # We can fit this data into a page, but maybe we can fit more data
         # Try to see if we have a better match
-        potential_target, potential_data = _binary_search_fitting_size(compressor,page_size,items,mid+1,hi)
+        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid+1, hi)
         if potential_target != -1:
             # We found a larger index that can still fit onto a page, so use that
             return potential_target, potential_data
@@ -94,7 +94,7 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
 
 def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
     # Find max number of items that fit on a page
-    return _binary_search_fitting_size(compressor,page_size,items,0,len(items))
+    return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
