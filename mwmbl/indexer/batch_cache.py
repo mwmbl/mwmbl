@@ -39,7 +39,11 @@ class BatchCache:
             except FileNotFoundError:
                 logger.exception(f"Missing batch file: {path}")
                 continue
-            batch = HashedBatch.parse_raw(data)
+            try:
+                batch = HashedBatch.parse_raw(data)
+            except ValidationError:
+                logger.exception(f"Unable to parse batch, skipping: '{data}'")
+                continue
             batches[url] = batch
         return batches
 

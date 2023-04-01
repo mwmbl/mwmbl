@@ -65,22 +65,42 @@ class TinyIndexMetadata:
         values = json.loads(data[constant_length:].decode('utf8'))
         return TinyIndexMetadata(**values)
 
+# Find the optimal amount of data that fits onto a page
+# We do this by leveraging binary search to quickly find the index where:
+#     - index+1 cannot fit onto a page
+#     - <=index can fit on a page
+def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items:list[T], lo:int, hi:int):
+    # Base case: our binary search has gone too far
+    if lo > hi:
+        return -1, None
+    # Check the midpoint to see if it will fit onto a page
+    mid = (lo+hi)//2
+    compressed_data = compressor.compress(json.dumps(items[:mid]).encode('utf8'))
+    size = len(compressed_data)
+    if size > page_size:
+        # We cannot fit this much data into a page
+        # Reduce the hi boundary, and try again
+        return _binary_search_fitting_size(compressor, page_size, items, lo, mid-1)
+    else:
+        # We can fit this data into a page, but maybe we can fit more data
+        # Try to see if we have a better match
+        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid+1, hi)
+        if potential_target != -1:
+            # We found a larger index that can still fit onto a page, so use that
+            return potential_target, potential_data
+        else:
+            # No better match, use our index
+            return mid, compressed_data
+
+def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
+    # Find max number of items that fit on a page
+    return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
-    bytes_io = BytesIO()
-    stream_writer = compressor.stream_writer(bytes_io, write_size=128)
-
-    num_fitting = 0
-    for i, item in enumerate(items):
-        serialised_data = json.dumps(item) + '\n'
-        stream_writer.write(serialised_data.encode('utf8'))
-        stream_writer.flush()
-        if len(bytes_io.getvalue()) > page_size:
-            break
-        num_fitting = i + 1
+    num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
-    assert len(compressed_data) < page_size, "The data shouldn't get bigger"
+    assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
 
