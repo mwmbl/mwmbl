@@ -100,7 +100,7 @@ def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
-    assert len(compressed_data) < page_size, "The data shouldn't get bigger"
+    assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
 
