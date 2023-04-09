@@ -53,6 +53,7 @@ def run():
 
     new_item_queue = Queue()
     queued_batches = Queue()
+    # curation_queue = Queue()
 
     if args.background:
         Process(target=background.run, args=(args.data,)).start()
@@ -84,7 +85,7 @@ def run():
         crawler_router = crawler.get_router(batch_cache, queued_batches)
         app.include_router(crawler_router)
 
-        user_router = user.create_router()
+        user_router = user.create_router(index_path)
         app.include_router(user_router)
 
         # Initialize uvicorn server using global app instance and server config params

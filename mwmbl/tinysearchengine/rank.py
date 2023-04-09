@@ -6,6 +6,7 @@ from operator import itemgetter
 from urllib.parse import urlparse
 
 from mwmbl.format import format_result_with_pattern, get_query_regex
+from mwmbl.platform.user import MAX_CURATED_SCORE
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS
@@ -149,6 +150,7 @@ class Ranker:
 
     def get_results(self, q):
         terms = tokenize(q)
+
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
             completions = self.completer.complete(terms[-1])
@@ -157,12 +159,23 @@ class Ranker:
             completions = []
             retrieval_terms = set(terms)
 
+        # Check for curation
+        curation_term = " ".join(terms)
+        curation_items = self.tiny_index.retrieve(curation_term)
+
+        # TODO: find a better way to track curated pages
+        if curation_items[0].score == MAX_CURATED_SCORE:
+            return curation_items, terms, completions
+
         bigrams = set(get_bigrams(len(terms), terms))
 
         pages = []
         seen_items = set()
         for term in retrieval_terms | bigrams:
-            items = self.tiny_index.retrieve(term)
+            if term == curation_term:
+                items = curation_items
+            else:
+                items = self.tiny_index.retrieve(term)
             if items is not None:
                 for item in items:
                     # if term in item.title.lower() or term in item.extract.lower():
