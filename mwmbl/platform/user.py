@@ -7,7 +7,7 @@ import requests
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize
 
 
@@ -149,11 +149,6 @@ def create_router(index_path: str) -> APIRouter:
         request = requests.post(urljoin(LEMMY_URL, "api/v3/comment"), json=create_comment)
 
         with TinyIndex(Document, index_path, 'w') as indexer:
-            documents = [
-                Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i)
-                for i, result in enumerate(curation.results)
-            ]
-
             query_string = parse_qs(curation.url)
             if len(query_string) > 1:
                 raise ValueError(f"Should be one query string in the URL: {curation.url}")
@@ -166,9 +161,14 @@ def create_router(index_path: str) -> APIRouter:
             print("Query", query)
             tokens = tokenize(query)
             print("Tokens", tokens)
-            key = " ".join(tokens)
-            print("Key", key)
-            page_index = indexer.get_key_page_index(key)
+            term = " ".join(tokens)
+            print("Key", term)
+
+            documents = [
+                Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i, term, DocumentState.CURATED.value)
+                for i, result in enumerate(curation.results)
+            ]
+            page_index = indexer.get_key_page_index(term)
             print("Page index", page_index)
             print("Storing documents", documents)
             indexer.store_in_page(page_index, documents)

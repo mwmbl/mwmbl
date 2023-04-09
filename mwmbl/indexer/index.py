@@ -77,18 +77,3 @@ def tokenize_document(url, title_cleaned, extract, score, nlp):
     # print("High scoring", len(high_scoring_tokens), token_scores, doc)
     document = TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
     return document
-
-
-def index_titles_urls_and_extracts(indexer: TinyIndex, nlp, titles_urls_and_extracts, link_counts, terms_path):
-    terms = Counter()
-    pages = get_pages(nlp, titles_urls_and_extracts, link_counts)
-    for page in pages:
-        for token in page.tokens:
-            indexer.index(token, Document(url=page.url, title=page.title, extract=page.extract, score=page.score))
-        terms.update([t.lower() for t in page.tokens])
-
-    term_df = pd.DataFrame({
-        'term': terms.keys(),
-        'count': terms.values(),
-    })
-    term_df.to_csv(terms_path)

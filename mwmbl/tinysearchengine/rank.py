@@ -10,7 +10,7 @@ from mwmbl.platform.user import MAX_CURATED_SCORE
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 
 logger = getLogger(__name__)
 
@@ -162,10 +162,9 @@ class Ranker:
         # Check for curation
         curation_term = " ".join(terms)
         curation_items = self.tiny_index.retrieve(curation_term)
-
-        # TODO: find a better way to track curated pages
-        if curation_items[0].score == MAX_CURATED_SCORE:
-            return curation_items, terms, completions
+        curated_items = [d for d in curation_items if d.state == DocumentState.CURATED and d.term == curation_term]
+        if len(curated_items) > 0:
+            return curated_items, terms, completions
 
         bigrams = set(get_bigrams(len(terms), terms))
 
