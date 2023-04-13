@@ -32,6 +32,7 @@ class Result(BaseModel):
     url: str
     title: str
     extract: str
+    curated: bool
 
 
 class BeginCurate(BaseModel):
