@@ -1,10 +1,11 @@
 import json
 import os
-from dataclasses import dataclass, asdict
-from io import UnsupportedOperation, BytesIO
+from dataclasses import dataclass, asdict, field
+from enum import IntEnum
+from io import UnsupportedOperation
 from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
-from typing import TypeVar, Generic, Callable, List
+from typing import TypeVar, Generic, Callable, List, Optional
 
 import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
@@ -20,7 +21,18 @@ logger = getLogger(__name__)
 
 
 def astuple(dc):
-    return tuple(dc.__dict__.values())
+    """
+    Convert a type to a tuple - values at the end that are None can be truncated.
+    """
+    value = tuple(dc.__dict__.values())
+    while value[-1] is None:
+        value = value[:-1]
+    return value
+
+
+class DocumentState(IntEnum):
+    CURATED = 0
+    VALIDATED = 1
 
 
 @dataclass
@@ -29,11 +41,13 @@ class Document:
     url: str
     extract: str
     score: float
+    term: Optional[str] = None
+    state: Optional[int] = None
 
 
 @dataclass
 class TokenizedDocument(Document):
-    tokens: List[str]
+    tokens: List[str] = field(default_factory=list)
 
 
 T = TypeVar('T')
@@ -174,23 +188,6 @@ class TinyIndex(Generic[T]):
             return []
         # logger.debug(f"Decompressed data: {decompressed_data}")
         return json.loads(decompressed_data.decode('utf8'))
-
-    def index(self, key: str, value: T):
-        assert type(value) == self.item_factory, f"Can only index the specified type" \
-                                              f" ({self.item_factory.__name__})"
-        page_index = self.get_key_page_index(key)
-        try:
-            self.add_to_page(page_index, [value])
-        except PageError:
-            pass
-
-    def add_to_page(self, page_index: int, values: list[T]):
-        current_page = self._get_page_tuples(page_index)
-        if current_page is None:
-            current_page = []
-        value_tuples = [astuple(value) for value in values]
-        current_page += value_tuples
-        self._write_page(current_page, page_index)
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [astuple(value) for value in values]

@@ -5,10 +5,12 @@ from logging import getLogger
 from operator import itemgetter
 from urllib.parse import urlparse
 
+from mwmbl.format import format_result_with_pattern, get_query_regex
+from mwmbl.platform.user import MAX_CURATED_SCORE
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 
 logger = getLogger(__name__)
 
@@ -19,20 +21,6 @@ LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
 DOMAIN_SCORE_SMOOTHING = 50
 HTTPS_STRING = 'https://'
-
-
-def _get_query_regex(terms, is_complete, is_url):
-    if not terms:
-        return ''
-
-    word_sep = r'\b' if is_url else ''
-    if is_complete:
-        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms]
-    else:
-        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms[:-1]] + [
-            rf'{word_sep}{re.escape(terms[-1])}']
-    pattern = '|'.join(term_patterns)
-    return pattern
 
 
 def score_result(terms: list[str], result: Document, is_complete: bool):
@@ -93,7 +81,7 @@ def get_domain_score(url):
 
 
 def get_match_features(terms, result_string, is_complete, is_url):
-    query_regex = _get_query_regex(terms, is_complete, is_url)
+    query_regex = get_query_regex(terms, is_complete, is_url)
     matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     # match_strings = {x.group(0).lower() for x in matches}
     # match_length = sum(len(x) for x in match_strings)
@@ -135,21 +123,10 @@ class Ranker:
         results, terms, _ = self.get_results(s)
 
         is_complete = s.endswith(' ')
-        pattern = _get_query_regex(terms, is_complete, False)
+        pattern = get_query_regex(terms, is_complete, False)
         formatted_results = []
         for result in results:
-            formatted_result = {}
-            for content_type, content in [('title', result.title), ('extract', result.extract)]:
-                matches = re.finditer(pattern, content, re.IGNORECASE)
-                all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(content)]
-                content_result = []
-                for i in range(len(all_spans) - 1):
-                    is_bold = i % 2 == 1
-                    start = all_spans[i]
-                    end = all_spans[i + 1]
-                    content_result.append({'value': content[start:end], 'is_bold': is_bold})
-                formatted_result[content_type] = content_result
-            formatted_result['url'] = result.url
+            formatted_result = format_result_with_pattern(pattern, result)
             formatted_results.append(formatted_result)
 
         logger.info("Return results: %r", formatted_results)
@@ -173,6 +150,7 @@ class Ranker:
 
     def get_results(self, q):
         terms = tokenize(q)
+
         is_complete = q.endswith(' ')
         if len(terms) > 0 and not is_complete:
             completions = self.completer.complete(terms[-1])
@@ -181,12 +159,23 @@ class Ranker:
             completions = []
             retrieval_terms = set(terms)
 
+        # Check for curation
+        curation_term = " ".join(terms)
+        curation_items = self.tiny_index.retrieve(curation_term)
+        curated_items = [d for d in curation_items if d.state in {DocumentState.CURATED, DocumentState.VALIDATED}
+                         and d.term == curation_term]
+        if len(curated_items) > 0:
+            return curated_items, terms, completions
+
         bigrams = set(get_bigrams(len(terms), terms))
 
         pages = []
         seen_items = set()
         for term in retrieval_terms | bigrams:
-            items = self.tiny_index.retrieve(term)
+            if term == curation_term:
+                items = curation_items
+            else:
+                items = self.tiny_index.retrieve(term)
             if items is not None:
                 for item in items:
                     # if term in item.title.lower() or term in item.extract.lower():

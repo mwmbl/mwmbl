@@ -6,11 +6,13 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from mwmbl import background
 from mwmbl.crawler import app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
+from mwmbl.platform import user
 from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.completer import Completer
@@ -51,6 +53,7 @@ def run():
 
     new_item_queue = Queue()
     queued_batches = Queue()
+    # curation_queue = Queue()
 
     if args.background:
         Process(target=background.run, args=(args.data,)).start()
@@ -67,12 +70,23 @@ def run():
         # Initialize FastApi instance
         app = FastAPI()
 
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
         search_router = search.create_router(ranker)
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
         crawler_router = crawler.get_router(batch_cache, queued_batches)
         app.include_router(crawler_router)
+
+        user_router = user.create_router(index_path)
+        app.include_router(user_router)
 
         # Initialize uvicorn server using global app instance and server config params
         uvicorn.run(app, host="0.0.0.0", port=args.port)
