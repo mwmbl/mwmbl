@@ -31,7 +31,8 @@ def astuple(dc):
 
 
 class DocumentState(IntEnum):
-    CURATED = 1
+    CURATED = 0
+    VALIDATED = 1
 
 
 @dataclass

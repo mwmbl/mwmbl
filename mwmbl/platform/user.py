@@ -166,7 +166,7 @@ def create_router(index_path: str) -> APIRouter:
             print("Key", term)
 
             documents = [
-                Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i, term, DocumentState.CURATED.value)
+                Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i, term, result.curated)
                 for i, result in enumerate(curation.results)
             ]
             page_index = indexer.get_key_page_index(term)
