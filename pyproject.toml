@@ -41,7 +41,6 @@ indexer = [
     "idna",
     "beautifulsoup4",
     "lxml",
-    "jusText",
     "langdetect",
     "pyarrow",
     "pyspark",
