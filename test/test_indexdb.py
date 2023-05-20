@@ -1,4 +1,4 @@
-from mwmbl.indexer.index_batches import clean_unicode
+from mwmbl.tokenizer import clean_unicode
 
 
 def test_clean_unicode():

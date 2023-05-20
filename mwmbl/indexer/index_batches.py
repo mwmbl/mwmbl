@@ -89,8 +89,3 @@ def get_url_error_status(item: Item):
         elif item.error.name == 'RobotsDenied':
             return URLStatus.ERROR_ROBOTS_DENIED
     return URLStatus.ERROR_OTHER
-
-
-# TODO: clean unicode at some point
-def clean_unicode(s: str) -> str:
-    return s.encode('utf-8', 'ignore').decode('utf-8')
