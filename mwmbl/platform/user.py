@@ -74,7 +74,9 @@ class Curation(BaseModel, Generic[T]):
 def create_router(index_path: str) -> APIRouter:
     router = APIRouter(prefix="/user", tags=["user"])
 
-    community_id = get_community_id()
+    # TODO: reinstate
+    # community_id = get_community_id()
+    community_id = 0
 
     @router.post("/register")
     def user_register(register: Register) -> Response:
