@@ -83,14 +83,16 @@ def create_router(index_path: str) -> APIRouter:
             "email": register.email,
             "password": register.password,
             "password_verify": register.password_verify,
-            "answer": None,
+            "answer": "not applicable",
             "captcha_answer": None,
             "captcha_uuid": None,
             "honeypot": None,
             "show_nsfw": False,
         }
         request = requests.post(urljoin(LEMMY_URL, "api/v3/user/register"), json=lemmy_register)
-        return Response(content=request.content, status_code=request.status_code, media_type="text/json")
+        if request.status_code != 200:
+            return Response(content=request.content, status_code=request.status_code, media_type="text/json")
+        
 
     @router.post("/login")
     def user_login(login: Login) -> Response:
