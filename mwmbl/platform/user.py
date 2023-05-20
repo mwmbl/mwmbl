@@ -92,7 +92,6 @@ def create_router(index_path: str) -> APIRouter:
         request = requests.post(urljoin(LEMMY_URL, "api/v3/user/register"), json=lemmy_register)
         if request.status_code != 200:
             return Response(content=request.content, status_code=request.status_code, media_type="text/json")
-        
 
     @router.post("/login")
     def user_login(login: Login) -> Response:
