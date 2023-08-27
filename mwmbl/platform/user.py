@@ -1,12 +1,21 @@
 import json
 import os
-from typing import TypeVar, Generic
+import uuid
+from typing import TypeVar, Generic, AsyncGenerator, Optional
 from urllib.parse import urljoin, parse_qs
 
 import requests
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Depends, Request
+from fastapi_users import UUIDIDMixin, BaseUserManager
+from fastapi_users.authentication import CookieTransport, AuthenticationBackend
+from fastapi_users.authentication.strategy import AccessTokenDatabase, DatabaseStrategy
+from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID, SQLAlchemyUserDatabase
+from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID, SQLAlchemyAccessTokenDatabase
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
+from mwmbl.settings import DATABASE_URL
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize
 
@@ -15,6 +24,76 @@ LEMMY_URL = os.environ["LEMMY_URL"]
 RESULT_URL = "https://mwmbl.org/?q="
 MAX_CURATED_SCORE = 1_111_111.0
 
+
+class Base(DeclarativeBase):
+    pass
+
+
+class User(SQLAlchemyBaseUserTableUUID, Base):
+    pass
+
+
+class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
+    pass
+
+
+engine = create_async_engine(DATABASE_URL)
+async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+cookie_transport = CookieTransport(cookie_max_age=3600)
+
+
+async def create_db_and_tables():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session_maker() as session:
+        yield session
+
+
+async def get_user_db(session: AsyncSession = Depends(get_async_session)):
+    yield SQLAlchemyUserDatabase(session, User)
+
+
+async def get_access_token_db(session: AsyncSession = Depends(get_async_session)):
+    yield SQLAlchemyAccessTokenDatabase(session, AccessToken)
+
+
+def get_database_strategy(
+    access_token_db: AccessTokenDatabase[AccessToken] = Depends(get_access_token_db),
+) -> DatabaseStrategy:
+    return DatabaseStrategy(access_token_db, lifetime_seconds=3600)
+
+
+auth_backend = AuthenticationBackend(
+    name="db",
+    transport=cookie_transport,
+    get_strategy=get_database_strategy,
+)
+
+
+class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
+    reset_password_token_secret = ""    # TODO
+    verification_token_secret = ""    # TODO
+
+    async def on_after_register(self, user: User, request: Optional[Request] = None):
+        print(f"User {user.id} has registered.")
+
+    async def on_after_forgot_password(
+        self, user: User, token: str, request: Optional[Request] = None
+    ):
+        print(f"User {user.id} has forgot their password. Reset token: {token}")
+
+    async def on_after_request_verify(
+        self, user: User, token: str, request: Optional[Request] = None
+    ):
+        print(f"Verification requested for user {user.id}. Verification token: {token}")
+
+
+async def get_user_manager(user_db=Depends(get_user_db)):
+    yield UserManager(user_db)
+    
 
 class Register(BaseModel):
     username: str
