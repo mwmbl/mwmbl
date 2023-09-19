@@ -34,7 +34,7 @@ RUN /venv/bin/pip install pip wheel --upgrade && \
 
 FROM base as final
 
-RUN apt-get update && apt-get install -y postgresql-client
+RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
