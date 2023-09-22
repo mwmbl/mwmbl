@@ -43,4 +43,4 @@ CORE_DOMAINS = {
     'www.python.org',
 }
 
-BLACKLIST_DOMAINS_URL = "https://github.com/T145/black-mirror/releases/download/latest/BLOCK_DOMAIN.txt"
+BLACKLIST_DOMAINS_URL = "https://get.domainsblacklists.com/blacklist.txt"
