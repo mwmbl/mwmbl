@@ -9,6 +9,8 @@ from time import sleep
 from typing import Iterable, Collection
 from urllib.parse import urlparse
 
+from requests_cache import CachedSession
+
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.database import Database
@@ -19,7 +21,7 @@ from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.indexer.paths import BATCH_DIR_NAME
 from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, EXCLUDED_DOMAINS, SCORE_FOR_SAME_DOMAIN, \
-    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER
+    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER, BLACKLIST_DOMAINS_URL
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -40,7 +42,11 @@ def run(batch_cache: BatchCache, new_item_queue: Queue):
 
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Queue):
-    logger.info(f"Recording URLs in database for {len(batches)} batches")
+    start = datetime.now()
+    blacklist_domains = get_blacklist_domains()
+    blacklist_retrieval_time = datetime.now() - start
+    logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
+                f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
     with Database() as db:
         url_db = URLDatabase(db.connection)
         url_scores = defaultdict(float)
@@ -64,12 +70,12 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
                     score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                     for link in item.content.links:
                         process_link(batch, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                     url_timestamps, url_users, False)
+                                     url_timestamps, url_users, False, blacklist_domains)
 
                     if item.content.extra_links:
                         for link in item.content.extra_links:
                             process_link(batch, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                         url_timestamps, url_users, True)
+                                         url_timestamps, url_users, True, blacklist_domains)
 
         found_urls = [FoundURL(url, url_users[url], url_scores[url], url_statuses[url], url_timestamps[url])
                       for url in url_scores.keys() | url_statuses.keys()]
@@ -80,9 +86,16 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
         logger.info(f"Put {len(urls)} new items in the URL queue")
 
 
-def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool):
+def get_blacklist_domains():
+    with CachedSession(expire_after=timedelta(days=1)) as session:
+        response = session.get(BLACKLIST_DOMAINS_URL)
+        return set(response.text.split())
+
+
+def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
     parsed_link = urlparse(link)
-    if parsed_link.netloc in EXCLUDED_DOMAINS:
+    if parsed_link.netloc in EXCLUDED_DOMAINS or parsed_link.netloc in blacklist_domains:
+        logger.info(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
     extra_multiplier = EXTRA_LINK_MULTIPLIER if is_extra else 1.0
