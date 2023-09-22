@@ -409,6 +409,27 @@ argon2 = ["argon2-cffi (>=19.1.0)"]
 bcrypt = ["bcrypt"]
 
 [[package]]
+name = "django-ninja"
+version = "0.22.2"
+description = "Django Ninja - Fast Django REST framework"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "django_ninja-0.22.2-py3-none-any.whl", hash = "sha256:c53b098a8190f373ea2605c276a6061d48b2626500a9c6b9916c503e4b4a20eb"},
+    {file = "django_ninja-0.22.2.tar.gz", hash = "sha256:913ebde7571d6a6968c9ac0b9e8a24680c46444d44fdd552f8831dbeede1292c"},
+]
+
+[package.dependencies]
+Django = ">=2.2"
+pydantic = ">=1.6,<2.0.0"
+
+[package.extras]
+dev = ["pre-commit"]
+doc = ["markdown-include", "mkdocs", "mkdocs-material", "mkdocstrings"]
+test = ["black", "django-stubs", "flake8", "isort", "mypy (==0.931)", "psycopg2-binary", "pytest", "pytest-asyncio", "pytest-cov", "pytest-django"]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.1.1"
 description = "Backport of PEP 654 (exception groups)"
@@ -2124,4 +2145,4 @@ indexer = ["ujson", "warcio", "idna", "beautifulsoup4", "lxml", "langdetect", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "b40fcb8fc85427fe91b9ba334eaa21bc58c746471650121fbf0846c859c6999e"
+content-hash = "9e8a04eb23e361a1493232289085251695eaeb08e165a36ad2ceeed03ad825cb"
