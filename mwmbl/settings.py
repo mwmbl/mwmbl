@@ -42,3 +42,5 @@ CORE_DOMAINS = {
     'arxiv.org',
     'www.python.org',
 }
+
+BLACKLIST_DOMAINS_URL = "https://github.com/T145/black-mirror/releases/download/latest/BLOCK_DOMAIN.txt"
