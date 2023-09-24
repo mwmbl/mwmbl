@@ -1,6 +1,6 @@
 from logging import getLogger
 
-from fastapi import APIRouter
+from ninja import Router
 
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
@@ -10,8 +10,8 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 
-def create_router(ranker: HeuristicRanker) -> APIRouter:
-    router = APIRouter(prefix="/search", tags=["search"])
+def create_router(ranker: HeuristicRanker) -> Router:
+    router = Router(tags=["search"])
 
     @router.get("")
     def search(s: str):
