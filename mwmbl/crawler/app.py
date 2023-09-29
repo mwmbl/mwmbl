@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import os
 from datetime import datetime, timezone, date
 from queue import Queue, Empty
 from typing import Union
@@ -13,8 +14,10 @@ from fastapi import HTTPException, APIRouter
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
+from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
+from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.format import format_result
@@ -31,9 +34,11 @@ from mwmbl.settings import (
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
-    DATE_REGEX, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS)
+    DATE_REGEX, NUM_EXTRACT_CHARS)
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.url_queue import URLQueue
+
+
+stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL")))
 
 
 def get_bucket(name):
@@ -128,6 +133,9 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         # Using an approach from https://stackoverflow.com/a/30476450
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
         hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
+
+        stats_manager.record_batch(hashed_batch)
+
         data = gzip.compress(hashed_batch.json().encode('utf8'))
         upload(data, filename)
 
@@ -190,6 +198,10 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         check_date_str(date_str)
         prefix = f'1/{VERSION}/{date_str}/1/'
         return get_subfolders(prefix)
+
+    @router.get('/stats')
+    def get_stats() -> MwmblStats:
+        return stats_manager.get_stats()
 
     @router.get('/')
     def status():
