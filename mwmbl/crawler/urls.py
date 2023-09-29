@@ -132,9 +132,11 @@ class URLDatabase:
         sql = f"""
         SELECT url, status, user_id_hash, score, updated FROM urls
         WHERE status = %(status)s
-        ORDER BY score DESC
         LIMIT %(num_urls)s
         """
+
+        # TODO: reinstate this line once performance issue is resolved:
+        #         ORDER BY score DESC
 
         with self.connection.cursor() as cursor:
             cursor.execute(sql, {'status': status.value, 'num_urls': num_urls})
