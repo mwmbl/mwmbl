@@ -36,7 +36,7 @@ class StatsManager:
 
         num_crawled_urls = sum(1 for item in hashed_batch.items if item.content is not None)
 
-        url_count_key = URL_DATE_COUNT_KEY.format(date=date_time.date)
+        url_count_key = URL_DATE_COUNT_KEY.format(date=date_time.date())
         self.redis.incrby(url_count_key, num_crawled_urls)
         self.redis.expire(url_count_key, EXPIRE_SECONDS)
 
@@ -45,11 +45,11 @@ class StatsManager:
         self.redis.incrby(hour_key, num_crawled_urls)
         self.redis.expire(hour_key, EXPIRE_SECONDS)
 
-        user_count_key = USER_COUNT_KEY.format(date=date_time.date)
+        user_count_key = USER_COUNT_KEY.format(date=date_time.date())
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, EXPIRE_SECONDS)
 
-        host_key = HOST_COUNT_KEY.format(date=date_time.date)
+        host_key = HOST_COUNT_KEY.format(date=date_time.date())
         for item in hashed_batch.items:
             if item.content is None:
                 continue
@@ -76,10 +76,10 @@ class StatsManager:
                 hour_count = 0
             hour_counts.append(hour_count)
 
-        user_count_key = USER_COUNT_KEY.format(date=date_time.date)
+        user_count_key = USER_COUNT_KEY.format(date=date_time.date())
         user_counts = self.redis.zrevrange(user_count_key, 0, 100, withscores=True)
 
-        host_key = HOST_COUNT_KEY.format(date=date_time.date)
+        host_key = HOST_COUNT_KEY.format(date=date_time.date())
         host_counts = self.redis.zrevrange(host_key, 0, 100, withscores=True)
 
         return MwmblStats(
