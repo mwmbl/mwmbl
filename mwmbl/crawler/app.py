@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import os
 from datetime import datetime, timezone, date
 from queue import Queue, Empty
 from typing import Union
@@ -37,7 +38,7 @@ from mwmbl.settings import (
 from mwmbl.tinysearchengine.indexer import Document
 
 
-redis = Redis(host='localhost', port=6379, decode_responses=True)
+stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL")))
 
 
 def get_bucket(name):
@@ -132,6 +133,9 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         # Using an approach from https://stackoverflow.com/a/30476450
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
         hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
+
+        stats_manager.record_batch(hashed_batch)
+
         data = gzip.compress(hashed_batch.json().encode('utf8'))
         upload(data, filename)
 
@@ -197,10 +201,7 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
 
     @router.get('/stats')
     def get_stats() -> MwmblStats:
-        stats = StatsManager(redis)
-        stats = stats.get_stats()
-        print("Stats", stats)
-        return stats
+        return stats_manager.get_stats()
 
     @router.get('/')
     def status():
