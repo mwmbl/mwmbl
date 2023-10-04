@@ -1,5 +1,6 @@
 import os
 import pickle
+import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
@@ -21,7 +22,8 @@ from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.indexer.paths import BATCH_DIR_NAME
 from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, EXCLUDED_DOMAINS, SCORE_FOR_SAME_DOMAIN, \
-    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER, BLACKLIST_DOMAINS_URL
+    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER, BLACKLIST_DOMAINS_URL, \
+    DOMAIN_BLACKLIST_REGEX
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -94,7 +96,8 @@ def get_blacklist_domains():
 
 def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
     parsed_link = urlparse(link)
-    if parsed_link.netloc in EXCLUDED_DOMAINS or parsed_link.netloc in blacklist_domains:
+    if parsed_link.netloc in EXCLUDED_DOMAINS or DOMAIN_BLACKLIST_REGEX.search(parsed_link.netloc) is not None \
+            or parsed_link.netloc in blacklist_domains:
         logger.info(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
