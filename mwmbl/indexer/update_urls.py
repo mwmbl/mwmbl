@@ -71,12 +71,12 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
                         continue
                     score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                     for link in item.content.links:
-                        process_link(batch, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
+                        process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
                                      url_timestamps, url_users, False, blacklist_domains)
 
                     if item.content.extra_links:
                         for link in item.content.extra_links:
-                            process_link(batch, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
+                            process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
                                          url_timestamps, url_users, True, blacklist_domains)
 
         found_urls = [FoundURL(url, url_users[url], url_scores[url], url_statuses[url], url_timestamps[url])
@@ -94,7 +94,7 @@ def get_blacklist_domains():
         return set(response.text.split())
 
 
-def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
+def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
     parsed_link = urlparse(link)
     if parsed_link.netloc in EXCLUDED_DOMAINS or DOMAIN_BLACKLIST_REGEX.search(parsed_link.netloc) is not None \
             or parsed_link.netloc in blacklist_domains:
@@ -104,11 +104,11 @@ def process_link(batch, crawled_page_domain, link, unknown_domain_multiplier, ti
     extra_multiplier = EXTRA_LINK_MULTIPLIER if is_extra else 1.0
     score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
     url_scores[link] += score * unknown_domain_multiplier * extra_multiplier
-    url_users[link] = batch.user_id_hash
+    url_users[link] = user_id_hash
     url_timestamps[link] = timestamp
     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
     url_scores[domain] += SCORE_FOR_ROOT_PATH * unknown_domain_multiplier
-    url_users[domain] = batch.user_id_hash
+    url_users[domain] = user_id_hash
     url_timestamps[domain] = timestamp
 
 
