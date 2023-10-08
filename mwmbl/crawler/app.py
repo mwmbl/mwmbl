@@ -14,6 +14,7 @@ from fastapi import HTTPException, APIRouter
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
+from ninja import Router
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
@@ -82,17 +83,15 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-def get_router(batch_cache: BatchCache, queued_batches: Queue):
-    router = APIRouter(prefix="/crawler", tags=["crawler"])
+def create_router(batch_cache: BatchCache, queued_batches: Queue) -> Router:
+    router = Router(tags=["crawler"])
 
-    @router.on_event("startup")
-    async def on_startup():
-        with Database() as db:
-            url_db = URLDatabase(db.connection)
-            return url_db.create_tables()
+    # TODO: # ensure tables are created before crawler code is used:
+    #       #
+    #       #     url_db.create_tables()
 
     @router.get('/fetch')
-    def fetch_url(url: str, query: str):
+    def fetch_url(request, url: str, query: str):
         response = requests.get(url)
         paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
         good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
@@ -105,7 +104,7 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         return format_result(result, query)
 
     @router.post('/batches/')
-    def post_batch(batch: Batch):
+    def post_batch(request, batch: Batch):
         if len(batch.items) > MAX_BATCH_SIZE:
             raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
 
@@ -159,7 +158,7 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         }
 
     @router.post('/batches/new')
-    def request_new_batch(batch_request: NewBatchRequest) -> list[str]:
+    def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
         user_id_hash = _get_user_id_hash(batch_request)
         try:
             urls = queued_batches.get(block=False)
@@ -174,14 +173,14 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
         return urls
 
     @router.get('/batches/{date_str}/users/{public_user_id}')
-    def get_batches_for_date_and_user(date_str, public_user_id):
+    def get_batches_for_date_and_user(request, date_str, public_user_id):
         check_date_str(date_str)
         check_public_user_id(public_user_id)
         prefix = f'1/{VERSION}/{date_str}/1/{public_user_id}/'
         return get_batch_ids_for_prefix(prefix)
 
     @router.get('/batches/{date_str}/users/{public_user_id}/batch/{batch_id}')
-    def get_batch_from_id(date_str, public_user_id, batch_id):
+    def get_batch_from_id(request, date_str, public_user_id, batch_id):
         url = get_batch_url(batch_id, date_str, public_user_id)
         data = json.loads(gzip.decompress(requests.get(url).content))
         return {
@@ -189,22 +188,22 @@ def get_router(batch_cache: BatchCache, queued_batches: Queue):
             'batch': data,
         }
 
-    @router.get('/latest-batch', response_model=list[HashedBatch])
-    def get_latest_batch():
+    @router.get('/latest-batch')
+    def get_latest_batch(request) -> list[HashedBatch]:
         return [] if last_batch is None else [last_batch]
 
     @router.get('/batches/{date_str}/users')
-    def get_user_id_hashes_for_date(date_str: str):
+    def get_user_id_hashes_for_date(request, date_str: str):
         check_date_str(date_str)
         prefix = f'1/{VERSION}/{date_str}/1/'
         return get_subfolders(prefix)
 
     @router.get('/stats')
-    def get_stats() -> MwmblStats:
+    def get_stats(request) -> MwmblStats:
         return stats_manager.get_stats()
 
     @router.get('/')
-    def status():
+    def status(request):
         return {
             'status': 'ok'
         }

@@ -83,7 +83,7 @@ def run():
         app.include_router(search_router)
 
         batch_cache = BatchCache(Path(args.data) / BATCH_DIR_NAME)
-        crawler_router = crawler.get_router(batch_cache, queued_batches)
+        crawler_router = crawler.create_router(batch_cache, queued_batches)
         app.include_router(crawler_router)
 
         user_router = user.create_router(index_path)

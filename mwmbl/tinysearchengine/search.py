@@ -14,11 +14,11 @@ def create_router(ranker: HeuristicRanker) -> Router:
     router = Router(tags=["search"])
 
     @router.get("")
-    def search(s: str):
+    def search(request, s: str):
         return ranker.search(s)
 
     @router.get("/complete")
-    def complete(q: str):
+    def complete(request, q: str):
         return ranker.complete(q)
 
     return router
