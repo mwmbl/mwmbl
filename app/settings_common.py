@@ -123,7 +123,3 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# ===================== Custom Settings =========================
-
-DATA_PATH = "./devdata"
-RUN_BACKGROUND_PROCESSES = True

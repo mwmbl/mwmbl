@@ -1,9 +1,9 @@
 from multiprocessing import Queue
 from pathlib import Path
 
+from django.conf import settings
 from ninja import NinjaAPI
 
-from app import settings
 import mwmbl.crawler.app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
