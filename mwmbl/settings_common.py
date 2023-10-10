@@ -23,9 +23,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["api.mwmbl.org"]
 
 
 # Application definition
