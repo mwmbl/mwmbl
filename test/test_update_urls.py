@@ -1,4 +1,4 @@
-from mwmbl.indexer import process_link
+from mwmbl.indexer.update_urls import process_link
 
 
 def test_process_link_normal():

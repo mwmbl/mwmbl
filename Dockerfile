@@ -46,8 +46,6 @@ VOLUME ["/data"]
 
 EXPOSE 5000
 
-ENV DJANGO_SETTINGS_MODULE=mwmbl.settings_dev
+ENV DJANGO_SETTINGS_MODULE=mwmbl.settings_prod
 
-# WORKDIR "/venv/lib/python3.10/site-packages/mwmbl/"
-# CMD ["/venv/bin/python", "-m", "uvicorn", "app.asgi:application"]
 CMD ["/venv/bin/mwmbl-tinysearchengine"]
