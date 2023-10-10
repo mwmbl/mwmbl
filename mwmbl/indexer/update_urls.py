@@ -1,13 +1,10 @@
-import os
-import pickle
-import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
 from multiprocessing import Queue
 from pathlib import Path
 from time import sleep
-from typing import Iterable, Collection
+from typing import Collection
 from urllib.parse import urlparse
 
 from requests_cache import CachedSession

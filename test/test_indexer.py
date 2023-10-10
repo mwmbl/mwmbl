@@ -1,9 +1,9 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex, _binary_search_fitting_size, astuple, _trim_items_to_page, _get_page_data, _pad_to_page_size
-from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
-import json
+from mwmbl.tinysearchengine import Document, TinyIndex, _binary_search_fitting_size, astuple, _trim_items_to_page, _get_page_data, _pad_to_page_size
+from zstandard import ZstdCompressor
+
 
 def test_create_index():
     num_pages = 10

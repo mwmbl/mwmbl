@@ -1,6 +1,6 @@
 import json
 
-from mwmbl.indexer.paths import TOP_DOMAINS_JSON_PATH
+from mwmbl.indexer import TOP_DOMAINS_JSON_PATH
 from mwmbl.hn_top_domains_filtered import DOMAINS
 
 

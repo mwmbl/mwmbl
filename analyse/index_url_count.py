@@ -1,7 +1,7 @@
 """
 Count unique URLs in the index.
 """
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine import TinyIndex, Document
 
 
 def run():

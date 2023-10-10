@@ -5,9 +5,9 @@ import numpy as np
 import spacy
 
 from analyse.index_local import EVALUATE_INDEX_PATH
-from mwmbl.indexer.index import tokenize_document
-from mwmbl.indexer.paths import INDEX_PATH
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.indexer import tokenize_document
+from mwmbl.indexer import INDEX_PATH
+from mwmbl.tinysearchengine import TinyIndex, Document
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)

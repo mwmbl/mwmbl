@@ -10,7 +10,7 @@ from uuid import uuid4
 import boto3
 import justext
 import requests
-from fastapi import HTTPException, APIRouter
+from fastapi import HTTPException
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor

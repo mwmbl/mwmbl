@@ -2,9 +2,9 @@ import logging
 import sys
 from itertools import islice
 
-from mwmbl.indexer.paths import INDEX_PATH
+from mwmbl.indexer import INDEX_PATH
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)

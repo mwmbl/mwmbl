@@ -1,5 +1,3 @@
-import mwmbl.tinysearchengine.completer
-import pytest
 import pandas as pd
 
 def mockCompleterData(mocker, data):
@@ -16,7 +14,7 @@ def test_correctCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = mwmbl.tinysearchengine.completer.Completer()
+    completer = app.tinysearchengine.completer.Completer()
     completion = completer.complete('build')
     assert ['build', 'builder', 'buildings'] == completion
 
@@ -29,7 +27,7 @@ def test_correctSortOrder(mocker):
         [3, 'buildings', 3]]
     mockCompleterData(mocker, testdata)
     
-    completer = mwmbl.tinysearchengine.completer.Completer()
+    completer = app.tinysearchengine.completer.Completer()
     completion = completer.complete('build')
     assert ['build', 'buildings', 'builder'] == completion
     
@@ -42,7 +40,7 @@ def test_noCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = mwmbl.tinysearchengine.completer.Completer()
+    completer = app.tinysearchengine.completer.Completer()
     completion = completer.complete('test')
     assert [] == completion
     
@@ -55,7 +53,7 @@ def test_singleCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = mwmbl.tinysearchengine.completer.Completer()
+    completer = app.tinysearchengine.completer.Completer()
     completion = completer.complete('announce')
     assert ['announce'] == completion
     
@@ -68,7 +66,7 @@ def test_idempotencyWithSameScoreCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = mwmbl.tinysearchengine.completer.Completer()
+    completer = app.tinysearchengine.completer.Completer()
     for i in range(3):
         print(f"iteration: {i}")
         completion = completer.complete('build')

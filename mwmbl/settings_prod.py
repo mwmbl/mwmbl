@@ -1,4 +1,4 @@
-from app.settings_common import *
+from mwmbl.settings_common import *
 
 DATA_PATH = "/app/storage"
 RUN_BACKGROUND_PROCESSES = True

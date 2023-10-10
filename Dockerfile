@@ -46,5 +46,8 @@ VOLUME ["/data"]
 
 EXPOSE 5000
 
-# Using the mwmbl-tinysearchengine binary/entrypoint which comes packaged with mwmbl
-CMD ["/venv/bin/mwmbl-tinysearchengine", "--num-pages", "10240000", "--background", "--data", "/app/storage"]
+ENV DJANGO_SETTINGS_MODULE=mwmbl.settings_dev
+
+# WORKDIR "/venv/lib/python3.10/site-packages/mwmbl/"
+# CMD ["/venv/bin/python", "-m", "uvicorn", "app.asgi:application"]
+CMD ["/venv/bin/mwmbl-tinysearchengine"]

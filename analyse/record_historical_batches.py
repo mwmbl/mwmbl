@@ -4,12 +4,10 @@ See how many unique URLs and root domains we have crawled.
 import glob
 import gzip
 import json
-from collections import defaultdict, Counter
-from urllib.parse import urlparse
 
 import requests
 
-from mwmbl.indexer.paths import CRAWL_GLOB
+from mwmbl.indexer import CRAWL_GLOB
 
 
 API_ENDPOINT = "http://95.216.215.29/batches/historical"

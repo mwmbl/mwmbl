@@ -1,16 +1,13 @@
 """
 Database storing info on URLs
 """
-import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from logging import getLogger
 
 from psycopg2.extras import execute_values
 
-from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.settings import CORE_DOMAINS
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 from mwmbl.utils import batch
 

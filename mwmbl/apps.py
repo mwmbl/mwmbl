@@ -4,7 +4,7 @@ from pathlib import Path
 from django.apps import AppConfig
 from django.conf import settings
 
-from app.api import queued_batches
+from mwmbl.api import queued_batches
 from mwmbl import background
 from mwmbl.indexer.paths import INDEX_NAME
 from mwmbl.indexer.update_urls import update_urls_continuously
@@ -13,7 +13,7 @@ from mwmbl.url_queue import update_queue_continuously
 
 
 class MwmblConfig(AppConfig):
-    name = "app"
+    name = "mwmbl"
     verbose_name = "Mwmbl Application"
 
     def ready(self):
