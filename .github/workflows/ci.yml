@@ -53,5 +53,7 @@ jobs:
       #              run test suite
       #----------------------------------------------
       - name: Run tests
+        env:
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_dev
         run: |
           poetry run pytest

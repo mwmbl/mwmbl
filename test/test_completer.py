@@ -1,9 +1,13 @@
 import pandas as pd
+from mwmbl import tinysearchengine
+from mwmbl.tinysearchengine.completer import Completer
+
 
 def mockCompleterData(mocker, data):
     testDataFrame = pd.DataFrame(data, columns=['','term','count'])
     mocker.patch('mwmbl.tinysearchengine.completer.Completer.get_terms', 
                  return_value = testDataFrame)
+
 
 def test_correctCompletions(mocker):
     # Mock completer with custom data
@@ -14,9 +18,10 @@ def test_correctCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = app.tinysearchengine.completer.Completer()
+    completer = Completer()
     completion = completer.complete('build')
     assert ['build', 'builder', 'buildings'] == completion
+
 
 def test_correctSortOrder(mocker):
     # Mock completer with custom data
@@ -27,10 +32,11 @@ def test_correctSortOrder(mocker):
         [3, 'buildings', 3]]
     mockCompleterData(mocker, testdata)
     
-    completer = app.tinysearchengine.completer.Completer()
+    completer = Completer()
     completion = completer.complete('build')
     assert ['build', 'buildings', 'builder'] == completion
-    
+
+
 def test_noCompletions(mocker):
     # Mock completer with custom data
     testdata = [
@@ -40,10 +46,11 @@ def test_noCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = app.tinysearchengine.completer.Completer()
+    completer = Completer()
     completion = completer.complete('test')
     assert [] == completion
-    
+
+
 def test_singleCompletions(mocker):
     # Mock completer with custom data
     testdata = [
@@ -53,10 +60,11 @@ def test_singleCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = app.tinysearchengine.completer.Completer()
+    completer = Completer()
     completion = completer.complete('announce')
     assert ['announce'] == completion
-    
+
+
 def test_idempotencyWithSameScoreCompletions(mocker):
     # Mock completer with custom data
     testdata = [
@@ -66,7 +74,7 @@ def test_idempotencyWithSameScoreCompletions(mocker):
         [3, 'buildings', 1]]
     mockCompleterData(mocker, testdata)
     
-    completer = app.tinysearchengine.completer.Completer()
+    completer = Completer()
     for i in range(3):
         print(f"iteration: {i}")
         completion = completer.complete('build')
