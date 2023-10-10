@@ -7,16 +7,15 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from datetime import datetime
 
 import spacy
 
-from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler import HashedBatch
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.database import Database
-from mwmbl.indexer.index_batches import index_batches
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.indexer import index_batches
+from mwmbl.tinysearchengine import TinyIndex, Document
 
 LOCAL_BATCHES_PATH = f'{os.environ["HOME"]}/data/mwmbl/file/**/*.json.gz'
 NUM_BATCHES = 10000

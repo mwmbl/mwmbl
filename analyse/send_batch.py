@@ -3,7 +3,7 @@ Send a batch to a running instance.
 """
 import requests
 
-from mwmbl.crawler.batch import Batch, Item, ItemContent
+from mwmbl.crawler import Batch, Item, ItemContent
 
 
 URL = 'http://localhost:5000/crawler/batches/'

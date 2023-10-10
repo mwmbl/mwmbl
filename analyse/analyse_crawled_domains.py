@@ -7,8 +7,8 @@ import json
 from collections import defaultdict, Counter
 from urllib.parse import urlparse
 
-from mwmbl.crawler.batch import HashedBatch
-from mwmbl.indexer.paths import CRAWL_GLOB, MWMBL_DATA_DIR
+from mwmbl.crawler import HashedBatch
+from mwmbl.indexer import CRAWL_GLOB, MWMBL_DATA_DIR
 
 
 # TODO: remove this line - temporary override

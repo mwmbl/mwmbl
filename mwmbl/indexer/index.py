@@ -1,13 +1,10 @@
 """
 Create a search index
 """
-from collections import Counter
 from typing import Iterable
 from urllib.parse import unquote
 
-import pandas as pd
-
-from mwmbl.tinysearchengine.indexer import Document, TokenizedDocument, TinyIndex
+from mwmbl.tinysearchengine.indexer import TokenizedDocument
 from mwmbl.tokenizer import tokenize, get_bigrams
 
 DEFAULT_SCORE = 0

@@ -1,6 +1,5 @@
 import time
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from logging import getLogger
 from multiprocessing import Queue

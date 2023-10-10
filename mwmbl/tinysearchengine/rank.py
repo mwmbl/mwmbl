@@ -6,7 +6,6 @@ from operator import itemgetter
 from urllib.parse import urlparse
 
 from mwmbl.format import format_result_with_pattern, get_query_regex
-from mwmbl.platform.user import MAX_CURATED_SCORE
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.hn_top_domains_filtered import DOMAINS

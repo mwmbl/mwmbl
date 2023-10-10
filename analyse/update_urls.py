@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from queue import Queue
 
-from mwmbl.indexer.update_urls import record_urls_in_database
+from mwmbl.indexer import record_urls_in_database
 
 
 def run_update_urls_on_fixed_batches():

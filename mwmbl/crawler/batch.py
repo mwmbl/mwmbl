@@ -1,21 +1,21 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from ninja import Schema
 
 
-class ItemContent(BaseModel):
+class ItemContent(Schema):
     title: str
     extract: str
     links: list[str]
     extra_links: Optional[list[str]]
 
 
-class ItemError(BaseModel):
+class ItemError(Schema):
     name: str
     message: Optional[str]
 
 
-class Item(BaseModel):
+class Item(Schema):
     url: str
     status: Optional[int]
     timestamp: int
@@ -23,16 +23,16 @@ class Item(BaseModel):
     error: Optional[ItemError]
 
 
-class Batch(BaseModel):
+class Batch(Schema):
     user_id: str
     items: list[Item]
 
 
-class NewBatchRequest(BaseModel):
+class NewBatchRequest(Schema):
     user_id: str
 
 
-class HashedBatch(BaseModel):
+class HashedBatch(Schema):
     user_id_hash: str
     timestamp: int
     items: list[Item]

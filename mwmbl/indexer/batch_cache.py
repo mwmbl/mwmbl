@@ -9,7 +9,6 @@ import os
 from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from urllib.parse import urlparse
 
 from pydantic import ValidationError

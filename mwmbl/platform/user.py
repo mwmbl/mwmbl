@@ -7,7 +7,7 @@ import requests
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tokenizer import tokenize
 
 
