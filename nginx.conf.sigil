@@ -82,13 +82,6 @@ server {
   keepalive_timeout   70;
   {{ if and (eq $.SPDY_SUPPORTED "true") (ne $.HTTP2_SUPPORTED "true") }}add_header          Alternate-Protocol  {{ $.PROXY_SSL_PORT }}:npn-spdy/2;{{ end }}
 
-## Static file hosting
-
-  location /static/ {
-    alias /var/lib/dokku/data/storage/mwmbl/;
-  }
-
-
   location    / {
 
 
@@ -173,6 +166,11 @@ server {
   location /502-error.html {
     root {{ $.DOKKU_LIB_ROOT }}/data/nginx-vhosts/dokku-errors;
     internal;
+  }
+
+  ## Static file hosting
+  location /static/ {
+    alias /var/lib/dokku/data/storage/mwmbl/;
   }
 }
 {{ else if eq $scheme "grpc"}}
