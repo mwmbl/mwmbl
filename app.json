@@ -1,7 +1,7 @@
 {
   "scripts": {
     "dokku": {
-      "predeploy": "rm -r /app/static/* && cp -r /front-end-build/* /app/static/"
+      "predeploy": "rm -rf /app/static/* && cp -r /front-end-build/* /app/static/"
     }
   }
 }
