@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mwmbl Stats</title>
+
+  <!-- Favicons -->
+  <link rel="icon" href="/images/favicon.svg" type="image/svg+xml">
+
+  <!-- Fonts import -->
+  <link rel="preload" href="/fonts/inter/inter.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="/fonts/inter/inter.css">
+  </noscript>
+
+  <!-- CSS Stylesheets (this is critical CSS) -->
+  <link rel="stylesheet" type="text/css" href="/css/reset.css">
+  <link rel="stylesheet" type="text/css" href="/css/theme.css">
+  <link rel="stylesheet" type="text/css" href="/css/global.css">
+  <link rel="stylesheet" type="text/css" href="stats.css">
+</head>
+<body>
+  <section>
+    <div class="info">
+      <h1>Mwmbl Stats</h1>
+      <p>
+        Mwmbl is a <a href="https://matrix.to/#/#mwmbl:matrix.org">community</a> devoted to building a
+        <a href="https://en.wikipedia.org/wiki/Free_and_open-source_software">free</a> search engine. You can try it
+        out <a href="/">here</a> or help us improve the index by
+        <a href="https://en.wikipedia.org/wiki/Web_crawler">crawling</a> the web with our
+        <a href="https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/">Firefox extension</a>
+        or <a href="https://github.com/mwmbl/crawler-script">command line script</a>.
+      </p>
+    </div>
+  </section>
+  <section>
+    <div class="info">
+      <h1>Number of users crawling today: <span id="num-users"></span></h1>
+      <div class="wrap">
+        <canvas id="users-by-day"></canvas>
+      </div>
+    </div>
+    <div class="info">
+      <h1>Number of URLs crawled today: <span id="num-urls"></span></h1>
+      <div class="wrap">
+        <canvas id="urls-by-day"></canvas>
+      </div>
+    </div>
+    <div class="info">
+      <div class="wrap">
+        <canvas id="urls-by-hour"></canvas>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="info tall">
+      <div class="wrap tall">
+        <canvas id="urls-by-user"></canvas>
+      </div>
+    </div>
+    <div class="info tall">
+      <div class="wrap tall">
+        <canvas id="urls-by-domain"></canvas>
+      </div>
+    </div>
+  </section>
+  <script src="./stats.js" type="module"></script>
+</body>
+</html>

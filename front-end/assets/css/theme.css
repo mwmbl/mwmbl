@@ -1,0 +1,18 @@
+:root {
+
+  /* This is the theme file, use it to define theme variables. */
+
+  /* Colors: */
+  --dark-color: #0A1931;
+  --primary-color: #185ADB;
+  --gray-color: #EEEEEE;
+  --light-color: #F8F8F8;
+
+  /* Fonts: */
+  --regular-font: 'Inter', sans-serif;
+  --default-font-size: 16px;
+  --default-font-weight: 400;
+  --bold-font-weight: 700;
+  --black-font-weight: 900;
+
+}

@@ -1,0 +1,33 @@
+
+body {
+    background: #eeeeee;
+}
+
+section {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.info {
+    flex: 1 500px;
+    margin: 10px;
+    padding: 50px;
+    background: #ffffff;
+    border-radius: 50px;
+}
+
+.wrap {
+    height: 512px;
+}
+
+#users-by-day-info {
+    width: 100%;
+}
+
+#url-info {
+    height: 3000px;
+}
+
+.tall {
+    height: 3000px;
+}

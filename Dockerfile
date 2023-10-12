@@ -1,3 +1,10 @@
+FROM node:hydrogen-bullseye as front-end
+
+COPY front-end /front-end
+WORKDIR /front-end
+RUN npm install && npm run build
+
+
 FROM python:3.10.2-bullseye as base
 
 ENV PYTHONFAULTHANDLER=1 \
@@ -38,6 +45,9 @@ RUN apt-get update && apt-get install -y postgresql-client
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
+
+# Copy the front end build
+COPY --from=front-end /front-end/dist /app/static
 
 ADD nginx.conf.sigil /app
 
