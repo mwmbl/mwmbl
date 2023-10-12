@@ -35,14 +35,3 @@ class MwmblConfig(AppConfig):
             Process(target=background.run, args=(settings.DATA_PATH,)).start()
             Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
             Process(target=update_urls_continuously, args=(settings.DATA_PATH, new_item_queue)).start()
-
-        if not settings.DEBUG:
-            # Remove all existing content from the static folder:
-            # https://stackoverflow.com/a/1073382
-            for root, dirs, files in os.walk('/app/static'):
-                for f in files:
-                    os.unlink(os.path.join(root, f))
-                for d in dirs:
-                    shutil.rmtree(os.path.join(root, d))
-
-            shutil.copytree('/front-end-build', '/app/static')
