@@ -3,7 +3,7 @@ import define from '../utils/define.js';
 const template = () => /*html*/`
   <header class="search-menu">
     <div class="branding">
-      <img class="brand-icon" src="/images/logo.svg" width="40" height="40" alt="mwmbl logo">
+      <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
       <span class="brand-title">MWMBL</span>
     </div>
     <mwmbl-search-bar></mwmbl-search-bar>

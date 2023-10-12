@@ -3,6 +3,7 @@ import { resolve } from 'path'
 
 export default {
   root: './src',
+  base: '/static',
   publicDir: '../assets',
   build: {
     outDir: '../dist',
