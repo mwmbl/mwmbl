@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y postgresql-client
 COPY --from=builder /venv /venv
 
 # Copy the front end build
-COPY --from=front-end /front-end/dist /app/static
+COPY --from=front-end /front-end/dist /front-end-build
 
 ADD nginx.conf.sigil /app
 
