@@ -45,4 +45,4 @@ class MwmblConfig(AppConfig):
                 for d in dirs:
                     shutil.rmtree(os.path.join(root, d))
 
-            shutil.copytree('/front-end-dist', '/app/static')
+            shutil.copytree('/front-end-build', '/app/static')
