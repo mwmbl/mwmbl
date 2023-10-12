@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <!-- Metas -->
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Page title -->
+  <title>MWMBL - Search</title>
+  <meta name="description" content="The free, open-source and non-profit search engine.">
+
+  <!-- Favicons -->
+  <link rel="icon" href="/images/favicon.svg" type="image/svg+xml">
+
+  <!-- Fonts import -->
+  <link rel="preload" href="/fonts/inter/inter.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="/fonts/inter/inter.css">
+  </noscript>
+
+  <!-- CSS Stylesheets (this is critical CSS) -->
+  <link rel="stylesheet" type="text/css" href="/css/reset.css">
+  <link rel="stylesheet" type="text/css" href="/css/theme.css">
+  <link rel="stylesheet" type="text/css" href="/css/global.css">
+
+  <!-- Phosphor Icons (https://github.com/phosphor-icons/phosphor-home) -->
+  <link rel="preload" href="/fonts/phosphor/icons.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="/fonts/phosphor/icons.css">
+  </noscript>
+
+  <!-- Custom Element Polyfill for Safari -->
+  <script src="https://unpkg.com/@ungap/custom-elements" type="module"></script>
+
+  <!-- OpenSearch -->
+  <link rel="search" type="application/opensearchdescription+xml" href="/opensearch.xml" title="MWMBL Search">
+</head>
+
+<body>
+  <mwmbl-app></mwmbl-app>
+  <noscript>
+    <main class="noscript">
+      <img class="brand-icon" src="/images/logo.svg" width="40" height="40" alt="mwmbl logo">
+      <h1>
+        Welcome to mwmbl, the free, open-source and non-profit search engine.
+      </h1>
+      <p>This website requires you to support/enable scripts.</p>
+      <p>
+        More information on
+        <a href="https://github.com/mwmbl/mwmbl" target="_blank">
+          Github
+        </a>
+        .
+      </p>
+    </main>
+  </noscript>
+  <!-- Javasript entrypoint -->
+  <script src="./index.js" type="module"></script>
+</body>
+
+</html>
