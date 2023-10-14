@@ -12,20 +12,28 @@ from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-api = NinjaAPI(version="1.0.0")
+
+queued_batches = Queue()
+completer = Completer()
 
 index_path = Path(settings.DATA_PATH) / INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
-
-completer = Completer()
 ranker = HeuristicRanker(tiny_index, completer)
-
-search_router = search.create_router(ranker)
-api.add_router("/search/", search_router)
-
 batch_cache = BatchCache(Path(settings.DATA_PATH) / BATCH_DIR_NAME)
 
-queued_batches = Queue()
-crawler_router = crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches)
-api.add_router("/crawler/", crawler_router)
+
+def create_api(version):
+    api = NinjaAPI(version=version)
+
+    search_router = search.create_router(ranker)
+    api.add_router("/search/", search_router)
+
+    crawler_router = crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches)
+    api.add_router("/crawler/", crawler_router)
+    return api
+
+
+# Work around because Django-Ninja doesn't allow using multiple URLs for the same thing
+api_original = create_api("0.1")
+api_v1 = create_api("1.0.0")
