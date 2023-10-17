@@ -10,6 +10,7 @@ from typing import KeysView, Union
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus, FoundURL, REASSIGN_MIN_HOURS
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS as TOP_DOMAINS
+from mwmbl.indexer.blacklist import is_domain_blacklisted, get_blacklist_domains
 from mwmbl.settings import CORE_DOMAINS
 from mwmbl.utils import batch, get_domain
 
@@ -52,6 +53,7 @@ class URLQueue:
         logger.info(f"Initialized URL queue with {len(found_urls)} urls, current queue size: {self.num_queued_batches}")
 
     def update(self):
+        blacklist_domains = get_blacklist_domains()
         num_processed = 0
         while True:
             try:
@@ -59,10 +61,10 @@ class URLQueue:
                 num_processed += 1
             except Empty:
                 break
-            self._process_found_urls(new_batch)
+            self._process_found_urls(new_batch, blacklist_domains)
         return num_processed
 
-    def _process_found_urls(self, found_urls: list[FoundURL]):
+    def _process_found_urls(self, found_urls: list[FoundURL], blacklist_domains: set[str]):
         min_updated_date = datetime.utcnow() - timedelta(hours=REASSIGN_MIN_HOURS)
 
         logger.info(f"Found URLS: {len(found_urls)}")
@@ -70,7 +72,7 @@ class URLQueue:
                 found_url.status == URLStatus.ASSIGNED.value and found_url.timestamp < min_updated_date)]
         logger.info(f"Valid URLs: {len(valid_urls)}")
 
-        self._sort_urls(valid_urls)
+        self._sort_urls(valid_urls, blacklist_domains)
         logger.info(f"Queue size: {self.num_queued_batches}")
         while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) >= self._min_top_domains:
             total_top_urls = sum(len(urls) for urls in self._top_urls.values())
@@ -82,11 +84,13 @@ class URLQueue:
             self._batch_urls()
             logger.info(f"Queue size after batching: {self.num_queued_batches}")
 
-    def _sort_urls(self, valid_urls: list[FoundURL]):
+    def _sort_urls(self, valid_urls: list[FoundURL], blacklist_domains: set[str]):
         for found_url in valid_urls:
             try:
                 domain = get_domain(found_url.url)
             except ValueError:
+                continue
+            if is_domain_blacklisted(domain, blacklist_domains):
                 continue
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
             url_store[domain][found_url.url] = found_url.score
