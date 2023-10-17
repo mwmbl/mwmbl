@@ -7,20 +7,18 @@ from time import sleep
 from typing import Collection
 from urllib.parse import urlparse
 
-from requests_cache import CachedSession
-
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.indexer.paths import BATCH_DIR_NAME
-from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, EXCLUDED_DOMAINS, SCORE_FOR_SAME_DOMAIN, \
-    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER, BLACKLIST_DOMAINS_URL, \
-    DOMAIN_BLACKLIST_REGEX
+from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, SCORE_FOR_SAME_DOMAIN, \
+    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -85,16 +83,9 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
         logger.info(f"Put {len(urls)} new items in the URL queue")
 
 
-def get_blacklist_domains():
-    with CachedSession(expire_after=timedelta(days=1)) as session:
-        response = session.get(BLACKLIST_DOMAINS_URL)
-        return set(response.text.split())
-
-
 def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
     parsed_link = urlparse(link)
-    if parsed_link.netloc in EXCLUDED_DOMAINS or DOMAIN_BLACKLIST_REGEX.search(parsed_link.netloc) is not None \
-            or parsed_link.netloc in blacklist_domains:
+    if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
         logger.info(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
