@@ -46,10 +46,11 @@ class URLQueue:
 
     def initialize(self):
         logger.info(f"Initializing URL queue")
+        blacklist_domains = get_blacklist_domains()
         with Database() as db:
             url_db = URLDatabase(db.connection)
             found_urls = url_db.get_urls(URLStatus.NEW, INITIALIZE_URLS)
-            self._process_found_urls(found_urls)
+            self._process_found_urls(found_urls, blacklist_domains)
         logger.info(f"Initialized URL queue with {len(found_urls)} urls, current queue size: {self.num_queued_batches}")
 
     def update(self):
