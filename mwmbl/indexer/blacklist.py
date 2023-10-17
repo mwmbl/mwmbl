@@ -22,11 +22,12 @@ def is_domain_blacklisted(domain: str, blacklist_domains: set[str]):
 
     # TODO: this is to filter out spammy domains that look like:
     #           brofqpxj.uelinc.com
-    #           gwaspsag.enflightmultisport.com
-    #           fmcqgzvk.onlinejobs2day.com
-    #           btmjmhyj.universityslandown.com
-    #           djqfctsq.ropman.com
+    #           gzsmjc.fba01.com
+    #           59648.etnomurcia.com
+    #
     #       Eventually we can figure out a better way to identify SEO spam
     domain_parts = domain.split('.')
-    if len(domain_parts) == 3 and domain_parts[2] == "com" and len(domain_parts[0]) == 8:
+    if (len(domain_parts) == 3 and domain_parts[2] == "com" and len(domain_parts[0]) in {6, 8}) or (
+        set(domain_parts[0]) <= set("1234567890")
+    ):
         return True

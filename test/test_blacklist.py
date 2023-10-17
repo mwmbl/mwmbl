@@ -4,10 +4,8 @@ from mwmbl.indexer.blacklist import is_domain_blacklisted
 def test_blacklist_excludes_bad_pattern():
     bad_domains = [
         "brofqpxj.uelinc.com",
-        "gwaspsag.enflightmultisport.com",
-        "fmcqgzvk.onlinejobs2day.com",
-        "btmjmhyj.universityslandown.com",
-        "djqfctsq.ropman.com",
+        "gzsmjc.fba01.com",
+        "59648.etnomurcia.com",
     ]
 
     for domain in bad_domains:
