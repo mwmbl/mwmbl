@@ -6,6 +6,7 @@ def test_blacklist_excludes_bad_pattern():
         "brofqpxj.uelinc.com",
         "gzsmjc.fba01.com",
         "59648.etnomurcia.com",
+        "something.hzqwyou.cn",
     ]
 
     for domain in bad_domains:
