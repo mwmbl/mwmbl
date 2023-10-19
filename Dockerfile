@@ -57,6 +57,4 @@ VOLUME ["/data"]
 
 EXPOSE 5000
 
-ENV DJANGO_SETTINGS_MODULE=mwmbl.settings_prod
-
 CMD ["/venv/bin/mwmbl-tinysearchengine"]
