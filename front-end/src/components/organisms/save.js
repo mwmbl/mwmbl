@@ -4,7 +4,7 @@ import config from "../../../config.js";
 
 
 const CURATION_KEY_PREFIX = "curation-";
-const CURATION_URL = config.publicApiURL + "user/curation/";
+const CURATION_URL = config.publicApiURL + "curation/";
 
 
 const template = () => /*html*/`
@@ -65,12 +65,12 @@ export default define('save', class extends HTMLLIElement {
       return;
     }
     this.sending = true;
-    const auth = document.cookie
+    const csrftoken = document.cookie
       .split('; ')
-      .find((row) => row.startsWith('jwt='))
+      .find((row) => row.startsWith('csrftoken='))
       ?.split('=')[1];
 
-    if (!auth) {
+    if (!csrftoken) {
       console.log("No auth");
       return;
     }
@@ -81,20 +81,14 @@ export default define('save', class extends HTMLLIElement {
       console.log("Value", value);
       const url = CURATION_URL + value['type'];
 
-      let data = value['data'];
-      if (value.type !== 'begin') {
-        if (this.currentCurationId === null) {
-          throw ReferenceError("No current curation found");
-        }
-        data['curation_id'] = this.currentCurationId;
-      }
-      data['auth'] = auth;
-
+      const data = value['data'];
       console.log("Data", data);
       const response = await fetch(url, {
           method: 'POST',
           cache: 'no-cache',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrftoken},
+          credentials: "same-origin",
+          mode: "same-origin",
           body: JSON.stringify(data),
         });
 
@@ -109,10 +103,6 @@ export default define('save', class extends HTMLLIElement {
 
       const responseData = await response.json();
       console.log("Response data", responseData);
-      if (responseData["curation_id"]) {
-        this.currentCurationId = responseData["curation_id"];
-      }
-
       // There may be more to send, wait a second and see
       setTimeout(this.__sendToApi.bind(this), 1000);
     }

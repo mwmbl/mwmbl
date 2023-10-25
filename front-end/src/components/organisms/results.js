@@ -96,6 +96,7 @@ export default define('results', class extends HTMLElement {
         detail: {
           type: 'delete',
           data: {
+            timestamp: Date.now(),
             url: document.location.href,
             results: newResults,
             curation: {
@@ -121,6 +122,7 @@ export default define('results', class extends HTMLElement {
         detail: {
           type: 'validate',
           data: {
+            timestamp: Date.now(),
             url: document.location.href,
             results: newResults,
             curation: e.detail.data
@@ -156,6 +158,7 @@ export default define('results', class extends HTMLElement {
       detail: {
         type: 'add',
         data: {
+          timestamp: Date.now(),
           url: document.location.href,
           results: newResults,
           curation: {
@@ -183,8 +186,10 @@ export default define('results', class extends HTMLElement {
         detail: {
           type: 'begin',
           data: {
+            timestamp: Date.now(),
             url: document.location.href,
-            results: results
+            results: results,
+            curation: {}
           }
         }
       });
@@ -219,6 +224,7 @@ export default define('results', class extends HTMLElement {
       detail: {
         type: 'move',
         data: {
+          timestamp: Date.now(),
           url: document.location.href,
           results: newResults,
           curation: {

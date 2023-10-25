@@ -3,6 +3,7 @@ from pathlib import Path
 
 from django.conf import settings
 from ninja import NinjaAPI
+from ninja.security import django_auth
 
 import mwmbl.crawler.app as crawler
 from mwmbl.indexer.batch_cache import BatchCache
@@ -35,7 +36,7 @@ def create_api(version):
     api.add_router("/crawler/", crawler_router)
 
     curation_router = curate.create_router(index_path)
-    api.add_router("/curation/", curation_router)
+    api.add_router("/curation/", curation_router, auth=django_auth)
     return api
 
 

@@ -37,9 +37,10 @@ class CurateValidate(Schema):
 T = TypeVar('T', CurateBegin, CurateAdd, CurateDelete, CurateMove, CurateValidate)
 
 
-class Curation(Schema, Generic[T]):
-    timestamp: int
-    url: str
-    results: list[Result]
-    curation: T
-
+def make_curation_type(t):
+    class Curation(Schema):
+        timestamp: int
+        url: str
+        results: list[Result]
+        curation: t
+    return Curation

@@ -1,16 +1,14 @@
-import json
-from urllib.parse import urljoin, parse_qs
+from typing import Any
+from urllib.parse import parse_qs
 
-import requests
 from ninja import Router
-from ninja.security import django_auth
 
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.models import UserCuration
-from mwmbl.platform.data import CurateBegin, CurateMove, CurateDelete, CurateAdd, CurateValidate, Curation
+from mwmbl.platform.data import CurateBegin, CurateMove, CurateDelete, CurateAdd, CurateValidate, \
+    make_curation_type
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tokenizer import tokenize
-
 
 RESULT_URL = "https://mwmbl.org/?q="
 MAX_CURATED_SCORE = 1_111_111.0
@@ -19,30 +17,30 @@ MAX_CURATED_SCORE = 1_111_111.0
 def create_router(index_path: str) -> Router:
     router = Router(tags=["user"])
 
-    @router.post("/begin", auth=django_auth)
-    def user_begin_curate(request, curate_begin: CurateBegin):
+    @router.post("/begin")
+    def user_begin_curate(request, curate_begin: make_curation_type(CurateBegin)):
         return _curate(request, "curate_begin", curate_begin)
 
-    @router.post("/move", auth=django_auth)
-    def user_move_result(request, curate_move: Curation[CurateMove]):
+    @router.post("/move")
+    def user_move_result(request, curate_move: make_curation_type(CurateMove)):
         return _curate(request, "curate_move", curate_move)
 
-    @router.post("/delete", auth=django_auth)
-    def user_delete_result(request, curate_delete: Curation[CurateDelete]):
+    @router.post("/delete")
+    def user_delete_result(request, curate_delete: make_curation_type(CurateDelete)):
         return _curate(request, "curate_delete", curate_delete)
 
-    @router.post("/add", auth=django_auth)
-    def user_add_result(request, curate_add: Curation[CurateAdd]):
+    @router.post("/add")
+    def user_add_result(request, curate_add: make_curation_type(CurateAdd)):
         return _curate(request, "curate_add", curate_add)
 
-    @router.post("/validate", auth=django_auth)
-    def user_add_result(request, curate_validate: Curation[CurateValidate]):
+    @router.post("/validate")
+    def user_add_result(request, curate_validate: make_curation_type(CurateValidate)):
         return _curate(request, "curate_validate", curate_validate)
 
-    def _curate(request, curation_type: str, curation: Curation):
+    def _curate(request, curation_type: str, curation: Any):
         user_curation = UserCuration(
             user=request.user,
-            timestamp=get_datetime_from_timestamp(curation.timestamp),
+            timestamp=get_datetime_from_timestamp(curation.timestamp / 1000.0),
             url=curation.url,
             results=curation.dict()["results"],
             curation_type=curation_type,
