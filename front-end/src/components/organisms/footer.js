@@ -4,14 +4,14 @@ import config from '../../../config.js';
 const template = ({ data }) => /*html*/`
   <p class="footer-text">Find more on</p>
   <ul class="footer-list">
-    ${data.links.map(link => /*html*/`
+    ${ data.links.map(link => /*html*/`
       <li class="footer-item">
-        <a href="${link.href}" class="footer-link" target="_blank">
+        <a href="${link.href}" class="footer-link" target="__blank">
           <i class="${link.icon}"></i>
           <span>${link.name}</span>
         </a>
       </li>
-    `).join('')}
+    `).join('') }
   </ul>
 `;
 
@@ -22,7 +22,7 @@ export default define('footer', class extends HTMLElement {
   }
 
   __setup() {
-    this.innerHTML = template({
+    this.innerHTML = template({ 
       data: {
         links: config.footerLinks
       }
@@ -31,6 +31,6 @@ export default define('footer', class extends HTMLElement {
   }
 
   __events() {
-
+    
   }
 }, { extends: 'footer' });

@@ -144,8 +144,12 @@ export default define('search-bar', class extends HTMLElement {
 
     // Focus search bar when pressing `ctrl + k` or `/`
     document.addEventListener('keydown', (e) => {
-      if ((e.key === 'k' && e.ctrlKey) || e.key === '/' || e.key === 'Escape') {
+      if ((e.key === 'k' && e.ctrlKey) || e.key === 'Escape') {
         e.preventDefault();
+
+        // Remove the modal if it's visible
+        document.querySelector('.modal').style.display = 'none';
+
         this.searchInput.focus();
       }
     });

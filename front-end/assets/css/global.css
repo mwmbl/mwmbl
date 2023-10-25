@@ -117,6 +117,10 @@ mwmbl-results, footer {
   padding: 10px;
 }
 
+.result {
+  min-height: 120px;
+}
+
 .result a {
   display: block;
   text-decoration: none;
@@ -229,4 +233,94 @@ a {
   font-weight: var(--bold-font-weight);
   color: var(--primary-color);
   text-decoration: underline;
+}
+
+.result-container {
+  display: flex;
+}
+
+.curation-buttons {
+  padding: 20px;
+}
+
+.curation-button {
+  opacity: 0;
+  color: inherit;
+  border: none;
+  padding: 0;
+  font: inherit;
+  outline: inherit;
+  cursor: pointer;
+
+  background: darkgrey;
+  box-shadow: 3px 3px 3px lightgrey;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex; /* or inline-flex */
+  align-items: center;
+  justify-content: center;
+  margin: 10px 0 10px 0;
+}
+
+.result:hover .curation-button {
+  opacity: 70%;
+  transition:
+    opacity 200ms ease-in-out;
+}
+
+.result:hover .curation-button:hover {
+  opacity: 100%;
+}
+
+.curate-delete {
+  margin-top: 0;
+}
+
+.validated {
+  background: lightgreen;
+  opacity: 100%;
+}
+
+.curate-add {
+  margin-bottom: 0;
+}
+
+
+.modal {
+  /*display: none; !* Hidden by default *!*/
+  position: fixed; /* Stay in place */
+  z-index: 100; /* Sit on top */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgb(0,0,0); /* Fallback color */
+  background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+}
+
+/* Modal Content/Box */
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto; /* 15% from the top and centered */
+  padding: 20px;
+  border: 1px solid #888;
+  max-width: 800px;
+  width: 80%; /* Could be more or less, depending on screen size */
+}
+
+/* The Close Button */
+.close {
+  color: #aaa;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.close:hover,
+.close:focus {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
 }
