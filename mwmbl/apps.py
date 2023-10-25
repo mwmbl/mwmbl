@@ -6,19 +6,20 @@ from pathlib import Path
 from django.apps import AppConfig
 from django.conf import settings
 
-from mwmbl.api import queued_batches
-from mwmbl import background
-from mwmbl.indexer.paths import INDEX_NAME
-from mwmbl.indexer.update_urls import update_urls_continuously
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-from mwmbl.url_queue import update_queue_continuously
-
 
 class MwmblConfig(AppConfig):
     name = "mwmbl"
     verbose_name = "Mwmbl Application"
 
     def ready(self):
+        # Imports here to avoid AppRegistryNotReady exception
+        from mwmbl.api import queued_batches
+        from mwmbl import background
+        from mwmbl.indexer.paths import INDEX_NAME
+        from mwmbl.indexer.update_urls import update_urls_continuously
+        from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
+        from mwmbl.url_queue import update_queue_continuously
+
         index_path = Path(settings.DATA_PATH) / INDEX_NAME
         try:
             existing_index = TinyIndex(item_factory=Document, index_path=index_path)
