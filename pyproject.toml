@@ -38,6 +38,7 @@ django-ninja = "^0.22.2"
 requests-cache = "^1.1.0"
 redis = {extras = ["hiredis"], version = "^5.0.1"}
 django-allauth = "^0.57.0"
+dj-database-url = "^2.1.0"
 
 [tool.poetry.extras]
 indexer = [
