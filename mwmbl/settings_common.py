@@ -126,3 +126,4 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 
+DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
