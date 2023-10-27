@@ -5,6 +5,9 @@ import dj_database_url
 from mwmbl.settings_common import *
 
 
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+
+
 DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"])}
 
 DEBUG = False

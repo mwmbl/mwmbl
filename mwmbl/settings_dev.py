@@ -1,6 +1,10 @@
 from mwmbl.settings_common import *
 
 
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = 'django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm'
+
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
