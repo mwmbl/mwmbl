@@ -10,7 +10,7 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"])}
 
-DEBUG = False
+DEBUG = True    # TODO set back to False
 ALLOWED_HOSTS = ["api.mwmbl.org", "mwmbl.org", "beta.mwmbl.org"]
 CSRF_TRUSTED_ORIGINS = list(ALLOWED_HOSTS)
 
