@@ -12,6 +12,8 @@ DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"
 
 DEBUG = False
 ALLOWED_HOSTS = ["api.mwmbl.org", "mwmbl.org", "beta.mwmbl.org"]
+CSRF_TRUSTED_ORIGINS = list(ALLOWED_HOSTS)
+
 
 DATA_PATH = "/app/storage"
 RUN_BACKGROUND_PROCESSES = False
