@@ -49,7 +49,7 @@ COPY --from=builder /venv /venv
 # Copy the front end build
 COPY --from=front-end /front-end/dist /front-end-build
 
-ADD nginx.conf.sigil /app
+# ADD nginx.conf.sigil /app
 ADD app.json /app
 
 # Set up a volume where the data will live
