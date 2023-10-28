@@ -9,6 +9,7 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 
 STATIC_ROOT = "/app/static/"
+STATICFILES_DIRS = ["/front-end-build/"]
 
 
 DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"])}

@@ -13,6 +13,9 @@ DATABASES = {
 }
 
 
+STATICFILES_DIRS = [str(Path(__file__).parent.parent / "front-end" / "dist")]
+
+
 DEBUG = True
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
