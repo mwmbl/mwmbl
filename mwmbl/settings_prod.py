@@ -8,6 +8,9 @@ from mwmbl.settings_common import *
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 
+STATIC_ROOT = "/app/static/"
+
+
 DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"])}
 
 DEBUG = True    # TODO set back to False
