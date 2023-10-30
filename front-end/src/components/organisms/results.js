@@ -1,25 +1,10 @@
-import define from '../../utils/define.js';
 import {globalBus} from '../../utils/events.js';
-
-// Components
-import result from '../molecules/result.js';
-import emptyResult from '../molecules/empty-result.js';
-import home from './home.js';
-import escapeString from '../../utils/escapeString.js';
-
-// const template = () => /*html*/`
-//   <ul class='results'>
-//     <li is='${home}'></li>
-//   </ul>
-// `;
 
 
 document.body.addEventListener('htmx:load', function(evt) {
 
 });
 
-
-// export default define('results', class extends HTMLElement {
 
 class ResultsHandler {
   constructor() {
@@ -30,15 +15,11 @@ class ResultsHandler {
   }
 
   __setup() {
-    // this.innerHTML = template();
     this.__events();
   }
 
   __events() {
     document.body.addEventListener('htmx:load', e => {
-      // });
-      //
-      // globalBus.on('search', (e) => {
       this.results = document.querySelector('.results');
 
       // Allow the user to re-order search results
@@ -204,4 +185,3 @@ class ResultsHandler {
 }
 
 const resultsHandler = new ResultsHandler();
-
