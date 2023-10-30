@@ -8,12 +8,8 @@ from typing import Union
 from uuid import uuid4
 
 import boto3
-import justext
 import requests
 from fastapi import HTTPException
-from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
-    LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
-    STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from ninja import Router
 from redis import Redis
 
@@ -21,7 +17,6 @@ from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
-from mwmbl.format import format_result
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
 from mwmbl.settings import (
@@ -35,9 +30,7 @@ from mwmbl.settings import (
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
-    DATE_REGEX, NUM_EXTRACT_CHARS)
-from mwmbl.tinysearchengine.indexer import Document
-
+    DATE_REGEX)
 
 stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL")))
 
@@ -57,51 +50,12 @@ def upload(data: bytes, name: str):
 last_batch = None
 
 
-def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
-        length_high=LENGTH_HIGH_DEFAULT, stopwords_low=STOPWORDS_LOW_DEFAULT,
-        stopwords_high=STOPWORDS_HIGH_DEFAULT, max_link_density=MAX_LINK_DENSITY_DEFAULT,
-        max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT, no_headings=NO_HEADINGS_DEFAULT,
-        encoding=None, default_encoding=DEFAULT_ENCODING,
-        enc_errors=DEFAULT_ENC_ERRORS):
-    """
-    Converts an HTML page into a list of classified paragraphs. Each paragraph
-    is represented as instance of class ˙˙justext.paragraph.Paragraph˙˙.
-    """
-    dom = html_to_dom(html_text, default_encoding, encoding, enc_errors)
-
-    titles = dom.xpath("//title")
-    title = titles[0].text if len(titles) > 0 else None
-
-    dom = preprocessor(dom)
-
-    paragraphs = ParagraphMaker.make_paragraphs(dom)
-
-    classify_paragraphs(paragraphs, stoplist, length_low, length_high,
-        stopwords_low, stopwords_high, max_link_density, no_headings)
-    revise_paragraph_classification(paragraphs, max_heading_distance)
-
-    return paragraphs, title
-
-
 def create_router(batch_cache: BatchCache, queued_batches: Queue) -> Router:
     router = Router(tags=["crawler"])
 
     # TODO: # ensure tables are created before crawler code is used:
     #       #
     #       #     url_db.create_tables()
-
-    @router.get('/fetch')
-    def fetch_url(request, url: str, query: str):
-        response = requests.get(url)
-        paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
-        good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
-
-        extract = ' '.join([p.text for p in good_paragraphs])
-        if len(extract) > NUM_EXTRACT_CHARS:
-            extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
-
-        result = Document(title=title, url=url, extract=extract, score=0.0)
-        return format_result(result, query)
 
     @router.post('/batches/')
     def post_batch(request, batch: Batch):

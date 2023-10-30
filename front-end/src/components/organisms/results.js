@@ -115,15 +115,7 @@ class ResultsHandler {
       console.log("Add result", e);
       this.__beginCurating();
       const resultData = e.detail;
-      const resultHTML = /*html*/`
-        <li
-          is='${result}'
-          data-url='${escapeString(resultData.url)}'
-          data-title='${escapeString(JSON.stringify(resultData.title))}'
-          data-extract='${escapeString(JSON.stringify(resultData.extract))}'
-        ></li>
-      `;
-      this.results.insertAdjacentHTML('afterbegin', resultHTML);
+      this.results.insertAdjacentHTML('afterbegin', resultData);
 
       const newResults = this.__getResults();
 
