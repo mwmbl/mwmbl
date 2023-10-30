@@ -14,7 +14,7 @@
 
   if (!redirected) {
     // Load components only after redirects are checked.
-    import('./components/app.js');
+    // import('./components/app.js');
     import('./components/login.js');
     import('./components/register.js');
     import("./components/organisms/search-bar.js");

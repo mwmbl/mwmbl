@@ -1,28 +1,10 @@
-from multiprocessing import Queue
-from pathlib import Path
-
-from django.conf import settings
 from ninja import NinjaAPI
 from ninja.security import django_auth
 
 import mwmbl.crawler.app as crawler
-from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
 from mwmbl.platform import curate
+from mwmbl.search_setup import queued_batches, index_path, ranker, batch_cache
 from mwmbl.tinysearchengine import search
-from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import HeuristicRanker
-
-
-queued_batches = Queue()
-completer = Completer()
-
-index_path = Path(settings.DATA_PATH) / INDEX_NAME
-tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
-tiny_index.__enter__()
-ranker = HeuristicRanker(tiny_index, completer)
-batch_cache = BatchCache(Path(settings.DATA_PATH) / BATCH_DIR_NAME)
 
 
 def create_api(version):

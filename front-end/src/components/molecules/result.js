@@ -5,22 +5,22 @@ import deleteButton from "./delete-button.js";
 import validateButton from "./validate-button.js";
 import addButton from "./add-button.js";
 
-const template = ({ data }) => /*html*/`
-  <div class="result-container">
-    <div class="curation-buttons">
-      <button class="curation-button curate-delete" is="${deleteButton}">✕</button>
-      <button class="curation-button curate-approve" is="${validateButton}">✓</button>
-      <button class="curation-button curate-add" is="${addButton}">＋</button>
-    </div>
-    <div class="result-link">
-      <a href='${data.url}'>
-        <p class='link'>${data.url}</p>
-        <p class='title'>${data.title}</p>
-        <p class='extract'>${data.extract}</p>
-      </a>
-    </div>
-  </div>
-`;
+// const template = ({ data }) => /*html*/`
+//   <div class="result-container">
+//     <div class="curation-buttons">
+//       <button class="curation-button curate-delete" is="${deleteButton}">✕</button>
+//       <button class="curation-button curate-approve" is="${validateButton}">✓</button>
+//       <button class="curation-button curate-add" is="${addButton}">＋</button>
+//     </div>
+//     <div class="result-link">
+//       <a href='${data.url}'>
+//         <p class='link'>${data.url}</p>
+//         <p class='title'>${data.title}</p>
+//         <p class='extract'>${data.extract}</p>
+//       </a>
+//     </div>
+//   </div>
+// `;
 
 export default define('result', class extends HTMLLIElement {
   constructor() {
@@ -30,11 +30,11 @@ export default define('result', class extends HTMLLIElement {
   }
 
   __setup() {
-    this.innerHTML = template({ data: {
-      url: this.dataset.url,
-      title: this.__handleBold(JSON.parse(this.dataset.title)),
-      extract: this.__handleBold(JSON.parse(this.dataset.extract))
-     }});
+    // this.innerHTML = template({ data: {
+    //   url: this.dataset.url,
+    //   title: this.__handleBold(JSON.parse(this.dataset.title)),
+    //   extract: this.__handleBold(JSON.parse(this.dataset.extract))
+    //  }});
     this.__events();
   }
 

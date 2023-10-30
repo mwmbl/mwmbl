@@ -48,6 +48,8 @@
 <!--  <mwmbl-register></mwmbl-register>-->
   <mwmbl-app></mwmbl-app>
   <noscript>
+    <!-- https://stackoverflow.com/a/431554 -->
+    <style> .jsonly { display: none } </style>
     <main class="noscript">
       <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
       <h1>
@@ -63,8 +65,46 @@
       </p>
     </main>
   </noscript>
+
   <!-- Javasript entrypoint -->
+  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
   <script src="./index.js" type="module"></script>
+
+  <main class="jsonly">
+    <header class="search-menu">
+      <ul>
+        <li is="${save}"></li>
+      </ul>
+      <div><a href="/accounts/login/">Login</a> <a href="/accounts/signup/">Sign up</a> </div>
+      <div class="branding">
+        <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
+        <span class="brand-title">MWMBL</span>
+      </div>
+      <form class="search-bar">
+        <i class="ph-magnifying-glass-bold"></i>
+        <input
+          type='search'
+          name='query'
+          class='search-bar-input'
+          placeholder='Search on mwmbl...'
+          title='Use "CTRL+K" or "/" to focus.'
+          autocomplete='off'
+          hx-get="/app/search/"
+          hx-trigger="keyup changed delay:100ms"
+          hx-target=".results"
+        >
+      </form>
+    </header>
+    <main>
+      <mwmbl-results>
+        <ul class='results'>
+          <li is='${home}'></li>
+        </ul>
+      </mwmbl-results>
+    </main>
+    <div is="${addResult}"></div>
+    <footer is="mwmbl-footer"></footer>
+  </main>
 </body>
 
 </html>

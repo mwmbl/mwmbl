@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 from mwmbl.api import api_original as api, api_v1
-from mwmbl.views import profile
+from mwmbl.views import profile, search_results
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,4 +27,6 @@ urlpatterns = [
     path('accounts/', include('allauth.urls')),
 
     path('accounts/profile/', profile, name='profile'),
+    path('app/search/', search_results, name="search_results")
+
 ]

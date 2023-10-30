@@ -7,15 +7,22 @@ import emptyResult from '../molecules/empty-result.js';
 import home from './home.js';
 import escapeString from '../../utils/escapeString.js';
 
-const template = () => /*html*/`
-  <ul class='results'>
-    <li is='${home}'></li>
-  </ul>
-`;
+// const template = () => /*html*/`
+//   <ul class='results'>
+//     <li is='${home}'></li>
+//   </ul>
+// `;
 
-export default define('results', class extends HTMLElement {
+
+document.body.addEventListener('htmx:load', function(evt) {
+
+});
+
+
+// export default define('results', class extends HTMLElement {
+
+class ResultsHandler {
   constructor() {
-    super();
     this.results = null;
     this.oldIndex = null;
     this.curating = false;
@@ -23,50 +30,16 @@ export default define('results', class extends HTMLElement {
   }
 
   __setup() {
-    this.innerHTML = template();
-    this.results = this.querySelector('.results');
+    // this.innerHTML = template();
     this.__events();
   }
 
   __events() {
-    globalBus.on('search', (e) => {
-      this.results.innerHTML = '';
-      let resultsHTML = '';
-      if (!e.detail.error) {
-        // If there is no details the input is empty
-        if (!e.detail.results) {
-          resultsHTML = /*html*/`
-            <li is='${home}'></li>
-          `;
-        }
-        // If the details array has results display them
-        else if (e.detail.results.length > 0) {
-          for(const resultData of e.detail.results) {
-            resultsHTML += /*html*/`
-              <li
-                is='${result}'
-                data-url='${escapeString(resultData.url)}'
-                data-title='${escapeString(JSON.stringify(resultData.title))}'
-                data-extract='${escapeString(JSON.stringify(resultData.extract))}'
-              ></li>
-            `;
-          }
-        }
-        // If the details array is empty there is no result
-        else {
-          resultsHTML = /*html*/`
-            <li is='${emptyResult}'></li>
-          `;
-        }
-      }
-      else {
-        // If there is an error display an empty result
-        resultsHTML = /*html*/`
-          <li is='${emptyResult}'></li>
-        `;
-      }
-      // Bind HTML to the DOM
-      this.results.innerHTML = resultsHTML;
+    document.body.addEventListener('htmx:load', e => {
+      // });
+      //
+      // globalBus.on('search', (e) => {
+      this.results = document.querySelector('.results');
 
       // Allow the user to re-order search results
       $(".results").sortable({
@@ -236,4 +209,7 @@ export default define('results', class extends HTMLElement {
     });
     globalBus.dispatch(curationMoveEvent);
   }
-});
+}
+
+const resultsHandler = new ResultsHandler();
+
