@@ -1,11 +1,5 @@
 import {globalBus} from '../../utils/events.js';
 
-
-document.body.addEventListener('htmx:load', function(evt) {
-
-});
-
-
 class ResultsHandler {
   constructor() {
     this.results = null;

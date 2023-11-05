@@ -48,7 +48,7 @@ def profile(request):
 def search_results(request):
     query = request.GET["query"]
     results = ranker.search(query)
-    return render(request, "results.html", {"results": results})
+    return render(request, "results.html", {"results": results, "query": query})
 
 
 def fetch_url(request):
@@ -63,4 +63,7 @@ def fetch_url(request):
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
     result = Document(title=title, url=url, extract=extract, score=0.0)
-    return render(request, "results.html", {"results": [format_result(result, query)]})
+    return render(request, "results.html", {
+        "results": [format_result(result, query)],
+        "query": query,
+    })
