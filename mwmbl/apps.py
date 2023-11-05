@@ -13,7 +13,7 @@ class MwmblConfig(AppConfig):
 
     def ready(self):
         # Imports here to avoid AppRegistryNotReady exception
-        from mwmbl.api import queued_batches
+        from mwmbl.search_setup import queued_batches
         from mwmbl import background
         from mwmbl.indexer.paths import INDEX_NAME
         from mwmbl.indexer.update_urls import update_urls_continuously

@@ -15,12 +15,10 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.contrib.auth import login, logout
-from django.template.defaulttags import url
 from django.urls import path, include
 
 from mwmbl.api import api_original as api, api_v1
-from mwmbl.views import signup, profile
+from mwmbl.views import profile, search_results, fetch_url
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,9 +26,7 @@ urlpatterns = [
     path('api/v1/', api_v1.urls),
     path('accounts/', include('allauth.urls')),
 
-    # path("accounts/", include("django.contrib.auth.urls")),
-    # path('accounts/new/', signup, name='signup'),
     path('accounts/profile/', profile, name='profile'),
-    # path('login/', login, {'template_name': 'login.html'}, name='login'),
-    # path('logout/', logout, {'next_page': 'login'}, name='logout'),
+    path('app/search/', search_results, name="search_results"),
+    path('app/fetch/', fetch_url, name="fetch_url")
 ]

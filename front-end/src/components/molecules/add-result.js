@@ -3,7 +3,7 @@ import config from "../../../config.js";
 import {globalBus} from "../../utils/events.js";
 
 
-const FETCH_URL = `${config['publicApiURL']}crawler/fetch?`
+const FETCH_URL = '/app/fetch?'
 
 
 const template = () => /*html*/`
@@ -56,7 +56,7 @@ export default define('add-result', class extends HTMLDivElement {
     const url = `${FETCH_URL}url=${encodeURIComponent(value)}&query=${encodeURIComponent(query)}`;
     const response = await fetch(url);
     if (response.status === 200) {
-      const data = await response.json();
+      const data = await response.text();
       console.log("Data", data);
 
       const addResultEvent = new CustomEvent('curate-add-result', {detail: data});
