@@ -49,13 +49,15 @@ def profile(request):
 def search_results(request):
     query = request.GET["query"]
     results = ranker.search(query)
-    rendered = render(request, "results.html", {"results": results, "query": query})
+    response = render(request, "results.html", {"results": results, "query": query})
     current_url = request.htmx.current_url
     # Replace query string with new query
     stripped_url = current_url[:current_url.index("?")] if "?" in current_url else current_url
     query_string = "?q=" + query if len(query) > 0 else ""
     new_url = stripped_url + query_string
-    return push_url(rendered, new_url)
+    # Set the htmx replace header
+    response["HX-Replace-Url"] = new_url
+    return response
 
 
 def fetch_url(request):
