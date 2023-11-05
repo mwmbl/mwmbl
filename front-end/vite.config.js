@@ -5,7 +5,8 @@ export default {
   base: '/static',
   publicDir: '../assets',
   build: {
-    outDir: '../dist'
+      outDir: '../dist',
+      minify: false
   },
   plugins: [
     legacy({
