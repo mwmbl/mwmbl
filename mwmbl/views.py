@@ -46,8 +46,14 @@ def profile(request):
     return render(request, 'profile.html')
 
 
+def home(request):
+    query = request.GET.get("q")
+    results = ranker.search(query) if query else None
+    return render(request, "index.html", {"results": results, "query": query})
+
+
 def search_results(request):
-    query = request.GET["query"]
+    query = request.GET["q"]
     results = ranker.search(query)
     response = render(request, "results.html", {"results": results, "query": query})
     current_url = request.htmx.current_url
