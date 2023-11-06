@@ -1,20 +1,28 @@
 {% load result_filters %}
 <title>Mwmbl - {{ query }}</title>
-{% for result in results %}
-  <li class="result" is="mwmbl-result">
-    <div class="result-container">
-      <div class="curation-buttons">
-        <button class="curation-button curate-delete" is="mwmbl-delete-button">✕</button>
-        <button class="curation-button curate-approve" is="mwmbl-validate-button">✓</button>
-        <button class="curation-button curate-add" is="mwmbl-add-button">＋</button>
+{% if results %}
+  {% for result in results %}
+    <li class="result" is="mwmbl-result">
+      <div class="result-container">
+        <div class="curation-buttons">
+          <button class="curation-button curate-delete" is="mwmbl-delete-button">✕</button>
+          <button class="curation-button curate-approve" is="mwmbl-validate-button">✓</button>
+          <button class="curation-button curate-add" is="mwmbl-add-button">＋</button>
+        </div>
+        <div class="result-link">
+          <a href="{{result.url}}">
+            <p class='link'>{{result.url}}</p>
+            <p class='title'>{{result.title|strengthen}}</p>
+            <p class='extract'>{{result.extract|strengthen}}</p>
+          </a>
+        </div>
       </div>
-      <div class="result-link">
-        <a href="{{result.url}}">
-          <p class='link'>{{result.url}}</p>
-          <p class='title'>{{result.title|strengthen}}</p>
-          <p class='extract'>{{result.extract|strengthen}}</p>
-        </a>
-      </div>
-    </div>
+    </li>
+  {% endfor %}
+{% else %}
+  <li class="home">
+    <h1>
+      Welcome to Mwmbl, the free, open-source and non-profit search engine.
+    </h1>
   </li>
-{% endfor %}
+{% endif %}
