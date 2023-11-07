@@ -75,8 +75,8 @@ export default define('save', class extends HTMLLIElement {
       return;
     }
 
-    if (localStorage.length > 0) {
-      const key = this.__getOldestCurationKey();
+    const key = this.__getOldestCurationKey();
+    if (key !== null) {
       const value = JSON.parse(localStorage.getItem(key));
       console.log("Value", value);
       const url = CURATION_URL + value['type'];
