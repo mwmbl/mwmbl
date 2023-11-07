@@ -8,11 +8,11 @@ const CURATION_URL = config.publicApiURL + "curation/";
 
 
 const template = () => /*html*/`
-  <span>🖫</span>
+  <span></span>
 `;
 
 
-export default define('save', class extends HTMLLIElement {
+export default define('save', class extends HTMLDivElement {
   constructor() {
     super();
     this.currentCurationId = null;
@@ -108,5 +108,5 @@ export default define('save', class extends HTMLLIElement {
     }
     this.sending = false;
   }
-}, { extends: 'li' });
+}, { extends: 'div' });
 
