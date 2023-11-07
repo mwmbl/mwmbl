@@ -63,17 +63,19 @@
         <li is="${save}"></li>
       </ul>
       <div><a href="/accounts/login/">Login</a> <a href="/accounts/signup/">Sign up</a> </div> -->
-      <div class="branding">
-        <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
-        <span class="brand-title">MWMBL</span>
-      </div>
+      <a href="/">
+        <div class="branding">
+          <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
+          <span class="brand-title">Mwmbl</span>
+        </div>
+      </a>
       <form class="search-bar">
         <i class="ph-magnifying-glass-bold"></i>
         <input
           type='search'
           name='q'
           class='search-bar-input'
-          placeholder='Search on mwmbl...'
+          placeholder='Search on Mwmbl...'
           title='Use "CTRL+K" or "/" to focus.'
           autocomplete='off'
           hx-get="/app/search/"

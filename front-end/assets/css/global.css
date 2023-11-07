@@ -62,12 +62,9 @@ body {
   height: 2rem;
 }
 
-mwmbl-search-bar {
-  width: 100%;
-}
-
 .search-bar {
   position: relative;
+  width: 100%;
 }
 
 .search-bar-input {
