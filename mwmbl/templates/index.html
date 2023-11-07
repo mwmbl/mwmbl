@@ -1,3 +1,4 @@
+{% load django_vite %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -45,6 +46,9 @@
   <link rel="stylesheet" href="//code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
   <script src="https://code.jquery.com/jquery-3.6.0.js"></script>
   <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+
+  {% vite_hmr_client %}
 </head>
 
 <body>
@@ -53,9 +57,7 @@
   <mwmbl-app></mwmbl-app>
 
   <!-- Javasript entrypoint -->
-  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-  <script src="/static/src/index.js" type="module"></script>
-
+  {#<script src="/static/src/index.js" type="module"></script>#}
     <header class="search-menu">
 <!--      <ul>
         <li is="${save}"></li>
@@ -89,6 +91,9 @@
     </main>
     <div is="mwmbl-add-result"></div>
     <footer is="mwmbl-footer"></footer>
+{% vite_asset 'index.js' %}
+{% vite_legacy_polyfills %}
+{% vite_legacy_asset 'index-legacy.js' %}
 </body>
 
 </html>

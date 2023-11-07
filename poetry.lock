@@ -593,6 +593,23 @@ doc = ["markdown-include", "mkdocs", "mkdocs-material", "mkdocstrings"]
 test = ["black", "django-stubs", "flake8", "isort", "mypy (==0.931)", "psycopg2-binary", "pytest", "pytest-asyncio", "pytest-cov", "pytest-django"]
 
 [[package]]
+name = "django-vite"
+version = "2.1.3"
+description = "Integration of ViteJS in a Django project."
+optional = false
+python-versions = "*"
+files = [
+    {file = "django-vite-2.1.3.tar.gz", hash = "sha256:c59b3bbd85501bc1faf63c500df66542abed2951cfa10dfbf8be8ecf229f7652"},
+    {file = "django_vite-2.1.3-py3-none-any.whl", hash = "sha256:97984ac495910b7b71039228ccddff52d132231fa6612d3d31c6c228c95b0217"},
+]
+
+[package.dependencies]
+Django = ">=1.11"
+
+[package.extras]
+dev = ["black", "flake8"]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.1.3"
 description = "Backport of PEP 654 (exception groups)"
@@ -2544,4 +2561,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "lxml", "pyarr
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "88ebe68ab5d0445ed67c07723156e622ebe10dbc50381b4982741f1404c0e8ce"
+content-hash = "4e4233221e9f3bd317c0693584612898b7b736f45983b7f3f5bad4d43e567353"

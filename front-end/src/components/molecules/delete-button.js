@@ -19,7 +19,7 @@ export default define('delete-button', class extends HTMLButtonElement {
       const result = this.closest('.result');
       const parent = result.parentNode;
 
-      const index = Array.prototype.indexOf.call(parent.children, result);
+      const index = Array.prototype.indexOf.call(parent.getElementsByClassName('result'), result);
       console.log("Delete index", index);
 
       const beginCuratingEvent = new CustomEvent('curate-delete-result', {

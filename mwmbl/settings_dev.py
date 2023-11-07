@@ -13,7 +13,11 @@ DATABASES = {
 }
 
 
-STATICFILES_DIRS = [str(Path(__file__).parent.parent / "front-end" / "dist")]
+STATIC_ROOT = ""
+DJANGO_VITE_ASSETS_PATH = Path(__file__).parent.parent / "front-end" / "dist"
+DJANGO_VITE_MANIFEST_PATH = DJANGO_VITE_ASSETS_PATH / "manifest.json"
+
+STATICFILES_DIRS = [str(DJANGO_VITE_ASSETS_PATH)]
 
 
 DEBUG = True
