@@ -86,7 +86,18 @@
       </mwmbl-results>
     </main>
     <div is="mwmbl-add-result"></div>
-    <footer is="mwmbl-footer"></footer>
+  <div class="footer">
+    <ul class="footer-list">
+      {% for link in footer_links %}
+        <li class="footer-item">
+          <a href="{{ link.href }}" class="footer-link" target="__blank">
+            <i class="{{ link.icon }}"></i>
+            <span>{{ link.name }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
 {% vite_asset 'index.js' %}
 {% vite_legacy_polyfills %}
 {% vite_legacy_asset 'index-legacy.js' %}

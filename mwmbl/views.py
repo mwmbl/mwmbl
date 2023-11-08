@@ -19,6 +19,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
 
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document
+from django.conf import settings
 
 
 def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
@@ -54,6 +55,7 @@ def index(request):
         "query": query,
         "user": request.user,
         "activity": activity,
+        "footer_links": settings.FOOTER_LINKS,
     })
 
 

@@ -159,7 +159,7 @@ mwmbl-results, footer {
   font-weight: var(--bold-font-weight);
 }
 
-footer {
+.footer {
   position: sticky;
   top: 100vh;
   margin-bottom: 25px;

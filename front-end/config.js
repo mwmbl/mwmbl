@@ -11,18 +11,6 @@ export default {
   publicApiURL: '/api/v1/',
   // publicApiURL: 'http://localhost:5000/',
   searchQueryParam: 'q',
-  footerLinks: [
-    {
-      name: 'Github',
-      icon: 'ph-github-logo-bold',
-      href: 'https://github.com/mwmbl/mwmbl'
-    },
-    {
-      name: 'Wiki',
-      icon: 'ph-info-bold',
-      href: 'https://github.com/mwmbl/mwmbl/wiki'
-    }
-  ],
   commands: {
     'go: ': 'https://',
     'search: google.com ': 'https://www.google.com/search?q=',

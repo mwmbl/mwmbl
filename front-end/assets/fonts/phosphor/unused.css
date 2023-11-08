@@ -13290,10 +13290,6 @@
   content: "\f6fa";
 }
 
-.ph-book-bold::before {
-  content: "\f6fb";
-}
-
 .ph-book-bookmark-bold::before {
   content: "\f6fc";
 }
@@ -13360,10 +13356,6 @@
 
 .ph-broadcast-bold::before {
   content: "\f70c";
-}
-
-.ph-browser-bold::before {
-  content: "\f70d";
 }
 
 .ph-browsers-bold::before {
@@ -13612,10 +13604,6 @@
 
 .ph-chat-circle-dots-bold::before {
   content: "\f74b";
-}
-
-.ph-chat-circle-text-bold::before {
-  content: "\f74c";
 }
 
 .ph-chat-dots-bold::before {
@@ -16748,10 +16736,6 @@
 
 .ph-yin-yang-bold::before {
   content: "\fa5c";
-}
-
-.ph-youtube-logo-bold::before {
-  content: "\fa5d";
 }
 
 .ph-activity-fill::before {

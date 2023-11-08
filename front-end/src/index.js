@@ -16,7 +16,6 @@ import 'vite/modulepreload-polyfill';
   if (!redirected) {
     // Load components only after redirects are checked.
     import("./components/organisms/results.js");
-    import("./components/organisms/footer.js");
     import("./components/organisms/save.js");
     import("./components/molecules/add-button.js");
     import("./components/molecules/add-result.js");

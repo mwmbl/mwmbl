@@ -134,3 +134,33 @@ ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 
 LOGIN_REDIRECT_URL = "/"
+
+FOOTER_LINKS = [
+    {
+        "name": "Matrix",
+        "icon": "ph-chat-circle-text-bold",
+        "href": "https://matrix.to/#/#mwmbl:matrix.org",
+    },
+    {
+        "name": "Book",
+        "icon": "ph-book-bold",
+        "href": "https://book.mwmbl.org",
+    },
+    {
+        "name": "Blog",
+        "icon": "ph-browser-bold",
+        "href": "https://blog.mwmbl.org",
+    },
+    {
+        "name": "GitHub",
+        "icon": "ph-github-logo-bold",
+        "href": "https://github.com/mwmbl/mwmbl",
+    },
+    {
+        "name": "YouTube",
+        "icon": "ph-youtube-logo-bold",
+        "href": "https://www.youtube.com/channel/UCFLbqrH63-icAHxQ1eFfAvA",
+    },
+
+
+]

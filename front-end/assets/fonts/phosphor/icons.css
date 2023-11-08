@@ -104,3 +104,19 @@ Phosphor Web Font
 .ph-info-bold::before {
   content: "\f88f";
 }
+
+.ph-book-bold::before {
+  content: "\f6fb";
+}
+
+.ph-browser-bold::before {
+  content: "\f70d";
+}
+
+.ph-youtube-logo-bold::before {
+  content: "\fa5d";
+}
+
+.ph-chat-circle-text-bold::before {
+  content: "\f74c";
+}
