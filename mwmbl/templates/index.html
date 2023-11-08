@@ -8,12 +8,7 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Page title -->
-    {% if query %}
-  <title>Mwmbl - {{ query }}</title>
-    {% else %}
-  <title>Mwmbl - Search</title>
-    {% endif %}
+  {%  include "title.html" %}
   <meta name="description" content="The free, open-source and non-profit search engine.">
 
   <!-- Favicons -->
@@ -69,7 +64,7 @@
           placeholder='Search on Mwmbl...'
           title='Use "CTRL+K" or "/" to focus.'
           autocomplete='off'
-          hx-get="/app/search/"
+          hx-get="/app/home/"
           hx-trigger="keyup changed delay:100ms"
           hx-target=".results"
         >
@@ -86,7 +81,7 @@
     <main>
       <mwmbl-results>
         <ul class='results'>
-          {%  include "results.html" %}
+          {%  include "home.html" %}
         </ul>
       </mwmbl-results>
     </main>

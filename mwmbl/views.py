@@ -41,7 +41,7 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-def home(request):
+def index(request):
     query = request.GET.get("q")
     results = ranker.search(query) if query else None
     return render(request, "index.html", {
@@ -51,10 +51,10 @@ def home(request):
     })
 
 
-def search_results(request):
+def home_fragment(request):
     query = request.GET["q"]
     results = ranker.search(query)
-    response = render(request, "results.html", {"results": results, "query": query})
+    response = render(request, "home.html", {"results": results, "query": query})
     current_url = request.htmx.current_url
     # Replace query string with new query
     stripped_url = current_url[:current_url.index("?")] if "?" in current_url else current_url
@@ -77,7 +77,7 @@ def fetch_url(request):
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
     result = Document(title=title, url=url, extract=extract, score=0.0)
-    return render(request, "results.html", {
+    return render(request, "home.html", {
         "results": [format_result(result, query)],
         "query": query,
     })
