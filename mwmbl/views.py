@@ -1,3 +1,8 @@
+from dataclasses import dataclass
+from datetime import datetime
+from itertools import groupby
+from urllib.parse import urlparse, parse_qs
+
 import justext
 import requests
 from django.contrib.auth.decorators import login_required
@@ -5,6 +10,7 @@ from django.shortcuts import render
 from django_htmx.http import push_url
 
 from mwmbl.format import format_result
+from mwmbl.models import UserCuration, MwmblUser
 from mwmbl.search_setup import ranker
 
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -42,19 +48,22 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
 
 
 def index(request):
-    query = request.GET.get("q")
-    results = ranker.search(query) if query else None
+    activity, query, results = _get_results_and_activity(request)
     return render(request, "index.html", {
         "results": results,
         "query": query,
         "user": request.user,
+        "activity": activity,
     })
 
 
 def home_fragment(request):
-    query = request.GET["q"]
-    results = ranker.search(query)
-    response = render(request, "home.html", {"results": results, "query": query})
+    activity, query, results = _get_results_and_activity(request)
+    response = render(request, "home.html", {
+        "results": results,
+        "query": query,
+        "activity": activity,
+    })
     current_url = request.htmx.current_url
     # Replace query string with new query
     stripped_url = current_url[:current_url.index("?")] if "?" in current_url else current_url
@@ -63,6 +72,42 @@ def home_fragment(request):
     # Set the htmx replace header
     response["HX-Replace-Url"] = new_url
     return response
+
+
+@dataclass
+class Activity:
+    user: MwmblUser
+    num_curations: int
+    timestamp: datetime
+    query: str
+    url: str
+
+
+def _get_results_and_activity(request):
+    query = request.GET.get("q")
+    if query:
+        results = ranker.search(query)
+        activity = None
+    else:
+        results = None
+        curations = UserCuration.objects.order_by("-timestamp")[:100]
+        sorted_curations = sorted(curations, key=lambda x: x.user.username)
+        groups = groupby(sorted_curations, key=lambda x: (x.user.username, x.url))
+        activity = []
+        for (user, url), group in groups:
+            parsed_url_query = parse_qs(urlparse(url).query)
+            activity_query = parsed_url_query.get("q", [""])[0]
+            group = list(group)
+            activity.append(Activity(
+                user=user,
+                num_curations=len(group),
+                timestamp=max([i.timestamp for i in group]),
+                query=activity_query,
+                url=url,
+            ))
+
+        print("Activity", activity)
+    return activity, query, results
 
 
 def fetch_url(request):

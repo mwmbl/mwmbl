@@ -1,4 +1,5 @@
 {% load result_filters %}
+{%  load humanize %}
 {%  include "title.html" %}
 {% if query %}
   {% if results %}
@@ -28,9 +29,11 @@
     </li>
   {% endif %}
 {% else %}
-  <li class="home">
-    <h1>
-      Welcome to Mwmbl, the free, open-source and non-profit search engine.
-    </h1>
-  </li>
+  {%  for item in activity %}
+    <li class="activity">
+      <h1>
+        {{ item.user }} made {{ item.num_curations | apnumber }} changes to <a href="{{ item.url }}">{{ item.query }}</a> {{ item.timestamp | naturaltime }}.
+      </h1>
+    </li>
+  {% endfor %}
 {% endif %}
