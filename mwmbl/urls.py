@@ -17,17 +17,15 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from mwmbl.api import api_original as api, api_v1
-from mwmbl.views import profile, search_results, fetch_url, home
+from mwmbl.api import api_v1
+from mwmbl.views import search_results, fetch_url, home
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # path('', api.urls),
     path('api/v1/', api_v1.urls),
     path('accounts/', include('allauth.urls')),
 
     path('', home, name="home"),
-    path('accounts/profile/', profile, name="profile"),
     path('app/search/', search_results, name="search_results"),
     path('app/fetch/', fetch_url, name="fetch_url")
 ]

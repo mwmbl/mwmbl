@@ -75,8 +75,13 @@
         >
       </form>
       <div is="mwmbl-save"></div>
-      <a class="button" href="/accounts/login/">Login</a>
-      <a class="button" href="/accounts/signup/">Sign up</a>
+      {%  if user.is_authenticated %}
+        <p class="login-info">Logged in as {{ user.username }}</p>
+        <a class="button" href="/accounts/logout/">Log out</a>
+      {% else %}
+        <a class="button" href="/accounts/login/">Login</a>
+        <a class="button" href="/accounts/signup/">Sign up</a>
+      {% endif %}
     </header>
     <main>
       <mwmbl-results>

@@ -41,15 +41,14 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-@login_required
-def profile(request):
-    return render(request, 'profile.html')
-
-
 def home(request):
     query = request.GET.get("q")
     results = ranker.search(query) if query else None
-    return render(request, "index.html", {"results": results, "query": query})
+    return render(request, "index.html", {
+        "results": results,
+        "query": query,
+        "user": request.user,
+    })
 
 
 def search_results(request):

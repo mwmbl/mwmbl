@@ -341,3 +341,7 @@ a {
 .button:hover {
     background-color: var(--dark-color);
 }
+
+.login-info {
+  padding: 10px;
+}
