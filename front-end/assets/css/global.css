@@ -236,6 +236,10 @@ a {
   display: flex;
 }
 
+.result-link a {
+  background: white;
+}
+
 .curation-buttons {
   padding: 20px;
 }
@@ -345,3 +349,16 @@ a {
 .login-info {
   padding: 10px;
 }
+
+/* Sortable styling is not working in HTML 5 yet */
+/*.sortable-drag {*/
+/*    opacity: 1.0;*/
+/*}*/
+
+/*.sortable-ghost {*/
+/*    opacity: 1.0;*/
+/*}*/
+
+/*.sortable-chosen {*/
+/*  opacity: 0;*/
+/*}*/

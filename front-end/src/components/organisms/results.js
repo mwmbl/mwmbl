@@ -1,4 +1,5 @@
 import {globalBus} from '../../utils/events.js';
+import Sortable from 'sortablejs';
 
 class ResultsHandler {
   constructor() {
@@ -109,19 +110,19 @@ class ResultsHandler {
   __initializeResults() {
     this.results = document.querySelector('.results');
 
-    // Allow the user to re-order search results
-    $(".results").sortable({
-      "activate": this.__sortableActivate.bind(this),
-      "deactivate": this.__sortableDeactivate.bind(this),
+    const sortable = new Sortable(this.results, {
+      "onStart": this.__sortableActivate.bind(this),
+      "onEnd": this.__sortableDeactivate.bind(this),
+      // "forceFallback": true,
     });
 
     this.curating = false;
   }
 
-  __sortableActivate(event, ui) {
-    console.log("Sortable activate", ui);
+  __sortableActivate(event) {
+    console.log("Sortable activate", event);
     this.__beginCurating();
-    this.oldIndex = ui.item.index();
+    this.oldIndex = event.oldIndex;
   }
 
   __beginCurating() {
@@ -159,9 +160,9 @@ class ResultsHandler {
     return results;
   }
 
-  __sortableDeactivate(event, ui) {
-    const newIndex = ui.item.index();
-    console.log('Sortable deactivate', ui, this.oldIndex, newIndex);
+  __sortableDeactivate(event) {
+    const newIndex = event.newIndex;
+    console.log('Sortable deactivate', this.oldIndex, newIndex);
 
     const newResults = this.__getResults();
 

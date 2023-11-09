@@ -13,6 +13,7 @@
     "vite": "^3.2.3"
   },
   "dependencies": {
-    "chart.js": "^4.4.0"
+    "chart.js": "^4.4.0",
+    "sortablejs": "^1.15.0"
   }
 }
