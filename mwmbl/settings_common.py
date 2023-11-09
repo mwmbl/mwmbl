@@ -29,8 +29,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
     'mwmbl',
-
+    'django_htmx',
+    'django_vite',
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
@@ -45,6 +47,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 
+    "django_htmx.middleware.HtmxMiddleware",
     "allauth.account.middleware.AccountMiddleware",
 ]
 
@@ -105,6 +108,9 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+DJANGO_VITE_DEV_MODE = False
+
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -126,3 +132,35 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
+
+LOGIN_REDIRECT_URL = "/"
+
+FOOTER_LINKS = [
+    {
+        "name": "Matrix",
+        "icon": "ph-chat-circle-text-bold",
+        "href": "https://matrix.to/#/#mwmbl:matrix.org",
+    },
+    {
+        "name": "Book",
+        "icon": "ph-book-bold",
+        "href": "https://book.mwmbl.org",
+    },
+    {
+        "name": "Blog",
+        "icon": "ph-browser-bold",
+        "href": "https://blog.mwmbl.org",
+    },
+    {
+        "name": "GitHub",
+        "icon": "ph-github-logo-bold",
+        "href": "https://github.com/mwmbl/mwmbl",
+    },
+    {
+        "name": "YouTube",
+        "icon": "ph-youtube-logo-bold",
+        "href": "https://www.youtube.com/channel/UCFLbqrH63-icAHxQ1eFfAvA",
+    },
+
+
+]

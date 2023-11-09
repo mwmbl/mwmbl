@@ -1,5 +1,39 @@
-{% extends 'base.html' %}
-
-{% block content %}
-  <h2>Welcome, {{ user.username }}!</h2>
-{% endblock %}
+{% load result_filters %}
+{%  load humanize %}
+{%  include "title.html" %}
+{% if query %}
+  {% if results %}
+    {% for result in results %}
+      <li class="result" is="mwmbl-result">
+        <div class="result-container">
+          <div class="curation-buttons">
+            <button class="curation-button curate-delete" is="mwmbl-delete-button">✕</button>
+            <button class="curation-button curate-approve" is="mwmbl-validate-button">✓</button>
+            <button class="curation-button curate-add" is="mwmbl-add-button">＋</button>
+          </div>
+          <div class="result-link">
+            <a href="{{result.url}}">
+              <p class='link'>{{result.url}}</p>
+              <p class='title'>{{result.title|strengthen}}</p>
+              <p class='extract'>{{result.extract|strengthen}}</p>
+            </a>
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  {% else %}
+    <li class="home">
+      <h1>
+        No results found for "{{query}}".
+      </h1>
+    </li>
+  {% endif %}
+{% else %}
+  {%  for item in activity %}
+    <li class="activity">
+      <h1>
+        {{ item.user }} made {{ item.num_curations | apnumber }} changes to <a href="{{ item.url }}">{{ item.query }}</a> {{ item.timestamp | naturaltime }}.
+      </h1>
+    </li>
+  {% endfor %}
+{% endif %}

@@ -1,11 +1,5 @@
 import {globalBus} from '../../utils/events.js';
 
-
-document.body.addEventListener('htmx:load', function(evt) {
-
-});
-
-
 class ResultsHandler {
   constructor() {
     this.results = null;
@@ -16,19 +10,12 @@ class ResultsHandler {
 
   __setup() {
     this.__events();
+    this.__initializeResults();
   }
 
   __events() {
     document.body.addEventListener('htmx:load', e => {
-      this.results = document.querySelector('.results');
-
-      // Allow the user to re-order search results
-      $(".results").sortable({
-        "activate": this.__sortableActivate.bind(this),
-        "deactivate": this.__sortableDeactivate.bind(this),
-      });
-
-      this.curating = false;
+      this.__initializeResults();
     });
 
     // Focus first element when coming from the search bar
@@ -117,6 +104,18 @@ class ResultsHandler {
     globalBus.dispatch(curationSaveEvent);
 
     });
+  }
+
+  __initializeResults() {
+    this.results = document.querySelector('.results');
+
+    // Allow the user to re-order search results
+    $(".results").sortable({
+      "activate": this.__sortableActivate.bind(this),
+      "deactivate": this.__sortableDeactivate.bind(this),
+    });
+
+    this.curating = false;
   }
 
   __sortableActivate(event, ui) {

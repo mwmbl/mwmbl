@@ -5,6 +5,7 @@
  * Please do not pollute this file if you can make
  * util or component files instead.
  */
+import 'vite/modulepreload-polyfill';
 
 // Waiting for top-level await to be better supported.
 (async () => {
@@ -14,11 +15,12 @@
 
   if (!redirected) {
     // Load components only after redirects are checked.
-    import('./components/login.js');
-    import('./components/register.js');
-    import("./components/organisms/search-bar.js");
     import("./components/organisms/results.js");
-    import("./components/organisms/footer.js");
     import("./components/organisms/save.js");
+    import("./components/molecules/add-button.js");
+    import("./components/molecules/add-result.js");
+    import("./components/molecules/delete-button.js");
+    import("./components/molecules/result.js");
+    import("./components/molecules/validate-button.js");
   }
 })();

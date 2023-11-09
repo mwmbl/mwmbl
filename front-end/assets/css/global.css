@@ -62,12 +62,9 @@ body {
   height: 2rem;
 }
 
-mwmbl-search-bar {
-  width: 100%;
-}
-
 .search-bar {
   position: relative;
+  width: 100%;
 }
 
 .search-bar-input {
@@ -162,7 +159,7 @@ mwmbl-results, footer {
   font-weight: var(--bold-font-weight);
 }
 
-footer {
+.footer {
   position: sticky;
   top: 100vh;
   margin-bottom: 25px;
@@ -323,4 +320,28 @@ a {
   color: black;
   text-decoration: none;
   cursor: pointer;
+}
+
+.button {
+    background-color: var(--primary-color);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    margin: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: var(--default-font-size);
+    border-radius: 50px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 200ms ease-in-out;
+}
+
+.button:hover {
+    background-color: var(--dark-color);
+}
+
+.login-info {
+  padding: 10px;
 }

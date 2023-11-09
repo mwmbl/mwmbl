@@ -21,7 +21,7 @@ export default define('validate-button', class extends HTMLButtonElement {
       const result = this.closest('.result');
       const parent = result.parentNode;
 
-      const index = Array.prototype.indexOf.call(parent.children, result);
+      const index = Array.prototype.indexOf.call(parent.getElementsByClassName('result'), result);
       console.log("Validate index", index);
 
       const curationValidateEvent = new CustomEvent('curate-validate-result', {

@@ -1,9 +1,16 @@
+from dataclasses import dataclass
+from datetime import datetime
+from itertools import groupby
+from urllib.parse import urlparse, parse_qs
+
 import justext
 import requests
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+from django_htmx.http import push_url
 
 from mwmbl.format import format_result
+from mwmbl.models import UserCuration, MwmblUser
 from mwmbl.search_setup import ranker
 
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -12,6 +19,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
 
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document
+from django.conf import settings
 
 
 def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
@@ -40,15 +48,68 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-@login_required
-def profile(request):
-    return render(request, 'profile.html')
+def index(request):
+    activity, query, results = _get_results_and_activity(request)
+    return render(request, "index.html", {
+        "results": results,
+        "query": query,
+        "user": request.user,
+        "activity": activity,
+        "footer_links": settings.FOOTER_LINKS,
+    })
 
 
-def search_results(request):
-    query = request.GET["query"]
-    results = ranker.search(query)
-    return render(request, "results.html", {"results": results})
+def home_fragment(request):
+    activity, query, results = _get_results_and_activity(request)
+    response = render(request, "home.html", {
+        "results": results,
+        "query": query,
+        "activity": activity,
+    })
+    current_url = request.htmx.current_url
+    # Replace query string with new query
+    stripped_url = current_url[:current_url.index("?")] if "?" in current_url else current_url
+    query_string = "?q=" + query if len(query) > 0 else ""
+    new_url = stripped_url + query_string
+    # Set the htmx replace header
+    response["HX-Replace-Url"] = new_url
+    return response
+
+
+@dataclass
+class Activity:
+    user: MwmblUser
+    num_curations: int
+    timestamp: datetime
+    query: str
+    url: str
+
+
+def _get_results_and_activity(request):
+    query = request.GET.get("q")
+    if query:
+        results = ranker.search(query)
+        activity = None
+    else:
+        results = None
+        curations = UserCuration.objects.order_by("-timestamp")[:100]
+        sorted_curations = sorted(curations, key=lambda x: x.user.username)
+        groups = groupby(sorted_curations, key=lambda x: (x.user.username, x.url))
+        activity = []
+        for (user, url), group in groups:
+            parsed_url_query = parse_qs(urlparse(url).query)
+            activity_query = parsed_url_query.get("q", [""])[0]
+            group = list(group)
+            activity.append(Activity(
+                user=user,
+                num_curations=len(group),
+                timestamp=max([i.timestamp for i in group]),
+                query=activity_query,
+                url=url,
+            ))
+
+        print("Activity", activity)
+    return activity, query, results
 
 
 def fetch_url(request):
@@ -63,4 +124,7 @@ def fetch_url(request):
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
     result = Document(title=title, url=url, extract=extract, score=0.0)
-    return render(request, "results.html", {"results": [format_result(result, query)]})
+    return render(request, "home.html", {
+        "results": [format_result(result, query)],
+        "query": query,
+    })
