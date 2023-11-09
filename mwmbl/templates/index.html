@@ -60,6 +60,7 @@
           placeholder='Search on Mwmbl...'
           title='Use "CTRL+K" or "/" to focus.'
           autocomplete='off'
+          value="{{ query }}"
           hx-get="/app/home/"
           hx-trigger="keyup changed delay:100ms"
           hx-target=".results"
