@@ -1,4 +1,4 @@
-nodeFROM node:hydrogen-bullseye as front-end
+FROM node:hydrogen-bullseye as front-end
 
 COPY front-end /front-end
 WORKDIR /front-end
