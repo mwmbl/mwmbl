@@ -87,9 +87,9 @@ class ResultsHandler {
       this.results.insertAdjacentHTML('afterbegin', resultData);
 
       const newResults = this.__getResults();
+      const url = newResults[0].url;
 
-      const curationSaveEvent = new CustomEvent('save-curation', {
-      detail: {
+      let detail = {
         type: 'add',
         data: {
           timestamp: Date.now(),
@@ -97,13 +97,15 @@ class ResultsHandler {
           results: newResults,
           curation: {
             insert_index: 0,
-            url: e.detail.url
+            url: url
           }
         }
-      }
-    });
-    globalBus.dispatch(curationSaveEvent);
-
+      };
+      console.log("Detail", detail);
+      const curationSaveEvent = new CustomEvent('save-curation', {
+        detail: detail
+      });
+      globalBus.dispatch(curationSaveEvent);
     });
   }
 

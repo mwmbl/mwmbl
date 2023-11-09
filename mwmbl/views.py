@@ -124,7 +124,6 @@ def fetch_url(request):
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
     result = Document(title=title, url=url, extract=extract, score=0.0)
-    return render(request, "home.html", {
-        "results": [format_result(result, query)],
-        "query": query,
+    return render(request, "result.html", {
+        "result": format_result(result, query),
     })

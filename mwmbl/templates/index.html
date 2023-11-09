@@ -60,10 +60,10 @@
           placeholder='Search on Mwmbl...'
           title='Use "CTRL+K" or "/" to focus.'
           autocomplete='off'
-          value="{{ query }}"
+          value='{{ query|default_if_none:"" }}'
           hx-get="/app/home/"
           hx-trigger="keyup changed delay:100ms"
-          hx-target=".results"
+          hx-target=".main"
         >
       </form>
       <div is="mwmbl-save"></div>
@@ -76,11 +76,7 @@
       {% endif %}
     </header>
     <main>
-      <mwmbl-results>
-        <ul class='results'>
-          {%  include "home.html" %}
-        </ul>
-      </mwmbl-results>
+      {%  include "home.html" %}
     </main>
     <div is="mwmbl-add-result"></div>
   <div class="footer">
