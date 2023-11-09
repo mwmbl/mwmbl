@@ -95,12 +95,12 @@ def _get_results_and_activity(request):
         curations = UserCuration.objects.order_by("-timestamp")[:100]
         sorted_curations = sorted(curations, key=lambda x: x.user.username)
         groups = groupby(sorted_curations, key=lambda x: (x.user.username, x.url))
-        activity = []
+        unsorted_activity = []
         for (user, url), group in groups:
             parsed_url_query = parse_qs(urlparse(url).query)
             activity_query = parsed_url_query.get("q", [""])[0]
             group = list(group)
-            activity.append(Activity(
+            unsorted_activity.append(Activity(
                 user=user,
                 num_curations=len(group),
                 timestamp=max([i.timestamp for i in group]),
@@ -108,7 +108,7 @@ def _get_results_and_activity(request):
                 url=url,
             ))
 
-        print("Activity", activity)
+        activity = sorted(unsorted_activity, key=lambda a: a.timestamp, reverse=True)
     return activity, query, results
 
 
