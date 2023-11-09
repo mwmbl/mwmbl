@@ -112,11 +112,12 @@ class ResultsHandler {
   __initializeResults() {
     this.results = document.querySelector('.results');
 
-    const sortable = new Sortable(this.results, {
-      "onStart": this.__sortableActivate.bind(this),
-      "onEnd": this.__sortableDeactivate.bind(this),
-      // "forceFallback": true,
-    });
+    if (this.results) {
+      const sortable = new Sortable(this.results, {
+        "onStart": this.__sortableActivate.bind(this),
+        "onEnd": this.__sortableDeactivate.bind(this),
+      });
+    }
 
     this.curating = false;
   }
