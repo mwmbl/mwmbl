@@ -21,6 +21,12 @@ body {
   margin: 25px;
 }
 
+@media screen and (max-width: 600px) {
+  .branding {
+    display: none;
+  }
+}
+
 .brand-title {
   text-align: center;
   font-weight: var(--black-font-weight);
