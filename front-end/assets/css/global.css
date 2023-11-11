@@ -21,6 +21,12 @@ body {
   margin: 25px;
 }
 
+@media screen and (max-width: 600px) {
+  .branding {
+    display: none;
+  }
+}
+
 .brand-title {
   text-align: center;
   font-weight: var(--black-font-weight);
@@ -111,15 +117,14 @@ body {
 .results {
   max-width: 100%;
   list-style-type: none;
-  padding: 10px;
+  padding: 0;
 }
 
 .result {
   min-height: 120px;
 }
 
-.result a {
-  display: block;
+.result-container {
   text-decoration: none;
   color: var(--dark-color);
   padding: 15px;
@@ -131,11 +136,11 @@ body {
     outline 100ms ease-in-out;
 }
 
-.result:hover a, .result a:focus {
+.result-container:hover,.result-container:focus {
   background-color: var(--gray-color);
 }
 
-.result a:focus {
+.result-container:focus {
   outline: 3px solid var(--primary-color);
 }
 
@@ -229,64 +234,28 @@ body {
 a {
   font-weight: var(--bold-font-weight);
   color: var(--primary-color);
-  text-decoration: underline;
-}
-
-.result-container {
-  display: flex;
-}
-
-.result-link a {
-  background: white;
+  text-decoration: none;
 }
 
 .curation-buttons {
-  padding: 20px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-column-gap: 20px;
+  grid-auto-columns: max-content;
 }
 
-.curation-button {
-  opacity: 0;
-  color: inherit;
-  border: none;
-  padding: 0;
-  font: inherit;
-  outline: inherit;
-  cursor: pointer;
-
-  background: darkgrey;
-  box-shadow: 3px 3px 3px lightgrey;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex; /* or inline-flex */
-  align-items: center;
-  justify-content: center;
-  margin: 10px 0 10px 0;
-}
-
-.result:hover .curation-button {
-  opacity: 70%;
-  transition:
-    opacity 200ms ease-in-out;
-}
-
-.result:hover .curation-button:hover {
-  opacity: 100%;
-}
-
-.curate-delete {
-  margin-top: 0;
+.result-container .button {
+  background-color: var(--dark-gray-color);
+  color: white;
+  padding: 5px 10px;
+  margin: 0;
+  font-size: var(--small-font-size);
+  font-weight: var(--bold-font-weight);
 }
 
 .validated {
-  background: lightgreen;
-  opacity: 100%;
+  background-color: green !important;
 }
-
-.curate-add {
-  margin-bottom: 0;
-}
-
 
 .modal {
   /*display: none; !* Hidden by default *!*/
@@ -340,6 +309,14 @@ a {
     cursor: pointer;
     flex-shrink: 0;
     transition: background-color 200ms ease-in-out;
+}
+
+@media screen and (max-width: 600px) {
+  .button {
+    padding: 5px 10px;
+    font-size: var(--small-font-size);
+    margin: 5px;
+  }
 }
 
 .button:hover {

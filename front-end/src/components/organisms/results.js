@@ -116,6 +116,7 @@ class ResultsHandler {
       const sortable = new Sortable(this.results, {
         "onStart": this.__sortableActivate.bind(this),
         "onEnd": this.__sortableDeactivate.bind(this),
+        "handle": ".handle",
       });
     }
 
