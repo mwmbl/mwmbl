@@ -2,6 +2,7 @@
 {%  include "title.html" %}
 <div class="main">
   {% if query %}
+    <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
     {% if results %}
       <ul class='results'>
         {% for result in results %}

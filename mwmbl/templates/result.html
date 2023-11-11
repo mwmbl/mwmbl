@@ -1,17 +1,17 @@
 {% load result_filters %}
 <li class="result" is="mwmbl-result">
   <div class="result-container">
-    <div class="curation-buttons">
-      <button class="curation-button curate-delete" is="mwmbl-delete-button">✕</button>
-      <button class="curation-button curate-approve" is="mwmbl-validate-button">✓</button>
-      <button class="curation-button curate-add" is="mwmbl-add-button">＋</button>
-    </div>
     <div class="result-link">
       <a href="{{result.url}}">
         <p class='link'>{{result.url}}</p>
         <p class='title'>{{result.title|strengthen}}</p>
       </a>
       <p class='extract'>{{result.extract|strengthen}}</p>
+    </div>
+    <div class="curation-buttons">
+      <span class="button handle">↕ Move</span>
+      <button class="button curate-delete" is="mwmbl-delete-button">✕ Delete</button>
+      <button class="button curate-approve" is="mwmbl-validate-button">✓ Looks good</button>
     </div>
   </div>
 </li>
