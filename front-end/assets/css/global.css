@@ -124,8 +124,8 @@ body {
   min-height: 120px;
 }
 
-.result a {
-  display: block;
+.result-container {
+  /*display: block;*/
   text-decoration: none;
   color: var(--dark-color);
   padding: 15px;
@@ -137,11 +137,11 @@ body {
     outline 100ms ease-in-out;
 }
 
-.result:hover a, .result a:focus {
+.result-container:hover,.result-container:focus {
   background-color: var(--gray-color);
 }
 
-.result a:focus {
+.result-container:focus {
   outline: 3px solid var(--primary-color);
 }
 
@@ -235,19 +235,31 @@ body {
 a {
   font-weight: var(--bold-font-weight);
   color: var(--primary-color);
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 .result-container {
-  display: flex;
+  /*display: flex;*/
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
-.result-link a {
-  background: white;
+/*.result-link {*/
+/*  background: white;*/
+/*}*/
+
+.result-link,.curation-buttons {
+  /*padding: 20px;*/
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .curation-buttons {
-  padding: 20px;
+  z-index: 10;
 }
 
 .curation-button {
