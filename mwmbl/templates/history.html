@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{%  load humanize %}
+
+{% block content %}
+  <div class="main">
+    <h1>Curations for <a href="{{ url }}">{{ query }}</a></h1>
+    {% for user_curation in curations %}
+      <p>{{ user_curation.user.username }} {{ user_curation.curation_type }} {{ user_curation.timestamp | naturaltime}}</p>
+    {% endfor %}
+  </div>
+{% endblock %}

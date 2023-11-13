@@ -127,3 +127,15 @@ def fetch_url(request):
     return render(request, "result.html", {
         "result": format_result(result, query),
     })
+
+
+def page_history(request):
+    url = request.GET["url"]
+    parsed_url_query = parse_qs(urlparse(url).query)
+    query = parsed_url_query.get("q", [""])[0]
+    curations = UserCuration.objects.filter(url=url).order_by("-timestamp")
+    return render(request, "history.html", {
+        "curations": curations,
+        "url": url,
+        "query": query,
+    })

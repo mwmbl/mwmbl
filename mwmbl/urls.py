@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 from mwmbl.api import api_v1
-from mwmbl.views import home_fragment, fetch_url, index
+from mwmbl.views import home_fragment, fetch_url, index, page_history
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,5 +27,6 @@ urlpatterns = [
 
     path('', index, name="home"),
     path('app/home/', home_fragment, name="home"),
-    path('app/fetch/', fetch_url, name="fetch_url")
+    path('app/fetch/', fetch_url, name="fetch_url"),
+    path('app/history/', page_history, name="history"),
 ]
