@@ -49,7 +49,7 @@ def prepare_url_for_tokenizing(url: str):
 def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedDocument]:
     for i, (title_cleaned, url, extract) in enumerate(titles_urls_and_extracts):
         score = link_counts.get(url, DEFAULT_SCORE)
-        yield tokenize_document(url, title_cleaned, extract, score, nlp)
+        yield tokenize_document(url, title_cleaned, extract, score)
 
         if i % 1000 == 0:
             print("Processed", i)
@@ -61,7 +61,7 @@ def get_index_tokens(tokens):
     return set(first_tokens + bigrams)
 
 
-def tokenize_document(url, title_cleaned, extract, score, nlp):
+def tokenize_document(url, title_cleaned, extract, score):
     title_tokens = tokenize(title_cleaned)
     prepared_url = prepare_url_for_tokenizing(unquote(url))
     url_tokens = tokenize(prepared_url)

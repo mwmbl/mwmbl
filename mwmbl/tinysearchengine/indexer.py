@@ -79,6 +79,7 @@ class TinyIndexMetadata:
         values = json.loads(data[constant_length:].decode('utf8'))
         return TinyIndexMetadata(**values)
 
+
 # Find the optimal amount of data that fits onto a page
 # We do this by leveraging binary search to quickly find the index where:
 #     - index+1 cannot fit onto a page
@@ -106,9 +107,11 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
             # No better match, use our index
             return mid, compressed_data
 
+
 def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
     # Find max number of items that fit on a page
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
+
 
 def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)

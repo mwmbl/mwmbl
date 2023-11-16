@@ -71,7 +71,7 @@ def preprocess_documents(documents, index_path, nlp):
     page_documents = defaultdict(list)
     with TinyIndex(Document, index_path, 'w') as indexer:
         for document in documents:
-            tokenized = tokenize_document(document.url, document.title, document.extract, document.score, nlp)
+            tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
             # logger.debug(f"Tokenized: {tokenized}")
             page_indexes = [indexer.get_key_page_index(token) for token in tokenized.tokens]
             for page in page_indexes:
