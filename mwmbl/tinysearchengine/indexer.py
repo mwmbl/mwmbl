@@ -189,7 +189,6 @@ class TinyIndex(Generic[T]):
         except ZstdError:
             logger.exception(f"Error decompressing page data, content: {page_data}")
             return []
-        # logger.debug(f"Decompressed data: {decompressed_data}")
         return json.loads(decompressed_data.decode('utf8'))
 
     def store_in_page(self, page_index: int, values: list[T]):

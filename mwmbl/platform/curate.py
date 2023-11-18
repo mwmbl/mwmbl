@@ -1,3 +1,4 @@
+from logging import getLogger
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -9,9 +10,13 @@ from mwmbl.platform.data import CurateBegin, CurateMove, CurateDelete, CurateAdd
     make_curation_type
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tokenizer import tokenize
+from mwmbl.utils import add_term_info, add_term_infos
 
 RESULT_URL = "https://mwmbl.org/?q="
 MAX_CURATED_SCORE = 1_111_111.0
+
+
+logger = getLogger(__name__)
 
 
 def create_router(index_path: str) -> Router:
@@ -58,20 +63,24 @@ def create_router(index_path: str) -> Router:
                 raise ValueError(f"Should be one query value in the URL: {curation.url}")
 
             query = queries[0]
-            print("Query", query)
             tokens = tokenize(query)
-            print("Tokens", tokens)
             term = " ".join(tokens)
-            print("Key", term)
 
             documents = [
                 Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i, term, result.curated)
                 for i, result in enumerate(curation.results)
             ]
+
             page_index = indexer.get_key_page_index(term)
-            print("Page index", page_index)
-            print("Storing documents", documents)
-            indexer.store_in_page(page_index, documents)
+            existing_documents_no_terms = indexer.get_page(page_index)
+            existing_documents = add_term_infos(existing_documents_no_terms, indexer, page_index)
+            other_documents = [doc for doc in existing_documents if doc.term != term]
+            logger.info(f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
+                        f"with terms { {doc.term for doc in other_documents} }")
+
+            all_documents = documents + other_documents
+            logger.info(f"Storing {len(all_documents)} documents at page {page_index}")
+            indexer.store_in_page(page_index, all_documents)
 
         return {"curation": "ok"}
 

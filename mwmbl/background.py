@@ -1,7 +1,9 @@
 """
 Script that updates data in a background process.
 """
-from logging import getLogger
+import logging
+import sys
+from logging import getLogger, basicConfig
 from pathlib import Path
 from time import sleep
 
@@ -11,6 +13,8 @@ from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 
+
+basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
 
 
