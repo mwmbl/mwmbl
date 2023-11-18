@@ -21,6 +21,12 @@ body {
   margin: 25px;
 }
 
+@media screen and (max-width: 600px) {
+  .branding {
+    display: none;
+  }
+}
+
 .brand-title {
   text-align: center;
   font-weight: var(--black-font-weight);
@@ -62,12 +68,9 @@ body {
   height: 2rem;
 }
 
-mwmbl-search-bar {
-  width: 100%;
-}
-
 .search-bar {
   position: relative;
+  width: 100%;
 }
 
 .search-bar-input {
@@ -104,7 +107,7 @@ mwmbl-search-bar {
   pointer-events: none;
 }
 
-mwmbl-results, footer {
+.main, footer {
   display: block;
   max-width: 800px;
   width: 100%;
@@ -114,11 +117,14 @@ mwmbl-results, footer {
 .results {
   max-width: 100%;
   list-style-type: none;
-  padding: 10px;
+  padding: 0;
 }
 
-.result a {
-  display: block;
+.result {
+  min-height: 120px;
+}
+
+.result-container {
   text-decoration: none;
   color: var(--dark-color);
   padding: 15px;
@@ -130,11 +136,11 @@ mwmbl-results, footer {
     outline 100ms ease-in-out;
 }
 
-.result:hover a, .result a:focus {
+.result-container:hover,.result-container:focus {
   background-color: var(--gray-color);
 }
 
-.result a:focus {
+.result-container:focus {
   outline: 3px solid var(--primary-color);
 }
 
@@ -158,7 +164,7 @@ mwmbl-results, footer {
   font-weight: var(--bold-font-weight);
 }
 
-footer {
+.footer {
   position: sticky;
   top: 100vh;
   margin-bottom: 25px;
@@ -228,5 +234,108 @@ footer {
 a {
   font-weight: var(--bold-font-weight);
   color: var(--primary-color);
-  text-decoration: underline;
+  text-decoration: none;
 }
+
+.curation-buttons {
+  display: grid;
+  grid-auto-flow: column;
+  grid-column-gap: 20px;
+  grid-auto-columns: max-content;
+}
+
+.result-container .button {
+  background-color: var(--dark-gray-color);
+  color: white;
+  padding: 5px 10px;
+  margin: 0;
+  font-size: var(--small-font-size);
+  font-weight: var(--bold-font-weight);
+}
+
+.validated {
+  background-color: green !important;
+}
+
+.modal {
+  /*display: none; !* Hidden by default *!*/
+  position: fixed; /* Stay in place */
+  z-index: 100; /* Sit on top */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgb(0,0,0); /* Fallback color */
+  background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+}
+
+/* Modal Content/Box */
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto; /* 15% from the top and centered */
+  padding: 20px;
+  border: 1px solid #888;
+  max-width: 800px;
+  width: 80%; /* Could be more or less, depending on screen size */
+}
+
+/* The Close Button */
+.close {
+  color: #aaa;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.close:hover,
+.close:focus {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button {
+    background-color: var(--primary-color);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    margin: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: var(--default-font-size);
+    border-radius: 50px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 200ms ease-in-out;
+}
+
+@media screen and (max-width: 600px) {
+  .button {
+    padding: 5px 10px;
+    font-size: var(--small-font-size);
+    margin: 5px;
+  }
+}
+
+.button:hover {
+    background-color: var(--dark-color);
+}
+
+.login-info {
+  padding: 10px;
+}
+
+/* Sortable styling is not working in HTML 5 yet */
+/*.sortable-drag {*/
+/*    opacity: 1.0;*/
+/*}*/
+
+/*.sortable-ghost {*/
+/*    opacity: 1.0;*/
+/*}*/
+
+/*.sortable-chosen {*/
+/*  opacity: 0;*/
+/*}*/

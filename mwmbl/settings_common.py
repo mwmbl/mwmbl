@@ -19,9 +19,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm'
-
 
 # Application definition
 
@@ -32,7 +29,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
     'mwmbl',
+    'django_htmx',
+    'django_vite',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
 ]
 
 MIDDLEWARE = [
@@ -43,6 +46,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+
+    "django_htmx.middleware.HtmxMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = 'mwmbl.urls'
@@ -64,17 +70,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'mwmbl.wsgi.application'
-
-
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
 
 
 # Password validation
@@ -112,11 +107,60 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
-STATICFILES_DIRS = [str(Path(__file__).parent.parent / "front-end" / "dist")]
-print("Static files", STATICFILES_DIRS)
+
+DJANGO_VITE_DEV_MODE = False
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+AUTHENTICATION_BACKENDS = [
+    # Needed to login by username in Django admin, regardless of `allauth`
+    'django.contrib.auth.backends.ModelBackend',
+
+    # `allauth` specific authentication methods, such as login by email
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+
+AUTH_USER_MODEL = "mwmbl.MwmblUser"
+
+
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+
+DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
+
+LOGIN_REDIRECT_URL = "/"
+
+FOOTER_LINKS = [
+    {
+        "name": "Matrix",
+        "icon": "ph-chat-circle-text-bold",
+        "href": "https://matrix.to/#/#mwmbl:matrix.org",
+    },
+    {
+        "name": "Book",
+        "icon": "ph-book-bold",
+        "href": "https://book.mwmbl.org",
+    },
+    {
+        "name": "Blog",
+        "icon": "ph-browser-bold",
+        "href": "https://blog.mwmbl.org",
+    },
+    {
+        "name": "GitHub",
+        "icon": "ph-github-logo-bold",
+        "href": "https://github.com/mwmbl/mwmbl",
+    },
+    {
+        "name": "YouTube",
+        "icon": "ph-youtube-logo-bold",
+        "href": "https://www.youtube.com/channel/UCFLbqrH63-icAHxQ1eFfAvA",
+    },
+
+
+]

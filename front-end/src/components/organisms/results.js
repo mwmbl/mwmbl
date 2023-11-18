@@ -1,75 +1,191 @@
-import define from '../../utils/define.js';
-import { globalBus } from '../../utils/events.js';
+import {globalBus} from '../../utils/events.js';
+import Sortable from 'sortablejs';
 
-// Components
-import result from '../molecules/result.js';
-import emptyResult from '../molecules/empty-result.js';
-import home from './home.js';
-import escapeString from '../../utils/escapeString.js';
-
-const template = () => /*html*/`
-  <ul class='results'>
-    <li is='${home}'></li>
-  </ul>
-`;
-
-export default define('results', class extends HTMLElement {
+class ResultsHandler {
   constructor() {
-    super();
     this.results = null;
+    this.oldIndex = null;
+    this.curating = false;
     this.__setup();
   }
 
   __setup() {
-    this.innerHTML = template();
-    this.results = this.querySelector('.results');
     this.__events();
+    this.__initializeResults();
   }
 
   __events() {
-    globalBus.on('search', (e) => {
-      this.results.innerHTML = '';
-      let resultsHTML = '';
-      if (!e.detail.error) {
-        // If there is no details the input is empty 
-        if (!e.detail.results) {
-          resultsHTML = /*html*/`
-            <li is='${home}'></li>
-          `;
-        }
-        // If the details array has results display them
-        else if (e.detail.results.length > 0) {
-          for(const resultData of e.detail.results) {
-            resultsHTML += /*html*/`
-              <li
-                is='${result}' 
-                data-url='${escapeString(resultData.url)}'
-                data-title='${escapeString(JSON.stringify(resultData.title))}'
-                data-extract='${escapeString(JSON.stringify(resultData.extract))}'
-              ></li>
-            `;
-          }
-        }
-        // If the details array is empty there is no result
-        else {
-          resultsHTML = /*html*/`
-            <li is='${emptyResult}'></li>
-          `;
-        }
-      }
-      else {
-        // If there is an error display an empty result
-        resultsHTML = /*html*/`
-          <li is='${emptyResult}'></li>
-        `;
-      }
-      // Bind HTML to the DOM
-      this.results.innerHTML = resultsHTML;
+    document.body.addEventListener('htmx:load', e => {
+      this.__initializeResults();
     });
 
     // Focus first element when coming from the search bar
     globalBus.on('focus-result', () => {
       this.results.firstElementChild.firstElementChild.focus();
-    })
+    });
+
+    globalBus.on('curate-delete-result',  (e) => {
+      console.log("Curate delete result event", e);
+      this.__beginCurating.bind(this)();
+
+      const children = this.results.getElementsByClassName('result');
+      let deleteIndex = e.detail.data.delete_index;
+      const child = children[deleteIndex];
+      this.results.removeChild(child);
+      const newResults = this.__getResults();
+
+      const curationSaveEvent = new CustomEvent('save-curation', {
+        detail: {
+          type: 'delete',
+          data: {
+            timestamp: Date.now(),
+            url: document.location.href,
+            results: newResults,
+            curation: {
+              delete_index: deleteIndex
+            }
+          }
+        }
+      });
+      globalBus.dispatch(curationSaveEvent);
+    });
+
+    globalBus.on('curate-validate-result',  (e) => {
+      console.log("Curate validate result event", e);
+      this.__beginCurating.bind(this)();
+
+      const children = this.results.getElementsByClassName('result');
+      const validateChild = children[e.detail.data.validate_index];
+      validateChild.querySelector('.curate-approve').toggleValidate();
+
+      const newResults = this.__getResults();
+
+      const curationStartEvent = new CustomEvent('save-curation', {
+        detail: {
+          type: 'validate',
+          data: {
+            timestamp: Date.now(),
+            url: document.location.href,
+            results: newResults,
+            curation: e.detail.data
+          }
+        }
+      });
+      globalBus.dispatch(curationStartEvent);
+    });
+
+    globalBus.on('begin-curating-results',  (e) => {
+      // We might not be online, or logged in, so save the curation in local storage in case:
+      console.log("Begin curation event", e);
+      this.__beginCurating.bind(this)();
+    });
+
+    globalBus.on('curate-add-result', (e) => {
+      console.log("Add result", e);
+      this.__beginCurating();
+      const resultData = e.detail;
+      this.results.insertAdjacentHTML('afterbegin', resultData);
+
+      const newResults = this.__getResults();
+      const url = newResults[0].url;
+
+      let detail = {
+        type: 'add',
+        data: {
+          timestamp: Date.now(),
+          url: document.location.href,
+          results: newResults,
+          curation: {
+            insert_index: 0,
+            url: url
+          }
+        }
+      };
+      console.log("Detail", detail);
+      const curationSaveEvent = new CustomEvent('save-curation', {
+        detail: detail
+      });
+      globalBus.dispatch(curationSaveEvent);
+    });
   }
-});
+
+  __initializeResults() {
+    this.results = document.querySelector('.results');
+
+    if (this.results) {
+      const sortable = new Sortable(this.results, {
+        "onStart": this.__sortableActivate.bind(this),
+        "onEnd": this.__sortableDeactivate.bind(this),
+        "handle": ".handle",
+      });
+    }
+
+    this.curating = false;
+  }
+
+  __sortableActivate(event) {
+    console.log("Sortable activate", event);
+    this.__beginCurating();
+    this.oldIndex = event.oldIndex;
+  }
+
+  __beginCurating() {
+    if (!this.curating) {
+      const results = this.__getResults();
+      const curationStartEvent = new CustomEvent('save-curation', {
+        detail: {
+          type: 'begin',
+          data: {
+            timestamp: Date.now(),
+            url: document.location.href,
+            results: results,
+            curation: {}
+          }
+        }
+      });
+      globalBus.dispatch(curationStartEvent);
+      this.curating = true;
+    }
+  }
+
+  __getResults() {
+    const resultsElements = document.querySelectorAll('.results .result:not(.ui-sortable-placeholder)');
+    const results = [];
+    for (let resultElement of resultsElements) {
+      const result = {
+        url: resultElement.querySelector('a').href,
+        title: resultElement.querySelector('.title').innerText,
+        extract: resultElement.querySelector('.extract').innerText,
+        curated: resultElement.querySelector('.curate-approve').isValidated()
+      }
+      results.push(result);
+    }
+    console.log("Results", results);
+    return results;
+  }
+
+  __sortableDeactivate(event) {
+    const newIndex = event.newIndex;
+    console.log('Sortable deactivate', this.oldIndex, newIndex);
+
+    const newResults = this.__getResults();
+
+    const curationMoveEvent = new CustomEvent('save-curation', {
+      detail: {
+        type: 'move',
+        data: {
+          timestamp: Date.now(),
+          url: document.location.href,
+          results: newResults,
+          curation: {
+            old_index: this.oldIndex,
+            new_index: newIndex,
+          }
+        }
+      }
+    });
+    globalBus.dispatch(curationMoveEvent);
+  }
+}
+
+const resultsHandler = new ResultsHandler();

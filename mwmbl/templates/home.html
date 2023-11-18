@@ -1,0 +1,32 @@
+{%  load humanize %}
+{%  include "title.html" %}
+<div class="main">
+  {% if query %}
+    <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
+    {% if results %}
+      <ul class='results'>
+        {% for result in results %}
+          {% include "result.html" %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <ul>
+        <li class="home">
+          <h1>
+            No results found for "{{query}}".
+          </h1>
+        </li>
+      </ul>
+    {% endif %}
+  {% else %}
+    {%  for item in activity %}
+      <ul>
+        <li class="activity">
+          <h1>
+            {{ item.user }} made {{ item.num_curations | apnumber }} changes to <a href="{{ item.url }}">{{ item.query }}</a> {{ item.timestamp | naturaltime }}.
+          </h1>
+        </li>
+      </ul>
+    {% endfor %}
+  {% endif %}
+</div>

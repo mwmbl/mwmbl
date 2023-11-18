@@ -7,12 +7,14 @@ export default {
   publicDir: '../assets',
   build: {
     outDir: '../dist',
+    manifest: true,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'src/index.html'),
+        index: resolve(__dirname, 'src/index.js'),
         stats: resolve(__dirname, 'src/stats/index.html'),
       },
     },
+    minify: false,
   },
   plugins: [
     legacy({

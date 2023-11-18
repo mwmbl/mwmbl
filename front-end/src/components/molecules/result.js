@@ -2,13 +2,6 @@ import define from '../../utils/define.js';
 import escapeString from '../../utils/escapeString.js';
 import { globalBus } from '../../utils/events.js';
 
-const template = ({ data }) => /*html*/`
-  <a href='${data.url}'>
-    <p class='link'>${data.url}</p>
-    <p class='title'>${data.title}</p>
-    <p class='extract'>${data.extract}</p>
-  </a>
-`;
 
 export default define('result', class extends HTMLLIElement {
   constructor() {
@@ -18,11 +11,6 @@ export default define('result', class extends HTMLLIElement {
   }
 
   __setup() {
-    this.innerHTML = template({ data: {
-      url: this.dataset.url,
-      title: this.__handleBold(JSON.parse(this.dataset.title)),
-      extract: this.__handleBold(JSON.parse(this.dataset.extract))
-     }});
     this.__events();
   }
 

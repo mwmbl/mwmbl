@@ -7,9 +7,11 @@
   --primary-color: #185ADB;
   --gray-color: #EEEEEE;
   --light-color: #F8F8F8;
+  --dark-gray-color: #767676;
 
   /* Fonts: */
   --regular-font: 'Inter', sans-serif;
+  --small-font-size: 12px;
   --default-font-size: 16px;
   --default-font-weight: 400;
   --bold-font-weight: 700;
