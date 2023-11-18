@@ -6,6 +6,10 @@ from pathlib import Path
 from django.apps import AppConfig
 from django.conf import settings
 
+from mwmbl.crawler.urls import URLDatabase
+from mwmbl.database import Database
+from mwmbl.indexer.indexdb import IndexDatabase
+
 
 class MwmblConfig(AppConfig):
     name = "mwmbl"
@@ -30,6 +34,12 @@ class MwmblConfig(AppConfig):
             print("Creating a new index")
             TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=settings.NUM_PAGES,
                              page_size=PAGE_SIZE)
+
+        with Database() as db:
+            url_db = URLDatabase(db.connection)
+            url_db.create_tables()
+            index_db = IndexDatabase(db.connection)
+            index_db.create_tables()
 
         if settings.RUN_BACKGROUND_PROCESSES:
             new_item_queue = Queue()
