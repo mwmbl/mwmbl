@@ -2,7 +2,7 @@ from logging import getLogger
 from typing import Any
 from urllib.parse import parse_qs
 
-from ninja import Router
+from ninja import Router, NinjaAPI
 
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.models import UserCuration
@@ -19,8 +19,8 @@ MAX_CURATED_SCORE = 1_111_111.0
 logger = getLogger(__name__)
 
 
-def create_router(index_path: str) -> Router:
-    router = Router(tags=["user"])
+def create_router(index_path: str, version: str) -> NinjaAPI:
+    router = NinjaAPI(urls_namespace=f"curate-{version}", csrf=True)
 
     @router.post("/begin")
     def user_begin_curate(request, curate_begin: make_curation_type(CurateBegin)):

@@ -17,16 +17,27 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from mwmbl.api import api_v1, api_original
+import mwmbl.crawler.app as crawler
+from mwmbl.platform import curate
+from mwmbl.search_setup import queued_batches, index_path, ranker, batch_cache
+from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, fetch_url, index
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/v1/', api_v1.urls),
     path('accounts/', include('allauth.urls')),
 
     path('', index, name="index"),
     path('app/home/', home_fragment, name="home"),
     path('app/fetch/', fetch_url, name="fetch_url"),
-    path('', api_original.urls),
+
+    # TODO: this is the old API, deprecated and to be removed once all clients have moved over
+    path("search/", search.create_router(ranker, "0.1").urls),
+    path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
+    path("curation/", curate.create_router(index_path, version="0.1").urls),
+
+    # New API
+    path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
+    path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
+    path("api/v1/curation/", curate.create_router(index_path, version="1.0.0").urls),
 ]
