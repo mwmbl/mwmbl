@@ -164,5 +164,3 @@ FOOTER_LINKS = [
 
 
 ]
-
-ENABLE_OLD_API = os.getenv("MWMBL_ENABLE_OLD_API", "false").lower() == "true"

@@ -16,11 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from django.conf import settings
 
 from mwmbl.api import api_v1, api_original
 from mwmbl.views import home_fragment, fetch_url, index
-
 
 urlpatterns = [
     path('admin/', admin.site.urls),
