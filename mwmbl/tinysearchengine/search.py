@@ -1,6 +1,6 @@
 from logging import getLogger
 
-from ninja import Router
+from ninja import NinjaAPI
 
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
@@ -10,8 +10,8 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 
-def create_router(ranker: HeuristicRanker) -> Router:
-    router = Router(tags=["search"])
+def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
+    router = NinjaAPI(urls_namespace=f"search-{version}")
 
     @router.get("")
     def search(request, s: str):
