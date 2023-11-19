@@ -16,16 +16,19 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
 
-from mwmbl.api import api_v1
+from mwmbl.api import api_v1, api_original
 from mwmbl.views import home_fragment, fetch_url, index
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', api_v1.urls),
     path('accounts/', include('allauth.urls')),
 
-    path('', index, name="home"),
+    path('', index, name="index"),
     path('app/home/', home_fragment, name="home"),
-    path('app/fetch/', fetch_url, name="fetch_url")
+    path('app/fetch/', fetch_url, name="fetch_url"),
+    path('', api_original.urls),
 ]
