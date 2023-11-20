@@ -88,7 +88,19 @@ class Activity:
 def _get_results_and_activity(request):
     query = request.GET.get("q")
     if query:
-        results = ranker.search(query)
+        # There may be extra results in the request that we need to add in
+        # format is ?enhanced=google&title=title1&url=url1&extract=extract1&title=title2&url=url2&extract=extract2
+        # enhanced = request.GET.get("enhanced")
+        titles = request.GET.getlist(f"title")
+        urls = request.GET.getlist(f"url")
+        extracts = request.GET.getlist(f"extract")
+
+        additional_results = [
+            Document(title=title, url=url, extract=extract, score=0.0)
+            for title, url, extract in zip(titles, urls, extracts)
+        ]
+
+        results = ranker.search(query, additional_results=additional_results)
         activity = None
     else:
         results = None
