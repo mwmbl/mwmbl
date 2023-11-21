@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, ParseResult
 
 import justext
 import requests
@@ -66,12 +66,13 @@ def home_fragment(request):
         "query": query,
         "activity": activity,
     })
-    current_url = request.htmx.current_url
-    # Replace query string with new query
-    stripped_url = current_url[:current_url.index("?")] if "?" in current_url else current_url
-    query_string = "?q=" + query if len(query) > 0 else ""
-    new_url = stripped_url + query_string
-    # Set the htmx replace header
+
+    # Encode the new query string
+    if query:
+        new_query_string = urlencode({"q": query}, doseq=True)
+        new_url = "/?" + new_query_string
+    else:
+        new_url = "/"
     response["HX-Replace-Url"] = new_url
     return response
 
