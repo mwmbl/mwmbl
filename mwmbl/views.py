@@ -90,7 +90,7 @@ def _get_results_and_activity(request):
     if query:
         # There may be extra results in the request that we need to add in
         # format is ?enhanced=google&title=title1&url=url1&extract=extract1&title=title2&url=url2&extract=extract2
-        # enhanced = request.GET.get("enhanced")
+        source = request.GET.get("enhanced", "unknown")
         titles = request.GET.getlist(f"title")
         urls = request.GET.getlist(f"url")
         extracts = request.GET.getlist(f"extract")
@@ -100,7 +100,7 @@ def _get_results_and_activity(request):
             for title, url, extract in zip(titles, urls, extracts)
         ]
 
-        results = ranker.search(query, additional_results=additional_results)
+        results = ranker.search(query, additional_results=additional_results, source=source)
         activity = None
     else:
         results = None
@@ -137,5 +137,5 @@ def fetch_url(request):
 
     result = Document(title=title, url=url, extract=extract, score=0.0)
     return render(request, "result.html", {
-        "result": format_result(result, query),
+        "result": format_result(result, query, "user"),
     })

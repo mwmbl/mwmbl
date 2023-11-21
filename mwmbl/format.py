@@ -3,7 +3,7 @@ import re
 from mwmbl.tokenizer import tokenize, clean_unicode
 
 
-def format_result_with_pattern(pattern, result):
+def format_result_with_pattern(pattern, result, source):
     formatted_result = {}
     for content_type, content_raw in [('title', result.title), ('extract', result.extract)]:
         content = clean_unicode(content_raw)
@@ -17,6 +17,7 @@ def format_result_with_pattern(pattern, result):
             content_result.append({'value': content[start:end], 'is_bold': is_bold})
         formatted_result[content_type] = content_result
     formatted_result['url'] = result.url
+    formatted_result['source'] = source
     return formatted_result
 
 
@@ -34,8 +35,8 @@ def get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def format_result(result, query):
+def format_result(result, query, source):
     tokens = tokenize(query)
     pattern = get_query_regex(tokens, True, False)
-    return format_result_with_pattern(pattern, result)
+    return format_result_with_pattern(pattern, result, source)
 

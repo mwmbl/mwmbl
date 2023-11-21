@@ -3,6 +3,7 @@ import re
 from abc import abstractmethod
 from logging import getLogger
 from operator import itemgetter
+from typing import Optional
 from urllib.parse import urlparse
 
 from mwmbl.format import format_result_with_pattern, get_query_regex
@@ -118,15 +119,20 @@ class Ranker:
     def order_results(self, terms, pages, is_complete):
         pass
 
-    def search(self, s: str, additional_results: list[Document]):
-        results, terms, _ = self.get_results(s)
+    def search(self, s: str, additional_results: list[Document], source: Optional[str] = None):
+        mwmbl_results, terms, _ = self.get_results(s)
 
         is_complete = s.endswith(' ')
         pattern = get_query_regex(terms, is_complete, False)
         formatted_results = []
-        for result in additional_results + results:
-            formatted_result = format_result_with_pattern(pattern, result)
-            formatted_results.append(formatted_result)
+        seen_urls = set()
+        for results, source in [(additional_results, source), (mwmbl_results, 'mwmbl')]:
+            for result in results:
+                if result.url in seen_urls:
+                    continue
+                formatted_result = format_result_with_pattern(pattern, result, source)
+                formatted_results.append(formatted_result)
+                seen_urls.add(result.url)
 
         logger.info("Return results: %d", len(formatted_results))
         return formatted_results

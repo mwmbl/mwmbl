@@ -148,6 +148,13 @@ body {
   font-size: .9rem;
 }
 
+.via {
+  font-size: .9rem;
+  font-weight: var(--default-font-weight);
+  /* italics */
+  font-style: italic;
+}
+
 .result .title, .result .title>* {
   color: var(--primary-color);
   font-size: 1.1rem;
