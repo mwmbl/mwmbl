@@ -1,12 +1,21 @@
 import re
 
+from mwmbl.tinysearchengine.indexer import DocumentState
 from mwmbl.tokenizer import tokenize, clean_unicode
+
+
+DOCUMENT_SOURCES = {
+    DocumentState.FROM_GOOGLE: 'google',
+    DocumentState.FROM_USER: 'user',
+    DocumentState.VALIDATED: 'mwmbl',
+    DocumentState.CURATED: 'mwmbl',
+}
 
 
 def format_result_with_pattern(pattern, result):
     formatted_result = {}
     for content_type, content_raw in [('title', result.title), ('extract', result.extract)]:
-        content = clean_unicode(content_raw)
+        content = clean_unicode(content_raw) if content_raw else ""
         matches = re.finditer(pattern, content, re.IGNORECASE)
         all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(content)]
         content_result = []
@@ -17,6 +26,7 @@ def format_result_with_pattern(pattern, result):
             content_result.append({'value': content[start:end], 'is_bold': is_bold})
         formatted_result[content_type] = content_result
     formatted_result['url'] = result.url
+    formatted_result['source'] = DOCUMENT_SOURCES[result.state] if result.state else 'mwmbl'
     return formatted_result
 
 

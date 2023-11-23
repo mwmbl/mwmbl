@@ -156,7 +156,8 @@ class ResultsHandler {
         url: resultElement.querySelector('a').href,
         title: resultElement.querySelector('.title').innerText,
         extract: resultElement.querySelector('.extract').innerText,
-        curated: resultElement.querySelector('.curate-approve').isValidated()
+        validated: resultElement.querySelector('.curate-approve').classList.contains('validated'),
+        source: resultElement.querySelector('.source').innerText,
       }
       results.push(result);
     }

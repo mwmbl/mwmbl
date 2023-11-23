@@ -8,7 +8,8 @@ class Result(Schema):
     url: str
     title: str
     extract: str
-    curated: bool
+    validated: bool
+    source: str
 
 
 class CurateBegin(Schema):

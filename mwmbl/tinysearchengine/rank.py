@@ -3,6 +3,7 @@ import re
 from abc import abstractmethod
 from logging import getLogger
 from operator import itemgetter
+from typing import Optional
 from urllib.parse import urlparse
 
 from mwmbl.format import format_result_with_pattern, get_query_regex
@@ -109,6 +110,15 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     return filtered_results
 
 
+def deduplicate(results, seen_titles):
+    deduplicated_results = []
+    for result in results:
+        if result.title not in seen_titles:
+            deduplicated_results.append(result)
+            seen_titles.add(result.title)
+    return deduplicated_results
+
+
 class Ranker:
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
@@ -118,17 +128,21 @@ class Ranker:
     def order_results(self, terms, pages, is_complete):
         pass
 
-    def search(self, s: str):
-        results, terms, _ = self.get_results(s)
+    def search(self, s: str, additional_results: list[Document]):
+        results, terms, _ = self.get_results(s, additional_results)
 
         is_complete = s.endswith(' ')
         pattern = get_query_regex(terms, is_complete, False)
         formatted_results = []
+        seen_urls = set()
         for result in results:
+            if result.url in seen_urls:
+                continue
             formatted_result = format_result_with_pattern(pattern, result)
             formatted_results.append(formatted_result)
+            seen_urls.add(result.url)
 
-        logger.info("Return results: %r", formatted_results)
+        logger.info("Return results: %d", len(formatted_results))
         return formatted_results
 
     def complete(self, q: str):
@@ -147,7 +161,7 @@ class Ranker:
             completed = [' '.join(terms[:-1] + [t]) for t in adjusted_completions]
             return [q, urls + completed]
 
-    def get_results(self, q):
+    def get_results(self, q: str, additional_results: list[Document]):
         terms = tokenize(q)
 
         is_complete = q.endswith(' ')
@@ -161,29 +175,28 @@ class Ranker:
         # Check for curation
         curation_term = " ".join(terms)
         curation_items = self.tiny_index.retrieve(curation_term)
-        curated_items = [d for d in curation_items if d.state in {DocumentState.CURATED, DocumentState.VALIDATED}
+        curated_items = [d for d in curation_items if d.state is not None
                          and d.term == curation_term]
+
         if len(curated_items) > 0:
-            return curated_items, terms, completions
+            deduplicated_additional = deduplicate(additional_results, {item.title for item in curated_items})
+            deduplicated_results = curated_items + deduplicated_additional
+        else:
+            bigrams = set(get_bigrams(len(terms), terms))
 
-        bigrams = set(get_bigrams(len(terms), terms))
+            pages = []
+            for term in retrieval_terms | bigrams:
+                # An optimisation - we have already retrieved this, so make use of it
+                if term == curation_term:
+                    items = curation_items
+                else:
+                    items = self.tiny_index.retrieve(term)
+                if items is not None:
+                    pages += items
 
-        pages = []
-        seen_items = set()
-        for term in retrieval_terms | bigrams:
-            if term == curation_term:
-                items = curation_items
-            else:
-                items = self.tiny_index.retrieve(term)
-            if items is not None:
-                for item in items:
-                    # if term in item.title.lower() or term in item.extract.lower():
-                    if item.title not in seen_items:
-                        pages.append(item)
-                        seen_items.add(item.title)
-
-        ordered_results = self.order_results(terms, pages, is_complete)
-        return ordered_results, terms, completions
+            ordered_results = self.order_results(terms, pages + additional_results, is_complete)
+            deduplicated_results = deduplicate(ordered_results, set())
+        return deduplicated_results, terms, completions
 
 
 class HeuristicRanker(Ranker):

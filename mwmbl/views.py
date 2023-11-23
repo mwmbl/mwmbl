@@ -18,7 +18,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 
 from mwmbl.settings import NUM_EXTRACT_CHARS
-from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.indexer import Document, DocumentState
 from django.conf import settings
 
 
@@ -89,7 +89,20 @@ class Activity:
 def _get_results_and_activity(request):
     query = request.GET.get("q")
     if query:
-        results = ranker.search(query)
+        # There may be extra results in the request that we need to add in
+        # format is ?enhanced=google&title=title1&url=url1&extract=extract1&title=title2&url=url2&extract=extract2
+        # source = request.GET.get("enhanced", "unknown")
+        titles = request.GET.getlist(f"title")
+        urls = request.GET.getlist(f"url")
+        extracts = request.GET.getlist(f"extract")
+
+        # For now, we only support the Google source
+        additional_results = [
+            Document(title=title, url=url, extract=extract, score=0.0, state=DocumentState.FROM_GOOGLE)
+            for title, url, extract in zip(titles, urls, extracts)
+        ]
+
+        results = ranker.search(query, additional_results=additional_results)
         activity = None
     else:
         results = None
@@ -124,7 +137,7 @@ def fetch_url(request):
     if len(extract) > NUM_EXTRACT_CHARS:
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
-    result = Document(title=title, url=url, extract=extract, score=0.0)
+    result = Document(title=title, url=url, extract=extract, score=0.0, state=DocumentState.FROM_USER)
     return render(request, "result.html", {
         "result": format_result(result, query),
     })

@@ -3,7 +3,7 @@
   <div class="result-container">
     <div class="result-link">
       <a href="{{result.url}}">
-        <p class='link'>{{result.url}}</p>
+        <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.source|title}}</span></span></p>
         <p class='title'>{{result.title|strengthen}}</p>
       </a>
       <p class='extract'>{{result.extract|strengthen}}</p>
