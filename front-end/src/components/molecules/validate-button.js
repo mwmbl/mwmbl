@@ -27,7 +27,8 @@ export default define('validate-button', class extends HTMLButtonElement {
       const curationValidateEvent = new CustomEvent('curate-validate-result', {
         detail: {
           data: {
-            validate_index: index
+            validate_index: index,
+            is_validated: this.isValidated(),
           }
         }
       });

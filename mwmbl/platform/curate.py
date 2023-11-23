@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import parse_qs
 
 from ninja import Router, NinjaAPI
@@ -8,7 +8,7 @@ from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.models import UserCuration
 from mwmbl.platform.data import CurateBegin, CurateMove, CurateDelete, CurateAdd, CurateValidate, \
     make_curation_type
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize
 from mwmbl.utils import add_term_info, add_term_infos
 
@@ -67,7 +67,14 @@ def create_router(index_path: str, version: str) -> NinjaAPI:
             term = " ".join(tokens)
 
             documents = [
-                Document(result.title, result.url, result.extract, MAX_CURATED_SCORE - i, term, result.curated)
+                Document(
+                    title=result.title,
+                    url=result.url,
+                    extract=result.extract,
+                    score=MAX_CURATED_SCORE - i,
+                    term=term,
+                    state=_get_document_state(result.validated, result.source),
+                )
                 for i, result in enumerate(curation.results)
             ]
 
@@ -87,3 +94,12 @@ def create_router(index_path: str, version: str) -> NinjaAPI:
     return router
 
 
+def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]:
+    if validated:
+        return DocumentState.VALIDATED
+    elif source.lower() == "user":
+        return DocumentState.FROM_USER
+    elif source.lower() == "google":
+        return DocumentState.FROM_GOOGLE
+    else:
+        return DocumentState.CURATED

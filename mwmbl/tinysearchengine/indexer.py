@@ -31,6 +31,9 @@ def astuple(dc):
 
 
 class DocumentState(IntEnum):
+    """
+    The state of the document in the index. A value of None indicates a document from our normal crawling procedure.
+    """
     CURATED = 0
     VALIDATED = 1
     FROM_USER = 2

@@ -175,7 +175,7 @@ class Ranker:
         # Check for curation
         curation_term = " ".join(terms)
         curation_items = self.tiny_index.retrieve(curation_term)
-        curated_items = [d for d in curation_items if d.state in {DocumentState.CURATED, DocumentState.VALIDATED}
+        curated_items = [d for d in curation_items if d.state is not None
                          and d.term == curation_term]
 
         if len(curated_items) > 0:
