@@ -15,7 +15,7 @@ DOCUMENT_SOURCES = {
 def format_result_with_pattern(pattern, result):
     formatted_result = {}
     for content_type, content_raw in [('title', result.title), ('extract', result.extract)]:
-        content = clean_unicode(content_raw)
+        content = clean_unicode(content_raw) if content_raw else ""
         matches = re.finditer(pattern, content, re.IGNORECASE)
         all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(content)]
         content_result = []
