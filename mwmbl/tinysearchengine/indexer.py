@@ -33,6 +33,8 @@ def astuple(dc):
 class DocumentState(IntEnum):
     CURATED = 0
     VALIDATED = 1
+    FROM_USER = 2
+    FROM_GOOGLE = 3
 
 
 @dataclass

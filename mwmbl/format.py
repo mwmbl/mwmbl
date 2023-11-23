@@ -1,9 +1,18 @@
 import re
 
+from mwmbl.tinysearchengine.indexer import DocumentState
 from mwmbl.tokenizer import tokenize, clean_unicode
 
 
-def format_result_with_pattern(pattern, result, source):
+DOCUMENT_SOURCES = {
+    DocumentState.FROM_GOOGLE: 'google',
+    DocumentState.FROM_USER: 'user',
+    DocumentState.VALIDATED: 'mwmbl',
+    DocumentState.CURATED: 'mwmbl',
+}
+
+
+def format_result_with_pattern(pattern, result):
     formatted_result = {}
     for content_type, content_raw in [('title', result.title), ('extract', result.extract)]:
         content = clean_unicode(content_raw)
@@ -17,7 +26,7 @@ def format_result_with_pattern(pattern, result, source):
             content_result.append({'value': content[start:end], 'is_bold': is_bold})
         formatted_result[content_type] = content_result
     formatted_result['url'] = result.url
-    formatted_result['source'] = source
+    formatted_result['source'] = DOCUMENT_SOURCES[result.state] if result.state else 'mwmbl'
     return formatted_result
 
 
@@ -35,8 +44,8 @@ def get_query_regex(terms, is_complete, is_url):
     return pattern
 
 
-def format_result(result, query, source):
+def format_result(result, query):
     tokens = tokenize(query)
     pattern = get_query_regex(tokens, True, False)
-    return format_result_with_pattern(pattern, result, source)
+    return format_result_with_pattern(pattern, result)
 
