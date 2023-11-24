@@ -98,8 +98,8 @@ def _get_results_and_activity(request):
 
         # For now, we only support the Google source
         additional_results = [
-            Document(title=title, url=url, extract=extract, score=0.0, state=DocumentState.FROM_GOOGLE)
-            for title, url, extract in zip(titles, urls, extracts)
+            Document(title=title, url=url, extract=extract, score=100.0 * 2 ** -i, state=DocumentState.FROM_GOOGLE)
+            for i, (title, url, extract) in enumerate(zip(titles, urls, extracts))
         ]
 
         results = ranker.search(query, additional_results=additional_results)

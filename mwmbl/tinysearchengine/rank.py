@@ -32,7 +32,7 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
 
     max_match_terms = max(features[f'match_terms_{name}']
                           for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
-    if max_match_terms <= len(terms) / 2:
+    if max_match_terms <= len(terms) / 2 and result.state is None:
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
@@ -162,6 +162,7 @@ class Ranker:
             return [q, urls + completed]
 
     def get_results(self, q: str, additional_results: list[Document]):
+        logger.info(f"Get results with {len(additional_results)} additional results")
         terms = tokenize(q)
 
         is_complete = q.endswith(' ')
