@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
-	<ShortName>MWMBL Local</ShortName>
-	<Description>Search MWMBL Local</Description>
+	<ShortName>MWMBL</ShortName>
+	<Description>Search MWMBL</Description>
 	<Url type="text/html" method="get" template="https://mwmbl.org/?q={searchTerms}"/>
 	<Url type="application/x-suggestions+json" template="https://mwmbl.org/api/v1/search/complete?q={searchTerms}"/>
 	<LongName>MWMBL Search Local</LongName>
