@@ -15,7 +15,7 @@ def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
 
     @router.get("")
     def search(request, s: str):
-        return ranker.search(s)
+        return ranker.search(s, [])
 
     @router.get("/complete")
     def complete(request, q: str):

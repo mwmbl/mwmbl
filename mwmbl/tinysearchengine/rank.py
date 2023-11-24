@@ -146,7 +146,7 @@ class Ranker:
         return formatted_results
 
     def complete(self, q: str):
-        ordered_results, terms, completions = self.get_results(q)
+        ordered_results, terms, completions = self.get_results(q, [])
         if len(ordered_results) == 0:
             # There are no results so suggest Google searches instead
             completion_queries = [' '.join(terms[:-1] + [t]) for t in completions]

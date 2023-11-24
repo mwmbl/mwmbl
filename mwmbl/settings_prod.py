@@ -16,7 +16,7 @@ STATICFILES_DIRS = [DJANGO_VITE_ASSETS_PATH]
 
 DATABASES = {'default': dj_database_url.config(default=os.environ["DATABASE_URL"])}
 
-DEBUG = True    # TODO set back to False
+DEBUG = False
 ALLOWED_HOSTS = ["api.mwmbl.org", "mwmbl.org", "beta.mwmbl.org"]
 CSRF_TRUSTED_ORIGINS = [f"https://{domain}" for domain in ALLOWED_HOSTS]
 
