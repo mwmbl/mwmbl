@@ -100,12 +100,12 @@ server {
 
   ## Static file hosting
   location /static/ {
-    alias /var/lib/dokku/data/storage/mwmbl-beta/;
+    alias /var/lib/dokku/data/storage/mwmbl/;
   }
 
   ## Stats served statically
   location ~ ^\/stats\/?$ {
-    root /var/lib/dokku/data/storage/mwmbl-beta;
+    root /var/lib/dokku/data/storage/mwmbl;
     try_files /stats/index.html =404;
   }
 
