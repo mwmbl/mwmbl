@@ -24,7 +24,7 @@ logger = getLogger(__name__)
 def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[tuple[str, str, str]]:
     for batch in batches:
         for item in batch.items:
-            if item.content is not None:
+            if item.content is not None and not item.content.links_only:
                 yield item.content.title, item.url, item.content.extract
 
 

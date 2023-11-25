@@ -8,6 +8,7 @@ class ItemContent(Schema):
     extract: str
     links: list[str]
     extra_links: Optional[list[str]]
+    links_only: Optional[bool]
 
 
 class ItemError(Schema):
