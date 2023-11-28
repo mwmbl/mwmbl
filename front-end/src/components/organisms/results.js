@@ -3,7 +3,6 @@ import Sortable from 'sortablejs';
 
 class ResultsHandler {
   constructor() {
-    this.results = null;
     this.oldIndex = null;
     this.curating = false;
     this.__setup();
@@ -19,19 +18,28 @@ class ResultsHandler {
       this.__initializeResults();
     });
 
+    window.addEventListener('message', e => {
+      console.log("Message event", e);
+      if (e.data === 'results-loaded') {
+        this.__initializeResults();
+      }
+    });
+
     // Focus first element when coming from the search bar
     globalBus.on('focus-result', () => {
-      this.results.firstElementChild.firstElementChild.focus();
+      const results = document.querySelector('.results');
+      results.firstElementChild.firstElementChild.focus();
     });
 
     globalBus.on('curate-delete-result',  (e) => {
       console.log("Curate delete result event", e);
+      const results = document.querySelector('.results');
       this.__beginCurating.bind(this)();
 
-      const children = this.results.getElementsByClassName('result');
+      const children = results.getElementsByClassName('result');
       let deleteIndex = e.detail.data.delete_index;
       const child = children[deleteIndex];
-      this.results.removeChild(child);
+      results.removeChild(child);
       const newResults = this.__getResults();
 
       const curationSaveEvent = new CustomEvent('save-curation', {
@@ -53,8 +61,9 @@ class ResultsHandler {
     globalBus.on('curate-validate-result',  (e) => {
       console.log("Curate validate result event", e);
       this.__beginCurating.bind(this)();
+      const results = document.querySelector('.results');
 
-      const children = this.results.getElementsByClassName('result');
+      const children = results.getElementsByClassName('result');
       const validateChild = children[e.detail.data.validate_index];
       validateChild.querySelector('.curate-approve').toggleValidate();
 
@@ -84,7 +93,8 @@ class ResultsHandler {
       console.log("Add result", e);
       this.__beginCurating();
       const resultData = e.detail;
-      this.results.insertAdjacentHTML('afterbegin', resultData);
+      const results = document.querySelector('.results');
+      results.insertAdjacentHTML('afterbegin', resultData);
 
       const newResults = this.__getResults();
       const url = newResults[0].url;
@@ -110,10 +120,10 @@ class ResultsHandler {
   }
 
   __initializeResults() {
-    this.results = document.querySelector('.results');
+    const results = document.querySelector('.results');
 
-    if (this.results) {
-      const sortable = new Sortable(this.results, {
+    if (results) {
+      const sortable = new Sortable(results, {
         "onStart": this.__sortableActivate.bind(this),
         "onEnd": this.__sortableDeactivate.bind(this),
         "handle": ".handle",
