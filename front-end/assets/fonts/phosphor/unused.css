@@ -13914,10 +13914,6 @@
   content: "\f799";
 }
 
-.ph-currency-dollar-bold::before {
-  content: "\f79a";
-}
-
 .ph-currency-dollar-simple-bold::before {
   content: "\f79b";
 }

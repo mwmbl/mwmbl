@@ -136,6 +136,11 @@ LOGIN_REDIRECT_URL = "/"
 
 FOOTER_LINKS = [
     {
+        "name": "Donate",
+        "icon": "ph-currency-dollar-bold",
+        "href": "https://opencollective.com/mwmbl",
+    },
+    {
         "name": "Matrix",
         "icon": "ph-chat-circle-text-bold",
         "href": "https://matrix.to/#/#mwmbl:matrix.org",

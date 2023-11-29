@@ -120,3 +120,7 @@ Phosphor Web Font
 .ph-chat-circle-text-bold::before {
   content: "\f74c";
 }
+
+.ph-currency-dollar-bold::before {
+  content: "\f79a";
+}
