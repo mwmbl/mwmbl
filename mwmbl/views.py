@@ -106,7 +106,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        curations = UserCuration.objects.order_by("-timestamp")[:100]
+        curations = UserCuration.objects.order_by("-timestamp")[:1000]
         sorted_curations = sorted(curations, key=lambda x: x.user.username)
         groups = groupby(sorted_curations, key=lambda x: (x.user.username, x.url))
         unsorted_activity = []
