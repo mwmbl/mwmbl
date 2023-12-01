@@ -139,5 +139,5 @@ def fetch_url(request):
 
     result = Document(title=title, url=url, extract=extract, score=0.0, state=DocumentState.FROM_USER)
     return render(request, "result.html", {
-        "result": format_result(result, query),
+        "result": result, "query": query
     })

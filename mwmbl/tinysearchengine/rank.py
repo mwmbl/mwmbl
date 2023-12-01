@@ -128,22 +128,21 @@ class Ranker:
     def order_results(self, terms, pages, is_complete):
         pass
 
-    def search(self, s: str, additional_results: list[Document]):
+    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         results, terms, _ = self.get_results(s, additional_results)
 
         is_complete = s.endswith(' ')
         pattern = get_query_regex(terms, is_complete, False)
-        formatted_results = []
+        ranked_results = []
         seen_urls = set()
         for result in results:
             if result.url in seen_urls:
                 continue
-            formatted_result = format_result_with_pattern(pattern, result)
-            formatted_results.append(formatted_result)
+            ranked_results.append(result)
             seen_urls.add(result.url)
 
-        logger.info("Return results: %d", len(formatted_results))
-        return formatted_results
+        logger.info("Return results: %d", len(ranked_results))
+        return ranked_results
 
     def complete(self, q: str):
         ordered_results, terms, completions = self.get_results(q, [])

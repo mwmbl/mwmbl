@@ -3,15 +3,22 @@
   <div class="result-container">
     <div class="result-link">
       <a href="{{result.url}}">
-        <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.source|title}}</span></span></p>
-        <p class='title'>{{result.title|strengthen}}</p>
+        <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
+        <p class='title'>{{result.title|format_for_query:query}}</p>
       </a>
-      <p class='extract'>{{result.extract|strengthen}}</p>
+      <p class='extract'>{{result.extract|format_for_query:query}}</p>
+      <input type="hidden" name="url" value="{{result.url}}" />
+      <input type="hidden" name="title" value="{{result.title}}" />
+      <input type="hidden" name="extract" value="{{result.extract}}" />
     </div>
     <div class="curation-buttons">
-      <span class="button handle">↕ Move</span>
-      <button class="button curate-delete" is="mwmbl-delete-button">✕ Delete</button>
-      <button class="button curate-approve" is="mwmbl-validate-button">✓ Looks good</button>
+      {% if result.state.name == 'VALIDATED' %}
+        <button class="button move-up">↑</button>
+        <button class="button move-down">↓</button>
+        <button class="button curate-approve" is="mwmbl-validate-button">✓ Approved</button>
+      {% else %}
+        <button class="button curate-approve" is="mwmbl-validate-button">✓ Approve</button>
+      {% endif %}
     </div>
   </div>
 </li>
