@@ -21,7 +21,7 @@ import mwmbl.crawler.app as crawler
 from mwmbl.platform import curate
 from mwmbl.search_setup import queued_batches, index_path, ranker, batch_cache
 from mwmbl.tinysearchengine import search
-from mwmbl.views import home_fragment, fetch_url, index
+from mwmbl.views import home_fragment, fetch_url, index, approve
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -30,6 +30,7 @@ urlpatterns = [
     path('', index, name="index"),
     path('app/home/', home_fragment, name="home"),
     path('app/fetch/', fetch_url, name="fetch_url"),
+    path('app/approve/', approve, name="approve"),
 
     # TODO: this is the old API, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),

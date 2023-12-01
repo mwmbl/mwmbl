@@ -7,6 +7,7 @@ import justext
 import requests
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+from django.views.decorators.http import require_http_methods
 from django_htmx.http import push_url
 
 from mwmbl.format import format_result
@@ -141,3 +142,56 @@ def fetch_url(request):
     return render(request, "result.html", {
         "result": result, "query": query
     })
+
+
+@require_http_methods(["POST"])
+def approve(request):
+    approve_url = request.POST.get("approveUrl")
+    query = request.POST.get("query")
+
+    urls = request.POST.getlist("url")
+    titles = request.POST.getlist("title")
+    extracts = request.POST.getlist("extract")
+    states = request.POST.getlist("state")
+    scores = request.POST.getlist("score")
+
+    documents = {}
+    for url, title, extract, state, score in zip(urls, titles, extracts, states, scores):
+        state_enum = DocumentState(int(state)) if state else None
+        documents[url] = Document(
+            title=title, url=url, extract=extract, score=float(score), state=state_enum)
+
+    # The approved Document should be pushed below the last Document with status > 0
+    # If there are no such documents, push it to the top
+
+    approved_document = documents[approve_url]
+    if approved_document.state is None:
+        approved_document.state = DocumentState.VALIDATED
+    else:
+        approved_document.state = None
+
+    reranked_documents = []
+    inserted_approved = False
+    for document in documents.values():
+        if document.url == approve_url:
+            continue
+
+        if document.state is None:
+            if not inserted_approved:
+                reranked_documents.append(approved_document)
+                inserted_approved = True
+
+        reranked_documents.append(document)
+
+    if not inserted_approved:
+        reranked_documents.append(approved_document)
+
+    print("Got approve request", approve_url, documents)
+
+    response = render(request, "home.html", {
+        "results": reranked_documents,
+        "query": query,
+        "activity": None,
+    })
+
+    return response
