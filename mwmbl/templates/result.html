@@ -18,7 +18,7 @@
               hx-post="/app/approve/"
               hx-target=".main"
               hx-include=".result"
-              hx-vals='{"approveUrl": "{{ result.url }}", "query": "{{ query }}"}'
+              hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"}'
               hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>✓</button>
       {% if result.state.value >= 7 %}
         <button class="button move-up">↑</button>

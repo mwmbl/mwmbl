@@ -163,7 +163,7 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
 
 @require_http_methods(["POST"])
 def approve(request):
-    approve_url = request.POST.get("approveUrl")
+    approve_url = request.POST.get("approve_url")
     query = request.POST.get("query")
 
     urls = request.POST.getlist("url")
@@ -203,8 +203,6 @@ def approve(request):
 
     if not inserted_approved:
         reranked_documents.append(approved_document)
-
-    print("Got approve request", approve_url, documents)
 
     response = render(request, "home.html", {
         "results": reranked_documents,
