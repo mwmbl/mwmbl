@@ -4,7 +4,8 @@ from django.template import Library
 from django.utils.html import conditional_escape
 from django.utils.safestring import mark_safe
 
-from mwmbl.format import get_query_regex, DOCUMENT_SOURCES
+from mwmbl.format import get_query_regex, DOCUMENT_SOURCES, get_document_source
+from mwmbl.tinysearchengine.indexer import DocumentState
 from mwmbl.tokenizer import tokenize
 
 register = Library()
@@ -27,6 +28,6 @@ def format_for_query(text: str, query: str, autoescape=True):
 
 
 @register.filter(needs_autoescape=True)
-def convert_state_to_source(state: str, autoescape=True):
+def convert_state_to_source(state: DocumentState, autoescape=True):
     escape = conditional_escape if autoescape else lambda x: x
-    return escape(DOCUMENT_SOURCES[state] if state else 'mwmbl')
+    return escape(get_document_source(state))

@@ -96,10 +96,15 @@ def create_router(index_path: str, version: str) -> NinjaAPI:
 
 def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]:
     if validated:
-        return DocumentState.VALIDATED
+        if source.lower() == "user":
+            return DocumentState.FROM_USER_APPROVED
+        elif source.lower() == "google":
+            return DocumentState.FROM_GOOGLE_APPROVED
+        else:
+            return DocumentState.ORGANIC_APPROVED
     elif source.lower() == "user":
         return DocumentState.FROM_USER
     elif source.lower() == "google":
         return DocumentState.FROM_GOOGLE
     else:
-        return DocumentState.CURATED
+        return None

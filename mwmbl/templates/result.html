@@ -1,5 +1,10 @@
 {% load result_filters %}
 <li class="result" is="mwmbl-result">
+  <input type="hidden" name="url" value="{{result.url}}" />
+  <input type="hidden" name="title" value="{{result.title}}" />
+  <input type="hidden" name="extract" value="{{result.extract}}" />
+  <input type="hidden" name="score" value="{{result.score}}" />
+  <input type="hidden" name="state" value="{{result.state.value}}" />
   <div class="result-container">
     <div class="result-link">
       <a href="{{result.url}}">
@@ -7,24 +12,19 @@
         <p class='title'>{{result.title|format_for_query:query}}</p>
       </a>
       <p class='extract'>{{result.extract|format_for_query:query}}</p>
-      <input type="hidden" name="url" value="{{result.url}}" />
-      <input type="hidden" name="title" value="{{result.title}}" />
-      <input type="hidden" name="extract" value="{{result.extract}}" />
-      <input type="hidden" name="score" value="{{result.score}}" />
-      <input type="hidden" name="state" value="{{result.state.value}}" />
     </div>
     <div class="curation-buttons">
-      {% if result.state.name == 'VALIDATED' %}
+      {% if result.state.value >= 7 %}
         <button class="button move-up">↑</button>
         <button class="button move-down">↓</button>
       {% endif %}
-      <button class="button curate-approve{% if result.state > 0 %} validated{% endif %}"
+      <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
               hx-post="/app/approve/"
               hx-target=".main"
               hx-include=".result"
               hx-vals='{"approveUrl": "{{ result.url }}", "query": "{{ query }}"}'
               hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-      {% if result.state.value > 0 %}
+      {% if result.state.value >= 7 %}
         ✓ Approved
       {% else %}
         ✓ Approve

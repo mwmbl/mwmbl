@@ -119,6 +119,16 @@ def deduplicate(results, seen_titles):
     return deduplicated_results
 
 
+def fix_document_state(result: Document):
+
+    try:
+        fixed_state = DocumentState(result.state)
+    except ValueError:
+        fixed_state = None
+    fixed_document = Document(result.title, result.url, result.extract, result.score, result.term, fixed_state)
+    return fixed_document
+
+
 class Ranker:
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
@@ -131,8 +141,6 @@ class Ranker:
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         results, terms, _ = self.get_results(s, additional_results)
 
-        is_complete = s.endswith(' ')
-        pattern = get_query_regex(terms, is_complete, False)
         ranked_results = []
         seen_urls = set()
         for result in results:
@@ -196,7 +204,8 @@ class Ranker:
 
             ordered_results = self.order_results(terms, pages + additional_results, is_complete)
             deduplicated_results = deduplicate(ordered_results, set())
-        return deduplicated_results, terms, completions
+        state_fixed = [fix_document_state(result) for result in deduplicated_results]
+        return state_fixed, terms, completions
 
 
 class HeuristicRanker(Ranker):

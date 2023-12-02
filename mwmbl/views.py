@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
+from typing import Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, ParseResult
 
 import justext
@@ -144,6 +145,21 @@ def fetch_url(request):
     })
 
 
+def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
+    if state is None:
+        return DocumentState.ORGANIC_APPROVED
+    if state == DocumentState.FROM_GOOGLE:
+        return DocumentState.FROM_GOOGLE_APPROVED
+    if state == DocumentState.FROM_USER:
+        return DocumentState.FROM_USER_APPROVED
+    if state == DocumentState.FROM_GOOGLE_APPROVED:
+        return DocumentState.FROM_GOOGLE
+    if state == DocumentState.FROM_USER_APPROVED:
+        return DocumentState.FROM_USER
+    if state == DocumentState.ORGANIC_APPROVED:
+        return None
+
+
 @require_http_methods(["POST"])
 def approve(request):
     approve_url = request.POST.get("approveUrl")
@@ -155,9 +171,16 @@ def approve(request):
     states = request.POST.getlist("state")
     scores = request.POST.getlist("score")
 
+    assert len(urls) == len(titles) == len(extracts) == len(states) == len(scores)
+
+    print("Got approve request", approve_url, urls, titles, extracts, states, scores)
+
     documents = {}
     for url, title, extract, state, score in zip(urls, titles, extracts, states, scores):
-        state_enum = DocumentState(int(state)) if state else None
+        try:
+            state_enum = DocumentState(int(state))
+        except ValueError:
+            state_enum = None
         documents[url] = Document(
             title=title, url=url, extract=extract, score=float(score), state=state_enum)
 
@@ -165,10 +188,7 @@ def approve(request):
     # If there are no such documents, push it to the top
 
     approved_document = documents[approve_url]
-    if approved_document.state is None:
-        approved_document.state = DocumentState.VALIDATED
-    else:
-        approved_document.state = None
+    approved_document.state = switch_state(approved_document.state)
 
     reranked_documents = []
     inserted_approved = False
@@ -176,10 +196,9 @@ def approve(request):
         if document.url == approve_url:
             continue
 
-        if document.state is None:
-            if not inserted_approved:
-                reranked_documents.append(approved_document)
-                inserted_approved = True
+        if (document.state is None or document.state < DocumentState.ORGANIC_APPROVED) and not inserted_approved:
+            reranked_documents.append(approved_document)
+            inserted_approved = True
 
         reranked_documents.append(document)
 
