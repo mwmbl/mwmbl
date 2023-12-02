@@ -34,8 +34,6 @@ class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
     """
-    # Needed to prevent Django from mangling the values
-    do_not_call_in_templates = True
     DELETED = -1
     FROM_USER = 2
     FROM_GOOGLE = 3

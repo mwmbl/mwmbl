@@ -158,6 +158,7 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
         return DocumentState.FROM_USER
     if state == DocumentState.ORGANIC_APPROVED:
         return None
+    raise ValueError(f"Unexpected state {repr(state)}")
 
 
 @require_http_methods(["POST"])
@@ -172,8 +173,6 @@ def approve(request):
     scores = request.POST.getlist("score")
 
     assert len(urls) == len(titles) == len(extracts) == len(states) == len(scores)
-
-    print("Got approve request", approve_url, urls, titles, extracts, states, scores)
 
     documents = {}
     for url, title, extract, state, score in zip(urls, titles, extracts, states, scores):

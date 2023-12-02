@@ -14,22 +14,16 @@
       <p class='extract'>{{result.extract|format_for_query:query}}</p>
     </div>
     <div class="curation-buttons">
-      {% if result.state.value >= 7 %}
-        <button class="button move-up">↑</button>
-        <button class="button move-down">↓</button>
-      {% endif %}
       <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
               hx-post="/app/approve/"
               hx-target=".main"
               hx-include=".result"
               hx-vals='{"approveUrl": "{{ result.url }}", "query": "{{ query }}"}'
-              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>✓</button>
       {% if result.state.value >= 7 %}
-        ✓ Approved
-      {% else %}
-        ✓ Approve
+        <button class="button move-up">↑</button>
+        <button class="button move-down">↓</button>
       {% endif %}
-      </button>
     </div>
   </div>
 </li>
