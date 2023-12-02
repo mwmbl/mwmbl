@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from itertools import groupby
 from typing import Optional
@@ -12,7 +12,7 @@ from django.views.decorators.http import require_http_methods
 from django_htmx.http import push_url
 
 from mwmbl.format import format_result
-from mwmbl.models import UserCuration, MwmblUser
+from mwmbl.models import UserCuration, MwmblUser, Curation
 from mwmbl.search_setup import ranker
 
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -165,12 +165,16 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
 def approve(request):
     approve_url = request.POST.get("approve_url")
     query = request.POST.get("query")
+    curation_id = request.POST.get("curation_id")
 
     urls = request.POST.getlist("url")
     titles = request.POST.getlist("title")
     extracts = request.POST.getlist("extract")
     states = request.POST.getlist("state")
     scores = request.POST.getlist("score")
+
+    print(f"Got approve request: urls={urls}, titles={titles}, extracts={extracts}, states={states}, scores={scores}, "
+          f"approve_url={approve_url}")
 
     assert len(urls) == len(titles) == len(extracts) == len(states) == len(scores)
 
@@ -204,10 +208,32 @@ def approve(request):
     if not inserted_approved:
         reranked_documents.append(approved_document)
 
+    reranked_document_dicts = [asdict(d) for d in reranked_documents]
+    if curation_id is not None:
+        curation = Curation.objects.get(id=curation_id)
+        curation.new_results = reranked_document_dicts
+        curation.num_changes += 1
+        curation.save()
+    else:
+        user = request.user
+        if not user.is_authenticated:
+            user = None
+
+        curation = Curation(
+            user=user,
+            timestamp=datetime.utcnow(),
+            query=query,
+            original_results=[asdict(d) for d in documents.values()],
+            new_results=reranked_document_dicts,
+        )
+        curation.save()
+
+
     response = render(request, "home.html", {
         "results": reranked_documents,
         "query": query,
         "activity": None,
+        "curation_id": curation.id,
     })
 
     return response
