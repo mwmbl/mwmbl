@@ -20,10 +20,10 @@
               hx-include=".result"
               hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation_id %}, "curation_id": {{ curation_id }}{% endif %}}'
               hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>✓</button>
-      {% if result.state.value >= 7 %}
-        <button class="button move-up">↑</button>
-        <button class="button move-down">↓</button>
-      {% endif %}
+{#      {% if result.state.value >= 7 %}#}
+{#        <button class="button move-up">↑</button>#}
+{#        <button class="button move-down">↓</button>#}
+{#      {% endif %}#}
     </div>
   </div>
 </li>

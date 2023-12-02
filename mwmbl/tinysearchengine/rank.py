@@ -186,24 +186,20 @@ class Ranker:
         curated_items = [d for d in curation_items if d.state is not None
                          and d.term == curation_term]
 
-        if len(curated_items) > 0:
-            deduplicated_additional = deduplicate(additional_results, {item.title for item in curated_items})
-            deduplicated_results = curated_items + deduplicated_additional
-        else:
-            bigrams = set(get_bigrams(len(terms), terms))
+        bigrams = set(get_bigrams(len(terms), terms))
 
-            pages = []
-            for term in retrieval_terms | bigrams:
-                # An optimisation - we have already retrieved this, so make use of it
-                if term == curation_term:
-                    items = curation_items
-                else:
-                    items = self.tiny_index.retrieve(term)
-                if items is not None:
-                    pages += items
+        pages = []
+        for term in retrieval_terms | bigrams:
+            # An optimisation - we have already retrieved this, so make use of it
+            if term == curation_term:
+                items = curation_items
+            else:
+                items = self.tiny_index.retrieve(term)
+            if items is not None:
+                pages += items
 
-            ordered_results = self.order_results(terms, pages + additional_results, is_complete)
-            deduplicated_results = deduplicate(ordered_results, set())
+        ordered_results = self.order_results(terms, pages + additional_results, is_complete)
+        deduplicated_results = deduplicate(curated_items + ordered_results, set())
         state_fixed = [fix_document_state(result) for result in deduplicated_results]
         return state_fixed, terms, completions
 

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from itertools import groupby
+from logging import getLogger
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, ParseResult
 
@@ -13,15 +14,23 @@ from django_htmx.http import push_url
 
 from mwmbl.format import format_result
 from mwmbl.models import UserCuration, MwmblUser, Curation
-from mwmbl.search_setup import ranker
+from mwmbl.search_setup import ranker, index_path
 
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 
 from mwmbl.settings import NUM_EXTRACT_CHARS
-from mwmbl.tinysearchengine.indexer import Document, DocumentState
+from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from django.conf import settings
+
+from mwmbl.tokenizer import tokenize
+from mwmbl.utils import add_term_infos
+
+MAX_CURATED_SCORE = 1_111_111.0
+
+
+logger = getLogger(__name__)
 
 
 def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
@@ -228,6 +237,7 @@ def approve(request):
         )
         curation.save()
 
+    _save_to_index(query, reranked_documents)
 
     response = render(request, "home.html", {
         "results": reranked_documents,
@@ -237,3 +247,57 @@ def approve(request):
     })
 
     return response
+
+
+def _save_to_index(query: str, new_results: list[Document]):
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        tokens = tokenize(query)
+        term = " ".join(tokens)
+
+        documents = [
+            Document(
+                title=result.title,
+                url=result.url,
+                extract=result.extract,
+                score=MAX_CURATED_SCORE - i,
+                term=term,
+                state=result.state,
+            )
+            for i, result in enumerate(new_results)
+            if result.state is not None and result.state >= DocumentState.ORGANIC_APPROVED
+        ]
+
+        page_index = indexer.get_key_page_index(term)
+        existing_documents_no_terms = indexer.get_page(page_index)
+        existing_documents = add_term_infos(existing_documents_no_terms, indexer, page_index)
+        new_urls = {doc.url for doc in documents}
+        other_documents = [doc for doc in existing_documents if doc.url not in new_urls]
+        logger.info(f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
+                    f"with terms { {doc.term for doc in other_documents} }")
+
+        # Update state for other documents
+        states = {doc.url: doc.state for doc in new_results}
+        for doc in other_documents:
+            doc.state = states.get(doc.url, doc.state)
+
+        all_documents = documents + other_documents
+        logger.info(f"Storing {len(all_documents)} documents at page {page_index}")
+        indexer.store_in_page(page_index, all_documents)
+
+    return {"curation": "ok"}
+
+
+def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]:
+    if validated:
+        if source.lower() == "user":
+            return DocumentState.FROM_USER_APPROVED
+        elif source.lower() == "google":
+            return DocumentState.FROM_GOOGLE_APPROVED
+        else:
+            return DocumentState.ORGANIC_APPROVED
+    elif source.lower() == "user":
+        return DocumentState.FROM_USER
+    elif source.lower() == "google":
+        return DocumentState.FROM_GOOGLE
+    else:
+        return None
