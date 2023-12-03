@@ -8,9 +8,11 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, ParseResult
 import justext
 import requests
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 from django_htmx.http import push_url
+from requests.exceptions import MissingSchema, RequestException
 
 from mwmbl.format import format_result
 from mwmbl.models import UserCuration, MwmblUser, Curation
@@ -112,10 +114,16 @@ def _get_results_and_activity(request):
     return activity, query, results
 
 
-def fetch_url(request):
-    url = request.GET["url"]
-    query = request.GET["query"]
-    response = requests.get(url)
+@require_http_methods(["POST"])
+def add_url(request):
+    new_url = request.POST["new_url"]
+    query = request.POST["query"]
+
+    try:
+        response = requests.get(new_url)
+    except RequestException:
+        return HttpResponseBadRequest("Could not fetch URL")
+
     paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
     good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
 
@@ -123,9 +131,19 @@ def fetch_url(request):
     if len(extract) > NUM_EXTRACT_CHARS:
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
-    result = Document(title=title, url=url, extract=extract, score=0.0, state=DocumentState.FROM_USER)
-    return render(request, "result.html", {
-        "result": result, "query": query
+    result = Document(title=title, url=new_url, extract=extract, score=0.0, state=DocumentState.FROM_USER_APPROVED)
+
+    documents = _get_documents(request)
+    reranked_documents = _insert_document(documents, result)
+    curation = _get_curation(request, query, documents, reranked_documents)
+
+    _save_to_index(query, reranked_documents)
+
+    return render(request, "home.html", {
+        "results": reranked_documents,
+        "query": query,
+        "activity": None,
+        "curation_id": curation.id,
     })
 
 
@@ -149,27 +167,8 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
 def approve(request):
     approve_url = request.POST.get("approve_url")
     query = request.POST.get("query")
-    curation_id = request.POST.get("curation_id")
 
-    urls = request.POST.getlist("url")
-    titles = request.POST.getlist("title")
-    extracts = request.POST.getlist("extract")
-    states = request.POST.getlist("state")
-    scores = request.POST.getlist("score")
-
-    print(f"Got approve request: urls={urls}, titles={titles}, extracts={extracts}, states={states}, scores={scores}, "
-          f"approve_url={approve_url}")
-
-    assert len(urls) == len(titles) == len(extracts) == len(states) == len(scores)
-
-    documents = {}
-    for url, title, extract, state, score in zip(urls, titles, extracts, states, scores):
-        try:
-            state_enum = DocumentState(int(state))
-        except ValueError:
-            state_enum = None
-        documents[url] = Document(
-            title=title, url=url, extract=extract, score=float(score), state=state_enum)
+    documents = _get_documents(request)
 
     # The approved Document should be pushed below the last Document with status > 0
     # If there are no such documents, push it to the top
@@ -177,21 +176,23 @@ def approve(request):
     approved_document = documents[approve_url]
     approved_document.state = switch_state(approved_document.state)
 
-    reranked_documents = []
-    inserted_approved = False
-    for document in documents.values():
-        if document.url == approve_url:
-            continue
+    reranked_documents = _insert_document(documents, approved_document)
+    curation = _get_curation(request, query, documents, reranked_documents)
 
-        if (document.state is None or document.state < DocumentState.ORGANIC_APPROVED) and not inserted_approved:
-            reranked_documents.append(approved_document)
-            inserted_approved = True
+    _save_to_index(query, reranked_documents)
 
-        reranked_documents.append(document)
+    response = render(request, "home.html", {
+        "results": reranked_documents,
+        "query": query,
+        "activity": None,
+        "curation_id": curation.id,
+    })
 
-    if not inserted_approved:
-        reranked_documents.append(approved_document)
+    return response
 
+
+def _get_curation(request, query, documents, reranked_documents):
+    curation_id = request.POST.get("curation_id")
     reranked_document_dicts = [asdict(d) for d in reranked_documents]
     if curation_id is not None:
         curation = Curation.objects.get(id=curation_id)
@@ -212,17 +213,42 @@ def approve(request):
             num_changes=1,
         )
         curation.save()
+    return curation
 
-    _save_to_index(query, reranked_documents)
 
-    response = render(request, "home.html", {
-        "results": reranked_documents,
-        "query": query,
-        "activity": None,
-        "curation_id": curation.id,
-    })
+def _insert_document(documents, approved_document):
+    reranked_documents = []
+    inserted_approved = False
+    for document in documents.values():
+        if document.url == approved_document.url:
+            continue
 
-    return response
+        if (document.state is None or document.state < DocumentState.ORGANIC_APPROVED) and not inserted_approved:
+            reranked_documents.append(approved_document)
+            inserted_approved = True
+
+        reranked_documents.append(document)
+    if not inserted_approved:
+        reranked_documents.append(approved_document)
+    return reranked_documents
+
+
+def _get_documents(request):
+    urls = request.POST.getlist("url")
+    titles = request.POST.getlist("title")
+    extracts = request.POST.getlist("extract")
+    states = request.POST.getlist("state")
+    scores = request.POST.getlist("score")
+    assert len(urls) == len(titles) == len(extracts) == len(states) == len(scores)
+    documents = {}
+    for url, title, extract, state, score in zip(urls, titles, extracts, states, scores):
+        try:
+            state_enum = DocumentState(int(state))
+        except ValueError:
+            state_enum = None
+        documents[url] = Document(
+            title=title, url=url, extract=extract, score=float(score), state=state_enum)
+    return documents
 
 
 def _save_to_index(query: str, new_results: list[Document]):

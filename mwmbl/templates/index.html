@@ -76,7 +76,18 @@
     <main>
       {%  include "home.html" %}
     </main>
-    <div is="mwmbl-add-result"></div>
+    <div is="mwmbl-add-result">
+      <form class="modal-content">
+        <span class="close">&times;</span>
+        <input class="add-result" name="new_url" placeholder="Enter a URL...">
+        <button class="button"
+                hx-post="/app/add/"
+                hx-target=".main"
+                hx-include=".result"
+                hx-vals='{"query": "{{ query }}"{% if curation_id %}, "curation_id": {{ curation_id }}{% endif %}}'
+                hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>Save</button>
+      </form>
+    </div>
   <div class="footer">
     <ul class="footer-list">
       {% for link in footer_links %}

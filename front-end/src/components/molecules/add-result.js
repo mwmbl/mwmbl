@@ -6,32 +6,20 @@ import {globalBus} from "../../utils/events.js";
 const FETCH_URL = '/app/fetch?'
 
 
-const template = () => /*html*/`
-    <form class="modal-content">
-      <span class="close">&times;</span>
-      <input class="add-result" placeholder="Enter a URL...">
-      <button>Save</button>
-    </form>
-`;
-
 export default define('add-result', class extends HTMLDivElement {
-  constructor() {
-    super();
+  connectedCallback() {
     this.classList.add('modal');
     this.__setup();
   }
 
   __setup() {
-    this.innerHTML = template();
     this.__events();
     this.style.display = 'none';
   }
 
   __events() {
     this.querySelector('.close').addEventListener('click', e => {
-      if (e.target === this) {
-        this.style.display = 'none';
-      }
+      this.style.display = 'none';
     });
 
     this.addEventListener('click', e => {

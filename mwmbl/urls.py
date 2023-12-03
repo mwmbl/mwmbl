@@ -20,7 +20,7 @@ from django.urls import path, include
 import mwmbl.crawler.app as crawler
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
-from mwmbl.views import home_fragment, fetch_url, index, approve
+from mwmbl.views import home_fragment, add_url, index, approve
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,7 +28,7 @@ urlpatterns = [
 
     path('', index, name="index"),
     path('app/home/', home_fragment, name="home"),
-    path('app/fetch/', fetch_url, name="fetch_url"),
+    path('app/add/', add_url, name="add_url"),
     path('app/approve/', approve, name="approve"),
 
     # TODO: this is the old API, deprecated and to be removed once all clients have moved over
