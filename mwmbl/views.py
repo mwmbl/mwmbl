@@ -88,15 +88,6 @@ def home_fragment(request):
     return response
 
 
-@dataclass
-class Activity:
-    user: MwmblUser
-    num_curations: int
-    timestamp: datetime
-    query: str
-    url: str
-
-
 def _get_results_and_activity(request):
     query = request.GET.get("q")
     if query:
@@ -117,23 +108,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        curations = UserCuration.objects.order_by("-timestamp")[:1000]
-        sorted_curations = sorted(curations, key=lambda x: x.user.username)
-        groups = groupby(sorted_curations, key=lambda x: (x.user.username, x.url))
-        unsorted_activity = []
-        for (user, url), group in groups:
-            parsed_url_query = parse_qs(urlparse(url).query)
-            activity_query = parsed_url_query.get("q", [""])[0]
-            group = list(group)
-            unsorted_activity.append(Activity(
-                user=user,
-                num_curations=len(group),
-                timestamp=max([i.timestamp for i in group]),
-                query=activity_query,
-                url=url,
-            ))
-
-        activity = sorted(unsorted_activity, key=lambda a: a.timestamp, reverse=True)
+        activity = Curation.objects.order_by("-timestamp")[:500]
     return activity, query, results
 
 
@@ -234,6 +209,7 @@ def approve(request):
             query=query,
             original_results=[asdict(d) for d in documents.values()],
             new_results=reranked_document_dicts,
+            num_changes=1,
         )
         curation.save()
 
