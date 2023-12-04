@@ -170,8 +170,15 @@ def approve(request):
     # The approved Document should be pushed below the last Document with status > 0
     # If there are no such documents, push it to the top
 
-    approved_document = documents[approve_url]
-    approved_document.state = switch_state(approved_document.state)
+    document_to_approve = documents[approve_url]
+    approved_document = Document(
+        title=document_to_approve.title,
+        url=document_to_approve.url,
+        extract=document_to_approve.extract,
+        score=document_to_approve.score,
+        term=document_to_approve.term,
+        state=switch_state(document_to_approve.state),
+    )
 
     reranked_documents = _insert_document(documents, approved_document)
     curation = _get_curation(request, query, documents, reranked_documents)
@@ -210,14 +217,13 @@ def revert_current_curation(request):
     # Delete the curation
     curation.delete()
 
-    response = render(request, "home.html", {
-        "results": documents,
+    original_documents = [Document(**doc) for doc in curation.original_results]
+    return render(request, "home.html", {
+        "results": original_documents,
         "query": query,
         "activity": None,
         "curation": None,
     })
-
-    return response
 
 
 def _get_curation(request, query, documents, reranked_documents):
