@@ -313,7 +313,6 @@ a {
     display: inline-block;
     font-size: var(--default-font-size);
     border-radius: 50px;
-    cursor: pointer;
     flex-shrink: 0;
     transition: background-color 200ms ease-in-out;
 }

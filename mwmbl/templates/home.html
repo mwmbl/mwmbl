@@ -1,7 +1,7 @@
 {%  load humanize %}
 {%  include "title.html" %}
 <div is="mwmbl-add-result">
-  <form class="modal-content">
+  <form class="modal-content" style="display: none">
     <span class="close">&times;</span>
     <input class="add-result" name="new_url" placeholder="Enter a URL...">
     <button class="button"
@@ -17,12 +17,13 @@
     <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
     {% if curation %}
       <button class="button"
+              id="revert-button"
               hx-post="/app/revert-current/"
               hx-target=".main"
               hx-vals='{"curation_id": {{ curation.id }}}'
               hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>↺ Revert {{ curation.num_changes }} changes</button>
     {% else %}
-      <button class="disabled-button">↺ Revert</button>
+      <button class="disabled-button" id="revert-button">↺ Revert</button>
     {% endif %}
     {% if results %}
       <ul class='results'>
