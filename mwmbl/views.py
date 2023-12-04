@@ -188,6 +188,38 @@ def approve(request):
     return response
 
 
+@require_http_methods(["POST"])
+def revert_current_curation(request):
+    curation_id = request.POST.get("curation_id")
+    curation = Curation.objects.get(id=curation_id)
+    query = curation.query
+
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        term = " ".join(tokenize(query))
+        documents = [Document(**doc) for doc in curation.original_index_results]
+
+        page_index = indexer.get_key_page_index(term)
+        existing_documents = indexer.get_page(page_index)
+        other_term_documents = [doc for doc in existing_documents if doc.term != term]
+
+        # Replace all existing documents for the term with the original documents
+        all_documents = documents + other_term_documents
+
+        indexer.store_in_page(page_index, all_documents)
+
+    # Delete the curation
+    curation.delete()
+
+    response = render(request, "home.html", {
+        "results": documents,
+        "query": query,
+        "activity": None,
+        "curation": None,
+    })
+
+    return response
+
+
 def _get_curation(request, query, documents, reranked_documents):
     curation_id = request.POST.get("curation_id")
     reranked_document_dicts = [asdict(d) for d in reranked_documents]

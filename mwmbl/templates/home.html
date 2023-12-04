@@ -16,7 +16,11 @@
   {% if query %}
     <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
     {% if curation %}
-      <button class="button">↺ Revert {{ curation.num_changes }} changes</button>
+      <button class="button"
+              hx-post="/app/revert-current/"
+              hx-target=".main"
+              hx-vals='{"curation_id": {{ curation.id }}}'
+              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>↺ Revert {{ curation.num_changes }} changes</button>
     {% else %}
       <button class="disabled-button">↺ Revert</button>
     {% endif %}
