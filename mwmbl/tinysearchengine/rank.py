@@ -129,6 +129,16 @@ def fix_document_state(result: Document):
     return fixed_document
 
 
+def remove_curate_state(state: DocumentState):
+    if state == DocumentState.ORGANIC_APPROVED:
+        return None
+    if state == DocumentState.FROM_USER_APPROVED:
+        return DocumentState.FROM_USER
+    if state == DocumentState.FROM_GOOGLE_APPROVED:
+        return DocumentState.FROM_GOOGLE
+    return state
+
+
 class Ranker:
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
@@ -194,7 +204,16 @@ class Ranker:
             if term == curation_term:
                 items = curation_items
             else:
-                items = self.tiny_index.retrieve(term)
+                items_wrong_state = self.tiny_index.retrieve(term)
+                # If this is not a curation term, it is not curated for the current term
+                items = [Document(result.title,
+                                  result.url,
+                                  result.extract,
+                                  result.score,
+                                  result.term,
+                                  remove_curate_state(result.state))
+                         for result in items_wrong_state]
+
             if items is not None:
                 pages += items
 

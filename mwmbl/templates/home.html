@@ -21,7 +21,7 @@
               hx-post="/app/revert-current/"
               hx-target=".main"
               hx-vals='{"curation_id": {{ curation.id }}}'
-              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>↺ Revert {{ curation.num_changes }} changes</button>
+              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>↺ Revert {{ curation.num_changes }} change{{ curation.num_changes|pluralize:"s" }}</button>
     {% else %}
       <button class="disabled-button" id="revert-button">↺ Revert</button>
     {% endif %}
