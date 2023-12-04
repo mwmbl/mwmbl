@@ -1,31 +1,24 @@
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from datetime import datetime
-from itertools import groupby
 from logging import getLogger
 from typing import Optional
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, ParseResult
+from urllib.parse import urlencode
 
 import justext
 import requests
-from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
-from django_htmx.http import push_url
-from requests.exceptions import MissingSchema, RequestException
-
-from mwmbl.format import format_result
-from mwmbl.models import UserCuration, MwmblUser, Curation
-from mwmbl.search_setup import ranker, index_path
-
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
+from requests.exceptions import RequestException
 
+from mwmbl.models import Curation
+from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
-from django.conf import settings
-
 from mwmbl.tokenizer import tokenize
 from mwmbl.utils import add_term_infos
 
@@ -100,9 +93,11 @@ def _get_results_and_activity(request):
         urls = request.GET.getlist(f"url")
         extracts = request.GET.getlist(f"extract")
 
+        term = " ".join(tokenize(query))
+
         # For now, we only support the Google source
         additional_results = [
-            Document(title=title, url=url, extract=extract, score=100.0 * 2 ** -i, state=DocumentState.FROM_GOOGLE)
+            Document(title=title, url=url, extract=extract, score=100.0 * 2 ** -i, term=term, state=DocumentState.FROM_GOOGLE)
             for i, (title, url, extract) in enumerate(zip(titles, urls, extracts))
         ]
 
@@ -131,9 +126,10 @@ def add_url(request):
     if len(extract) > NUM_EXTRACT_CHARS:
         extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
 
-    result = Document(title=title, url=new_url, extract=extract, score=0.0, state=DocumentState.FROM_USER_APPROVED)
+    term = " ".join(tokenize(query))
+    result = Document(title=title, url=new_url, extract=extract, score=0.0, term=term, state=DocumentState.FROM_USER_APPROVED)
 
-    documents = _get_documents(request)
+    documents = _get_documents(request, term)
     reranked_documents = _insert_document(documents, result)
     curation = _get_curation(request, query, documents, reranked_documents)
 
@@ -168,7 +164,8 @@ def approve(request):
     approve_url = request.POST.get("approve_url")
     query = request.POST.get("query")
 
-    documents = _get_documents(request)
+    term = " ".join(tokenize(query))
+    documents = _get_documents(request, term)
 
     # The approved Document should be pushed below the last Document with status > 0
     # If there are no such documents, push it to the top
@@ -204,10 +201,16 @@ def _get_curation(request, query, documents, reranked_documents):
         if not user.is_authenticated:
             user = None
 
+        with TinyIndex(Document, index_path, 'r') as indexer:
+            tokens = tokenize(query)
+            term = " ".join(tokens)
+            original_index_results = [doc for doc in indexer.retrieve(term) if doc.term == term]
+
         curation = Curation(
             user=user,
             timestamp=datetime.utcnow(),
             query=query,
+            original_index_results=[asdict(d) for d in original_index_results],
             original_results=[asdict(d) for d in documents.values()],
             new_results=reranked_document_dicts,
             num_changes=1,
@@ -233,7 +236,7 @@ def _insert_document(documents, approved_document):
     return reranked_documents
 
 
-def _get_documents(request):
+def _get_documents(request, term: str):
     urls = request.POST.getlist("url")
     titles = request.POST.getlist("title")
     extracts = request.POST.getlist("extract")
@@ -247,15 +250,13 @@ def _get_documents(request):
         except ValueError:
             state_enum = None
         documents[url] = Document(
-            title=title, url=url, extract=extract, score=float(score), state=state_enum)
+            title=title, url=url, extract=extract, score=float(score), term=term, state=state_enum)
     return documents
 
 
 def _save_to_index(query: str, new_results: list[Document]):
     with TinyIndex(Document, index_path, 'w') as indexer:
-        tokens = tokenize(query)
-        term = " ".join(tokens)
-
+        term = " ".join(tokenize(query))
         documents = [
             Document(
                 title=result.title,

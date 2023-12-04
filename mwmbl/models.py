@@ -22,6 +22,7 @@ class Curation(models.Model):
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, null=True)
     timestamp = models.DateTimeField()
     query = models.CharField(max_length=300)
+    original_index_results = models.JSONField(default=list)
     original_results = models.JSONField()
     new_results = models.JSONField()
     num_changes = models.IntegerField(default=0)
