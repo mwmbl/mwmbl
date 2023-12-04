@@ -302,6 +302,23 @@ a {
   cursor: pointer;
 }
 
+.disabled-button {
+    background-color: var(--dark-gray-color);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    margin: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: var(--default-font-size);
+    border-radius: 50px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 200ms ease-in-out;
+}
+
+
 .button {
     background-color: var(--primary-color);
     border: none;

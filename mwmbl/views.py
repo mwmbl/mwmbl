@@ -139,7 +139,7 @@ def add_url(request):
         "results": reranked_documents,
         "query": query,
         "activity": None,
-        "curation_id": curation.id,
+        "curation": curation,
     })
 
 
@@ -182,7 +182,7 @@ def approve(request):
         "results": reranked_documents,
         "query": query,
         "activity": None,
-        "curation_id": curation.id,
+        "curation": curation,
     })
 
     return response
