@@ -116,7 +116,7 @@ def add_url(request):
     query = request.POST["query"]
 
     try:
-        response = requests.get(new_url)
+        response = requests.get(new_url, timeout=5)
     except RequestException:
         return HttpResponseBadRequest("Could not fetch URL")
 
