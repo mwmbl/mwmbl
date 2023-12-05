@@ -265,7 +265,7 @@ a {
 }
 
 .modal {
-  /*display: none; !* Hidden by default *!*/
+  display: none; /* Hidden by default */
   position: fixed; /* Stay in place */
   z-index: 100; /* Sit on top */
   left: 0;
@@ -301,6 +301,22 @@ a {
   text-decoration: none;
   cursor: pointer;
 }
+
+.disabled-button {
+    background-color: var(--dark-gray-color);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    margin: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: var(--default-font-size);
+    border-radius: 50px;
+    flex-shrink: 0;
+    transition: background-color 200ms ease-in-out;
+}
+
 
 .button {
     background-color: var(--primary-color);

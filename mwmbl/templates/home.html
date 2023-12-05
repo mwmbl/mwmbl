@@ -1,32 +1,55 @@
 {%  load humanize %}
 {%  include "title.html" %}
-<div class="main">
-  {% if query %}
-    <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
-    {% if results %}
-      <ul class='results'>
-        {% for result in results %}
-          {% include "result.html" %}
-        {% endfor %}
-      </ul>
-    {% else %}
-      <ul>
-        <li class="home">
-          <h1>
-            No results found for "{{query}}".
-          </h1>
-        </li>
-      </ul>
-    {% endif %}
-  {% else %}
-    {%  for item in activity %}
-      <ul>
-        <li class="activity">
-          <h1>
-            {{ item.user }} made {{ item.num_curations | apnumber }} changes to <a href="{{ item.url }}">{{ item.query }}</a> {{ item.timestamp | naturaltime }}.
-          </h1>
-        </li>
-      </ul>
-    {% endfor %}
-  {% endif %}
+<div is="mwmbl-add-result" style="display: none">
+  <form class="modal-content"
+        hx-post="/app/add/"
+        hx-target=".main"
+        hx-include=".result"
+        hx-vals='{"query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'
+        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    <span class="close">&times;</span>
+    <label>
+      Enter a URL: <input class="add-result" name="new_url" placeholder="https://something.org">
+    </label>
+    <input type="submit" class="button" value="Save"/>
+  </form>
 </div>
+{% if query %}
+  <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
+  {% if curation %}
+    <button class="button"
+            id="revert-button"
+            hx-post="/app/revert-current/"
+            hx-target=".main"
+            hx-vals='{"curation_id": {{ curation.id }}}'
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>↺ Revert {{ curation.num_changes }} change{{ curation.num_changes|pluralize:"s" }}</button>
+  {% else %}
+    <button class="disabled-button" id="revert-button">↺ Revert</button>
+  {% endif %}
+  {% if results %}
+    <ul class='results'>
+      {% for result in results %}
+        {% include "result.html" %}
+      {% endfor %}
+    </ul>
+  {% else %}
+    <ul>
+      <li class="home">
+        <h1>
+          No results found for "{{query}}".
+        </h1>
+      </li>
+    </ul>
+  {% endif %}
+{% else %}
+  {%  for item in activity %}
+    <ul>
+      <li class="activity">
+        <h1>
+          {% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %} made {{ item.num_changes | apnumber }}
+          changes to <a href="/?q={{ item.query|urlencode }}">{{ item.query }}</a> {{ item.timestamp | naturaltime }}.
+        </h1>
+      </li>
+    </ul>
+  {% endfor %}
+{% endif %}

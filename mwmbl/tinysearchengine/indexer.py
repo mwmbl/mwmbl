@@ -32,12 +32,14 @@ def astuple(dc):
 
 class DocumentState(IntEnum):
     """
-    The state of the document in the index. A value of None indicates a document from our normal crawling procedure.
+    The state of the document in the index. A value of None indicates an organic search result.
     """
-    CURATED = 0
-    VALIDATED = 1
+    DELETED = -1
     FROM_USER = 2
     FROM_GOOGLE = 3
+    ORGANIC_APPROVED = 7
+    FROM_USER_APPROVED = 8
+    FROM_GOOGLE_APPROVED = 9
 
 
 @dataclass

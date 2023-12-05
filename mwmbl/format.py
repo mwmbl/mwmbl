@@ -7,9 +7,14 @@ from mwmbl.tokenizer import tokenize, clean_unicode
 DOCUMENT_SOURCES = {
     DocumentState.FROM_GOOGLE: 'google',
     DocumentState.FROM_USER: 'user',
-    DocumentState.VALIDATED: 'mwmbl',
-    DocumentState.CURATED: 'mwmbl',
+    DocumentState.ORGANIC_APPROVED: 'mwmbl',
+    DocumentState.FROM_GOOGLE_APPROVED: 'google',
+    DocumentState.FROM_USER_APPROVED: 'user',
 }
+
+
+def get_document_source(state: DocumentState):
+    return DOCUMENT_SOURCES.get(state, 'mwmbl')
 
 
 def format_result_with_pattern(pattern, result):
@@ -26,7 +31,7 @@ def format_result_with_pattern(pattern, result):
             content_result.append({'value': content[start:end], 'is_bold': is_bold})
         formatted_result[content_type] = content_result
     formatted_result['url'] = result.url
-    formatted_result['source'] = DOCUMENT_SOURCES[result.state] if result.state else 'mwmbl'
+    formatted_result['source'] = get_document_source(result.state)
     return formatted_result
 
 

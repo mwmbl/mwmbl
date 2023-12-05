@@ -119,6 +119,26 @@ def deduplicate(results, seen_titles):
     return deduplicated_results
 
 
+def fix_document_state(result: Document):
+
+    try:
+        fixed_state = DocumentState(result.state)
+    except ValueError:
+        fixed_state = None
+    fixed_document = Document(result.title, result.url, result.extract, result.score, result.term, fixed_state)
+    return fixed_document
+
+
+def remove_curate_state(state: DocumentState):
+    if state == DocumentState.ORGANIC_APPROVED:
+        return None
+    if state == DocumentState.FROM_USER_APPROVED:
+        return DocumentState.FROM_USER
+    if state == DocumentState.FROM_GOOGLE_APPROVED:
+        return DocumentState.FROM_GOOGLE
+    return state
+
+
 class Ranker:
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
@@ -128,22 +148,19 @@ class Ranker:
     def order_results(self, terms, pages, is_complete):
         pass
 
-    def search(self, s: str, additional_results: list[Document]):
+    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         results, terms, _ = self.get_results(s, additional_results)
 
-        is_complete = s.endswith(' ')
-        pattern = get_query_regex(terms, is_complete, False)
-        formatted_results = []
+        ranked_results = []
         seen_urls = set()
         for result in results:
             if result.url in seen_urls:
                 continue
-            formatted_result = format_result_with_pattern(pattern, result)
-            formatted_results.append(formatted_result)
+            ranked_results.append(result)
             seen_urls.add(result.url)
 
-        logger.info("Return results: %d", len(formatted_results))
-        return formatted_results
+        logger.info("Return results: %d", len(ranked_results))
+        return ranked_results
 
     def complete(self, q: str):
         ordered_results, terms, completions = self.get_results(q, [])
@@ -179,25 +196,31 @@ class Ranker:
         curated_items = [d for d in curation_items if d.state is not None
                          and d.term == curation_term]
 
-        if len(curated_items) > 0:
-            deduplicated_additional = deduplicate(additional_results, {item.title for item in curated_items})
-            deduplicated_results = curated_items + deduplicated_additional
-        else:
-            bigrams = set(get_bigrams(len(terms), terms))
+        bigrams = set(get_bigrams(len(terms), terms))
 
-            pages = []
-            for term in retrieval_terms | bigrams:
-                # An optimisation - we have already retrieved this, so make use of it
-                if term == curation_term:
-                    items = curation_items
-                else:
-                    items = self.tiny_index.retrieve(term)
-                if items is not None:
-                    pages += items
+        pages = []
+        for term in retrieval_terms | bigrams:
+            # An optimisation - we have already retrieved this, so make use of it
+            if term == curation_term:
+                items = curation_items
+            else:
+                items_wrong_state = self.tiny_index.retrieve(term)
+                # If this is not a curation term, it is not curated for the current term
+                items = [Document(result.title,
+                                  result.url,
+                                  result.extract,
+                                  result.score,
+                                  result.term,
+                                  remove_curate_state(result.state))
+                         for result in items_wrong_state]
 
-            ordered_results = self.order_results(terms, pages + additional_results, is_complete)
-            deduplicated_results = deduplicate(ordered_results, set())
-        return deduplicated_results, terms, completions
+            if items is not None:
+                pages += items
+
+        ordered_results = self.order_results(terms, pages + additional_results, is_complete)
+        deduplicated_results = deduplicate(curated_items + ordered_results, set())
+        state_fixed = [fix_document_state(result) for result in deduplicated_results]
+        return state_fixed, terms, completions
 
 
 class HeuristicRanker(Ranker):

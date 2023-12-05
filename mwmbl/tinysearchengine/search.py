@@ -2,6 +2,7 @@ from logging import getLogger
 
 from ninja import NinjaAPI
 
+from mwmbl.format import format_result
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logger = getLogger(__name__)
@@ -15,7 +16,8 @@ def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
 
     @router.get("")
     def search(request, s: str):
-        return ranker.search(s, [])
+        results = ranker.search(s, [])
+        return [format_result(result, s) for result in results]
 
     @router.get("/complete")
     def complete(request, q: str):
