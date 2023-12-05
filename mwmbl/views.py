@@ -19,6 +19,7 @@ from mwmbl.models import Curation
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
+from mwmbl.tinysearchengine.rank import fix_document_state
 from mwmbl.tokenizer import tokenize
 from mwmbl.utils import add_term_infos
 
@@ -217,7 +218,8 @@ def revert_current_curation(request):
     # Delete the curation
     curation.delete()
 
-    original_documents = [Document(**doc) for doc in curation.original_results]
+    original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
+    original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
     return render(request, "home.html", {
         "results": original_documents,
         "query": query,
