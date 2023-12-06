@@ -6,12 +6,14 @@
  * util or component files instead.
  */
 import 'vite/modulepreload-polyfill';
+import {setupResultsLoadedListener} from "./utils/events.js";
 
 // Waiting for top-level await to be better supported.
 (async () => {
   // Check if a suggestion redirect is needed.
   const { redirectToSuggestions } = await import("./utils/suggestions.js");
   const redirected = redirectToSuggestions();
+  setupResultsLoadedListener();
 
   if (!redirected) {
     // Load components only after redirects are checked.

@@ -4,6 +4,8 @@
  * It is simply a trick using a div element
  * to carry events.
  */
+import htmx from 'htmx.org';
+
 class Bus {
   constructor() {
     this.element = document.createElement('div');
@@ -24,7 +26,18 @@ class Bus {
  * */
 const globalBus = new Bus();
 
+const setupResultsLoadedListener = () => {
+  window.addEventListener('message', e => {
+    console.log("Message event", e);
+    if (e.data === 'results-loaded') {
+      htmx.process(document.querySelector('.results'));
+    }
+  });
+}
+
+
 export {
   Bus,
   globalBus,
+  setupResultsLoadedListener,
 }

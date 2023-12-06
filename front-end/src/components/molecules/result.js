@@ -1,5 +1,4 @@
 import define from '../../utils/define.js';
-import escapeString from '../../utils/escapeString.js';
 import { globalBus } from '../../utils/events.js';
 
 
@@ -32,14 +31,5 @@ export default define('result', class extends HTMLLIElement {
         }
       }
     })
-  }
-
-  __handleBold(input) {
-    let text = '';
-    for (const part of input) {
-      if (part.is_bold) text += `<strong>${escapeString(part.value)}</strong>`;
-      else text += escapeString(part.value);
-    }
-    return text;
   }
 }, { extends: 'li' });
