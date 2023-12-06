@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && cp node_modules/htmx.org/dist/htmx.min.js dist/assets/htmx.min.js",
     "preview": "vite preview"
   },
   "devDependencies": {
