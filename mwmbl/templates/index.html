@@ -37,12 +37,13 @@
   <!-- OpenSearch -->
   <link rel="search" type="application/opensearchdescription+xml" href="/static/opensearch.xml" title="Mwmbl Search">
 
-  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+  <script src="/static/assets/htmx.min.js"></script>
 
   {% vite_hmr_client %}
 </head>
 
 <body>
+  {% csrf_token %}
   <mwmbl-app></mwmbl-app>
     <header class="search-menu compact">
       <a href="/" class="branding">
@@ -64,7 +65,6 @@
           hx-target=".main"
         >
       </form>
-      <div is="mwmbl-save"></div>
       {%  if user.is_authenticated %}
         <p class="login-info">Logged in as {{ user.username }}</p>
         <a class="button" href="/accounts/logout/">Log out</a>
