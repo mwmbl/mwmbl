@@ -84,7 +84,12 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
 
 
 def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
-    parsed_link = urlparse(link)
+    try:
+        parsed_link = urlparse(link)
+    except ValueError:
+        logger.debug(f"Couldn't parse link: {link}")
+        return
+
     if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
         logger.debug(f"Excluding link for blacklisted domain: {parsed_link}")
         return
