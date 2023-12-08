@@ -122,6 +122,9 @@ body {
 
 .result {
   min-height: 120px;
+  transition-property: all;
+  transition-duration: 200ms;
+  transition-timing-function: ease-in-out;
 }
 
 .result-container {

@@ -1,5 +1,7 @@
 import re
+from base64 import b64encode
 
+import mmh3
 from django.template import Library
 from django.utils.html import conditional_escape
 from django.utils.safestring import mark_safe
@@ -31,3 +33,10 @@ def format_for_query(text: str, query: str, autoescape=True):
 def convert_state_to_source(state: DocumentState, autoescape=True):
     escape = conditional_escape if autoescape else lambda x: x
     return escape(get_document_source(state))
+
+
+@register.filter(needs_autoescape=False)
+def hash_url(url: str) -> str:
+    hashed_url = mmh3.hash128(url)
+    base64_hash = b64encode(hashed_url.to_bytes(16, 'big'))[:10]
+    return base64_hash.decode('ascii')
