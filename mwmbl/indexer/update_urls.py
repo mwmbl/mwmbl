@@ -35,7 +35,7 @@ def update_urls_continuously(data_path: str, new_item_queue: Queue):
 
 
 def run(batch_cache: BatchCache, new_item_queue: Queue):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, new_item_queue)
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, new_item_queue, 100)
 
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Queue):
