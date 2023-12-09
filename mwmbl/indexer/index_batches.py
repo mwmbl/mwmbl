@@ -36,7 +36,7 @@ def run(batch_cache: BatchCache, index_path: str):
             index_batches(batches, index_path, url_db)
             logger.info("Indexed pages")
 
-    process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, 10000, process)
+    process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, process, 10000)
 
 
 def index_batches(batch_data: Collection[HashedBatch], index_path: str, url_db: URLDatabase):
