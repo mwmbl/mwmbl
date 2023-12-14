@@ -13,12 +13,14 @@
       </a>
       <p class='extract'>{{result.extract|format_for_query:query}}</p>
     </div>
-    <div class="curation-buttons">
-      <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
-              hx-post="/app/approve/"
-              hx-target=".main"
-              hx-include=".result,[name='csrfmiddlewaretoken']"
-              hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>✓</button>
+    {% if user.is_authenticated %}
+      <div class="curation-buttons">
+        <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
+                hx-post="/app/approve/"
+                hx-target=".main"
+                hx-include=".result,[name='csrfmiddlewaretoken']"
+                hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>✓</button>
+      </div>
     </div>
-  </div>
+  {% endif %}
 </li>
