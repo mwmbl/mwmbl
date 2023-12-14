@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 import justext
 import requests
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
@@ -110,6 +111,7 @@ def _get_results_and_activity(request):
     return activity, query, results
 
 
+@login_required
 @require_http_methods(["POST"])
 def add_url(request):
     new_url = request.POST["new_url"]
@@ -160,6 +162,7 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
     raise ValueError(f"Unexpected state {repr(state)}")
 
 
+@login_required
 @require_http_methods(["POST"])
 def approve(request):
     approve_url = request.POST.get("approve_url")
@@ -196,6 +199,7 @@ def approve(request):
     return response
 
 
+@login_required
 @require_http_methods(["POST"])
 def revert_current_curation(request):
     curation_id = request.POST.get("curation_id")
