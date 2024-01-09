@@ -1,20 +1,22 @@
 {%  load humanize %}
 {%  include "title.html" %}
-<p>Welcome to Mwmbl! Please read the <a href="https://book.mwmbl.org/page/curating/">guidelines</a> before editing results.</p>
-<br>
-<div is="mwmbl-add-result" style="display: none">
-  <form class="modal-content"
-        hx-post="/app/add/"
-        hx-target=".main"
-        hx-include=".result,[name='csrfmiddlewaretoken']"
-        hx-vals='{"query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>
-    <span class="close">&times;</span>
-    <label>
-      Enter a URL: <input class="add-result" name="new_url" placeholder="https://something.org">
-    </label>
-    <input type="submit" class="button" value="Save"/>
-  </form>
-</div>
+{% if user.is_authenticated %}
+  <p>Welcome to Mwmbl! Please read the <a href="https://book.mwmbl.org/page/curating/">guidelines</a> before editing results.</p>
+  <br>
+  <div is="mwmbl-add-result" style="display: none">
+    <form class="modal-content"
+          hx-post="/app/add/"
+          hx-target=".main"
+          hx-include=".result,[name='csrfmiddlewaretoken']"
+          hx-vals='{"query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>
+      <span class="close">&times;</span>
+      <label>
+        Enter a URL: <input class="add-result" name="new_url" placeholder="https://something.org">
+      </label>
+      <input type="submit" class="button" value="Save"/>
+    </form>
+  </div>
+{% endif %}
 {% if query %}
   <button class="button curate-add" is="mwmbl-add-button">＋ Add new</button>
   {% if curation %}
