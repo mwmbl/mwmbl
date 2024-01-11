@@ -78,9 +78,9 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
                       for url in url_scores.keys() | url_statuses.keys()]
 
         logger.info(f"Found URLs, {len(found_urls)}")
-        urls = url_db.update_found_urls(found_urls)
-        new_item_queue.put(urls)
-        logger.info(f"Put {len(urls)} new items in the URL queue")
+        new_urls = url_db.update_found_urls(found_urls)
+        new_item_queue.put(new_urls)
+        logger.info(f"Put {len(new_urls)} new items in the URL queue")
 
 
 def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
