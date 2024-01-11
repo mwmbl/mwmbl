@@ -1501,6 +1501,16 @@ files = [
 numpy = ">=1.16.6"
 
 [[package]]
+name = "pybloomfiltermmap3"
+version = "0.5.7"
+description = "A fast implementation of Bloom filter for Python 3 built on mmap"
+optional = false
+python-versions = ">=3.5, <4"
+files = [
+    {file = "pybloomfiltermmap3-0.5.7.tar.gz", hash = "sha256:fe2cf925a1623b886ff12b8ab3f31c33392cd5c192ecd60d55af66d162bb9e71"},
+]
+
+[[package]]
 name = "pycparser"
 version = "2.21"
 description = "C parser in Python"
@@ -2561,4 +2571,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "lxml", "pyarr
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "4e4233221e9f3bd317c0693584612898b7b736f45983b7f3f5bad4d43e567353"
+content-hash = "f884b27d04703e4a611c6d37cc1b3153b9de0522637c3216672138ee6c22ffd6"

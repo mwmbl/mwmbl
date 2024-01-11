@@ -37,7 +37,6 @@ class MwmblConfig(AppConfig):
 
         with Database() as db:
             url_db = URLDatabase(db.connection)
-            url_db.create_tables()
             index_db = IndexDatabase(db.connection)
             index_db.create_tables()
 

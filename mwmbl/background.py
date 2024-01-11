@@ -23,7 +23,6 @@ def run(data_path: str):
 
     with Database() as db:
         url_db = URLDatabase(db.connection)
-        url_db.create_tables()
 
     historical.run()
     index_path = Path(data_path) / INDEX_NAME

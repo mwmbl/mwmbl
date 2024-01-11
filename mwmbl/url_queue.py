@@ -9,7 +9,7 @@ from typing import KeysView, Union
 
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus, FoundURL, REASSIGN_MIN_HOURS
 from mwmbl.database import Database
-from mwmbl.hn_top_domains_filtered import DOMAINS as TOP_DOMAINS
+from mwmbl.hn_top_domains_filtered import DOMAINS as TOP_DOMAINS, DOMAINS
 from mwmbl.indexer.blacklist import is_domain_blacklisted, get_blacklist_domains
 from mwmbl.settings import CORE_DOMAINS
 from mwmbl.utils import batch, get_domain
@@ -43,15 +43,6 @@ class URLQueue:
         self._top_urls = defaultdict(dict)
         self._min_top_domains = min_top_domains
         assert min_top_domains > 0, "Need a minimum greater than 0 to prevent a never-ending loop"
-
-    def initialize(self):
-        logger.info(f"Initializing URL queue")
-        blacklist_domains = get_blacklist_domains()
-        with Database() as db:
-            url_db = URLDatabase(db.connection)
-            found_urls = url_db.get_urls(URLStatus.NEW, INITIALIZE_URLS)
-            self._process_found_urls(found_urls, blacklist_domains)
-        logger.info(f"Initialized URL queue with {len(found_urls)} urls, current queue size: {self.num_queued_batches}")
 
     def update(self):
         blacklist_domains = get_blacklist_domains()
@@ -94,7 +85,7 @@ class URLQueue:
             if is_domain_blacklisted(domain, blacklist_domains):
                 continue
             url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
-            url_store[domain][found_url.url] = found_url.score
+            url_store[domain][found_url.url] = 1/len(found_url.url)
 
         logger.info(f"URL store updated: {len(self._top_urls)} top domains, {len(self._other_urls)} other domains")
 
@@ -146,7 +137,6 @@ def _add_urls(domains: Union[set[str], KeysView], domain_urls: dict[str, dict[st
 
 def update_queue_continuously(new_item_queue: Queue, queued_batches: Queue):
     queue = URLQueue(new_item_queue, queued_batches)
-    queue.initialize()
     while True:
         num_processed = queue.update()
         logger.info(f"Queue update, num processed: {num_processed}, queue size: {queue.num_queued_batches}, num top "

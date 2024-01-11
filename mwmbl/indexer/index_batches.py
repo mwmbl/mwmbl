@@ -31,20 +31,16 @@ def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[tup
 def run(batch_cache: BatchCache, index_path: str):
 
     def process(batches: Collection[HashedBatch]):
-        with Database() as db:
-            url_db = URLDatabase(db.connection)
-            index_batches(batches, index_path, url_db)
-            logger.info("Indexed pages")
+        index_batches(batches, index_path)
+        logger.info("Indexed pages")
 
     process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, process, 10000)
 
 
-def index_batches(batch_data: Collection[HashedBatch], index_path: str, url_db: URLDatabase):
+def index_batches(batch_data: Collection[HashedBatch], index_path: str):
     document_tuples = list(get_documents_from_batches(batch_data))
-    urls = [url for title, url, extract in document_tuples]
-    url_scores = url_db.get_url_scores(urls)
-    logger.info(f"Indexing {len(urls)} document tuples and {len(url_scores)} URL scores")
-    documents = [Document(title, url, extract, url_scores.get(url, 1.0)) for title, url, extract in document_tuples]
+    # TODO: compute a proper score for each document
+    documents = [Document(title, url, extract, 1/len(url)) for title, url, extract in document_tuples]
     page_documents = preprocess_documents(documents, index_path)
     index_pages(index_path, page_documents)
 

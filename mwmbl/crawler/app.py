@@ -115,10 +115,7 @@ def create_router(batch_cache: BatchCache, queued_batches: Queue, version: str) 
         except Empty:
             return []
 
-        found_urls = [FoundURL(url, user_id_hash, 0.0, URLStatus.ASSIGNED, datetime.utcnow()) for url in urls]
-        with Database() as db:
-            url_db = URLDatabase(db.connection)
-            url_db.update_found_urls(found_urls)
+        # TODO: track which URLs are currently being crawled
 
         return urls
 
