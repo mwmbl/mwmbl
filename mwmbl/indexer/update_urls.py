@@ -44,8 +44,8 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
     blacklist_retrieval_time = datetime.now() - start
     logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
                 f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
-    with Database() as db:
-        url_db = URLDatabase(db.connection)
+
+    with URLDatabase() as url_db:
         url_scores = defaultdict(float)
         url_users = {}
         url_timestamps = {}

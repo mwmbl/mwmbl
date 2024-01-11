@@ -1,12 +1,9 @@
-import os
-import shutil
 from multiprocessing import Process, Queue
 from pathlib import Path
 
 from django.apps import AppConfig
 from django.conf import settings
 
-from mwmbl.crawler.urls import URLDatabase
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase
 
@@ -36,7 +33,6 @@ class MwmblConfig(AppConfig):
                              page_size=PAGE_SIZE)
 
         with Database() as db:
-            url_db = URLDatabase(db.connection)
             index_db = IndexDatabase(db.connection)
             index_db.create_tables()
 

@@ -5,18 +5,14 @@ from collections import defaultdict
 from logging import getLogger
 from typing import Collection, Iterable
 
-import spacy
-from mwmbl.indexer import process_batch
-from spacy import Language
-
 from mwmbl.crawler.batch import HashedBatch, Item
-from mwmbl.crawler.urls import URLDatabase, URLStatus
-from mwmbl.database import Database
+from mwmbl.crawler.urls import URLStatus
+from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
-from mwmbl.utils import add_term_info, add_term_infos
+from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
 

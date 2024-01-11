@@ -51,12 +51,18 @@ class FoundURL:
 
 
 class URLDatabase:
-    def __init__(self, connection):
+    def __init__(self):
+        self.urls = None
+
+    def __enter__(self):
         try:
             self.urls = BloomFilter.open(settings.URLS_BLOOM_FILTER_PATH)
         except FileNotFoundError:
             logger.info("No existing bloom filter found, creating a new one")
-            self.urls = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 0.01, settings.URLS_BLOOM_FILTER_PATH, perm=0o666)
+            self.urls = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, settings.URLS_BLOOM_FILTER_PATH, perm=0o666)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.urls.close()
 
     def update_found_urls(self, found_urls: list[FoundURL]):
         """

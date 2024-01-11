@@ -15,7 +15,6 @@ from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
 from mwmbl.crawler.stats import MwmblStats, StatsManager
-from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
