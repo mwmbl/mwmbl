@@ -45,7 +45,6 @@ CRAWLED_STATUSES = {URLStatus.CRAWLED, URLStatus.ERROR_TIMEOUT, URLStatus.ERROR_
 class FoundURL:
     url: str
     user_id_hash: str
-    score: float
     status: URLStatus
     timestamp: datetime
 

@@ -57,6 +57,5 @@ class DomainLinkDatabase:
         bloom_filter = self.links[url_group]
         bloom_filter.update(target)
 
-
-
-
+    def get_domain_score(self, domain: str) -> float:
+        return sum(1 if domain in bloom_filter else 0 for bloom_filter in self.links.values())/len(self.links)

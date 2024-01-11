@@ -45,39 +45,40 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
     logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
                 f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
 
-    with URLDatabase() as url_db:
-        url_scores = defaultdict(float)
-        url_users = {}
-        url_timestamps = {}
-        url_statuses = defaultdict(lambda: URLStatus.NEW)
-        for batch in batches:
-            for item in batch.items:
-                timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
-                url_timestamps[item.url] = timestamp
-                url_users[item.url] = batch.user_id_hash
-                if item.content is None:
-                    url_statuses[item.url] = get_url_error_status(item)
-                else:
-                    url_statuses[item.url] = URLStatus.CRAWLED
-                    try:
-                        crawled_page_domain = get_domain(item.url)
-                    except ValueError:
-                        logger.info(f"Couldn't parse URL {item.url}")
-                        continue
-                    score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
-                    for link in item.content.links:
+    url_scores = defaultdict(float)
+    url_users = {}
+    url_timestamps = {}
+    url_statuses = defaultdict(lambda: URLStatus.NEW)
+    for batch in batches:
+        for item in batch.items:
+            timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
+            url_timestamps[item.url] = timestamp
+            url_users[item.url] = batch.user_id_hash
+            if item.content is None:
+                url_statuses[item.url] = get_url_error_status(item)
+            else:
+                url_statuses[item.url] = URLStatus.CRAWLED
+                try:
+                    crawled_page_domain = get_domain(item.url)
+                except ValueError:
+                    logger.info(f"Couldn't parse URL {item.url}")
+                    continue
+                score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
+                for link in item.content.links:
+                    process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
+                                 url_timestamps, url_users, False, blacklist_domains)
+
+                if item.content.extra_links:
+                    for link in item.content.extra_links:
                         process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                     url_timestamps, url_users, False, blacklist_domains)
+                                     url_timestamps, url_users, True, blacklist_domains)
 
-                    if item.content.extra_links:
-                        for link in item.content.extra_links:
-                            process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                         url_timestamps, url_users, True, blacklist_domains)
+    found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
+                  for url in url_scores.keys() | url_statuses.keys()]
 
-        found_urls = [FoundURL(url, url_users[url], url_scores[url], url_statuses[url], url_timestamps[url])
-                      for url in url_scores.keys() | url_statuses.keys()]
+    logger.info(f"Found URLs, {len(found_urls)}")
 
-        logger.info(f"Found URLs, {len(found_urls)}")
+    with URLDatabase() as url_db:
         new_urls = url_db.update_found_urls(found_urls)
         new_item_queue.put(new_urls)
         logger.info(f"Put {len(new_urls)} new items in the URL queue")
