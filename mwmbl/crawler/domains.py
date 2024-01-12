@@ -9,7 +9,7 @@ from pybloomfilter import BloomFilter
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
 
-URL_GROUPS = [
+DOMAIN_GROUPS = [
     'github.com',
     'en.wikipedia.org',
     'news.ycombinator.com',
@@ -23,12 +23,12 @@ TOP_DOMAINS = set(islice(DOMAINS, 1000))
 OTHER_DOMAINS = set(islice(DOMAINS, 1000, 10000))
 
 
-def get_bloom_filter(url_group: str) -> BloomFilter:
+def get_bloom_filter(domain_group: str) -> BloomFilter:
     try:
-        bloom_filter = BloomFilter.open(settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(url_group=url_group))
+        bloom_filter = BloomFilter.open(settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(domain_group=domain_group))
     except FileNotFoundError:
         bloom_filter = BloomFilter(settings.NUM_DOMAINS_IN_BLOOM_FILTER, 1e-6,
-                                   settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(url_group=url_group))
+                                   settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(domain_group=domain_group), perm=0o666)
     return bloom_filter
 
 
@@ -37,18 +37,19 @@ class DomainLinkDatabase:
         self.links = {}
 
     def __enter__(self):
-        self.links = {url_group: get_bloom_filter(url_group) for url_group in URL_GROUPS}
+        self.links = {domain_group: get_bloom_filter(domain_group) for domain_group in DOMAIN_GROUPS}
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for bloom_filter in self.links.values():
             bloom_filter.close()
 
-    def update_domain_links(self, source: str, target: list[str]):
+    def update_domain_links(self, source: str, target: set[str]):
         if source in TOP_DOMAINS:
             url_group = 'top'
         elif source in OTHER_DOMAINS:
             url_group = 'other'
-        elif source in URL_GROUPS:
+        elif source in DOMAIN_GROUPS:
             url_group = source
         else:
             # This is a URL that we don't care about

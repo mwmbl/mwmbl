@@ -8,6 +8,7 @@ from typing import Collection
 from urllib.parse import urlparse
 
 from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS
@@ -45,10 +46,10 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
     logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
                 f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
 
-    url_scores = defaultdict(float)
     url_users = {}
     url_timestamps = {}
     url_statuses = defaultdict(lambda: URLStatus.NEW)
+    domain_links = defaultdict(set)
     for batch in batches:
         for item in batch.items:
             timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
@@ -63,18 +64,17 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
                 except ValueError:
                     logger.info(f"Couldn't parse URL {item.url}")
                     continue
-                score_multiplier = 1 if crawled_page_domain in DOMAINS else UNKNOWN_DOMAIN_MULTIPLIER
                 for link in item.content.links:
-                    process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                 url_timestamps, url_users, False, blacklist_domains)
+                    process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
+                                 blacklist_domains, domain_links)
 
                 if item.content.extra_links:
                     for link in item.content.extra_links:
-                        process_link(batch.user_id_hash, crawled_page_domain, link, score_multiplier, timestamp, url_scores,
-                                     url_timestamps, url_users, True, blacklist_domains)
+                        process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
+                                     blacklist_domains, domain_links)
 
     found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
-                  for url in url_scores.keys() | url_statuses.keys()]
+                  for url in url_statuses.keys() | url_users.keys()]
 
     logger.info(f"Found URLs, {len(found_urls)}")
 
@@ -83,8 +83,13 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
         new_item_queue.put(new_urls)
         logger.info(f"Put {len(new_urls)} new items in the URL queue")
 
+    with DomainLinkDatabase() as domain_link_db:
+        for source_domain, target_domains in domain_links.items():
+            domain_link_db.update_domain_links(source_domain, target_domains)
 
-def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multiplier, timestamp, url_scores, url_timestamps, url_users, is_extra: bool, blacklist_domains):
+
+def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users, blacklist_domains,
+                 domain_links):
     try:
         parsed_link = urlparse(link)
     except ValueError:
@@ -95,15 +100,12 @@ def process_link(user_id_hash, crawled_page_domain, link, unknown_domain_multipl
         logger.debug(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
-    extra_multiplier = EXTRA_LINK_MULTIPLIER if is_extra else 1.0
-    score = SCORE_FOR_SAME_DOMAIN if parsed_link.netloc == crawled_page_domain else SCORE_FOR_DIFFERENT_DOMAIN
-    url_scores[link] += score * unknown_domain_multiplier * extra_multiplier
     url_users[link] = user_id_hash
     url_timestamps[link] = timestamp
     domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
-    url_scores[domain] += SCORE_FOR_ROOT_PATH * unknown_domain_multiplier
     url_users[domain] = user_id_hash
     url_timestamps[domain] = timestamp
+    domain_links[crawled_page_domain].add(domain)
 
 
 def get_datetime_from_timestamp(timestamp: float) -> datetime:

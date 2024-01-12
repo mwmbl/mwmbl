@@ -59,6 +59,7 @@ class URLDatabase:
         except FileNotFoundError:
             logger.info("No existing bloom filter found, creating a new one")
             self.urls = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, settings.URLS_BLOOM_FILTER_PATH, perm=0o666)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.urls.close()
