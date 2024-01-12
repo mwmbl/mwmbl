@@ -7,6 +7,7 @@ from queue import Empty
 from random import Random
 from typing import KeysView, Union
 
+from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import BATCH_SIZE, URLDatabase, URLStatus, FoundURL, REASSIGN_MIN_HOURS
 from mwmbl.database import Database
 from mwmbl.hn_top_domains_filtered import DOMAINS as TOP_DOMAINS, DOMAINS
@@ -57,35 +58,39 @@ class URLQueue:
         return num_processed
 
     def _process_found_urls(self, found_urls: list[FoundURL], blacklist_domains: set[str]):
-        min_updated_date = datetime.utcnow() - timedelta(hours=REASSIGN_MIN_HOURS)
-
         logger.info(f"Found URLS: {len(found_urls)}")
-        valid_urls = [found_url for found_url in found_urls if found_url.status == URLStatus.NEW.value or (
-                found_url.status == URLStatus.ASSIGNED.value and found_url.timestamp < min_updated_date)]
+        logger.info(f"Found: {found_urls[:100]}")
+        valid_urls = [found_url for found_url in found_urls if found_url.status == URLStatus.NEW]
         logger.info(f"Valid URLs: {len(valid_urls)}")
 
         self._sort_urls(valid_urls, blacklist_domains)
         logger.info(f"Queue size: {self.num_queued_batches}")
         while self.num_queued_batches < MAX_QUEUE_SIZE and len(self._top_urls) >= self._min_top_domains:
             total_top_urls = sum(len(urls) for urls in self._top_urls.values())
-            logger.info(f"Total top URLs stored: {total_top_urls}")
+            logger.info(f"Total top URLs stored: {total_top_urls} for domains {self._top_urls.keys()}")
 
             total_other_urls = sum(len(urls) for urls in self._other_urls.values())
-            logger.info(f"Total other URLs stored: {total_other_urls}")
+            logger.info(f"Total other URLs stored: {total_other_urls} for domains {self._other_urls.keys()}")
 
             self._batch_urls()
             logger.info(f"Queue size after batching: {self.num_queued_batches}")
 
     def _sort_urls(self, valid_urls: list[FoundURL], blacklist_domains: set[str]):
-        for found_url in valid_urls:
-            try:
-                domain = get_domain(found_url.url)
-            except ValueError:
-                continue
-            if is_domain_blacklisted(domain, blacklist_domains):
-                continue
-            url_store = self._top_urls if domain in TOP_DOMAINS else self._other_urls
-            url_store[domain][found_url.url] = 1/len(found_url.url)
+        with DomainLinkDatabase() as link_db:
+            for found_url in valid_urls:
+                try:
+                    domain = get_domain(found_url.url)
+                except ValueError:
+                    continue
+                if is_domain_blacklisted(domain, blacklist_domains):
+                    continue
+                if domain in TOP_DOMAINS:
+                    self._top_urls[domain][found_url.url] = 1/len(found_url.url)
+                else:
+                    domain_score = link_db.get_domain_score(domain)
+                    if domain_score > 0:
+                        logger.info(f"Domain score for {domain}: {domain_score}")
+                        self._other_urls[domain][found_url.url] = 1/len(found_url.url)
 
         logger.info(f"URL store updated: {len(self._top_urls)} top domains, {len(self._other_urls)} other domains")
 

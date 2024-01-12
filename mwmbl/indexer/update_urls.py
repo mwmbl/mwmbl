@@ -102,10 +102,10 @@ def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timesta
 
     url_users[link] = user_id_hash
     url_timestamps[link] = timestamp
-    domain = f'{parsed_link.scheme}://{parsed_link.netloc}/'
-    url_users[domain] = user_id_hash
-    url_timestamps[domain] = timestamp
-    domain_links[crawled_page_domain].add(domain)
+    root_url = f'{parsed_link.scheme}://{parsed_link.netloc}/'
+    url_users[root_url] = user_id_hash
+    url_timestamps[root_url] = timestamp
+    domain_links[crawled_page_domain].add(parsed_link.netloc)
 
 
 def get_datetime_from_timestamp(timestamp: float) -> datetime:

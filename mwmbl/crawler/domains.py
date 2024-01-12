@@ -3,11 +3,15 @@ Record which source domains link to destination domains. Each source domain is a
 destination domains.
 """
 from itertools import islice
+from logging import getLogger
 
 from django.conf import settings
 from pybloomfilter import BloomFilter
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
+
+
+logger = getLogger(__name__)
 
 DOMAIN_GROUPS = [
     'github.com',
@@ -45,18 +49,19 @@ class DomainLinkDatabase:
             bloom_filter.close()
 
     def update_domain_links(self, source: str, target: set[str]):
-        if source in TOP_DOMAINS:
-            url_group = 'top'
+        if source in DOMAIN_GROUPS:
+            domain_group = source
+        elif source in TOP_DOMAINS:
+            domain_group = 'top'
         elif source in OTHER_DOMAINS:
-            url_group = 'other'
-        elif source in DOMAIN_GROUPS:
-            url_group = source
+            domain_group = 'other'
         else:
             # This is a URL that we don't care about
             return
 
-        bloom_filter = self.links[url_group]
+        logger.info(f"Updating domain links for {domain_group} with {target} links")
+        bloom_filter = self.links[domain_group]
         bloom_filter.update(target)
 
     def get_domain_score(self, domain: str) -> float:
-        return sum(1 if domain in bloom_filter else 0 for bloom_filter in self.links.values())/len(self.links)
+        return sum(1 if domain in bloom_filter else 0 for bloom_filter in self.links.values())
