@@ -1,3 +1,4 @@
+import faulthandler
 from multiprocessing import Process, Queue
 from pathlib import Path
 
@@ -20,6 +21,8 @@ class MwmblConfig(AppConfig):
         from mwmbl.indexer.update_urls import update_urls_continuously
         from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
         from mwmbl.url_queue import update_queue_continuously
+
+        faulthandler.enable()
 
         index_path = Path(settings.DATA_PATH) / INDEX_NAME
         try:
