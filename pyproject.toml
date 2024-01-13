@@ -77,3 +77,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 mwmbl-tinysearchengine = "mwmbl.main:run"
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"
