@@ -26,6 +26,11 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 DATA_PATH = "./devdata"
-RUN_BACKGROUND_PROCESSES = False
+RUN_BACKGROUND_PROCESSES = True
 NUM_PAGES = 2560
 
+URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls.bloom")
+NUM_URLS_IN_BLOOM_FILTER = 100_000
+
+DOMAIN_LINKS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "links_{domain_group}.bloom")
+NUM_DOMAINS_IN_BLOOM_FILTER = 100_000
