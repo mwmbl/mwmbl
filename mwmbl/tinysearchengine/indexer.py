@@ -190,6 +190,7 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
+        logger.info(f"Getting page {i}")
         page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
         try:
             decompressed_data = self.decompressor.decompress(page_data)
