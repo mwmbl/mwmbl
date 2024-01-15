@@ -193,8 +193,8 @@ class TinyIndex(Generic[T]):
         page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
         try:
             decompressed_data = self.decompressor.decompress(page_data)
-        except ZstdError:
-            logger.exception(f"Error decompressing page data, content: {page_data}")
+        except ZstdError as e:
+            logger.exception(f"Error decompressing page {i}: {e}")
             return []
         return json.loads(decompressed_data.decode('utf8'))
 
