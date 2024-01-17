@@ -5,6 +5,7 @@ from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
+from time import sleep
 from typing import TypeVar, Generic, Callable, List, Optional
 
 import mmh3
@@ -70,6 +71,7 @@ class TinyIndexMetadata:
     page_size: int
     num_pages: int
     item_factory: str
+    checksum_size: int = 0
 
     def to_bytes(self) -> bytes:
         metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode('utf8')
@@ -138,7 +140,7 @@ def _pad_to_page_size(data: bytes, page_size: int):
 
 
 class TinyIndex(Generic[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path, mode='r'):
+    def __init__(self, item_factory: Callable[..., T], index_path: str, mode: str = 'r'):
         if mode not in {'r', 'w'}:
             raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
 
@@ -157,6 +159,7 @@ class TinyIndex(Generic[T]):
 
         self.num_pages = metadata.num_pages
         self.page_size = metadata.page_size
+        self.checksum_size = metadata.checksum_size
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
@@ -186,12 +189,25 @@ class TinyIndex(Generic[T]):
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
+        # results = []
+        # for i in range(5):
+        #     try:
+        #         results = self._get_page_tuples(i)
+        #         break
+        #     except PageError:
+        #         sleep(0.001)
         results = self._get_page_tuples(i)
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
         logger.info(f"Getting page {i}")
-        page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
+        all_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
+        page_data = all_data[self.checksum_size:]
+        if self.checksum_size > 0:
+            checksum = all_data[:self.checksum_size]
+            calculated_checksum = mmh3.hash_bytes(page_data)[:self.checksum_size]
+            if checksum != calculated_checksum:
+                raise PageError(f"Checksums do not match, expected {checksum} but got {calculated_checksum}")
         try:
             decompressed_data = self.decompressor.decompress(page_data)
         except ZstdError:
@@ -211,16 +227,17 @@ class TinyIndex(Generic[T]):
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.compressor, self.page_size, data)
+        page_data = _get_page_data(self.compressor, self.page_size - self.checksum_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        checksum = mmh3.hash_bytes(page_data)[:self.checksum_size] if self.checksum_size > 0 else b''
+        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = checksum + page_data
 
     @staticmethod
-    def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
+    def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int, checksum_size: int = 8):
         if os.path.isfile(index_path):
             raise FileExistsError(f"Index file '{index_path}' already exists")
 
-        metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
+        metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__, checksum_size)
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
