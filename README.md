@@ -122,18 +122,7 @@ Development
 
 ### Local Testing
 
-This will run against a local test database without running background
-tasks to update batches etc.
-
-This is the simplest way to configure postgres, but you can set it up
-how you like as long as the `DATABASE_URL` you give is correct for
-your configuration.
-
-1. Install postgres and create a user for your current username
-2. Install [poetry](https://python-poetry.org/docs/#installation)
-3. Run `poetry install` to install dependencies
-4. Run `poetry shell` in the root directory to enter the virtual environment
-5. Run `$ DATABASE_URL="postgres://username@" python -m mwmbl.main` replacing "username" with your username.
+For trying out the service locally see the section in the Mwmbl [book](https://book.mwmbl.org/page/developers/).
 
 ### Using Dokku
 
