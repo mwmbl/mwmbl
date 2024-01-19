@@ -32,7 +32,7 @@ from mwmbl.settings import (
     FILE_NAME_SUFFIX,
     DATE_REGEX)
 
-stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL")))
+stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")))
 
 
 def get_bucket(name):
