@@ -189,6 +189,7 @@ class TinyIndex(Generic[T]):
         """
         Get the page at index i, decompress and deserialise it using JSON
         """
+        logger.info(f"Getting page {i}")
         # results = []
         # for i in range(5):
         #     try:
@@ -210,8 +211,8 @@ class TinyIndex(Generic[T]):
                 raise PageError(f"Checksums do not match, expected {checksum} but got {calculated_checksum}")
         try:
             decompressed_data = self.decompressor.decompress(page_data)
-        except ZstdError:
-            logger.exception(f"Error decompressing page data, content: {page_data}")
+        except ZstdError as e:
+            logger.exception(f"Error decompressing page {i}: {e}")
             return []
         return json.loads(decompressed_data.decode('utf8'))
 
