@@ -17,10 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-import mwmbl.crawler.app as crawler
-from mwmbl.search_setup import queued_batches, ranker, batch_cache
-from mwmbl.tinysearchengine import search
-from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation
+from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, search
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -32,11 +29,13 @@ urlpatterns = [
     path('app/approve/', approve, name="approve"),
     path('app/revert-current/', revert_current_curation, name="revert_current"),
 
-    # TODO: this is the old API, deprecated and to be removed once all clients have moved over
-    path("search/", search.create_router(ranker, "0.1").urls),
-    path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
+    path('search/', search, name="search"),
 
-    # New API
-    path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
-    path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
+    # # TODO: this is the old API, deprecated and to be removed once all clients have moved over
+    # path("search/", search.create_router(ranker, "0.1").urls),
+    # path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
+    #
+    # # New API
+    # path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
+    # path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
 ]

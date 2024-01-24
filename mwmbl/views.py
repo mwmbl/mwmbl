@@ -8,7 +8,7 @@ import justext
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -16,6 +16,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException
 
+from mwmbl.format import format_result
 from mwmbl.models import Curation
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
@@ -348,3 +349,9 @@ def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]
         return DocumentState.FROM_GOOGLE
     else:
         return None
+
+
+def search(request):
+    s = request.GET.get("s")
+    results = ranker.search(s, [])
+    return JsonResponse([format_result(result, s) for result in results], safe=False)

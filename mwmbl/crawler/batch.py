@@ -1,6 +1,10 @@
 from typing import Optional
 
-from ninja import Schema
+# from ninja import Schema
+
+
+class Schema:
+    pass
 
 
 class ItemContent(Schema):

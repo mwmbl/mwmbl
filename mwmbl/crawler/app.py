@@ -10,7 +10,7 @@ from uuid import uuid4
 import boto3
 import requests
 from fastapi import HTTPException
-from ninja import NinjaAPI
+# from ninja import NinjaAPI
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
@@ -49,7 +49,7 @@ def upload(data: bytes, name: str):
 last_batch = None
 
 
-def create_router(batch_cache: BatchCache, queued_batches: Queue, version: str) -> NinjaAPI:
+def create_router(batch_cache: BatchCache, queued_batches: Queue, version: str):
     router = NinjaAPI(urls_namespace=f"crawler-{version}")
 
     @router.post('/batches/')
