@@ -4,7 +4,8 @@ from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
-from mmap import mmap, PROT_READ, PROT_WRITE
+# from mmap import mmap, PROT_READ, PROT_WRITE
+from fmmap import mmap, PROT_READ, PROT_WRITE
 from time import sleep
 from typing import TypeVar, Generic, Callable, List, Optional
 
