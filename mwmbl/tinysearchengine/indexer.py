@@ -120,7 +120,8 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 
-def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
+def _get_page_data(page_size: int, items: list[T]):
+    compressor = ZstdCompressor()
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
@@ -157,8 +158,6 @@ class TinyIndex(Generic[T]):
 
         self.num_pages = metadata.num_pages
         self.page_size = metadata.page_size
-        self.compressor = ZstdCompressor()
-        self.decompressor = ZstdDecompressor()
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         self.index_file = None
         self.mmap = None
@@ -191,8 +190,9 @@ class TinyIndex(Generic[T]):
 
     def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
+        decompressor = ZstdDecompressor()
         try:
-            decompressed_data = self.decompressor.decompress(page_data)
+            decompressed_data = decompressor.decompress(page_data)
         except ZstdError as e:
             logger.exception(f"Error decompressing page {i}: {e}")
             return []
@@ -210,7 +210,7 @@ class TinyIndex(Generic[T]):
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.compressor, self.page_size, data)
+        page_data = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
 
@@ -223,8 +223,7 @@ class TinyIndex(Generic[T]):
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
-        compressor = ZstdCompressor()
-        page_bytes = _get_page_data(compressor, page_size, [])
+        page_bytes = _get_page_data(page_size, [])
 
         with open(index_path, 'wb') as index_file:
             index_file.write(metadata_padded)
