@@ -10,7 +10,7 @@ random = Random(1)
 
 
 def random_query(query):
-    url = f"http://localhost:8000/api/v1/search/?s={query}"
+    url = f"http://localhost:5000/api/v1/search/?s={query}"
     print(url)
     response = requests.get(url)
     data = response.json()
