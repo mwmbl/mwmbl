@@ -19,7 +19,7 @@ DOCUMENTS = [
     Document(title=f"Document {i}", url=f"https://something.com/{i}.html", extract=random_string(), score=i) for
     i in range(1000)]
 
-PAGES = [random.randint(0, 10240000) for _ in range(20000)]
+PAGES = [random.randint(0, 10240000) for _ in range(20)]
 
 NUM_PAGES = 10240000
 PAGE_SIZE = 4096

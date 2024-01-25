@@ -19,7 +19,7 @@ def random_query(query):
 
 def run():
     print("Start")
-    queries = ["".join(random.sample("the quick brown fox jumps over the lazy dog", 4)) for i in range(5000)]
+    queries = ["".join(random.sample("the quick brown fox jumps over the lazy dog", 4)) for i in range(10000)]
     with multiprocessing.Pool(processes=20) as pool:
         pool.map(random_query, queries)
     print("End")
