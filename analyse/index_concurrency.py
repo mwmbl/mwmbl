@@ -1,6 +1,7 @@
 import multiprocessing
 import os
 import string
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from random import Random
 
@@ -59,15 +60,17 @@ def read_page(page_index: int):
 
 
 def index_reading_writing_multithreading():
-    with multiprocessing.Pool(processes=10) as pool:
+    # with multiprocessing.Pool(processes=10) as pool:
+    with ThreadPool(processes=10) as pool:
         print("Start")
-        pool.map_async(read_page, [random.randint(0, indexer.num_pages) for i in range(1000000)])
+        pool.map_async(read_page, [random.randint(0, indexer.num_pages) for i in range(100000)])
 
         # for i in range(1000):
         #     write_page()
 
         pool.close()
         pool.join()
+        print("End")
 
 
 if __name__ == '__main__':

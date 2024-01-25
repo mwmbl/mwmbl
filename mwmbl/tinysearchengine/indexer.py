@@ -167,12 +167,14 @@ class TinyIndex(Generic[T]):
         self.mmap = None
 
     def __enter__(self):
+        print("Entering mmap")
         self.index_file = open(self.index_path, 'r+b')
         prot = PROT_READ   # if self.mode == 'r' else PROT_READ | PROT_WRITE
         self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print("Exiting mmap")
         self.mmap.close()
         self.index_file.close()
 
