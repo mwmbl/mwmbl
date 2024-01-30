@@ -3,9 +3,7 @@ name: Mirror Sync
 on:
   push:
     branches: ["main"]
-  workflow_dispatch: # Manual dispatch
-  schedule:
-    - cron: "0 * * * *"
+    workflow_dispatch: # Manual dispatch
 jobs:
   codeberg:
     runs-on: ubuntu-latest
