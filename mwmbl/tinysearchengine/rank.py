@@ -82,7 +82,11 @@ def get_domain_score(url):
 
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = get_query_regex(terms, is_complete, is_url)
-    matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
+    try:
+        matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
+    except TypeError:
+        logger.exception(f"Error getting match features, regex: {query_regex} result string: {result_string}")
+        raise
     # match_strings = {x.group(0).lower() for x in matches}
     # match_length = sum(len(x) for x in match_strings)
 
