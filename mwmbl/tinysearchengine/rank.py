@@ -49,6 +49,7 @@ def score_match(last_match_char, match_length, total_possible_match_length):
 
 
 def get_features(terms, title, url, extract, score, is_complete):
+    assert url is not None
     features = {}
     parsed_url = urlparse(url)
     domain = parsed_url.netloc
@@ -58,8 +59,10 @@ def get_features(terms, title, url, extract, score, is_complete):
                                (domain, 'domain', True),
                                (domain, 'domain_tokenized', False),
                                (path, 'path', True)]:
+        part_not_none = part if part is not None else 'socks'
+        print("Part", part, name)
         last_match_char, match_length, total_possible_match_length, match_terms = \
-            get_match_features(terms, part, is_complete, is_url)
+            get_match_features(terms, part_not_none, is_complete, is_url)
         features[f'last_match_char_{name}'] = last_match_char
         features[f'match_length_{name}'] = match_length
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
@@ -82,11 +85,7 @@ def get_domain_score(url):
 
 def get_match_features(terms, result_string, is_complete, is_url):
     query_regex = get_query_regex(terms, is_complete, is_url)
-    try:
-        matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
-    except TypeError:
-        logger.exception(f"Error getting match features, regex: {query_regex} result string: {result_string}")
-        raise
+    matches = list(re.finditer(query_regex, result_string, flags=re.IGNORECASE))
     # match_strings = {x.group(0).lower() for x in matches}
     # match_length = sum(len(x) for x in match_strings)
 
