@@ -51,6 +51,14 @@ class Document:
     term: Optional[str] = None
     state: Optional[int] = None
 
+    def __init__(self, title, url, extract, score, term=None, state=None):
+        self.title = title if title is not None else ''
+        self.url = url
+        self.extract = extract if extract is not None else ''
+        self.score = score
+        self.term = term
+        self.state = state
+
 
 @dataclass
 class TokenizedDocument(Document):

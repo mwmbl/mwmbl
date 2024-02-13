@@ -13,15 +13,3 @@ def test_order_result():
     ordered_results = order_results(["bananas"], documents, True)
 
     assert ordered_results[0].title == 'Bananas and apples'
-
-
-def test_order_results_where_document_has_properties_that_are_none():
-    doc1 = Document(title=None, url='https://something.com', extract='extract2', score=2.0)
-    doc2 = Document(title='Bananas and apples', url='https://something.com', extract=None, score=1.0)
-
-    documents = [doc1, doc2]
-
-    # Sort the documents
-    ordered_results = order_results(["bananas"], documents, True)
-
-    assert ordered_results[0].title == 'Bananas and apples'

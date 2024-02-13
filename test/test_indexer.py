@@ -117,3 +117,9 @@ def test_get_page_data_many_docs_subset_fit():
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
     
     assert serialized_data == padded_trimmed_data
+
+
+def test_constructing_document_removes_none():
+    document = Document(title=None,url='url',extract=None,score=1.0)
+    assert document.title == ''
+    assert document.extract == ''
