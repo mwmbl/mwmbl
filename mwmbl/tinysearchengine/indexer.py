@@ -52,6 +52,8 @@ class Document:
     state: Optional[int] = None
 
     def __init__(self, title, url, extract, score, term=None, state=None):
+        # Sometimes the title or extract may be None, probably because of user generated content
+        # It's not allowed to be None though, or things will break
         self.title = title if title is not None else ''
         self.url = url
         self.extract = extract if extract is not None else ''
