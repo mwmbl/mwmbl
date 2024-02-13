@@ -50,6 +50,8 @@ def score_match(last_match_char, match_length, total_possible_match_length):
 
 def get_features(terms, title, url, extract, score, is_complete):
     assert url is not None
+    assert title is not None
+    assert extract is not None
     features = {}
     parsed_url = urlparse(url)
     domain = parsed_url.netloc
@@ -59,10 +61,8 @@ def get_features(terms, title, url, extract, score, is_complete):
                                (domain, 'domain', True),
                                (domain, 'domain_tokenized', False),
                                (path, 'path', True)]:
-        part_not_none = part if part is not None else 'socks'
-        print("Part", part, name)
         last_match_char, match_length, total_possible_match_length, match_terms = \
-            get_match_features(terms, part_not_none, is_complete, is_url)
+            get_match_features(terms, part, is_complete, is_url)
         features[f'last_match_char_{name}'] = last_match_char
         features[f'match_length_{name}'] = match_length
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
