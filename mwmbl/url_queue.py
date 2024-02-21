@@ -143,7 +143,13 @@ def _add_urls(domains: Union[set[str], KeysView], domain_urls: dict[str, dict[st
 def update_queue_continuously(new_item_queue: Queue, queued_batches: Queue):
     queue = URLQueue(new_item_queue, queued_batches)
     while True:
-        num_processed = queue.update()
+        # noinspection PyBroadException
+        try:
+            num_processed = queue.update()
+        except Exception:
+            logger.exception("Error updating URL queue")
+            time.sleep(10)
+            continue
         logger.info(f"Queue update, num processed: {num_processed}, queue size: {queue.num_queued_batches}, num top "
                     f"domains: {queue.num_top_domains}")
         if num_processed == 0:
