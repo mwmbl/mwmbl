@@ -41,7 +41,7 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str):
     index_pages(index_path, page_documents)
 
 
-def index_pages(index_path, page_documents):
+def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
     with TinyIndex(Document, index_path, 'w') as indexer:
         for page, documents in page_documents.items():
             new_documents = []
