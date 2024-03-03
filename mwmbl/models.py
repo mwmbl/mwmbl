@@ -26,3 +26,10 @@ class Curation(models.Model):
     original_results = models.JSONField()
     new_results = models.JSONField()
     num_changes = models.IntegerField(default=0)
+
+
+class OldIndex(models.Model):
+    index_path = models.CharField(max_length=300, primary_key=True)
+    index_total_pages = models.IntegerField()
+    last_copied_time = models.DateTimeField()
+    last_page_copied = models.IntegerField()
