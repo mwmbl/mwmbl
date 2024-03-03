@@ -185,7 +185,8 @@ class TinyIndex(Generic[T]):
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
         logger.debug(f"Retrieving index {index}")
-        return self.get_page(index)
+        page = self.get_page(index)
+        return [item for item in page if item.term is None or item.term == key]
 
     def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
