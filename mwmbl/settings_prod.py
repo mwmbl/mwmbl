@@ -30,7 +30,6 @@ EMAIL_USE_TLS = True
 
 
 DATA_PATH = "/app/storage"
-RUN_BACKGROUND_PROCESSES = False
 NUM_PAGES = 10240000
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls.bloom")
