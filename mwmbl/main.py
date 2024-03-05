@@ -27,7 +27,7 @@ def run():
         redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
         url_queue = RedisURLQueue(redis)
         update_urls_continuously(settings.DATA_PATH, url_queue)
-    elif mwmbl_app == "background":
+    elif mwmbl_app == "update_batches":
         background.run(settings.DATA_PATH)
     elif mwmbl_app == "server":
         uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000)
