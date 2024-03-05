@@ -12,9 +12,6 @@ from mwmbl.redis_url_queue import RedisURLQueue
 
 
 def run():
-    # FORMAT = '%(levelname)s %(name)s %(asctime)s %(message)s'
-    # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=FORMAT)
-
     django.setup()
 
     from django.conf import settings
