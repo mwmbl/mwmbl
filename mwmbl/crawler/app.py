@@ -18,6 +18,7 @@ from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
+from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
     ENDPOINT_URL,
     KEY_ID,
@@ -31,7 +32,7 @@ from mwmbl.settings import (
     FILE_NAME_SUFFIX,
     DATE_REGEX)
 
-stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")))
+stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
 
 
 def get_bucket(name):
@@ -49,7 +50,7 @@ def upload(data: bytes, name: str):
 last_batch = None
 
 
-def create_router(batch_cache: BatchCache, queued_batches: Queue, version: str) -> NinjaAPI:
+def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, version: str) -> NinjaAPI:
     router = NinjaAPI(urls_namespace=f"crawler-{version}")
 
     @router.post('/batches/')
@@ -110,10 +111,9 @@ def create_router(batch_cache: BatchCache, queued_batches: Queue, version: str) 
     def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
         user_id_hash = _get_user_id_hash(batch_request)
         try:
-            urls = queued_batches.get(block=False)
+            urls = queued_batches.get_batch()
         except Empty:
             return []
-
         # TODO: track which URLs are currently being crawled
 
         return urls
