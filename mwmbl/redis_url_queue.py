@@ -1,3 +1,4 @@
+from logging import getLogger
 from random import Random
 from urllib.parse import urlparse
 
@@ -9,6 +10,7 @@ from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.settings import CORE_DOMAINS
 
 random = Random(1)
+logger = getLogger(__name__)
 
 
 DOMAIN_URLS_KEY = "domain-urls-{domain}"
@@ -56,6 +58,8 @@ class RedisURLQueue:
             lowest_scoring_domain = self.redis.zpopmin(DOMAIN_SCORE_KEY)
             self.redis.delete(DOMAIN_URLS_KEY.format(domain=lowest_scoring_domain))
 
+        logger.info(f"Queued {len(found_urls)} URLs, number of domains: {self.redis.zcard(DOMAIN_SCORE_KEY)}")
+
     def get_batch(self) -> list[str]:
         top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
         top_other_domains = top_scoring_domains - DOMAINS.keys()
@@ -64,11 +68,18 @@ class RedisURLQueue:
                    + random.sample(DOMAINS.keys(), 50)
                    + random.sample(top_other_domains, 100))
 
+        logger.info(f"Getting batch from domains {domains}")
+
         # Pop the highest scoring URL from each domain
         urls = []
         for domain in domains:
-            urls.append(self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain)))
-            if len(urls) > BATCH_SIZE:
+            domain_urls_scores = self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain))
+
+            for url, score in domain_urls_scores:
+                urls.append(url)
+
+            if len(urls) >= BATCH_SIZE:
                 break
 
+        logger.info(f"Returning URLs: {urls}")
         return urls

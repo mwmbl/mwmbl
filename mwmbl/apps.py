@@ -14,12 +14,8 @@ class MwmblConfig(AppConfig):
 
     def ready(self):
         # Imports here to avoid AppRegistryNotReady exception
-        from mwmbl.search_setup import queued_batches
-        from mwmbl import background
         from mwmbl.indexer.paths import INDEX_NAME
-        from mwmbl.indexer.update_urls import update_urls_continuously
         from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-        from mwmbl.url_queue import update_queue_continuously
 
         index_path = Path(settings.DATA_PATH) / INDEX_NAME
         try:
@@ -35,9 +31,3 @@ class MwmblConfig(AppConfig):
         with Database() as db:
             index_db = IndexDatabase(db.connection)
             index_db.create_tables()
-
-        if settings.RUN_BACKGROUND_PROCESSES:
-            new_item_queue = Queue()
-            Process(target=background.run, args=(settings.DATA_PATH,)).start()
-            Process(target=update_queue_continuously, args=(new_item_queue, queued_batches,)).start()
-            Process(target=update_urls_continuously, args=(settings.DATA_PATH, new_item_queue)).start()

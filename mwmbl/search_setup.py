@@ -1,15 +1,18 @@
-from multiprocessing import Queue
+import os
 from pathlib import Path
 
 from django.conf import settings
+from redis import Redis
 
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import INDEX_NAME, BATCH_DIR_NAME
+from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
-queued_batches = Queue()
+redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+queued_batches = RedisURLQueue(redis)
 completer = Completer()
 index_path = Path(settings.DATA_PATH) / INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)

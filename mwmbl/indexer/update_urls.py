@@ -18,6 +18,7 @@ from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.indexer.paths import BATCH_DIR_NAME
+from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, SCORE_FOR_SAME_DOMAIN, \
     SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER
 from mwmbl.utils import get_domain
@@ -25,7 +26,7 @@ from mwmbl.utils import get_domain
 logger = getLogger(__name__)
 
 
-def update_urls_continuously(data_path: str, new_item_queue: Queue):
+def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
     batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
     while True:
         try:
@@ -35,11 +36,12 @@ def update_urls_continuously(data_path: str, new_item_queue: Queue):
         sleep(10)
 
 
-def run(batch_cache: BatchCache, new_item_queue: Queue):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 100, new_item_queue)
+def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue):
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 100,
+                      new_item_queue)
 
 
-def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Queue):
+def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
     start = datetime.now()
     blacklist_domains = get_blacklist_domains()
     blacklist_retrieval_time = datetime.now() - start
@@ -80,7 +82,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Qu
 
     with URLDatabase() as url_db:
         new_urls = url_db.update_found_urls(found_urls)
-        new_item_queue.put(new_urls)
+        new_item_queue.queue_urls(new_urls)
         logger.info(f"Put {len(new_urls)} new items in the URL queue")
 
     with DomainLinkDatabase() as domain_link_db:
