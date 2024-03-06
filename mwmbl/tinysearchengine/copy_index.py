@@ -30,3 +30,5 @@ def copy_pages(old_index_path: str, new_index_path: str, start_page: int, num_pa
 
     logger.info(f"Copying {len(page_documents)} pages to {new_index_path}")
     index_pages(new_index_path, page_documents)
+
+    return page_index
