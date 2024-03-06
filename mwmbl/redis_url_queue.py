@@ -75,6 +75,15 @@ class RedisURLQueue:
         for domain in domains:
             domain_urls_scores = self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain))
 
+            # Update the domain score if we removed a URL
+            new_domain_scores = self.redis.zrangebyscore(
+                DOMAIN_URLS_KEY.format(domain=domain), "-inf", "+inf", start=0, num=1, withscores=True)
+            if new_domain_scores:
+                new_domain_score = new_domain_scores[0][1]
+                self.redis.zadd(DOMAIN_SCORE_KEY, {domain: new_domain_score}, gt=True)
+            else:
+                self.redis.zrem(DOMAIN_SCORE_KEY, domain)
+
             for url, score in domain_urls_scores:
                 urls.append(url)
 
