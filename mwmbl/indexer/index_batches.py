@@ -33,10 +33,14 @@ def run(batch_cache: BatchCache, index_path: str):
     process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, process, 10000)
 
 
+def get_url_score(url):
+    # TODO: compute a proper score for each document
+    return 1/len(url)
+
+
 def index_batches(batch_data: Collection[HashedBatch], index_path: str):
     document_tuples = list(get_documents_from_batches(batch_data))
-    # TODO: compute a proper score for each document
-    documents = [Document(title, url, extract, 1/len(url)) for title, url, extract in document_tuples]
+    documents = [Document(title, url, extract, get_url_score(url)) for title, url, extract in document_tuples]
     page_documents = preprocess_documents(documents, index_path)
     index_pages(index_path, page_documents)
 

@@ -15,9 +15,9 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 from mwmbl.models import OldIndex
 from mwmbl.tinysearchengine.copy_index import copy_pages
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
-
-NUM_PAGES_TO_COPY = 10
+NUM_PAGES_TO_COPY = 1024
 
 
 basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -49,13 +49,13 @@ def copy_all_indexes(new_index_path):
 
     # Check if all indexes are copied
 
+    num_updated = 0
     for old_index_info in old_indexes:
-        if old_index_info.last_page_copied >= old_index_info.num_pages - 1:
-            logger.info(f"All pages copied for index {old_index_info.index_path}")
-            continue
+        start_page = old_index_info.last_page_copied + 1 if old_index_info.last_page_copied else 0
+        end_page = copy_pages(old_index_info.index_path, new_index_path, start_page, NUM_PAGES_TO_COPY)
 
-        logger.info(f"Copying pages from {old_index_info.index_path} to {new_index_path} starting at page {old_index_info.last_page_copied}")
-        end_page = copy_pages(old_index_info.index_path, new_index_path, old_index_info.start_page, NUM_PAGES_TO_COPY)
+        if start_page == end_page:
+            continue
 
         # Update the start page
         old_index_info.last_page_copied = end_page
@@ -63,13 +63,18 @@ def copy_all_indexes(new_index_path):
         old_index_info.save()
 
         logger.info(f"Copied pages from {old_index_info.index_path} to {new_index_path} up to page {end_page}")
+        num_updated += 1
+    return num_updated
 
 
 def copy_indexes_continuously():
     new_index_path = Path(settings.DATA_PATH) / INDEX_NAME
     while True:
+        num_updated = 0
         try:
-            copy_all_indexes(new_index_path)
+            num_updated = copy_all_indexes(new_index_path)
         except Exception:
             logger.exception("Error copying pages")
-        sleep(10)
+
+        if num_updated == 0:
+            sleep(10)
