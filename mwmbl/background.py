@@ -12,10 +12,8 @@ from django.conf import settings
 
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.paths import BATCH_DIR_NAME, INDEX_NAME
 from mwmbl.models import OldIndex
 from mwmbl.tinysearchengine.copy_index import copy_pages
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
 NUM_PAGES_TO_COPY = 1024
 
@@ -28,8 +26,8 @@ def run(data_path: str):
     logger.info("Started background process")
 
     historical.run()
-    index_path = Path(data_path) / INDEX_NAME
-    batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
+    index_path = Path(data_path) / settings.INDEX_NAME
+    batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
 
     while True:
         try:
@@ -68,7 +66,7 @@ def copy_all_indexes(new_index_path):
 
 
 def copy_indexes_continuously():
-    new_index_path = Path(settings.DATA_PATH) / INDEX_NAME
+    new_index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     while True:
         num_updated = 0
         try:

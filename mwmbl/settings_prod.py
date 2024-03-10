@@ -30,7 +30,10 @@ EMAIL_USE_TLS = True
 
 
 DATA_PATH = "/app/storage"
-NUM_PAGES = 10240000
+INDEX_NAME = 'index-v2-400G.tinysearch'
+
+# 400GB index
+NUM_PAGES = 102400000
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls.bloom")
 NUM_URLS_IN_BLOOM_FILTER = 200_000_000

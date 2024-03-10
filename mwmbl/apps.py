@@ -14,10 +14,9 @@ class MwmblConfig(AppConfig):
 
     def ready(self):
         # Imports here to avoid AppRegistryNotReady exception
-        from mwmbl.indexer.paths import INDEX_NAME
         from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
 
-        index_path = Path(settings.DATA_PATH) / INDEX_NAME
+        index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
         try:
             existing_index = TinyIndex(item_factory=Document, index_path=index_path)
             if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != settings.NUM_PAGES:

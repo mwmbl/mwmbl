@@ -168,3 +168,5 @@ FOOTER_LINKS = [
 
 
 ]
+
+BATCH_DIR_NAME = 'batches'

@@ -1,12 +1,10 @@
 import os
-from pathlib import Path
 
 import django
 import uvicorn
 from django.core.management import call_command
 from redis import Redis
 
-from mwmbl.indexer.paths import INDEX_NAME
 from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.redis_url_queue import RedisURLQueue
 
