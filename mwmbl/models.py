@@ -30,6 +30,5 @@ class Curation(models.Model):
 
 class OldIndex(models.Model):
     index_path = models.CharField(max_length=300, primary_key=True)
-    index_total_pages = models.IntegerField()
-    last_copied_time = models.DateTimeField()
-    last_page_copied = models.IntegerField()
+    last_copied_time = models.DateTimeField(null=True, blank=True)
+    last_page_copied = models.IntegerField(null=True, blank=True)

@@ -5,7 +5,6 @@ from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from random import Random
 
-from mwmbl.indexer.paths import INDEX_NAME
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
 random = Random(2)
@@ -25,7 +24,7 @@ PAGES = [random.randint(0, 10240000) for _ in range(20)]
 NUM_PAGES = 10240000
 PAGE_SIZE = 4096
 
-INDEX_PATH = Path(os.environ["HOME"] + "/mwmbl-data") / INDEX_NAME
+INDEX_PATH = Path(os.environ["HOME"] + "/mwmbl-data") / "index-v2.tinysearch"
 
 # INDEX_PATH = 'temp-index.tinysearch'
 

@@ -1,7 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
-from multiprocessing import Queue
 from pathlib import Path
 from time import sleep
 from typing import Collection
@@ -10,24 +9,21 @@ from urllib.parse import urlparse
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
-from mwmbl.database import Database
-from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.indexer.paths import BATCH_DIR_NAME
 from mwmbl.redis_url_queue import RedisURLQueue
-from mwmbl.settings import UNKNOWN_DOMAIN_MULTIPLIER, SCORE_FOR_SAME_DOMAIN, \
-    SCORE_FOR_DIFFERENT_DOMAIN, SCORE_FOR_ROOT_PATH, EXTRA_LINK_MULTIPLIER
 from mwmbl.utils import get_domain
+
+from django.conf import settings
 
 logger = getLogger(__name__)
 
 
 def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
-    batch_cache = BatchCache(Path(data_path) / BATCH_DIR_NAME)
+    batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
     while True:
         try:
             run(batch_cache, new_item_queue)

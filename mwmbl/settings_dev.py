@@ -26,6 +26,8 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 DATA_PATH = "./devdata"
+INDEX_NAME = 'index-v2.tinysearch'
+
 NUM_PAGES = 2560
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls.bloom")

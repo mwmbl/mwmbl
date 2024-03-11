@@ -26,6 +26,3 @@ TOP_DOMAINS_JSON_PATH = TINYSEARCH_DATA_DIR / 'hn-top-domains.json'
 MWMBL_DATA_DIR = DATA_DIR / "mwmbl"
 CRAWL_GLOB = str(MWMBL_DATA_DIR / "b2") + "/*/*/*/*/*/*.json.gz"
 LINK_COUNT_PATH = MWMBL_DATA_DIR / 'crawl-counts.json'
-
-INDEX_NAME = 'index-v2.tinysearch'
-BATCH_DIR_NAME = 'batches'
