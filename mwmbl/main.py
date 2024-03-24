@@ -5,7 +5,7 @@ import uvicorn
 from django.core.management import call_command
 from redis import Redis
 
-from mwmbl.count_urls import count_urls
+from mwmbl.count_urls import count_urls_continuously
 from mwmbl.indexer.update_urls import update_urls_continuously
 from mwmbl.redis_url_queue import RedisURLQueue
 
@@ -31,7 +31,7 @@ def run():
     elif mwmbl_app == "copy_indexes":
         background.copy_indexes_continuously()
     elif mwmbl_app == "count_urls":
-        count_urls()
+        count_urls_continuously()
     elif mwmbl_app == "server":
         uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000)
     else:

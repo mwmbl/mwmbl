@@ -1,7 +1,8 @@
 import os
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from logging import getLogger
 from pathlib import Path
+from time import sleep
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -26,6 +27,17 @@ logger = getLogger(__name__)
 
 def get_redis():
     return Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+
+
+def count_urls_continuously():
+    while True:
+        start_time = datetime.utcnow()
+        count_urls()
+        end_time = datetime.utcnow()
+        total_time = (end_time - start_time)
+        time_remaining = 60 * 60 * 24 - total_time.total_seconds()
+        logger.info(f"Counting took {total_time}. Sleeping for {timedelta(seconds=time_remaining)}.")
+        sleep(time_remaining)
 
 
 def count_urls():
