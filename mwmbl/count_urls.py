@@ -82,21 +82,21 @@ def _set_count(key, redis, today, count):
     redis.expire(key.format(date=today), LONG_EXPIRE_SECONDS)
 
 
-def get_counts() -> dict[str, list[int]]:
+def get_counts() -> dict[str, dict[str, int]]:
     redis = get_redis()
 
     today = date.today()
 
-    urls_in_index_daily = []
-    domains_in_index_daily = []
-    results_in_index_daily = []
+    urls_in_index_daily = {}
+    domains_in_index_daily = {}
+    results_in_index_daily = {}
     for i in range(29, -1, -1):
         date_i = today - timedelta(days=i)
 
         key = INDEX_URL_COUNT_KEY
-        urls_in_index_daily.append(_get_count(redis, key, date_i))
-        domains_in_index_daily.append(_get_count(redis, INDEX_DOMAIN_COUNT_KEY, date_i))
-        results_in_index_daily.append(_get_count(redis, INDEX_RESULT_COUNT_KEY, date_i))
+        urls_in_index_daily[str(date_i)] = _get_count(redis, key, date_i)
+        domains_in_index_daily[str(date_i)] = _get_count(redis, INDEX_DOMAIN_COUNT_KEY, date_i)
+        results_in_index_daily[str(date_i)] = _get_count(redis, INDEX_RESULT_COUNT_KEY, date_i)
 
     return {
         "urls_in_index_daily": urls_in_index_daily,
