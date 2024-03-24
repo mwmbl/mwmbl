@@ -93,10 +93,9 @@ def get_counts() -> dict[str, dict[str, int]]:
     for i in range(29, -1, -1):
         date_i = today - timedelta(days=i)
 
-        key = INDEX_URL_COUNT_KEY
-        urls_in_index_daily[str(date_i)] = _get_count(redis, key, date_i)
-        domains_in_index_daily[str(date_i)] = _get_count(redis, INDEX_DOMAIN_COUNT_KEY, date_i)
-        results_in_index_daily[str(date_i)] = _get_count(redis, INDEX_RESULT_COUNT_KEY, date_i)
+        _get_count(redis, urls_in_index_daily, INDEX_URL_COUNT_KEY, date_i)
+        _get_count(redis, domains_in_index_daily, INDEX_DOMAIN_COUNT_KEY, date_i)
+        _get_count(redis, results_in_index_daily, INDEX_RESULT_COUNT_KEY, date_i)
 
     return {
         "urls_in_index_daily": urls_in_index_daily,
@@ -105,9 +104,13 @@ def get_counts() -> dict[str, dict[str, int]]:
     }
 
 
-def _get_count(redis, key, date_i):
-    c = int(redis.get(key.format(date=date_i)) or 0)
-    return c
+def _get_count(redis, count_dict, key, date_i):
+    """
+    Get the count for a given date and set it in the count_dict.
+    """
+    count = redis.get(key.format(date=date_i))
+    if count is not None:
+        count_dict[str(date_i)] = int(count)
 
 
 if __name__ == "__main__":
