@@ -1,4 +1,5 @@
 import re
+from typing import Sequence
 
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -6,7 +7,7 @@ from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 DOMAIN_REGEX = re.compile(r".*://([^/]*)")
 
 
-def batch(items: list, batch_size):
+def batch(items: Sequence, batch_size):
     """
     Adapted from https://stackoverflow.com/a/8290508
     """

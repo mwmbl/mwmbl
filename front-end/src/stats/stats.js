@@ -28,6 +28,9 @@ import {Chart} from "chart.js/auto";
   const urlsCrawledDailyChart = createChart('urls-by-day', null, "URLs crawled by day");
   const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour")
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day")
+  const numUrlsInIndexDailyChart = createChart('num-index-urls-by-day', null, "Number of URLs in index by day")
+  const numDomainsInIndexDailyChart = createChart('num-index-domains-by-day', null, "Number of domains in index by day")
+  const numResultsInIndexDailyChart = createChart('num-index-results-by-day', null, "Number of results in index by day")
 
   const urlsByUserCanvas = document.getElementById('urls-by-user');
   const byUserChart = new Chart(urlsByUserCanvas, {
@@ -101,6 +104,18 @@ import {Chart} from "chart.js/auto";
         byDomainChart.data.labels = Object.keys(stats.top_domains);
         byDomainChart.data.datasets[0].data = Object.values(stats.top_domains);
         byDomainChart.update();
+
+        numUrlsInIndexDailyChart.data.labels = Object.keys(stats.urls_in_index_daily);
+        numUrlsInIndexDailyChart.data.datasets[0].data = Object.values(stats.urls_in_index_daily);
+        numUrlsInIndexDailyChart.update();
+
+        numDomainsInIndexDailyChart.data.labels = Object.keys(stats.domains_in_index_daily);
+        numDomainsInIndexDailyChart.data.datasets[0].data = Object.values(stats.domains_in_index_daily);
+        numDomainsInIndexDailyChart.update();
+
+        numResultsInIndexDailyChart.data.labels = Object.keys(stats.results_in_index_daily);
+        numResultsInIndexDailyChart.data.datasets[0].data = Object.values(stats.results_in_index_daily);
+        numResultsInIndexDailyChart.update();
       })
     });
   }

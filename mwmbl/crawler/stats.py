@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 from redis import Redis
 
+from mwmbl.count_urls import get_counts
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 
@@ -29,6 +30,9 @@ class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
     top_users: dict[str, int]
     top_domains: dict[str, int]
+    urls_in_index_daily: dict[str, int]
+    domains_in_index_daily: dict[str, int]
+    results_in_index_daily: dict[str, int]
 
 
 class StatsManager:
@@ -101,6 +105,7 @@ class StatsManager:
         host_counts = self.redis.zrevrange(host_key, 0, 100, withscores=True)
 
         urls_crawled_today = list(urls_crawled_daily.values())[-1]
+        index_stats = get_counts()
         return MwmblStats(
             urls_crawled_today=urls_crawled_today,
             urls_crawled_daily=urls_crawled_daily,
@@ -108,6 +113,7 @@ class StatsManager:
             users_crawled_daily=users_crawled_daily,
             top_users=user_counts,
             top_domains=host_counts,
+            **index_stats,
         )
 
 
