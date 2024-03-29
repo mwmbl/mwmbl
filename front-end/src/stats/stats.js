@@ -73,6 +73,10 @@ import {Chart} from "chart.js/auto";
     }
   });
 
+function numberWithCommas(x) {
+  // From https://stackoverflow.com/a/2901298/660902
+  return x.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
 
   function updateStats() {
     fetch("https://api.mwmbl.org/crawler/stats").then(result => {
@@ -80,11 +84,23 @@ import {Chart} from "chart.js/auto";
         console.log("Stats", stats);
 
         const urlCountSpan = document.getElementById("num-urls");
-        urlCountSpan.innerText = stats.urls_crawled_today;
+        urlCountSpan.innerText = numberWithCommas(stats.urls_crawled_today);
 
         const numUsers = Object.values(stats.users_crawled_daily)[Object.keys(stats.users_crawled_daily).length - 1];
         const userCountSpan = document.getElementById("num-users");
-        userCountSpan.innerText = numUsers;
+        userCountSpan.innerText = numberWithCommas(numUsers);
+
+        const numUrlsInIndex = Object.values(stats.urls_in_index_daily)[Object.keys(stats.urls_in_index_daily).length - 1];
+        const numUrlsInIndexSpan = document.getElementById("num-index-urls");
+        numUrlsInIndexSpan.innerText = numberWithCommas(numUrlsInIndex);
+
+        const numDomainsInIndex = Object.values(stats.domains_in_index_daily)[Object.keys(stats.domains_in_index_daily).length - 1];
+        const numDomainsInIndexSpan = document.getElementById("num-index-domains");
+        numDomainsInIndexSpan.innerText = numberWithCommas(numDomainsInIndex);
+
+        const numResultsInIndex = Object.values(stats.results_in_index_daily)[Object.keys(stats.results_in_index_daily).length - 1];
+        const numResultsInIndexSpan = document.getElementById("num-index-results");
+        numResultsInIndexSpan.innerText = numberWithCommas(numResultsInIndex);
 
         usersCrawledDailyChart.data.labels = Object.keys(stats.users_crawled_daily);
         usersCrawledDailyChart.data.datasets[0].data = Object.values(stats.users_crawled_daily);
