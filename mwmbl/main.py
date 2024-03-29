@@ -32,10 +32,12 @@ def run():
         background.copy_indexes_continuously()
     elif mwmbl_app == "count_urls":
         count_urls_continuously()
-    elif mwmbl_app == "server":
-        uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000)
+    # TODO: reinstate
+    # elif mwmbl_app == "server":
     else:
-        raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
+        uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000)
+    # else:
+    #     raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
 
 
 if __name__ == "__main__":
