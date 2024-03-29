@@ -21,7 +21,7 @@ def run():
 
     call_command("migrate")
 
-    mwmbl_app = os.environ.get("MWMBL_APP")
+    mwmbl_app = os.environ["MWMBL_APP"]
     if mwmbl_app == "update_urls":
         redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
         url_queue = RedisURLQueue(redis)
@@ -32,12 +32,10 @@ def run():
         background.copy_indexes_continuously()
     elif mwmbl_app == "count_urls":
         count_urls_continuously()
-    # TODO: reinstate
-    # elif mwmbl_app == "server":
-    else:
+    elif mwmbl_app == "server":
         uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000)
-    # else:
-    #     raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
+    else:
+        raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
 
 
 if __name__ == "__main__":
