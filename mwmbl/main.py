@@ -21,7 +21,7 @@ def run():
 
     call_command("migrate")
 
-    mwmbl_app = os.environ["MWMBL_APP"]
+    mwmbl_app = os.environ.get("MWMBL_APP")
     if mwmbl_app == "update_urls":
         redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
         url_queue = RedisURLQueue(redis)
