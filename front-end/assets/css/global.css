@@ -350,6 +350,17 @@ a {
   padding: 10px;
 }
 
+.compare {
+  display: flex;
+  /*flex-direction: column;*/
+  gap: 10px;
+}
+
+.compare-item {
+  /* set the maximum width of the item */
+  /*max-width: 300px;*/
+}
+
 /* Sortable styling is not working in HTML 5 yet */
 /*.sortable-drag {*/
 /*    opacity: 1.0;*/
@@ -362,3 +373,7 @@ a {
 /*.sortable-chosen {*/
 /*  opacity: 0;*/
 /*}*/
+
+.center {
+  text-align: center;
+}
