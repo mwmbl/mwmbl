@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load result_filters %}
+
+{% block content %}
+  <h1>Original results</h1>
+  <ul class="results">
+    {% for result in curation.original_results %}
+      <li class="result" is="mwmbl-result">
+        <div class="result-container">
+          <div class="result-link">
+            <a href="{{result.url}}">
+              <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
+              <p class='title'>{{result.title|format_for_query:curation.query}}</p>
+            </a>
+            <p class='extract'>{{result.extract|format_for_query:curation.query}}</p>
+          </div>
+          <div class="curation-buttons">
+            <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}">✓</button>
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}
