@@ -49,7 +49,6 @@ indexer = [
     "warcio",
     "idna",
     "beautifulsoup4",
-    "lxml",
     "langdetect",
     "pyarrow",
     "pyspark",
