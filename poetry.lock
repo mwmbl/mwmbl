@@ -1073,9 +1073,6 @@ files = [
     {file = "lxml-5.2.0.tar.gz", hash = "sha256:21dc490cdb33047bc7f7ad76384f3366fa8f5146b86cc04c4af45de901393b90"},
 ]
 
-[package.dependencies]
-lxml-html-clean = {version = "*", optional = true, markers = "extra == \"html-clean\""}
-
 [package.extras]
 cssselect = ["cssselect (>=0.7)"]
 html-clean = ["lxml-html-clean"]
@@ -2684,4 +2681,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "b5dbef591ef471269abb560c51ce86b447809d588c36038d68d0fa243dcab393"
+content-hash = "b40f6c3798e99e8938fe137447fcaeb2a4067cd0548c7eaa692d43c6d38ab62b"
