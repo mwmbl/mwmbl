@@ -2679,9 +2679,9 @@ cffi = {version = ">=1.11", markers = "platform_python_implementation == \"PyPy\
 cffi = ["cffi (>=1.11)"]
 
 [extras]
-indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "lxml", "pyarrow", "pyspark", "ujson", "warcio"]
+indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "pyspark", "ujson", "warcio"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "0963d5357a23dcf000959bfe830bfb0f5b88ea6dd26d987a5adbdd996b086e61"
+content-hash = "b5dbef591ef471269abb560c51ce86b447809d588c36038d68d0fa243dcab393"
