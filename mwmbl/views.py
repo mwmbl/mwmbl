@@ -8,6 +8,7 @@ import justext
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.forms import ModelForm
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
@@ -17,7 +18,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException
 
-from mwmbl.models import Curation
+from mwmbl.models import Curation, FlagCuration
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
@@ -353,3 +354,29 @@ def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]
 
 class CurationDetailView(DetailView):
     model = Curation
+
+
+class CurationFlagForm(ModelForm):
+    class Meta:
+        model = FlagCuration
+        fields = ["flag", "reason"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["flag"].widget.attrs["class"] = "form-select"
+
+
+@login_required
+def flag_curation(request, curation_id):
+    if request.method == "POST":
+        form = CurationFlagForm(request.POST)
+        if form.is_valid():
+            flag_curation = form.save(commit=False)
+            flag_curation.user = request.user
+            flag_curation.timestamp = datetime.now()
+            flag_curation.curation_id = curation_id
+            flag_curation.save()
+            return render(request, "mwmbl/flag_curation_success.html")
+    else:
+        form = CurationFlagForm()
+    return render(request, "mwmbl/flag_curation.html", {"form": form})

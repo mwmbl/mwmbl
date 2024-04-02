@@ -20,7 +20,8 @@ from django.urls import path, include
 import mwmbl.crawler.app as crawler
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
-from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView
+from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
+    flag_curation
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -32,6 +33,7 @@ urlpatterns = [
     path('app/approve/', approve, name="approve"),
     path('app/revert-current/', revert_current_curation, name="revert_current"),
     path('app/curation/<int:pk>/', CurationDetailView.as_view(), name="curation"),
+    path('app/curation/<int:curation_id>/flag/', flag_curation, name="flag_curation"),
 
     # TODO: this is the old API, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),
