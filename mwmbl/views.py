@@ -8,11 +8,11 @@ import justext
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.forms import ModelForm
+from django.forms import ModelForm, ModelChoiceField, RadioSelect
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
-from django.views.generic import DetailView
+from django.views.generic import DetailView, ListView
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
@@ -355,11 +355,18 @@ def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]
 class CurationDetailView(DetailView):
     model = Curation
 
+    def get_context_data(self, **kwargs):
+        flags = FlagCuration.objects.filter(curation=self.object)
+        return super().get_context_data(flags=flags, **kwargs)
+
 
 class CurationFlagForm(ModelForm):
     class Meta:
         model = FlagCuration
         fields = ["flag", "reason"]
+        widgets = {
+            "flag": RadioSelect(),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -371,12 +378,30 @@ def flag_curation(request, curation_id):
     if request.method == "POST":
         form = CurationFlagForm(request.POST)
         if form.is_valid():
-            flag_curation = form.save(commit=False)
-            flag_curation.user = request.user
-            flag_curation.timestamp = datetime.now()
-            flag_curation.curation_id = curation_id
-            flag_curation.save()
+            curation = form.save(commit=False)
+            curation.user = request.user
+            curation.timestamp = datetime.now()
+            curation.curation_id = curation_id
+            curation.save()
             return render(request, "mwmbl/flag_curation_success.html")
+    if request.method == "PUT":
+        new_status = request.POST.get("status")
+        if new_status not in FlagCuration.FLAG_STATUS:
+            return HttpResponseBadRequest("Invalid status")
+        curation = FlagCuration.objects.get(id=curation_id)
+        curation.status = new_status
+        curation.save()
+        return render(request, "mwmbl/flag_curation_updated.html")
     else:
         form = CurationFlagForm()
-    return render(request, "mwmbl/flag_curation.html", {"form": form})
+    return render(request, "mwmbl/flag_curation.html", {"form": form, "curation_id": curation_id})
+
+
+class CurationFlagListView(ListView):
+    model = FlagCuration
+    template_name = "mwmbl/flag_curation_list.html"
+    context_object_name = "flags"
+    paginate_by = 20
+
+    def get_queryset(self):
+        return super().get_queryset().filter(user=self.request.user)

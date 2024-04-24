@@ -33,6 +33,11 @@ class Curation(models.Model):
 
 
 class FlagCuration(models.Model):
+    class Meta:
+        permissions = [
+            ("change_flag_status", "Can change the flag status (approve or reject)"),
+        ]
+
     FLAG_TYPES = {
         "RELEVANCE": "The curation is unlikely to be useful to a large number of users",
         "LANGUAGE": "The curation is for a query in an unsupported language",
@@ -41,11 +46,18 @@ class FlagCuration(models.Model):
         "OTHER": "Other",
     }
 
+    FLAG_STATUS = {
+        "PENDING": "The flag has been submitted and is awaiting review",
+        "REJECTED": "The flag has been rejected",
+        "ACCEPTED": "The flag has been accepted and the curation has been reverted",
+    }
+
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
     timestamp = models.DateTimeField()
     curation = models.ForeignKey(Curation, on_delete=models.CASCADE)
     flag = models.CharField(max_length=20, choices=[(k, v) for k, v in FLAG_TYPES.items()])
-    reason = models.CharField(max_length=300)
+    reason = models.CharField(max_length=300, blank=True)
+    status = models.CharField(max_length=20, choices=[(k, v) for k, v in FLAG_STATUS.items()], default="PENDING")
 
 
 class OldIndex(models.Model):
