@@ -161,6 +161,11 @@ FOOTER_LINKS = [
         "href": "https://github.com/mwmbl/mwmbl",
     },
     {
+        "name": "YouTube",
+        "icon": "ph-youtube-logo-bold",
+        "href": "https://www.youtube.com/@mwmbl",
+    },
+    {
         "name": "Discord",
         "icon": "ph-discord-logo-bold",
         "href": "https://discord.gg/2BGSUYFdkD",
