@@ -88,6 +88,30 @@ def home_fragment(request):
     return response
 
 
+def curation_fragment(request):
+    page = 0
+    if request.GET.get("page") != '' and request.GET.get("page") is not None:
+        page = int(request.GET.get("page"))
+    activity = _get_activity(page)
+    if request.htmx:
+        response = render(request, "curation_table.html", {
+            "activity": activity,
+            "next_page": (page + 1) if len(activity) > 0 else None,
+        })
+        return response
+    response = render(request, "curation_table_head.html", {
+        "activity": activity,
+        "next_page": (page + 1) if len(activity) > 0 else None,
+    })
+    return response
+
+
+def _get_activity(page):
+    # Get only 30 results per page
+    activity = Curation.objects.order_by("-timestamp")[(page * 30):((page * 30) + 30)]
+    return activity
+
+
 def _get_results_and_activity(request):
     query = request.GET.get("q")
     if query:
