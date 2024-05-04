@@ -1,19 +1,32 @@
 {%  load humanize %}
-<head><script src="/static/assets/htmx.min.js"></script></head>
+<head>
+    <link rel="stylesheet" type="text/css" href="/static/css/reset.css">
+    <link rel="stylesheet" type="text/css" href="/static/css/theme.css">
+    <link rel="stylesheet" type="text/css" href="/static/css/global.css">
 
-<table><thead><tr><th>User</th><th>Query</th><th>Time</th></tr></thead><tbody>
-{%  for item in activity %}
-<tr><td>{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td><a href="{% url 'curation' item.id %}">{{ item.query }}</a></td><td>{{ item.timestamp | naturaltime}}</td></tr>
-{% endfor %}
+    <script src="/static/assets/htmx.min.js"></script>
+</head>
+<body>
 
-{% if next_page %}
-<tr id="replaceMe">
-  <td colspan="3">
-    <button class='button' hx-get="{% url 'curation_table' %}?page={{next_page}}"
-                        hx-target="#replaceMe"
-                        hx-swap="outerHTML">
-         Load More... <!-- <img class="htmx-indicator" src="/img/bars.svg"> -->
-    </button>
-  </td>
-</tr>
-{% endif %}
+  <h2 align="center">Curation Changelog</h2>
+
+  <table><thead><tr><th>User</th><th>Query</th><th>Time</th></tr></thead><tbody>
+  {%  for item in activity %}
+  <tr><td align="center">{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td align="leftr"><a href="{% url 'curation' item.id %}">{{ item.query }}</a></td><td align="center">{{ item.timestamp | naturaltime}}</td></tr>
+  {% endfor %}
+
+  {% if next_page %}
+  <tr id="replaceMe">
+    <td></td>
+    <td></td>
+    <td colspan="3">
+      <button class='button' align="center" hx-get="{% url 'curation_table' %}?page={{next_page}}"
+                          hx-target="#replaceMe"
+                          hx-swap="outerHTML">
+           Load More...
+      </button>
+    </td>
+  </tr>
+  {% endif %}
+
+<body>

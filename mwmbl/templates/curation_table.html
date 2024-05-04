@@ -1,12 +1,14 @@
 {% load humanize %}
 {%  for item in activity %}
-<tr><td>{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td>{{ item.query }}</td><td>{{ item.timestamp | naturaltime }}</td></tr>
+<tr><td>{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td><a href="{% url 'curation' item.id %}">{{ item.query }}</a></td><td align="right">{{ item.timestamp | naturaltime }}</td></tr>
 {% endfor %}
 
 {% if next_page %}
 <tr id="replaceMe">
+  <td></td>
+  <td></td>
   <td colspan="3">
-    <button class='button' hx-get="{% url 'curation_table' %}?page={{next_page}}"
+    <button class='button' align="center" hx-get="{% url 'curation_table' %}?page={{next_page}}"
                         hx-target="#replaceMe"
                         hx-swap="outerHTML">
          Load More... <!-- <img class="htmx-indicator" src="/img/bars.svg"> -->
