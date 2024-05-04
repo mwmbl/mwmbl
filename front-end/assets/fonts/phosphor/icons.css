@@ -117,6 +117,10 @@ Phosphor Web Font
   content: "\fa5d";
 }
 
+.ph-discord-logo-bold::before {
+  content: "\f7bb";
+}
+
 .ph-chat-circle-text-bold::before {
   content: "\f74c";
 }
