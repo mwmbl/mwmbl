@@ -1,6 +1,6 @@
 {% load humanize %}
 {%  for item in activity %}
-<tr><td>{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td>{{ item.query }}</td><td>{{ item.timestamp | naturaltime }}</td></tr>
+<tr><td>{% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %}</td><td><a href="{% url 'curation' item.id %}">{{ item.query }}</a></td><td>{{ item.timestamp | naturaltime }}</td></tr>
 {% endfor %}
 
 {% if next_page %}
