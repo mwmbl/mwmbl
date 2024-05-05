@@ -8,6 +8,7 @@ import justext
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.forms import ModelForm, ModelChoiceField, RadioSelect
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
@@ -397,11 +398,9 @@ def flag_curation(request, curation_id):
     return render(request, "mwmbl/flag_curation.html", {"form": form, "curation_id": curation_id})
 
 
-class CurationFlagListView(ListView):
+class CurationFlagListView(LoginRequiredMixin, ListView):
     model = FlagCuration
     template_name = "mwmbl/flag_curation_list.html"
-    context_object_name = "flags"
-    paginate_by = 20
 
     def get_queryset(self):
-        return super().get_queryset().filter(user=self.request.user)
+        return FlagCuration.objects.filter(status="PENDING").order_by("-timestamp")

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{%  load humanize %}
+
+{% block content %}
+<h1>Flagged Curations</h1>
+{# Iterate over list of flagged curations #}
+{% for flag_curation in object_list %}
+  <p>{{ flag_curation.user }} flagged a <a href="{% url "curation" flag_curation.curation_id %}">curation by {{ flag_curation.curation.user }} of {{ flag_curation.curation.query }}</a> {{ flag_curation.timestamp|naturaltime }}</p>
+
+{% endfor %}
+{% endblock %}
