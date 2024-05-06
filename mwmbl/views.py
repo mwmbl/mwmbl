@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import justext
 import requests
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.forms import ModelForm, ModelChoiceField, RadioSelect
 from django.http import HttpResponseBadRequest
@@ -207,10 +207,24 @@ def approve(request):
 def revert_current_curation(request):
     curation_id = request.POST.get("curation_id")
     curation = Curation.objects.get(id=curation_id)
-    query = curation.query
+    _revert_curation(curation)
 
+    # Delete the curation
+    curation.delete()
+
+    original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
+    original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
+    return render(request, "home.html", {
+        "results": original_documents,
+        "query": (curation.query),
+        "activity": None,
+        "curation": None,
+    })
+
+
+def _revert_curation(curation):
     with TinyIndex(Document, index_path, 'w') as indexer:
-        term = " ".join(tokenize(query))
+        term = " ".join(tokenize(curation.query))
         documents = [Document(**doc) for doc in curation.original_index_results]
 
         page_index = indexer.get_key_page_index(term)
@@ -221,18 +235,6 @@ def revert_current_curation(request):
         all_documents = documents + other_term_documents
 
         indexer.store_in_page(page_index, all_documents)
-
-    # Delete the curation
-    curation.delete()
-
-    original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
-    original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
-    return render(request, "home.html", {
-        "results": original_documents,
-        "query": query,
-        "activity": None,
-        "curation": None,
-    })
 
 
 def _get_curation(request, query, documents, reranked_documents):
@@ -357,7 +359,7 @@ class CurationDetailView(DetailView):
     model = Curation
 
     def get_context_data(self, **kwargs):
-        flags = FlagCuration.objects.filter(curation=self.object)
+        flags = FlagCuration.objects.filter(curation=self.object, status="PENDING")
         return super().get_context_data(flags=flags, **kwargs)
 
 
@@ -385,17 +387,27 @@ def flag_curation(request, curation_id):
             curation.curation_id = curation_id
             curation.save()
             return render(request, "mwmbl/flag_curation_success.html")
-    if request.method == "PUT":
-        new_status = request.POST.get("status")
-        if new_status not in FlagCuration.FLAG_STATUS:
-            return HttpResponseBadRequest("Invalid status")
-        curation = FlagCuration.objects.get(id=curation_id)
-        curation.status = new_status
-        curation.save()
-        return render(request, "mwmbl/flag_curation_updated.html")
     else:
         form = CurationFlagForm()
     return render(request, "mwmbl/flag_curation.html", {"form": form, "curation_id": curation_id})
+
+
+@login_required
+@permission_required("mwmbl.change_flag_status")
+def flag_curation_update(request, flag_curation_id):
+    new_status = request.POST.get("status")
+    if new_status not in FlagCuration.FLAG_STATUS:
+        return HttpResponseBadRequest("Invalid status")
+    flag_curation = FlagCuration.objects.get(id=flag_curation_id)
+    flag_curation.status = new_status
+    flag_curation.save()
+
+    # If the flag has been accepted, revert the curation
+    if new_status == "ACCEPTED":
+        _revert_curation(flag_curation.curation)
+
+    flags = FlagCuration.objects.filter(curation=flag_curation.curation.id, status="PENDING")
+    return render(request, "mwmbl/flags.html", context={"flags": flags})
 
 
 class CurationFlagListView(LoginRequiredMixin, ListView):

@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-
 {%  load humanize %}
 
 {% block content %}
@@ -9,21 +8,7 @@
   <br>
   {# Only show if the user is logged in #}
   {% if user.is_authenticated %}
-    {% if flags %}
-      <p><b>This curation has been flagged.</b> If this is your curation, you can take a look at the
-        <a href="https://book.mwmbl.org/page/curating/">guidelines</a> to  understand the moderation process and
-        why it might have been flagged.</p>
-      <ul>
-        {% for flag in flags %}
-          <li>{{ flag.user }} flagged this curation {{ flag.timestamp|naturaltime }} for <b>{{ flag.flag|lower }}</b> {% if flag.reason %} with reason: “{{ flag.reason }}” {% endif %}. Status <b>{{ flag.status|lower }}</b>.
-          {% if perms.mwmbl.change_flag_status %}
-            <button name="status" value="accept" hx-put="{% url "flag_curation" curation.id %}" hx-swap="outerHTML">Accept</button>
-            <button name="status" value="reject" hx-put="{% url "flag_curation" curation.id %}" hx-swap="outerHTML">Reject</button>
-          {% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
+    {% include "mwmbl/flags.html" %}
     <br>
     <a href="{% url "flag_curation" curation.id %}" hx-get="{% url "flag_curation" curation.id %}" hx-swap="outerHTML">Flag this curation</a>
   {% endif %}
