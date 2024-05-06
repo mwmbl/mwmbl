@@ -110,7 +110,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        activity = Curation.objects.order_by("-timestamp")[:500]
+        activity = Curation.objects.filter(flagcuration__isnull=True).order_by("-timestamp")[:8]
     return activity, query, results
 
 
