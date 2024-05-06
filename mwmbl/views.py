@@ -7,17 +7,19 @@ from urllib.parse import urlencode
 import justext
 import requests
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.forms import ModelForm, ModelChoiceField, RadioSelect
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
-from django.views.generic import DetailView
+from django.views.generic import DetailView, ListView
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException
 
-from mwmbl.models import Curation
+from mwmbl.models import Curation, FlagCuration
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
@@ -108,7 +110,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        activity = Curation.objects.order_by("-timestamp")[:500]
+        activity = Curation.objects.filter(flagcuration__isnull=True).order_by("-timestamp")[:8]
     return activity, query, results
 
 
@@ -205,10 +207,24 @@ def approve(request):
 def revert_current_curation(request):
     curation_id = request.POST.get("curation_id")
     curation = Curation.objects.get(id=curation_id)
-    query = curation.query
+    _revert_curation(curation)
 
+    # Delete the curation
+    curation.delete()
+
+    original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
+    original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
+    return render(request, "home.html", {
+        "results": original_documents,
+        "query": (curation.query),
+        "activity": None,
+        "curation": None,
+    })
+
+
+def _revert_curation(curation):
     with TinyIndex(Document, index_path, 'w') as indexer:
-        term = " ".join(tokenize(query))
+        term = " ".join(tokenize(curation.query))
         documents = [Document(**doc) for doc in curation.original_index_results]
 
         page_index = indexer.get_key_page_index(term)
@@ -219,18 +235,6 @@ def revert_current_curation(request):
         all_documents = documents + other_term_documents
 
         indexer.store_in_page(page_index, all_documents)
-
-    # Delete the curation
-    curation.delete()
-
-    original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
-    original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
-    return render(request, "home.html", {
-        "results": original_documents,
-        "query": query,
-        "activity": None,
-        "curation": None,
-    })
 
 
 def _get_curation(request, query, documents, reranked_documents):
@@ -353,3 +357,62 @@ def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]
 
 class CurationDetailView(DetailView):
     model = Curation
+
+    def get_context_data(self, **kwargs):
+        flags = FlagCuration.objects.filter(curation=self.object, status="PENDING")
+        return super().get_context_data(flags=flags, **kwargs)
+
+
+class CurationFlagForm(ModelForm):
+    class Meta:
+        model = FlagCuration
+        fields = ["flag", "reason"]
+        widgets = {
+            "flag": RadioSelect(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["flag"].widget.attrs["class"] = "form-select"
+
+
+@login_required
+def flag_curation(request, curation_id):
+    if request.method == "POST":
+        form = CurationFlagForm(request.POST)
+        if form.is_valid():
+            curation = form.save(commit=False)
+            curation.user = request.user
+            curation.timestamp = datetime.now()
+            curation.curation_id = curation_id
+            curation.save()
+            return render(request, "mwmbl/flag_curation_success.html")
+    else:
+        form = CurationFlagForm()
+    return render(request, "mwmbl/flag_curation.html", {"form": form, "curation_id": curation_id})
+
+
+@login_required
+@permission_required("mwmbl.change_flag_status")
+def flag_curation_update(request, flag_curation_id):
+    new_status = request.POST.get("status")
+    if new_status not in FlagCuration.FLAG_STATUS:
+        return HttpResponseBadRequest("Invalid status")
+    flag_curation = FlagCuration.objects.get(id=flag_curation_id)
+    flag_curation.status = new_status
+    flag_curation.save()
+
+    # If the flag has been accepted, revert the curation
+    if new_status == "ACCEPTED":
+        _revert_curation(flag_curation.curation)
+
+    flags = FlagCuration.objects.filter(curation=flag_curation.curation.id, status="PENDING")
+    return render(request, "mwmbl/flags.html", context={"flags": flags})
+
+
+class CurationFlagListView(LoginRequiredMixin, ListView):
+    model = FlagCuration
+    template_name = "mwmbl/flag_curation_list.html"
+
+    def get_queryset(self):
+        return FlagCuration.objects.filter(status="PENDING").order_by("-timestamp")

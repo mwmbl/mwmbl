@@ -1,0 +1,5 @@
+<form action="#" method="post" hx-post="{% url "flag_curation" curation_id %}">
+    {% csrf_token %}
+    {{ form }}
+    <input type="submit" value="Submit">
+</form>
