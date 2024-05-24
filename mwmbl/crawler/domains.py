@@ -14,13 +14,13 @@ from mwmbl.hn_top_domains_filtered import DOMAINS
 logger = getLogger(__name__)
 
 DOMAIN_GROUPS = [
-    'github.com',
-    'en.wikipedia.org',
-    'news.ycombinator.com',
-    'lemmy.ml',
-    'mastodon.social',
-    'top',
-    'other',
+    ('github.com', 10),
+    ('en.wikipedia.org', 10),
+    ('news.ycombinator.com', 10),
+    ('lemmy.ml', 2),
+    ('mastodon.social', 2),
+    ('top', 5),
+    ('other', 1),
 ]
 
 TOP_DOMAINS = set(islice(DOMAINS, 1000))
@@ -41,7 +41,7 @@ class DomainLinkDatabase:
         self.links = {}
 
     def __enter__(self):
-        self.links = {domain_group: get_bloom_filter(domain_group) for domain_group in DOMAIN_GROUPS}
+        self.links = {domain_group: (get_bloom_filter(domain_group), score) for domain_group, score in DOMAIN_GROUPS}
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -60,8 +60,8 @@ class DomainLinkDatabase:
             return
 
         logger.info(f"Updating domain links for {domain_group} with {target} links")
-        bloom_filter = self.links[domain_group]
+        bloom_filter, score = self.links[domain_group]
         bloom_filter.update(target)
 
     def get_domain_score(self, domain: str) -> float:
-        return sum(1 if domain in bloom_filter else 0 for bloom_filter in self.links.values())
+        return sum(score if domain in bloom_filter else 0 for bloom_filter, score in self.links.values())
