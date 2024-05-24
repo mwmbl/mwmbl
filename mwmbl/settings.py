@@ -32,7 +32,7 @@ SCORE_FOR_SAME_DOMAIN = 0.01
 EXTRA_LINK_MULTIPLIER = 0.001
 UNKNOWN_DOMAIN_MULTIPLIER = 0.001
 EXCLUDED_DOMAINS = {'web.archive.org', 'forums.giantitp.com', 'www.crutchfield.com', 'plus.google.com'}
-DOMAIN_BLACKLIST_REGEX = re.compile(r"porn|xxx|jksu\.org|lwhyl\.org$|rgcd\.cn$|hzqwyou\.cn$|omgoat\.org$|pussyboy\.net$")
+DOMAIN_BLACKLIST_REGEX = re.compile(r"porn|xxx|adult|jksu\.org|lwhyl\.org$|rgcd\.cn$|hzqwyou\.cn$|omgoat\.org$|pussyboy\.net$")
 CORE_DOMAINS = {
     'github.com',
     'en.wikipedia.org',
