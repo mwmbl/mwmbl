@@ -9,6 +9,7 @@ from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.settings import CORE_DOMAINS
 
+
 random = Random(1)
 logger = getLogger(__name__)
 
@@ -25,6 +26,9 @@ MAX_OTHER_DOMAINS = 10000
 MAX_BATCH_URLS_PER_CORE_DOMAIN = 100
 MAX_BATCH_URLS_PER_TOP_DOMAIN = 10
 MAX_BATCH_URLS_PER_OTHER_DOMAIN = 1
+
+NUM_TOP_DOMAIN_URLS_TO_INCLUDE = 50
+NUM_OTHER_URLS_TO_INCLUDE = 100
 
 BATCH_SIZE = 100
 
@@ -64,9 +68,17 @@ class RedisURLQueue:
         top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
         top_other_domains = top_scoring_domains - DOMAINS.keys()
 
-        domains = (list(CORE_DOMAINS)
-                   + random.sample(DOMAINS.keys(), 50)
-                   + random.sample(top_other_domains, 100))
+        domains = list(CORE_DOMAINS)
+
+        if len(DOMAINS) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
+            domains += random.sample(DOMAINS.keys(), NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
+        else:
+            domains += list(DOMAINS.keys())
+
+        if len(top_other_domains) > NUM_OTHER_URLS_TO_INCLUDE:
+            domains += random.sample(top_other_domains, NUM_OTHER_URLS_TO_INCLUDE)
+        else:
+            domains += list(top_other_domains)
 
         logger.info(f"Getting batch from domains {domains}")
 
