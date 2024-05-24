@@ -7,6 +7,7 @@ from redis import Redis
 from mwmbl.crawler.domains import DomainLinkDatabase, TOP_DOMAINS
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.settings import CORE_DOMAINS
 
 
@@ -45,6 +46,7 @@ def get_domain_max_urls(domain: str):
 class RedisURLQueue:
     def __init__(self, redis: Redis):
         self.redis = redis
+        self.black_listed_domains = get_blacklist_domains()
 
     def queue_urls(self, found_urls: list[FoundURL]):
         with DomainLinkDatabase() as link_db:
@@ -80,6 +82,7 @@ class RedisURLQueue:
         else:
             domains += list(top_other_domains)
 
+        domains = [domain for domain in domains if not is_domain_blacklisted(domain, self.black_listed_domains)]
         logger.info(f"Getting batch from domains {domains}")
 
         # Pop the highest scoring URL from each domain
