@@ -85,8 +85,11 @@ class RedisURLQueue:
         domains = [domain for domain in domains if not is_domain_blacklisted(domain, self.black_listed_domains)]
         logger.info(f"Getting batch from domains {domains}")
 
+        # Add a random url as the root domain of one of DOMAINS
+        random_domain = random.choice(DOMAINS.keys())
+        urls = [f"https://{random_domain}/"]
+
         # Pop the highest scoring URL from each domain
-        urls = []
         for domain in domains:
             domain_urls_scores = self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain))
 
