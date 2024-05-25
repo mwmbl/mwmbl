@@ -86,7 +86,7 @@ class RedisURLQueue:
         logger.info(f"Getting batch from domains {domains}")
 
         # Add a random url as the root domain of one of DOMAINS
-        random_domain = random.choice(DOMAINS.keys())
+        random_domain = random.choice(list(DOMAINS.keys()))
         urls = [f"https://{random_domain}/"]
 
         # Pop the highest scoring URL from each domain
