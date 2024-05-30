@@ -56,7 +56,7 @@ class RedisURLQueue:
                 domain_score = link_db.get_domain_score(domain) + url_score
                 max_urls = get_domain_max_urls(domain)
                 self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), {url.url: url_score})
-                self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -max_urls)
+                self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -(max_urls + 1))
                 self.redis.zadd(DOMAIN_SCORE_KEY, {domain: domain_score}, gt=True)
 
         # Remove the lowest scoring domains
@@ -110,3 +110,6 @@ class RedisURLQueue:
 
         logger.info(f"Returning URLs: {urls}")
         return urls
+
+    def get_domain_count(self, domain: str):
+        return self.redis.zcard(DOMAIN_URLS_KEY.format(domain=domain))
