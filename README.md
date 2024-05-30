@@ -1,32 +1,65 @@
 ![banner](docs/assets/images/banner_mwmbl.svg)
 
-# Mwmbl - **No ads, no tracking, no cruft, no profit**
+# Mwmbl - the Open Source Web Search Engine
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
 
-Mwmbl is a non-profit, ad-free, free-libre and free-lunch search
-engine with a focus on useability and speed. At the moment it is
-little more than an idea together with a [proof of concept
-implementation](https://mwmbl.org/) of
-the web front-end and search technology on a small index.
+**No ads, no tracking, no profit**
 
-Our vision is a community working to provide top quality search
-particularly for hackers, funded purely by donations.
+[Mwmbl](https://mwmbl.org) is a non-profit, open source search engine
+where the community determines the rankings. We aim to be a
+replacement for commercial search engines such as Google and
+Bing.
 
 ![mwmbl](https://user-images.githubusercontent.com/1283077/218265959-be4220b4-dcf0-47ab-acd3-f06df0883b52.gif)
+
+We have our own index powered by our community. Our index is currently
+much smaller than those of commercial search engines, with around 500
+million unique URLs ([more stats](https://mwmbl.org/stats/)). The
+quality is a long way off the commercial engines at the moment, but
+you can help change that by joining us! We aim to have 1 billion
+unique URLs indexed by the end of 2024, 10 billion by the end of 2025
+and 100 billion by the end of 2026 by which point we should be
+comparable with the commercial search engines.
+
+
+Community
+=========
+
+Our main community is on
+[Matrix](https://matrix.to/#/#mwmbl:matrix.org) but we also have a
+[Discord server](https://discord.gg/2BGSUYFdkD) for non-development
+related discussion.
+
+The community is responsible for crawling the web (see below) and
+[curating search results](https://book.mwmbl.org/page/curating/). We are
+friendly and welcoming. Join us!
+
+
+Documentation
+=============
+
+All documentation is at [https://book.mwmbl.org](https://book.mwmbl.org).
+
 
 Crawling
 ========
 
-**Update 2022-02-05:** We now have a distributed crawler that runs on
-our volunteers' machines! If you have Firefox you can help out by
-[installing our
+Crawling is distributed across the community, while indexing is
+centralised on the main server.
+
+If you have spare compute and bandwidth, the best way you can help is
+by running our [command line
+crawler](https://github.com/mwmbl/crawler-script) with as many threads
+as you can spare.
+
+If you have Firefox you can help out by [installing our
 extension](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/). This
-will crawl the web in the background, retrieving one page a second. It
-does not use or access any of your personal data. Instead it crawls
-the web at random, using the top scoring sites on Hacker News as seed
-pages. After extracting a summary of each page, it batches these up
-and sends the data to a central server to be stored and indexed.
+will crawl the web in the background. It does not use or access any of
+your personal data. Instead it crawls a set of URLs sent from our
+central server. After extracting a summary of each page, it batches
+these up and sends the data to the central server to be stored and
+indexed.
 
 Why a non-profit search engine?
 ===============================
@@ -51,21 +84,25 @@ But what about...?
 The space of alternative search engines has expanded rapidly in recent
 years. Here's a very incomplete list of some that have interested me:
 
- - [YaCy](https://yacy.net/) - an open source distributed search engine
  - [search.marginalia.nu](https://search.marginalia.nu/) - a search
    engine favouring text-heavy websites
+ - [SearXNG](https://github.com/searxng/searxng) - an open source meta
+   search engine
+ - [YaCy](https://yacy.net/) - an open source distributed search engine
  - [Gigablast](https://gigablast.com/) - a privacy-focused search
    engine whose owner makes money by selling the technology to third
    parties
  - [Brave](https://search.brave.com/)
  - [DuckDuckGo](https://duckduckgo.com/)
+ - [Kagi](https://kagi.com/)
 
 Of these, YaCy is the closest in spirit to the idea of a non-profit
 search engine. The index is distributed across a peer-to-peer
 network. Unfortunately this design decision makes search very slow.
 
-Marginalia Search is fantastic, but it is more of a personal project
-than an open source community.
+Marginalia Search is fantastic, but our goals are different: we aim to
+be a replacement for commercial search engines but Marginalia aims to
+provide a different type of search.
 
 All other search engines that I've come across are for-profit. Please
 let me know if I've missed one!
