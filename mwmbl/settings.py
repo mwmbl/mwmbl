@@ -42,6 +42,7 @@ CORE_DOMAINS = {
     'developer.mozilla.org',
     'arxiv.org',
     'www.python.org',
+    'news.ycombinator.com',
 }
 
 BLACKLIST_DOMAINS_URL = "https://get.domainsblacklists.com/blacklist.txt"

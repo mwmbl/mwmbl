@@ -23,8 +23,8 @@ DOMAIN_GROUPS = [
     ('other', 1),
 ]
 
-TOP_DOMAINS = set(islice(DOMAINS, 1000))
-OTHER_DOMAINS = set(islice(DOMAINS, 1000, 10000))
+TOP_DOMAINS = set(islice(DOMAINS, 4000))
+OTHER_DOMAINS = set(islice(DOMAINS, 4000, 10000))
 
 
 def get_bloom_filter(domain_group: str) -> BloomFilter:
@@ -45,7 +45,7 @@ class DomainLinkDatabase:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        for bloom_filter in self.links.values():
+        for bloom_filter, _ in self.links.values():
             bloom_filter.close()
 
     def update_domain_links(self, source: str, target: set[str]):
