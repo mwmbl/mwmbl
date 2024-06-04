@@ -46,7 +46,6 @@ class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
     top_users: dict[str, int]
     top_domains: dict[str, int]
-    domain_stats: list[DomainStats]
 
 
 # New stats we want per domain:
@@ -114,6 +113,7 @@ class StatsManager:
                         self.redis.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
 
         self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
+        self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.utcnow()
@@ -148,20 +148,6 @@ class StatsManager:
         host_key = HOST_COUNT_KEY.format(date=date_time.date())
         host_counts = self.redis.zrevrange(host_key, 0, 100, withscores=True)
 
-        all_domain_stats = []
-        for host, count in host_counts:
-            num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=date_time.date()), host)
-            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
-            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
-            domain_stats = DomainStats(
-                domain_name=host,
-                num_crawled=num_crawled,
-                num_successful=count,
-                num_links=num_links,
-                num_links_new=num_links_new,
-            )
-            all_domain_stats.append(domain_stats)
-
         urls_crawled_today = list(urls_crawled_daily.values())[-1]
         index_stats = get_counts()
         return MwmblStats(
@@ -171,9 +157,27 @@ class StatsManager:
             users_crawled_daily=users_crawled_daily,
             top_users=user_counts,
             top_domains=host_counts,
-            domain_stats=all_domain_stats,
             **index_stats,
         )
+
+    def get_domain_stats(self) -> list[DomainStats]:
+        date_time = datetime.utcnow()
+        host_all_key = HOST_COUNT_ALL_KEY.format(date=date_time.date())
+        host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
+        all_domain_stats = []
+        for host, count in host_counts_all:
+            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
+            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
+            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+            domain_stats = DomainStats(
+                domain_name=host,
+                num_crawled=count,
+                num_successful=num_successful or 0,
+                num_links=num_links or 0,
+                num_links_new=num_links_new or 0,
+            )
+            all_domain_stats.append(domain_stats)
+        return all_domain_stats
 
 
 def get_test_batches():

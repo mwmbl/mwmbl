@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+  <table>
+  <thead>
+  <tr>
+  <th>Domain name</th><th>Crawled</th><th>Successful</th><th>Links</th><th>New links</th>
+  </tr>
+  </thead>
+  {% for domain in domain_stats %}
+    <tr>
+      <td>{{ domain.domain_name }}</td>
+      <td>{{ domain.num_crawled }}</td>
+      <td>{{ domain.num_successful }}</td>
+      <td>{{ domain.num_links }}</td>
+      <td>{{ domain.num_links_new }}</td>
+    </tr>
+  {% endfor %}
+  </table>
+
+
+{% endblock %}
