@@ -3,13 +3,18 @@ from datetime import datetime, timedelta
 from glob import glob
 from itertools import islice
 from logging import getLogger
+from pathlib import Path
 from urllib.parse import urlparse
 
+import django
+from django.conf import settings
 from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts
 from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.urls import URLDatabase
+from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 
 logger = getLogger(__name__)
@@ -19,8 +24,19 @@ URL_HOUR_COUNT_KEY = "url-count-hour-{hour}"
 USERS_KEY = "users-{date}"
 USER_COUNT_KEY = "user-count-{date}"
 HOST_COUNT_KEY = "host-count-{date}"
+HOST_COUNT_ALL_KEY = "host-count-all-{date}"
+HOST_COUNT_LINK_KEY = "host-count-link-{date}"
+HOST_COUNT_LINK_NEW_KEY = "host-count-link-new-{date}"
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
+
+
+class DomainStats(BaseModel):
+    domain_name: str
+    num_crawled: int
+    num_successful: int
+    num_links: int
+    num_links_new: int
 
 
 class MwmblStats(BaseModel):
@@ -30,9 +46,23 @@ class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
     top_users: dict[str, int]
     top_domains: dict[str, int]
-    urls_in_index_daily: dict[str, int]
-    domains_in_index_daily: dict[str, int]
-    results_in_index_daily: dict[str, int]
+
+
+# New stats we want per domain:
+# - Number of results in index
+# - Number of links to this domain in URL queue
+# - Best score of links for this domain in URL queue
+# - Number of URLs crawled for this domain today:
+#   - Total - done
+#   - Number of successes - done
+#   - Number of timeouts
+#   - Number of 404s
+#   - Number excluded by robots.txt
+#   - Number of other errors
+# - Number of internal and external links to this domain crawled today
+#   - Number of links excluded because they've already been crawled
+# - Number of external links extracted from this domain today
+# -
 
 
 class StatsManager:
@@ -44,7 +74,8 @@ class StatsManager:
 
         num_crawled_urls = sum(1 for item in hashed_batch.items if item.content is not None)
 
-        url_count_key = URL_DATE_COUNT_KEY.format(date=date_time.date())
+        date = date_time.date()
+        url_count_key = URL_DATE_COUNT_KEY.format(date=date)
         self.redis.incrby(url_count_key, num_crawled_urls)
         self.redis.expire(url_count_key, LONG_EXPIRE_SECONDS)
 
@@ -54,25 +85,38 @@ class StatsManager:
         self.redis.incrby(hour_key, num_crawled_urls)
         self.redis.expire(hour_key, SHORT_EXPIRE_SECONDS)
 
-        users_key = USERS_KEY.format(date=date_time.date())
+        users_key = USERS_KEY.format(date=date)
         self.redis.sadd(users_key, hashed_batch.user_id_hash)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
-        user_count_key = USER_COUNT_KEY.format(date=date_time.date())
+        user_count_key = USER_COUNT_KEY.format(date=date)
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
 
-        host_key = HOST_COUNT_KEY.format(date=date_time.date())
-        for item in hashed_batch.items:
-            if item.content is None:
-                continue
+        host_key = HOST_COUNT_KEY.format(date=date)
+        host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
+        with URLDatabase() as url_db:
+            for item in hashed_batch.items:
+                host = urlparse(item.url).netloc
+                self.redis.zincrby(host_all_key, 1, host)
 
-            host = urlparse(item.url).netloc
-            self.redis.zincrby(host_key, 1, host)
+                if item.content is None:
+                    continue
+
+                self.redis.zincrby(host_key, 1, host)
+
+                for link in item.content.links:
+                    link_host = urlparse(link).netloc
+                    self.redis.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
+
+                    if link not in url_db:
+                        self.redis.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
+
         self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
+        self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
-        date_time = datetime.now()
+        date_time = datetime.utcnow()
         date = date_time.date()
 
         urls_crawled_daily = {}
@@ -116,6 +160,25 @@ class StatsManager:
             **index_stats,
         )
 
+    def get_domain_stats(self) -> list[DomainStats]:
+        date_time = datetime.utcnow()
+        host_all_key = HOST_COUNT_ALL_KEY.format(date=date_time.date())
+        host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
+        all_domain_stats = []
+        for host, count in host_counts_all:
+            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
+            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
+            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+            domain_stats = DomainStats(
+                domain_name=host,
+                num_crawled=count,
+                num_successful=num_successful or 0,
+                num_links=num_links or 0,
+                num_links_new=num_links_new or 0,
+            )
+            all_domain_stats.append(domain_stats)
+        return all_domain_stats
+
 
 def get_test_batches():
     for path in glob("./devdata/batches/**/*.json.gz", recursive=True):
@@ -125,6 +188,7 @@ def get_test_batches():
 
 
 if __name__ == '__main__':
+    django.setup()
     redis = Redis(host='localhost', port=6379, decode_responses=True)
     stats = StatsManager(redis)
     batches = get_test_batches()

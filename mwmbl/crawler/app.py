@@ -227,5 +227,6 @@ def get_batches_for_date(date_str):
         # Don't cache data from today since it may change
         data = gzip.compress(json.dumps(result).encode('utf8'))
         upload(data, cache_filename)
-    print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
+        print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
+    print(f"Returning {len(result['batch_urls'])} batches for {date_str}")
     return result

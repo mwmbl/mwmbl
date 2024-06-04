@@ -11,10 +11,6 @@ from mwmbl.crawler import HashedBatch
 from mwmbl.indexer import CRAWL_GLOB, MWMBL_DATA_DIR
 
 
-# TODO: remove this line - temporary override
-CRAWL_GLOB = str(MWMBL_DATA_DIR / "b2") + "/*/*/2022-06-23/*/*/*.json.gz"
-
-
 def get_urls():
     for path in glob.glob(CRAWL_GLOB):
         data = json.load(gzip.open(path))

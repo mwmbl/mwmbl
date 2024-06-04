@@ -80,3 +80,6 @@ class URLDatabase:
 
         logger.info(f"Found {num_crawled_urls} crawled URLs and {len(new_urls)} new URLs")
         return new_urls
+
+    def __contains__(self, url):
+        return url in self.urls

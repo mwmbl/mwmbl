@@ -19,6 +19,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException
 
+from mwmbl.crawler.app import stats_manager
 from mwmbl.models import Curation, FlagCuration
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
@@ -416,3 +417,8 @@ class CurationFlagListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         return FlagCuration.objects.filter(status="PENDING").order_by("-timestamp")
+
+
+def domains_view(request):
+    domain_stats = stats_manager.get_domain_stats()
+    return render(request, "mwmbl/domains.html", {"domain_stats": domain_stats})
