@@ -5,7 +5,7 @@
   <table>
   <thead>
   <tr>
-  <th>Domain name</th><th>Crawled</th><th>Successful</th><th>Links</th><th>New links</th>
+  <th>Domain name</th><th>Crawled</th><th>Successful</th><th>Links</th><th>New links</th><th>Index results</th>
   </tr>
   </thead>
   {% for domain in domain_stats %}
@@ -15,6 +15,7 @@
       <td>{{ domain.num_successful }}</td>
       <td>{{ domain.num_links }}</td>
       <td>{{ domain.num_links_new }}</td>
+      <td>{{ domain.num_index_results }}</td>
     </tr>
   {% endfor %}
   </table>
