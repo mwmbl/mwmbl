@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 from datetime import date, timedelta, datetime
 from logging import getLogger
 from pathlib import Path
@@ -14,6 +15,7 @@ from mwmbl.utils import batch
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
 INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
 INDEX_URL_COUNT_KEY = "index-url-count-{date}"
+INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{domain}-{date}"
 
 INDEX_URL_HLL_KEY = "index-hll-{date}"
 INDEX_DOMAIN_HLL_KEY = "index-domain-hll-{date}"
@@ -55,11 +57,20 @@ def count_urls():
         for page_indexes in batch(range(tiny_index.num_pages), NUM_PAGES_IN_BATCH):
             urls = set()
             domains = set()
+            domain_counts = Counter()
             for i in page_indexes:
                 docs = tiny_index.get_page(i)
                 urls |= {doc.url for doc in docs}
-                domains |= {urlparse(doc.url).netloc for doc in docs}
+                page_domains = [urlparse(doc.url).netloc for doc in docs]
+                domain_counts.update(page_domains)
+                domains |= set(page_domains)
                 num_results += len(docs)
+
+            for domain, count in domain_counts.items():
+                domain_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(domain=domain, date=today)
+                redis.incrby(domain_key, count)
+                redis.expire(domain_key, SHORT_EXPIRE_SECONDS)
+
             redis.pfadd(url_hll_key, *urls)
             redis.pfadd(domain_hll_key, *domains)
             logger.info(f"Counted {i} pages of {tiny_index.num_pages}.")
@@ -104,6 +115,14 @@ def get_counts() -> dict[str, dict[str, int]]:
     }
 
 
+def get_domain_result_count(domain: str) -> int:
+    redis = get_redis()
+
+    today = date.today()
+    count = redis.get(INDEX_DOMAIN_RESULT_COUNT_KEY.format(domain=domain, date=today))
+    return 0 if count is None else int(count)
+
+
 def _get_count(redis, count_dict, key, date_i):
     """
     Get the count for a given date and set it in the count_dict.
@@ -121,3 +140,6 @@ if __name__ == "__main__":
     count_urls()
     counts = get_counts()
     print("Counts", counts, sep="\n")
+
+    github_count = get_domain_result_count("github.com")
+    print("GitHub count", github_count)
