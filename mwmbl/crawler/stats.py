@@ -182,6 +182,23 @@ class StatsManager:
             all_domain_stats.append(domain_stats)
         return all_domain_stats
 
+    def get_stats_for_domain(self, host: str) -> DomainStats:
+        date_time = datetime.utcnow()
+        num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=date_time.date()), host)
+        num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
+        num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
+        num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+        num_index_results = get_domain_result_count(host)
+        domain_stats = DomainStats(
+            domain_name=host,
+            num_crawled=num_crawled or 0,
+            num_successful=num_successful or 0,
+            num_links=num_links or 0,
+            num_links_new=num_links_new or 0,
+            num_index_results=num_index_results,
+        )
+        return domain_stats
+
 
 def get_test_batches():
     for path in glob("./devdata/batches/**/*.json.gz", recursive=True):

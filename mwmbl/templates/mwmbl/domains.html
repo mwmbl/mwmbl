@@ -10,7 +10,7 @@
   </thead>
   {% for domain in domain_stats %}
     <tr>
-      <td>{{ domain.domain_name }}</td>
+      <td><a href="{% url "domain" domain.domain_name %}">{{ domain.domain_name }}</a></td>
       <td>{{ domain.num_crawled }}</td>
       <td>{{ domain.num_successful }}</td>
       <td>{{ domain.num_links }}</td>

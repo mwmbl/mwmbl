@@ -422,3 +422,8 @@ class CurationFlagListView(LoginRequiredMixin, ListView):
 def domains_view(request):
     domain_stats = stats_manager.get_domain_stats()
     return render(request, "mwmbl/domains.html", {"domain_stats": domain_stats})
+
+
+def domain_view(request, domain):
+    domain_stats = stats_manager.get_stats_for_domain(domain)
+    return render(request, "mwmbl/domain.html", {"domain_stats": domain_stats})

@@ -21,7 +21,7 @@ import mwmbl.crawler.app as crawler
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
-    flag_curation, CurationFlagListView, flag_curation_update, domains_view
+    flag_curation, CurationFlagListView, flag_curation_update, domains_view, domain_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -37,6 +37,7 @@ urlpatterns = [
     path('app/flags/curation', CurationFlagListView.as_view(), name="flag_curation_list"),
     path('app/flags/curation/<int:flag_curation_id>/update', flag_curation_update, name="flag_curation_update"),
     path('app/domains/', domains_view, name="domains"),
+    path('app/domains/<str:domain>/', domain_view, name="domain"),
 
     # TODO: this is the old API, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),

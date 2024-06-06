@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Stats for {{ domain_stats.domain_name }}</h1>
+<ul>
+<li>Number of URLs crawled today: {{ domain_stats.num_crawled }}</li>
+<li>Number successfully retrieved: {{ domain_stats.num_successful }}</li>
+<li>Number of links extracted from this domain: {{ domain_stats.num_links }}</li>
+<li>Number of links which are new: {{ domain_stats.num_links_new }}</li>
+<li>Number of results for this domain in the index: {{ domain_stats.num_index_results }}</li>
+</ul>
+
+{% endblock content %}
