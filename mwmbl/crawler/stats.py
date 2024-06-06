@@ -11,7 +11,7 @@ from django.conf import settings
 from pydantic import BaseModel
 from redis import Redis
 
-from mwmbl.count_urls import get_counts
+from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.batch_cache import BatchCache
@@ -37,6 +37,7 @@ class DomainStats(BaseModel):
     num_successful: int
     num_links: int
     num_links_new: int
+    num_index_results: int
 
 
 class MwmblStats(BaseModel):
@@ -169,12 +170,14 @@ class StatsManager:
             num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
             num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
             num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+            num_index_results = get_domain_result_count(host)
             domain_stats = DomainStats(
                 domain_name=host,
                 num_crawled=count,
                 num_successful=num_successful or 0,
                 num_links=num_links or 0,
                 num_links_new=num_links_new or 0,
+                num_index_results=num_index_results,
             )
             all_domain_stats.append(domain_stats)
         return all_domain_stats
