@@ -2,10 +2,11 @@
 Database storing info on URLs
 """
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from logging import getLogger
 from pathlib import Path
+from typing import Optional
 
 from django.conf import settings
 from psycopg2.extras import execute_values
@@ -47,38 +48,55 @@ class FoundURL:
     user_id_hash: str
     status: URLStatus
     timestamp: datetime
+    last_crawled: Optional[datetime] = None
 
 
 class URLDatabase:
     def __init__(self):
-        self.urls = None
+        self.urls = {}
 
     def __enter__(self):
-        try:
-            self.urls = BloomFilter.open(settings.URLS_BLOOM_FILTER_PATH)
-        except FileNotFoundError:
-            logger.info("No existing bloom filter found, creating a new one")
-            self.urls = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, settings.URLS_BLOOM_FILTER_PATH, perm=0o666)
-        return self
+        month_date = datetime.utcnow()
+        for i in range(3):
+            # Start from current month and go back two months
+            month_date = datetime(month_date.year, month_date.month, 1)
+            urls_path = settings.URLS_BLOOM_FILTER_PATH.format(month=month_date.month, year=month_date.year)
+            try:
+                self.urls[month_date] = BloomFilter.open(urls_path)
+            except FileNotFoundError:
+                if i == 0:
+                    logger.info("No existing bloom filter found, creating a new one")
+                    self.urls[month_date] = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, urls_path, perm=0o666)
+                else:
+                    logger.info("No existing bloom filter found, using fallback")
+            month_date -= timedelta(days=1)
+            return self
+
+        self.urls[datetime(2024, 1, 1)] = BloomFilter.open(settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
+        logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.urls.close()
+        for month_date, bloom_filter in self.urls.items():
+            bloom_filter.close()
 
     def update_found_urls(self, found_urls: list[FoundURL]):
         """
-        Update URL that have been crawled, and return any that have not yet been crawled
+        Update URLs with the most recent crawl date, if they've been crawled before, or None otherwise.
+        Update the most recent URL status in the database.
         """
+        most_recent_urls = next(iter(self.urls.values()))
         new_urls = []
-        num_crawled_urls = 0
         for url in found_urls:
-            if url.url not in self.urls:
-                if url.status in CRAWLED_STATUSES:
-                    self.urls.add(url.url)
-                    num_crawled_urls += 1
-                else:
-                    new_urls.append(url)
+            found_date = None
+            for date, bloom_filter in self.urls.items():
+                if url.url in bloom_filter:
+                    found_date = date
+                    break
 
-        logger.info(f"Found {num_crawled_urls} crawled URLs and {len(new_urls)} new URLs")
+            if url.status in CRAWLED_STATUSES:
+                most_recent_urls.add(url.url)
+
+            new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls
 
     def __contains__(self, url):

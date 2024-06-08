@@ -1,3 +1,6 @@
+import math
+from datetime import datetime, timedelta
+
 from logging import getLogger
 from random import Random
 from urllib.parse import urlparse
@@ -10,6 +13,8 @@ from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.settings import CORE_DOMAINS
 
+
+MAX_TIME_DELTA = timedelta(days=100000)
 
 random = Random(1)
 logger = getLogger(__name__)
@@ -33,6 +38,9 @@ NUM_OTHER_URLS_TO_INCLUDE = 100
 
 BATCH_SIZE = 100
 
+# Discount URLs crawled recently - this is the scale - currently 10 months
+SCORE_TIME_CONSTANT = 60 * 60 * 24 * 30 * 10
+
 
 def get_domain_max_urls(domain: str):
     if domain in CORE_DOMAINS:
@@ -51,8 +59,21 @@ class RedisURLQueue:
     def queue_urls(self, found_urls: list[FoundURL]):
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
+                time_since_crawled = (datetime.utcnow() - url.last_crawled
+                                      if url.last_crawled is not None else MAX_TIME_DELTA)
+
+                # Skip URLs crawled in the last month
+                if time_since_crawled < timedelta(days=30):
+                    continue
+
                 domain = urlparse(url.url).netloc
                 url_score = 1/len(url.url)
+
+                # Discount URLs that were crawled recently
+                score_multiplier = 1 - math.exp(-time_since_crawled.total_seconds() / SCORE_TIME_CONSTANT)
+                url_score *= score_multiplier
+                logger.info(f"URL score: {url_score}, score multiplier: {score_multiplier} for domain {domain} and age {time_since_crawled}")
+
                 domain_score = link_db.get_domain_score(domain) + url_score
                 max_urls = get_domain_max_urls(domain)
                 self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), {url.url: url_score})
