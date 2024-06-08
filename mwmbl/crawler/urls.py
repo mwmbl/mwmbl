@@ -100,4 +100,7 @@ class URLDatabase:
         return new_urls
 
     def __contains__(self, url):
-        return url in self.urls
+        for bloom_filter in self.urls.values():
+            if url in bloom_filter:
+                return True
+        return False
