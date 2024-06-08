@@ -70,10 +70,10 @@ class URLDatabase:
                 else:
                     logger.info("No existing bloom filter found, using fallback")
             month_date -= timedelta(days=1)
-            return self
 
         self.urls[datetime(2024, 1, 1)] = BloomFilter.open(settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
         logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for month_date, bloom_filter in self.urls.items():
