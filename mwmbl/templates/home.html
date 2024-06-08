@@ -43,14 +43,11 @@
     </ul>
   {% endif %}
 {% else %}
+  <h1>Recent community activity</h1>
+  <br>
   {%  for item in activity %}
-    <ul>
-      <li class="activity">
-        <h1>
-          {% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %} made <a href="{% url 'curation' item.id %}">{{ item.num_changes | apnumber }}
-          changes to {{ item.query }}</a> {{ item.timestamp | naturaltime }}.
-        </h1>
-      </li>
-    </ul>
+    {% include "curation_item.html" %}
   {% endfor %}
+  <br>
+  <a href="{% url "curations" %}">All curations</a>
 {% endif %}

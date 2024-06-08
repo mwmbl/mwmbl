@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}
+  <title>Mwmbl Community Curations</title>
+{% endblock %}
+
+{% block content %}
+
+  <h1>Mwmbl Community Curations</h1>
+  <br>
+  {% for item in object_list %}
+  {% include "curation_item.html" %}
+  {% endfor %}
+
+  <br>
+  <div class="pagination">
+  All curations, page:
+  {% for page in page_obj.paginator.page_range %}
+    {% if page == page_obj.number %}
+      <span class="page-current">{{ page }}</span>
+    {% else %}
+      <span class="page-other"><a href="?page={{ page }}">{{ page }}</a></span>
+    {% endif %}
+  {% endfor %}
+  </div>
+
+{% endblock %}
