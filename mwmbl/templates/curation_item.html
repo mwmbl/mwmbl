@@ -1,0 +1,9 @@
+{%  load humanize %}
+<ul>
+  <li class="activity">
+    <h1>
+      {% if item.user %}{{ item.user }}{% else %}Anonymous{% endif %} made <a href="{% url 'curation' item.id %}">{{ item.num_changes | apnumber }}
+      changes to {{ item.query }}</a> {{ item.timestamp | naturaltime }}{% if item.flag_curation_set.count > 0 %} (flagged){% endif %}.
+    </h1>
+  </li>
+</ul>

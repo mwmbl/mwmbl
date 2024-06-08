@@ -111,7 +111,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        activity = Curation.objects.filter(flagcuration__isnull=True).order_by("-timestamp")[:8]
+        activity = Curation.objects.filter(flag_curation_set__isnull=True).order_by("-timestamp")[:8]
     return activity, query, results
 
 
@@ -354,6 +354,15 @@ def _get_document_state(validated: bool, source: str) -> Optional[DocumentState]
         return DocumentState.FROM_GOOGLE
     else:
         return None
+
+
+class CurationsView(ListView):
+    paginate_by = 40
+    model = Curation
+    template_name = "mwmbl/curations.html"
+
+    def get_queryset(self):
+        return Curation.objects.prefetch_related('flag_curation_set').all().order_by("-timestamp")
 
 
 class CurationDetailView(DetailView):
