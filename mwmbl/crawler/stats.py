@@ -47,6 +47,9 @@ class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
     top_users: dict[str, int]
     top_domains: dict[str, int]
+    urls_in_index_daily: dict[str, int]
+    domains_in_index_daily: dict[str, int]
+    results_in_index_daily: dict[str, int]
 
 
 # New stats we want per domain:
