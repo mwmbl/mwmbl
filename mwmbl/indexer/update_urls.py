@@ -29,7 +29,6 @@ def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
     while True:
         try:
             run(batch_cache, new_item_queue)
-            add_hn_links(new_item_queue)
         except Exception:
             logger.exception("Error updating URLs")
         sleep(10)
