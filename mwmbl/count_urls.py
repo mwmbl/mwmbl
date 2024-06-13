@@ -4,13 +4,12 @@ from datetime import date, timedelta, datetime
 from logging import getLogger
 from pathlib import Path
 from time import sleep
-from urllib.parse import urlparse
 
 from django.conf import settings
 from redis import Redis
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.utils import batch
+from mwmbl.utils import batch, parse_url
 
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
 INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
@@ -53,6 +52,7 @@ def count_urls():
     domain_hll_key = INDEX_DOMAIN_HLL_KEY.format(date=today)
     domain_count_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today)
     num_results = 0
+    start_time = datetime.utcnow()
     with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
         # Count using a Redis hyperloglog to avoid memory issues.
         for page_indexes in batch(range(tiny_index.num_pages), NUM_PAGES_IN_BATCH):
@@ -62,7 +62,7 @@ def count_urls():
             for i in page_indexes:
                 docs = tiny_index.get_page(i)
                 urls |= {doc.url for doc in docs}
-                page_domains = [urlparse(doc.url).netloc for doc in docs]
+                page_domains = [parse_url(doc.url).netloc for doc in docs]
                 domain_counts.update(page_domains)
                 domains |= set(page_domains)
                 num_results += len(docs)
@@ -87,6 +87,9 @@ def count_urls():
     _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
     _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
     _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results)
+
+    end_time = datetime.utcnow()
+    logger.info(f"Counting took {end_time - start_time}.")
 
 
 def _set_count(key, redis, today, count):
