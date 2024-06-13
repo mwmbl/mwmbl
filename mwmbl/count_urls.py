@@ -2,6 +2,7 @@ import os
 from collections import Counter
 from datetime import date, timedelta, datetime
 from logging import getLogger
+from multiprocessing import Pool
 from pathlib import Path
 from time import sleep
 
@@ -43,19 +44,46 @@ def count_urls_continuously():
 
 def count_urls():
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
+        page_indexes = batch(range(tiny_index.num_pages), NUM_PAGES_IN_BATCH)
+
+    start_time = datetime.utcnow()
+    with Pool(processes=4) as pool:
+        num_results = sum(pool.map(count_urls_in_batch, page_indexes))
+
+    logger.info(f"Processed {num_results} results in total.")
+
+    domain_count_key, domain_hll_key, url_hll_key = _get_keys()
+
+    redis = get_redis()
+    redis.expire(url_hll_key, SHORT_EXPIRE_SECONDS)
+    url_count = redis.pfcount(url_hll_key)
+    logger.info("Counted %d unique URLs", url_count)
+
+    redis.expire(domain_hll_key, SHORT_EXPIRE_SECONDS)
+    domain_count = redis.pfcount(domain_hll_key)
+    logger.info("Counted %d unique domains", domain_count)
+
+    redis.expire(domain_count_key, SHORT_EXPIRE_SECONDS)
+
+    today = date.today()
+    _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
+    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
+    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results)
+
+    end_time = datetime.utcnow()
+    logger.info(f"Counting took {end_time - start_time}.")
+
+
+def count_urls_in_batch(page_indexes: list[int]):
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     redis = get_redis()
 
     logger.info(f"Counting URLs in index {index_path}")
 
-    today = date.today()
-    url_hll_key = INDEX_URL_HLL_KEY.format(date=today)
-    domain_hll_key = INDEX_DOMAIN_HLL_KEY.format(date=today)
-    domain_count_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today)
+    domain_count_key, domain_hll_key, url_hll_key = _get_keys()
     num_results = 0
-    start_time = datetime.utcnow()
     with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
-        # Count using a Redis hyperloglog to avoid memory issues.
-        for page_indexes in batch(range(tiny_index.num_pages), NUM_PAGES_IN_BATCH):
             urls = set()
             domains = set()
             domain_counts = Counter()
@@ -73,23 +101,15 @@ def count_urls():
             redis.pfadd(url_hll_key, *urls)
             redis.pfadd(domain_hll_key, *domains)
             logger.info(f"Counted {i} pages of {tiny_index.num_pages}.")
+    return num_results
 
-    redis.expire(url_hll_key, SHORT_EXPIRE_SECONDS)
-    url_count = redis.pfcount(url_hll_key)
-    logger.info("Counted %d unique URLs", url_count)
 
-    redis.expire(domain_hll_key, SHORT_EXPIRE_SECONDS)
-    domain_count = redis.pfcount(domain_hll_key)
-    logger.info("Counted %d unique domains", domain_count)
-
-    redis.expire(domain_count_key, SHORT_EXPIRE_SECONDS)
-
-    _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
-    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
-    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results)
-
-    end_time = datetime.utcnow()
-    logger.info(f"Counting took {end_time - start_time}.")
+def _get_keys():
+    today = date.today()
+    url_hll_key = INDEX_URL_HLL_KEY.format(date=today)
+    domain_hll_key = INDEX_DOMAIN_HLL_KEY.format(date=today)
+    domain_count_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today)
+    return domain_count_key, domain_hll_key, url_hll_key
 
 
 def _set_count(key, redis, today, count):
