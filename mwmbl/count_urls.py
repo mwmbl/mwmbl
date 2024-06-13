@@ -15,13 +15,13 @@ from mwmbl.utils import batch
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
 INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
 INDEX_URL_COUNT_KEY = "index-url-count-{date}"
-INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{domain}-{date}"
+INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
 INDEX_URL_HLL_KEY = "index-hll-{date}"
 INDEX_DOMAIN_HLL_KEY = "index-domain-hll-{date}"
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
-NUM_PAGES_IN_BATCH = 1024
+NUM_PAGES_IN_BATCH = 10240
 
 
 logger = getLogger(__name__)
@@ -51,6 +51,7 @@ def count_urls():
     today = date.today()
     url_hll_key = INDEX_URL_HLL_KEY.format(date=today)
     domain_hll_key = INDEX_DOMAIN_HLL_KEY.format(date=today)
+    domain_count_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today)
     num_results = 0
     with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
         # Count using a Redis hyperloglog to avoid memory issues.
@@ -67,9 +68,7 @@ def count_urls():
                 num_results += len(docs)
 
             for domain, count in domain_counts.items():
-                domain_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(domain=domain, date=today)
-                redis.incrby(domain_key, count)
-                redis.expire(domain_key, SHORT_EXPIRE_SECONDS)
+                redis.zincrby(domain_count_key, count, domain)
 
             redis.pfadd(url_hll_key, *urls)
             redis.pfadd(domain_hll_key, *domains)
@@ -82,6 +81,8 @@ def count_urls():
     redis.expire(domain_hll_key, SHORT_EXPIRE_SECONDS)
     domain_count = redis.pfcount(domain_hll_key)
     logger.info("Counted %d unique domains", domain_count)
+
+    redis.expire(domain_count_key, SHORT_EXPIRE_SECONDS)
 
     _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
     _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
@@ -119,7 +120,7 @@ def get_domain_result_count(domain: str) -> int:
     redis = get_redis()
 
     today = date.today()
-    count = redis.get(INDEX_DOMAIN_RESULT_COUNT_KEY.format(domain=domain, date=today))
+    count = redis.zscore(INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today), domain)
     return 0 if count is None else int(count)
 
 
