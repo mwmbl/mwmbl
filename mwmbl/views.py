@@ -464,4 +464,18 @@ def domains_view(request):
 
 def domain_view(request, domain):
     domain_stats = stats_manager.get_stats_for_domain(domain)
-    return render(request, "mwmbl/domain.html", {"domain_stats": domain_stats})
+    domain_submissions = DomainSubmission.objects.filter(name=domain)
+
+    context = {
+        "domain_stats": domain_stats,
+        "domain_submissions": domain_submissions,
+    }
+
+    return render(request, "mwmbl/domain.html", context)
+
+
+class DomainView(ListView):
+    model = DomainSubmission
+
+    def get_queryset(self):
+        return DomainSubmission.objects.all().order_by("-submitted_on")

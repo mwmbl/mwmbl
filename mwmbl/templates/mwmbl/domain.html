@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{%  load humanize %}
 
 {% block content %}
 <h1>Stats for {{ domain_stats.domain_name }}</h1>
@@ -10,4 +11,15 @@
 <li>Number of results for this domain in the index: {{ domain_stats.num_index_results }}</li>
 </ul>
 
+<h1>Submissions for this domain</h1>
+<ul>
+  {% for domain_submission in domain_submissions %}
+    <li>
+      Submitted by {{ domain_submission.submitted_by }} {{ domain_submission.submitted_on|naturaltime }} - status {{ domain_submission.status }}
+
+    </li>
+  {% empty %}
+    <li>No submissions for this domain</li>
+  {% endfor %}
+</ul>
 {% endblock content %}

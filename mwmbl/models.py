@@ -80,7 +80,7 @@ class DomainSubmission(models.Model):
         "OTHER": "The domain submission was rejected for another reason",
     }
 
-    name = models.CharField(max_length=300, primary_key=True)
+    name = models.CharField(max_length=300)
     submitted_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="domain_submissions")
     submitted_on = models.DateTimeField()
     status = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_SUBMISSION_STATUS.items()], default="PENDING")

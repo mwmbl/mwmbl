@@ -5,7 +5,7 @@
 {% block content %}
 <ul>
   {% for object in object_list %}
-    <li>{{ object.name }} submitted by {{ object.submitted_by }} on {{ object.submitted_on }}, status {{ object.status }}</li>
+    <li><a href="{% url "domain" object.name %}">{{ object.name }}</a> submitted by {{ object.submitted_by }} on {{ object.submitted_on }}, status {{ object.status }}</li>
   {% endfor %}
 </ul>
 {% endblock %}
