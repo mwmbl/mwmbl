@@ -11,7 +11,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.forms import ModelForm, ModelChoiceField, RadioSelect
 from django.http import HttpResponseBadRequest
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -20,7 +20,7 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
 from requests.exceptions import RequestException
 
 from mwmbl.crawler.app import stats_manager
-from mwmbl.models import Curation, FlagCuration
+from mwmbl.models import Curation, FlagCuration, DomainSubmission
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
@@ -148,6 +148,35 @@ def add_url(request):
         "activity": None,
         "curation": curation,
     })
+
+
+class DomainSubmissionForm(ModelForm):
+    class Meta:
+        model = DomainSubmission
+        fields = ["name"]
+
+
+@login_required
+def submit_domain(request):
+    if request.method == "POST":
+        form = DomainSubmissionForm(request.POST)
+        if form.is_valid():
+            domain_submission = form.save(commit=False)
+            domain_submission.submitted_by = request.user
+            domain_submission.submitted_on = datetime.utcnow()
+            domain_submission.save()
+            return redirect("domain_submissions")
+    else:
+        form = DomainSubmissionForm()
+    return render(request, "mwmbl/domain_submission.html", {"form": form})
+
+
+class DomainSubmissionListView(ListView):
+    model = DomainSubmission
+    template_name = "mwmbl/domain_submission_list.html"
+
+    def get_queryset(self):
+        return DomainSubmission.objects.all().order_by("-submitted_on")
 
 
 def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
