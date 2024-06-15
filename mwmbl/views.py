@@ -156,6 +156,12 @@ class DomainSubmissionForm(ModelForm):
         fields = ["name"]
 
 
+class DomainSubmissionApprovalForm(ModelForm):
+    class Meta:
+        model = DomainSubmission
+        fields = ["status", "rejection_reason", "rejection_detail"]
+
+
 @login_required
 def submit_domain(request):
     if request.method == "POST":
@@ -463,19 +469,29 @@ def domains_view(request):
 
 
 def domain_view(request, domain):
+    if request.method == "POST":
+        if request.user.has_perm("mwmbl.change_domain_submission_status"):
+            instance_id = request.POST.get("id")
+            if instance_id is not None:
+                instance = DomainSubmission.objects.get(id=instance_id)
+                form = DomainSubmissionApprovalForm(request.POST, instance=instance)
+                if form.is_valid():
+                    form.save()
+
     domain_stats = stats_manager.get_stats_for_domain(domain)
-    domain_submissions = DomainSubmission.objects.filter(name=domain)
+    domain_submissions = DomainSubmission.objects.filter(name=domain).order_by("-submitted_on")
+
+    # Add a form if the user is a moderator
+    if request.user.has_perm("mwmbl.change_domain_submission_status"):
+        pending_submissions = DomainSubmission.objects.filter(name=domain, status="PENDING").order_by("-submitted_on")
+        forms = [DomainSubmissionApprovalForm(instance=submission) for submission in pending_submissions]
+    else:
+        forms = []
 
     context = {
         "domain_stats": domain_stats,
         "domain_submissions": domain_submissions,
+        "forms": forms,
     }
 
     return render(request, "mwmbl/domain.html", context)
-
-
-class DomainView(ListView):
-    model = DomainSubmission
-
-    def get_queryset(self):
-        return DomainSubmission.objects.all().order_by("-submitted_on")

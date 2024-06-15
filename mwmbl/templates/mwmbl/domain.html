@@ -16,10 +16,22 @@
   {% for domain_submission in domain_submissions %}
     <li>
       Submitted by {{ domain_submission.submitted_by }} {{ domain_submission.submitted_on|naturaltime }} - status {{ domain_submission.status }}
-
     </li>
   {% empty %}
     <li>No submissions for this domain</li>
   {% endfor %}
 </ul>
+
+{% for form in forms %}
+  <br>
+  <h1> Update submission from {{ form.instance.submitted_by }} {{ form.instance.submitted_on|naturaltime }}</h1>
+  <br>
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <input type="hidden" name="id" value="{{ form.instance.id }}">
+    <button type="submit">Update</button>
+  </form>
+{% endfor %}
 {% endblock content %}

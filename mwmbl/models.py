@@ -67,6 +67,11 @@ class OldIndex(models.Model):
 
 
 class DomainSubmission(models.Model):
+    class Meta:
+        permissions = [
+            ("change_domain_submission_status", "Can change the domain submission status"),
+        ]
+
     DOMAIN_SUBMISSION_STATUS = {
         "PENDING": "The domain submission is awaiting review",
         "APPROVED": "The domain submission has been approved",
