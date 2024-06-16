@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 from logging import getLogger
 from random import Random
+from typing import Callable
 from urllib.parse import urlparse
 
 from redis import Redis
@@ -11,7 +12,6 @@ from mwmbl.crawler.domains import DomainLinkDatabase, TOP_DOMAINS
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
-from mwmbl.models import DomainSubmission
 from mwmbl.settings import CORE_DOMAINS
 
 
@@ -48,18 +48,14 @@ def get_domain_max_urls(domain: str, curated_domains: set[str]):
         return MAX_URLS_PER_OTHER_DOMAIN
 
 
-def _get_curated_domains():
-    curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list('name', flat=True))
-    return curated_domains
-
-
 class RedisURLQueue:
-    def __init__(self, redis: Redis):
+    def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]]) -> None:
         self.redis = redis
         self.black_listed_domains = get_blacklist_domains()
+        self.get_curated_domains_function = get_curated_domains_function
 
     def queue_urls(self, found_urls: list[FoundURL]):
-        curated_domains = _get_curated_domains()
+        curated_domains = self.get_curated_domains_function()
         logger.info(f"Got {len(found_urls)} URLs, {len(curated_domains)} curated domains")
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
@@ -94,7 +90,7 @@ class RedisURLQueue:
     def get_batch(self) -> list[str]:
         top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
         top_other_domains = top_scoring_domains - DOMAINS.keys()
-        curated_domains = _get_curated_domains()
+        curated_domains = self.get_curated_domains_function()
 
         domains = list(CORE_DOMAINS)
         top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains

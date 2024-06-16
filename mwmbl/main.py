@@ -14,6 +14,7 @@ def run():
     from mwmbl.redis_url_queue import RedisURLQueue
     from mwmbl.count_urls import count_urls_continuously
     from mwmbl.indexer.update_urls import update_urls_continuously
+    from mwmbl.search_setup import get_curated_domains
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")
@@ -23,7 +24,7 @@ def run():
     mwmbl_app = os.environ["MWMBL_APP"]
     if mwmbl_app == "update_urls":
         redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
-        url_queue = RedisURLQueue(redis)
+        url_queue = RedisURLQueue(redis, get_curated_domains)
         update_urls_continuously(settings.DATA_PATH, url_queue)
     elif mwmbl_app == "update_batches":
         background.run(settings.DATA_PATH)
