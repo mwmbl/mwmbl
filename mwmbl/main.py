@@ -5,16 +5,15 @@ import uvicorn
 from django.core.management import call_command
 from redis import Redis
 
-from mwmbl.count_urls import count_urls_continuously
-from mwmbl.indexer.update_urls import update_urls_continuously
-from mwmbl.redis_url_queue import RedisURLQueue
-
 
 def run():
     django.setup()
 
     from django.conf import settings
     from mwmbl import background
+    from mwmbl.redis_url_queue import RedisURLQueue
+    from mwmbl.count_urls import count_urls_continuously
+    from mwmbl.indexer.update_urls import update_urls_continuously
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")
