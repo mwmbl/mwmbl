@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}<title>Submit a domain for crawling</title>{% endblock %}
+
+{% block content %}
+
+  <h1>Submit a domain for crawling</h1>
+  <form action="{% url "submit_domain" %}" method="POST">
+    {% csrf_token %}
+    {{ form }}
+    <input type="submit" value="Submit">
+  </form>
+
+{% endblock %}

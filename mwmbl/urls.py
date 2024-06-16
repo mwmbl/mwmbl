@@ -21,7 +21,8 @@ import mwmbl.crawler.app as crawler
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
-    flag_curation, CurationFlagListView, flag_curation_update, domains_view, domain_view, CurationsView
+    flag_curation, CurationFlagListView, flag_curation_update, domains_view, domain_view, CurationsView, submit_domain, \
+    DomainSubmissionListView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -30,6 +31,8 @@ urlpatterns = [
     path('', index, name="index"),
     path('app/home/', home_fragment, name="home"),
     path('app/add/', add_url, name="add_url"),
+    path('app/domain-submissions/', DomainSubmissionListView.as_view(), name="domain_submissions"),
+    path('app/domain-submissions/new', submit_domain, name="submit_domain"),
     path('app/approve/', approve, name="approve"),
     path('app/revert-current/', revert_current_curation, name="revert_current"),
     path('app/curations/', CurationsView.as_view(), name="curations"),
