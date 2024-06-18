@@ -5,3 +5,6 @@ README.md
 *.pyd
 __pycache__
 .pytest_cache
+devdata
+**/*.tinysearch
+
