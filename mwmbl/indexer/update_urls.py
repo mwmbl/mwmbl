@@ -35,7 +35,7 @@ def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
 
 
 def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 100,
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 1000,
                       new_item_queue)
 
 
