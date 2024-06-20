@@ -68,6 +68,11 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
         user_id_hash = _get_user_id_hash(batch)
 
+        urls = [item.url for item in batch.items]
+        invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
+        if invalid_urls:
+            raise HTTPException(400, f"The following URLs were not assigned to the user: {invalid_urls}")
+
         now = datetime.now(timezone.utc)
         seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
 
@@ -111,7 +116,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
     def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
         user_id_hash = _get_user_id_hash(batch_request)
         try:
-            urls = queued_batches.get_batch()
+            urls = queued_batches.get_batch(user_id_hash)
         except Empty:
             return []
         # TODO: track which URLs are currently being crawled
