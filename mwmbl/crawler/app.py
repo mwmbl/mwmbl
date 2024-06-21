@@ -71,7 +71,9 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         urls = [item.url for item in batch.items]
         invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
         if invalid_urls:
-            raise HTTPException(400, f"The following URLs were not assigned to the user: {invalid_urls}")
+            raise HTTPException(400, f"The following URLs were not assigned to the user for crawling:"
+                                     f" {invalid_urls}. To suggest a domain to crawl, please visit "
+                                     f"https://mwmbl.org/app/domain-submissions/new")
 
         now = datetime.now(timezone.utc)
         seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
