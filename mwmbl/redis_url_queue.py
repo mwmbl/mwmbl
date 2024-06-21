@@ -1,3 +1,4 @@
+import json
 import math
 from datetime import datetime, timedelta
 
@@ -23,6 +24,9 @@ logger = getLogger(__name__)
 
 DOMAIN_URLS_KEY = "domain-urls-{domain}"
 DOMAIN_SCORE_KEY = "domain-scores"
+USER_URLS_KEY = "user-urls-{user_id}"
+
+USER_EXPIRY_SECONDS = 60 * 60 * 24 * 7
 
 
 MAX_URLS_PER_CORE_DOMAIN = 1000
@@ -87,7 +91,7 @@ class RedisURLQueue:
 
         logger.info(f"Queued {len(found_urls)} URLs, number of domains: {self.redis.zcard(DOMAIN_SCORE_KEY)}")
 
-    def get_batch(self) -> list[str]:
+    def get_batch(self, user_id: str) -> list[str]:
         top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
         top_other_domains = top_scoring_domains - DOMAINS.keys()
         curated_domains = self.get_curated_domains_function()
@@ -131,7 +135,21 @@ class RedisURLQueue:
                 break
 
         logger.info(f"Returning URLs: {urls}")
+
+        # Assign the URLs to this user
+        user_url_str = json.dumps(urls)
+        self.redis.set(USER_URLS_KEY.format(user_id=user_id), user_url_str)
+        self.redis.expire(USER_URLS_KEY.format(user_id=user_id), USER_EXPIRY_SECONDS)
+
         return urls
+
+    def check_user_crawled_urls(self, user_id: str, urls: list[str]):
+        user_assigned_urls = self.redis.get(USER_URLS_KEY.format(user_id=user_id))
+        if user_assigned_urls is None:
+            return urls
+
+        user_assigned_url_set = set(json.loads(user_assigned_urls))
+        return [url for url in urls if url not in user_assigned_url_set]
 
     def get_domain_count(self, domain: str):
         return self.redis.zcard(DOMAIN_URLS_KEY.format(domain=domain))
