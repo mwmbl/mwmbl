@@ -165,9 +165,11 @@ class DomainSubmissionForm(ModelForm):
         original_name = self.cleaned_data["name"]
         try:
             domain = parse_url(original_name).netloc
-            return domain
+            if domain is not None:
+                return domain
         except ValueError:
-            return original_name
+            pass
+        return original_name
 
 
 class DomainSubmissionApprovalForm(ModelForm):
