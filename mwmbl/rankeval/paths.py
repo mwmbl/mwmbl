@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent.parent.parent / 'devdata' / 'rankeval'
+DATA_DIR = Path(__file__).parent.parent.parent / 'devdata' / 'rankeval-2024-06'
 QUERIES_DATASET_PATH = DATA_DIR / 'queries.csv'
 
 REMOTE_DATA_DIR = Path(__file__).parent.parent / 'remote-datasets'
