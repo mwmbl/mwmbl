@@ -42,12 +42,14 @@ def run():
     # Get one suggestion for each query
     # Use this method: https://stackoverflow.com/a/46660098
     # Shuffle, then take the top item from each group
-    queries = query_dataset.sample(frac=1.0)\
+    queries = query_dataset.sample(frac=1.0, random_state=1)\
         .groupby('query')\
         .head()['suggestion']\
         .to_list()
 
     for i, path in enumerate([RANKINGS_DATASET_TRAIN_PATH, RANKINGS_DATASET_TEST_PATH]):
+        if i == 0:
+            continue
         rankings = get_query_rankings(queries[NUM_QUERIES * i:NUM_QUERIES * (i+1)])
         rankings.to_csv(path)
 
