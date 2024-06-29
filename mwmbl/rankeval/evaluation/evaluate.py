@@ -16,6 +16,9 @@ CLICK_PROPORTIONS = [0.285, 0.157, 0.110, 0.080, 0.072, 0.051, 0.040, 0.032, 0.0
 NUM_RESULTS_FOR_EVAL = len(CLICK_PROPORTIONS)
 
 
+random = np.random.default_rng(42)
+
+
 class RankingModel(ABC):
     @abstractmethod
     def predict(self, query: str) -> list[str]:
@@ -25,7 +28,7 @@ class RankingModel(ABC):
         pass
 
 
-def evaluate(ranking_model: RankingModel):
+def evaluate(ranking_model: RankingModel, fraction: float = 1.0):
     # TODO:
     #  - output feature importances from XGBoost
     #  - experiment with more features
@@ -33,7 +36,19 @@ def evaluate(ranking_model: RankingModel):
     dataset = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
     ndcg_scores = []
     proportions = []
+
+    queries = dataset['query'].unique()
+    if fraction < 1.0:
+        num_queries = int(fraction * len(queries))
+        print("Num queries", num_queries)
+        random_queries = set(random.choice(queries, num_queries, replace=False))
+    else:
+        random_queries = set(queries)
+
     for query, rankings in dataset.groupby('query'):
+        if query not in random_queries:
+            continue
+
         top_ranked = rankings[['url']].iloc[:NUM_RESULTS_FOR_EVAL]
         top_ranked['score'] = CLICK_PROPORTIONS[:len(top_ranked)]
         scores = top_ranked.set_index('url')['score'].to_dict()
