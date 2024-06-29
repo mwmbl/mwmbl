@@ -11,8 +11,8 @@ class MwmblRankingModel(RankingModel):
         self.ranker = ranker
 
     def predict(self, query: str) -> list[str]:
-        results = self.ranker.search(query)
-        return [x['url'] for x in results]
+        results = self.ranker.search(query, [])
+        return [x.url for x in results]
 
 
 class DummyCompleter:

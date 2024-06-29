@@ -10,7 +10,7 @@ from sklearn.metrics import ndcg_score
 
 
 # Sourced from https://www.searchenginejournal.com/google-first-page-clicks/374516/
-from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH
+from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RANKINGS_DATASET_TRAIN_PATH
 
 CLICK_PROPORTIONS = [0.285, 0.157, 0.110, 0.080, 0.072, 0.051, 0.040, 0.032, 0.028, 0.025]
 NUM_RESULTS_FOR_EVAL = len(CLICK_PROPORTIONS)
@@ -28,12 +28,16 @@ class RankingModel(ABC):
         pass
 
 
-def evaluate(ranking_model: RankingModel, fraction: float = 1.0):
+def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False):
     # TODO:
     #  - output feature importances from XGBoost
     #  - experiment with more features
 
-    dataset = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
+    if use_test:
+        dataset = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
+    else:
+        dataset = pd.read_csv(RANKINGS_DATASET_TRAIN_PATH)
+
     ndcg_scores = []
     proportions = []
 
@@ -74,3 +78,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0):
     print()
     print("proportion_score_mean:", np.mean(proportions))
     print("proportion_score_sem:", sem(proportions))
+
+    print("Dataset\tNDCG\tSEM\tProportion\tSEM")
+    print(f"{'Test' if use_test else 'Train'}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t{np.mean(proportions)}\t"
+          f"{sem(proportions)}")

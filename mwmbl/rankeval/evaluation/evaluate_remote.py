@@ -7,6 +7,8 @@ from argparse import ArgumentParser
 import requests
 from joblib import Memory
 
+from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import Ranker, HeuristicRanker
 
@@ -22,17 +24,9 @@ def fetch_results(url: str, query: str):
     return results
 
 
-class RemoteRankingModel(RankingModel):
-    def __init__(self, url: str = "https://mwmbl.org"):
-        self.url = url
-
-    def predict(self, query: str) -> list[str]:
-        results = fetch_results(self.url, query)
-        return [x['url'] for x in results]
-
-
 def run():
-    model = RemoteRankingModel()
+    ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
+    model = MwmblRankingModel(ranker)
     evaluate(model, fraction=1.0)
 
 
