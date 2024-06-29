@@ -1,3 +1,4 @@
+import re
 from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
@@ -9,9 +10,9 @@ import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.forms import ModelForm, ModelChoiceField, RadioSelect
+from django.forms import ModelForm, ModelChoiceField, RadioSelect, CharField
 from django.http import HttpResponseBadRequest
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
@@ -20,13 +21,13 @@ from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revis
 from requests.exceptions import RequestException
 
 from mwmbl.crawler.app import stats_manager
-from mwmbl.models import Curation, FlagCuration
+from mwmbl.models import Curation, FlagCuration, DomainSubmission
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.tinysearchengine.rank import fix_document_state
 from mwmbl.tokenizer import tokenize
-from mwmbl.utils import add_term_infos
+from mwmbl.utils import add_term_infos, parse_url, validate_domain
 
 MAX_CURATED_SCORE = 1_111_111.0
 
@@ -148,6 +149,56 @@ def add_url(request):
         "activity": None,
         "curation": curation,
     })
+
+
+class DomainSubmissionForm(ModelForm):
+    class Meta:
+        model = DomainSubmission
+        fields = ["name"]
+
+    name = CharField(validators=[validate_domain])
+
+    def clean_name(self):
+        """
+        Domain names or URLs are allowed. If a URL is submitted, just extract the domain.
+        """
+        original_name = self.cleaned_data["name"]
+        try:
+            domain = parse_url(original_name).netloc
+            if domain is not None:
+                return domain
+        except ValueError:
+            pass
+        return original_name
+
+
+class DomainSubmissionApprovalForm(ModelForm):
+    class Meta:
+        model = DomainSubmission
+        fields = ["status", "rejection_reason", "rejection_detail"]
+
+
+@login_required
+def submit_domain(request):
+    if request.method == "POST":
+        form = DomainSubmissionForm(request.POST)
+        if form.is_valid():
+            domain_submission = form.save(commit=False)
+            domain_submission.submitted_by = request.user
+            domain_submission.submitted_on = datetime.utcnow()
+            domain_submission.save()
+            return redirect("domain_submissions")
+    else:
+        form = DomainSubmissionForm()
+    return render(request, "mwmbl/domain_submission.html", {"form": form})
+
+
+class DomainSubmissionListView(ListView):
+    model = DomainSubmission
+    template_name = "mwmbl/domain_submission_list.html"
+
+    def get_queryset(self):
+        return DomainSubmission.objects.all().order_by("-submitted_on")
 
 
 def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
@@ -434,5 +485,29 @@ def domains_view(request):
 
 
 def domain_view(request, domain):
+    if request.method == "POST":
+        if request.user.has_perm("mwmbl.change_domain_submission_status"):
+            instance_id = request.POST.get("id")
+            if instance_id is not None:
+                instance = DomainSubmission.objects.get(id=instance_id)
+                form = DomainSubmissionApprovalForm(request.POST, instance=instance)
+                if form.is_valid():
+                    form.save()
+
     domain_stats = stats_manager.get_stats_for_domain(domain)
-    return render(request, "mwmbl/domain.html", {"domain_stats": domain_stats})
+    domain_submissions = DomainSubmission.objects.filter(name=domain).order_by("-submitted_on")
+
+    # Add a form if the user is a moderator
+    if request.user.has_perm("mwmbl.change_domain_submission_status"):
+        pending_submissions = DomainSubmission.objects.filter(name=domain, status="PENDING").order_by("-submitted_on")
+        forms = [DomainSubmissionApprovalForm(instance=submission) for submission in pending_submissions]
+    else:
+        forms = []
+
+    context = {
+        "domain_stats": domain_stats,
+        "domain_submissions": domain_submissions,
+        "forms": forms,
+    }
+
+    return render(request, "mwmbl/domain.html", context)

@@ -1,5 +1,8 @@
 import re
+from dataclasses import dataclass
 from typing import Sequence
+
+from django.core.exceptions import ValidationError
 
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -41,3 +44,40 @@ def add_term_infos(documents: list[Document], index: TinyIndex, page_index: int)
             yield add_term_info(document, index, page_index)
         except ValueError:
             continue
+
+
+@dataclass
+class ParsedUrl:
+    scheme: str
+    netloc: str
+    query_string: str
+    fragment: str
+
+
+# See https://stackoverflow.com/a/2627127/660902
+URL_REGEX = re.compile("^(([^:/?#]+):)?(//([^/?#]*)|///)?([^?#]*)(\\?[^#]*)?(#.*)?")
+
+
+def parse_url(url: str) -> ParsedUrl:
+    """
+    Custom URL parsing function using regex because urlparse is too slow.
+    """
+    results = URL_REGEX.match(url)
+    if results is None:
+        raise ValueError(f"Unable to parse URL {url}")
+    return ParsedUrl(results.group(2), results.group(4), results.group(6), results.group(7))
+
+
+VALID_DOMAIN_REGEX = re.compile(r"^[\w-]{1,63}(\.[\w-]{1,63})+$")
+
+
+def validate_domain(domain_or_url: str):
+    if VALID_DOMAIN_REGEX.fullmatch(domain_or_url) is None:
+        # See if we can extract a domain from the URL
+        try:
+            domain = parse_url(domain_or_url).netloc
+        except ValueError:
+            raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
+        if domain is None or VALID_DOMAIN_REGEX.fullmatch(domain) is None:
+            raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
+

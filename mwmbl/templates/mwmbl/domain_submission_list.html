@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}<title>Domain Submission for {{ object.name }}</title> {% endblock %}
+
+{% block content %}
+<ul>
+  {% for object in object_list %}
+    <li><a href="{% url "domain" object.name %}">{{ object.name }}</a> submitted by {{ object.submitted_by }} on {{ object.submitted_on }}, status {{ object.status }}</li>
+  {% endfor %}
+</ul>
+{% endblock %}

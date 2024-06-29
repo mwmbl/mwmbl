@@ -64,3 +64,32 @@ class OldIndex(models.Model):
     index_path = models.CharField(max_length=300, primary_key=True)
     last_copied_time = models.DateTimeField(null=True, blank=True)
     last_page_copied = models.IntegerField(null=True, blank=True)
+
+
+class DomainSubmission(models.Model):
+    class Meta:
+        permissions = [
+            ("change_domain_submission_status", "Can change the domain submission status"),
+        ]
+
+    DOMAIN_SUBMISSION_STATUS = {
+        "PENDING": "The domain submission is awaiting review",
+        "APPROVED": "The domain submission has been approved",
+        "REJECTED": "The domain submission has been rejected",
+    }
+
+    DOMAIN_REJECTION_REASON = {
+        "SPAM": "The domain submission was rejected because it was spam",
+        "OFFENSIVE": "The domain submission was rejected because it was offensive",
+        "LANGUAGE": "The domain is in an unsupported language",
+        "OTHER": "The domain submission was rejected for another reason",
+    }
+
+    name = models.CharField(max_length=300)
+    submitted_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="domain_submissions")
+    submitted_on = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_SUBMISSION_STATUS.items()], default="PENDING")
+    status_changed_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, null=True, blank=True, related_name="domain_submissions_changed")
+    status_changed_on = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
+    rejection_detail = models.CharField(max_length=300, blank=True)
