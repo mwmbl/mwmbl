@@ -225,6 +225,11 @@ class Ranker:
         state_fixed = [fix_document_state(result) for result in deduplicated_results]
         return state_fixed, terms, completions
 
+    def get_raw_results(self, query: str):
+        tokens = tokenize(query)
+        term = ' '.join(tokens)
+        return self.tiny_index.retrieve(term)
+
 
 class HeuristicRanker(Ranker):
     def order_results(self, terms, pages, is_complete):
