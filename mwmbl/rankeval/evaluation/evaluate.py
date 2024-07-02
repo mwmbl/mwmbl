@@ -79,6 +79,6 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     print("proportion_score_mean:", np.mean(proportions))
     print("proportion_score_sem:", sem(proportions))
 
-    print("Dataset\tNDCG\tSEM\tProportion\tSEM")
-    print(f"{'Test' if use_test else 'Train'}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t{np.mean(proportions)}\t"
-          f"{sem(proportions)}")
+    print("Dataset\tFraction\tNDCG\tSEM\tProportion\tSEM")
+    print(f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
+          f"{np.mean(proportions)}\t{sem(proportions)}")

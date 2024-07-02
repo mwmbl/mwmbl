@@ -27,8 +27,16 @@ def fetch_results(url: str, query: str):
 def run():
     ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     model = MwmblRankingModel(ranker)
-    evaluate(model, fraction=1.0)
+    evaluate(model, fraction=0.01)
+
+
+def single_query(query: str):
+    ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
+    results = ranker.search(query, [])
+    for result in results:
+        print(result)
 
 
 if __name__ == '__main__':
-    run()
+    # run()
+    single_query("beethoven - wikipedia")
