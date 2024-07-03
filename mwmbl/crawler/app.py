@@ -55,6 +55,10 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
     @router.post('/batches/')
     def post_batch(request, batch: Batch):
+        """
+        Store a batch of crawled pages.
+        """
+
         if len(batch.items) > MAX_BATCH_SIZE:
             raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
 
