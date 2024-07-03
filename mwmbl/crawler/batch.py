@@ -3,10 +3,19 @@ from typing import Optional
 from ninja import Schema
 
 
+class Link(Schema):
+    url: str
+    anchor_text: str
+    link_type: str
+
+
 class ItemContent(Schema):
     title: str
     extract: str
-    links: list[str]
+    link_details: Optional[list[Link]]
+
+    # Deprecated
+    links: Optional[list[str]]
     extra_links: Optional[list[str]]
     links_only: Optional[bool]
 
@@ -18,6 +27,7 @@ class ItemError(Schema):
 
 class Item(Schema):
     url: str
+    resolved_url: Optional[str]
     status: Optional[int]
     timestamp: int
     content: Optional[ItemContent]

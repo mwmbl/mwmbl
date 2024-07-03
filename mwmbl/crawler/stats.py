@@ -109,7 +109,15 @@ class StatsManager:
 
                 self.redis.zincrby(host_key, 1, host)
 
-                for link in item.content.links:
+                links = []
+                if item.content.links is not None:
+                    links += item.content.links
+                if item.content.extra_links is not None:
+                    links += item.content.extra_links
+                if item.content.link_details is not None:
+                    links += [link.url for link in item.content.link_details]
+
+                for link in links:
                     link_host = urlparse(link).netloc
                     self.redis.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
 
