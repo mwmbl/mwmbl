@@ -6,6 +6,8 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import justext
+import objgraph
+import psutil
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, permission_required
@@ -511,3 +513,15 @@ def domain_view(request, domain):
     }
 
     return render(request, "mwmbl/domain.html", context)
+
+
+def memory_view(request):
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    most_common_objects = objgraph.most_common_types(limit=100)
+    growth = objgraph.growth(limit=100)
+    return render(request, "mwmbl/memory.html", {
+        "most_common_objects": most_common_objects,
+        "growth": growth,
+        "memory_info": memory_info,
+    })

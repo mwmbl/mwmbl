@@ -44,6 +44,8 @@ pybloomfiltermmap3 = "^0.5.7"
 lxml-html-clean = "^0.1.0"
 lxml = "^5.2.0"
 numpy = "1.23.2"
+objgraph = "^3.6.1"
+psutil = "^6.0.0"
 [tool.poetry.extras]
 indexer = [
     "ujson",
