@@ -20,15 +20,15 @@
 {#    <tr><td>swap</td><td>{{ memory_info.swap|human_bytes }}</td></tr>#}
   </table>
   <br>
-  <table><thead><tr><th>Most common objects</th><th>Number</th></tr></thead>
+  <table><thead><tr><th>Most common objects</th><th>Count</th></tr></thead>
   {% for t, c in most_common_objects %}
     <tr><td>{{ t }}</td><td>{{ c }}</td></tr>
   {% endfor %}
   </table>
   <br>
-  <table><thead><tr><th>Growth objects</th><th>Number</th></tr></thead>
-  {% for t, c in growth %}
-    <tr><td>{{ t }}</td><td>{{ c }}</td></tr>
+  <table><thead><tr><th>Growth objects</th><th>Count</th><th>Increase</th></tr></thead>
+  {% for t, count, change in growth %}
+    <tr><td>{{ t }}</td><td>{{ count }}</td><td>{{ change }}</td></tr>
   {% endfor %}
   </table>
 {% endblock %}
