@@ -22,7 +22,7 @@ from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
     flag_curation, CurationFlagListView, flag_curation_update, domains_view, domain_view, CurationsView, submit_domain, \
-    DomainSubmissionListView
+    DomainSubmissionListView, memory_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -50,4 +50,6 @@ urlpatterns = [
     # New API
     path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
     path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
+
+    path("debug/memory", memory_view, name="memory"),
 ]

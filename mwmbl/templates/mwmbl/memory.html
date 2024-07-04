@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load humanbytes %}
+
+{% block title %}<title>Mwmbl Debugging - Memory usage</title>{% endblock %}
+
+
+
+{% block content %}
+  <table>
+    <thead><tr><th>Memory type</th><th>Size</th></tr></thead>
+    <tr><td>rss</td><td>{{ memory_info.rss|human_bytes }}</td></tr>
+    <tr><td>vms</td><td>{{ memory_info.vms|human_bytes }}</td></tr>
+    <tr><td>shared</td><td>{{ memory_info.shared|human_bytes }}</td></tr>
+    <tr><td>text</td><td>{{ memory_info.text|human_bytes }}</td></tr>
+    <tr><td>lib</td><td>{{ memory_info.lib|human_bytes }}</td></tr>
+    <tr><td>data</td><td>{{ memory_info.data|human_bytes }}</td></tr>
+    <tr><td>dirty</td><td>{{ memory_info.dirty|human_bytes }}</td></tr>
+{#    <tr><td>uss</td><td>{{ memory_info.uss|human_bytes }}</td></tr>#}
+{#    <tr><td>pss</td><td>{{ memory_info.pss|human_bytes }}</td></tr>#}
+{#    <tr><td>swap</td><td>{{ memory_info.swap|human_bytes }}</td></tr>#}
+  </table>
+  <br>
+  <table><thead><tr><th>Most common objects</th><th>Number</th></tr></thead>
+  {% for t, c in most_common_objects %}
+    <tr><td>{{ t }}</td><td>{{ c }}</td></tr>
+  {% endfor %}
+  </table>
+  <br>
+  <table><thead><tr><th>Growth objects</th><th>Number</th></tr></thead>
+  {% for t, c in growth %}
+    <tr><td>{{ t }}</td><td>{{ c }}</td></tr>
+  {% endfor %}
+  </table>
+{% endblock %}
