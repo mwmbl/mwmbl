@@ -97,35 +97,36 @@ class StatsManager:
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
 
-        host_key = HOST_COUNT_KEY.format(date=date)
-        host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
-        with URLDatabase() as url_db:
-            for item in hashed_batch.items:
-                host = urlparse(item.url).netloc
-                self.redis.zincrby(host_all_key, 1, host)
-
-                if item.content is None:
-                    continue
-
-                self.redis.zincrby(host_key, 1, host)
-
-                links = []
-                if item.content.links is not None:
-                    links += item.content.links
-                if item.content.extra_links is not None:
-                    links += item.content.extra_links
-                if item.content.link_details is not None:
-                    links += [link.url for link in item.content.link_details]
-
-                for link in links:
-                    link_host = urlparse(link).netloc
-                    self.redis.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
-
-                    if link not in url_db:
-                        self.redis.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
-
-        self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
-        self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
+        # Currently commented out for performance reasons
+        # host_key = HOST_COUNT_KEY.format(date=date)
+        # host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
+        # with URLDatabase() as url_db:
+        #     for item in hashed_batch.items:
+        #         host = urlparse(item.url).netloc
+        #         self.redis.zincrby(host_all_key, 1, host)
+        #
+        #         if item.content is None:
+        #             continue
+        #
+        #         self.redis.zincrby(host_key, 1, host)
+        #
+        #         links = []
+        #         if item.content.links is not None:
+        #             links += item.content.links
+        #         if item.content.extra_links is not None:
+        #             links += item.content.extra_links
+        #         if item.content.link_details is not None:
+        #             links += [link.url for link in item.content.link_details]
+        #
+        #         for link in links:
+        #             link_host = urlparse(link).netloc
+        #             self.redis.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
+        #
+        #             if link not in url_db:
+        #                 self.redis.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
+        #
+        # self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
+        # self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.utcnow()

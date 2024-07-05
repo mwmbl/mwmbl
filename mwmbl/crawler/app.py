@@ -94,7 +94,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
         hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
 
-        # stats_manager.record_batch(hashed_batch)
+        stats_manager.record_batch(hashed_batch)
 
         data = gzip.compress(hashed_batch.json().encode('utf8'))
         upload(data, filename)
