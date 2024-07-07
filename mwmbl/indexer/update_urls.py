@@ -113,7 +113,7 @@ def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timest
         return
 
     if not isinstance(parsed_link.netloc, str):
-        logger.debug(f"Couldn't parse netloc: {parsed_link}")
+        logger.debug(f"Couldn't find netloc: {link.url}")
         return
 
     if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
