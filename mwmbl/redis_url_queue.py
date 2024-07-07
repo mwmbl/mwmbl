@@ -1,5 +1,6 @@
 import json
 import math
+from collections import defaultdict
 from datetime import datetime, timedelta
 from logging import getLogger
 from random import Random
@@ -59,7 +60,7 @@ class RedisURLQueue:
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()
         logger.info(f"Got {len(found_urls)} URLs, {len(curated_domains)} curated domains")
-        url_scores = {}
+        url_scores = defaultdict(list)
         domain_scores = {}
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
@@ -78,14 +79,14 @@ class RedisURLQueue:
                 url_score *= score_multiplier
                 logger.info(f"URL score: {url_score}, score multiplier: {score_multiplier} for domain {domain} and age {time_since_crawled}")
 
-                url_scores[url.url] = url_score
+                url_scores[domain].append((url.url, url_score))
                 domain_score = link_db.get_domain_score(domain) + url_score
                 domain_scores[domain] = max(domain_score, domain_scores.get(domain, 0.0))
 
-        self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), url_scores)
         self.redis.zadd(DOMAIN_SCORE_KEY, domain_scores, gt=True)
 
         for domain in domain_scores.keys():
+            self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), dict(url_scores[domain]))
             max_urls = get_domain_max_urls(domain, curated_domains)
             self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -(max_urls + 1))
 
