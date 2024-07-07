@@ -5,9 +5,9 @@ from logging import getLogger
 from pathlib import Path
 from time import sleep
 from typing import Collection
-from urllib.parse import urlparse
 
 import requests
+from django.conf import settings
 from redis import Redis
 
 from mwmbl.crawler.batch import HashedBatch, Link
@@ -19,9 +19,7 @@ from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.redis_url_queue import RedisURLQueue, get_domain_max_urls
-from mwmbl.utils import get_domain
-
-from django.conf import settings
+from mwmbl.utils import get_domain, parse_url
 
 logger = getLogger(__name__)
 
@@ -109,7 +107,7 @@ def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timest
                  url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_domains: set[str],
                  domain_links: dict[str, set[str]]):
     try:
-        parsed_link = urlparse(link.url)
+        parsed_link = parse_url(link.url)
     except ValueError:
         logger.debug(f"Couldn't parse link: {link.url}")
         return
@@ -136,4 +134,7 @@ if __name__ == "__main__":
     redis: Redis = Redis.from_url("redis://127.0.0.1:6379", decode_responses=True)
     batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
     url_queue = RedisURLQueue(redis, lambda: set())
-    run(batch_cache, url_queue, num_batches=100)
+    start_time = datetime.now()
+    run(batch_cache, url_queue, num_batches=500)
+    end_time = datetime.now()
+    logger.info(f"Finished updating URLs in {end_time - start_time}")

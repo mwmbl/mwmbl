@@ -1,11 +1,9 @@
 import json
 import math
 from datetime import datetime, timedelta
-
 from logging import getLogger
 from random import Random
 from typing import Callable
-from urllib.parse import urlparse
 
 from redis import Redis
 
@@ -14,7 +12,7 @@ from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.settings import CORE_DOMAINS
-
+from mwmbl.utils import parse_url
 
 MAX_TIME_DELTA = timedelta(days=100000)
 
@@ -61,6 +59,8 @@ class RedisURLQueue:
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()
         logger.info(f"Got {len(found_urls)} URLs, {len(curated_domains)} curated domains")
+        url_scores = {}
+        domain_scores = {}
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
                 time_since_crawled = (datetime.utcnow() - url.last_crawled
@@ -70,7 +70,7 @@ class RedisURLQueue:
                 if time_since_crawled < timedelta(days=30):
                     continue
 
-                domain = urlparse(url.url).netloc
+                domain = parse_url(url.url).netloc
                 url_score = 1/len(url.url)
 
                 # Discount URLs that were crawled recently
@@ -78,11 +78,16 @@ class RedisURLQueue:
                 url_score *= score_multiplier
                 logger.info(f"URL score: {url_score}, score multiplier: {score_multiplier} for domain {domain} and age {time_since_crawled}")
 
+                url_scores[url.url] = url_score
                 domain_score = link_db.get_domain_score(domain) + url_score
-                max_urls = get_domain_max_urls(domain, curated_domains)
-                self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), {url.url: url_score})
-                self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -(max_urls + 1))
-                self.redis.zadd(DOMAIN_SCORE_KEY, {domain: domain_score}, gt=True)
+                domain_scores[domain] = max(domain_score, domain_scores.get(domain, 0.0))
+
+        self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), url_scores)
+        self.redis.zadd(DOMAIN_SCORE_KEY, domain_scores, gt=True)
+
+        for domain in domain_scores.keys():
+            max_urls = get_domain_max_urls(domain, curated_domains)
+            self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -(max_urls + 1))
 
         # Remove the lowest scoring domains
         while self.redis.zcard(DOMAIN_SCORE_KEY) > MAX_OTHER_DOMAINS:
