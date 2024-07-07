@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
@@ -7,6 +8,7 @@ from typing import Collection
 from urllib.parse import urlparse
 
 import requests
+from redis import Redis
 
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.crawler.domains import DomainLinkDatabase
@@ -34,8 +36,8 @@ def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
         sleep(10)
 
 
-def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 1000,
+def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int = 1000):
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, num_batches,
                       new_item_queue)
 
 
@@ -131,3 +133,11 @@ def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timesta
 def get_datetime_from_timestamp(timestamp: float) -> datetime:
     batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=timestamp)
     return batch_datetime
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    redis: Redis = Redis.from_url("redis://127.0.0.1:6379", decode_responses=True)
+    batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
+    url_queue = RedisURLQueue(redis, lambda: set())
+    run(batch_cache, url_queue, num_batches=100)
