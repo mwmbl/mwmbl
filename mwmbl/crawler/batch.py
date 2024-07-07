@@ -5,8 +5,8 @@ from ninja import Schema
 
 class Link(Schema):
     url: str
-    anchor_text: str
     link_type: str
+    anchor_text: Optional[str] = None
 
 
 class ItemContent(Schema):
@@ -18,6 +18,17 @@ class ItemContent(Schema):
     links: Optional[list[str]]
     extra_links: Optional[list[str]]
     links_only: Optional[bool]
+
+    @property
+    def all_links(self) -> list[Link]:
+        links = []
+        if self.link_details:
+            links += self.link_details
+        if self.links:
+            links += [Link(url=link, link_type="content") for link in self.links]
+        if self.extra_links:
+            links += [Link(url=link, link_type="nav") for link in self.extra_links]
+        return links
 
 
 class ItemError(Schema):

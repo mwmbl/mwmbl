@@ -1,14 +1,16 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
 from pathlib import Path
 from time import sleep
 from typing import Collection
-from urllib.parse import urlparse
 
 import requests
+from django.conf import settings
+from redis import Redis
 
-from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.batch import HashedBatch, Link
 from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.indexer import process_batch
@@ -17,9 +19,7 @@ from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.redis_url_queue import RedisURLQueue, get_domain_max_urls
-from mwmbl.utils import get_domain
-
-from django.conf import settings
+from mwmbl.utils import get_domain, parse_url
 
 logger = getLogger(__name__)
 
@@ -34,8 +34,8 @@ def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
         sleep(10)
 
 
-def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue):
-    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, 1000,
+def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int = 1000):
+    process_batch.run(batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, num_batches,
                       new_item_queue)
 
 
@@ -64,14 +64,9 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
                 except ValueError:
                     logger.info(f"Couldn't parse URL {item.url}")
                     continue
-                for link in item.content.links:
+                for link in item.content.all_links:
                     process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
                                  blacklist_domains, domain_links)
-
-                if item.content.extra_links:
-                    for link in item.content.extra_links:
-                        process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
-                                     blacklist_domains, domain_links)
 
     found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
                   for url in url_statuses.keys() | url_users.keys()]
@@ -108,20 +103,21 @@ def add_hn_links(new_item_queue: RedisURLQueue):
         logger.info(f"Added {len(urls)} HN links, {hn_count} total, max item ID: {max_item}")
 
 
-def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users, blacklist_domains,
-                 domain_links):
+def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timestamp: datetime,
+                 url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_domains: set[str],
+                 domain_links: dict[str, set[str]]):
     try:
-        parsed_link = urlparse(link)
+        parsed_link = parse_url(link.url)
     except ValueError:
-        logger.debug(f"Couldn't parse link: {link}")
+        logger.debug(f"Couldn't parse link: {link.url}")
         return
 
     if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
         logger.debug(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
-    url_users[link] = user_id_hash
-    url_timestamps[link] = timestamp
+    url_users[link.url] = user_id_hash
+    url_timestamps[link.url] = timestamp
     root_url = f'{parsed_link.scheme}://{parsed_link.netloc}/'
     url_users[root_url] = user_id_hash
     url_timestamps[root_url] = timestamp
@@ -131,3 +127,14 @@ def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timesta
 def get_datetime_from_timestamp(timestamp: float) -> datetime:
     batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=timestamp)
     return batch_datetime
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    redis: Redis = Redis.from_url("redis://127.0.0.1:6379", decode_responses=True)
+    batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
+    url_queue = RedisURLQueue(redis, lambda: set())
+    start_time = datetime.now()
+    run(batch_cache, url_queue, num_batches=500)
+    end_time = datetime.now()
+    logger.info(f"Finished updating URLs in {end_time - start_time}")

@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+from mwmbl.crawler.batch import Link
 from mwmbl.indexer.update_urls import process_link
 
 
@@ -12,7 +13,7 @@ def test_process_link_normal():
     process_link(
         user_id_hash="abc123",
         crawled_page_domain="somewhere.com",
-        link="https://somesite.com/something.html",
+        link=Link(url="https://somesite.com/something.html", link_type="nav"),
         timestamp=1234,
         url_timestamps=url_timestamps,
         url_users=url_users,
@@ -32,7 +33,7 @@ def test_process_link_excludes_porn():
     process_link(
         user_id_hash="abc123",
         crawled_page_domain="somewhere.com",
-        link="https://somepornsite.com/something.html",
+        link=Link(url="https://somepornsite.com/something.html", link_type="content"),
         timestamp=1234,
         url_timestamps=url_timestamps,
         url_users=url_users,

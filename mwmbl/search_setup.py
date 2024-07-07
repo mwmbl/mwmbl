@@ -12,7 +12,7 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 
-def get_curated_domains():
+def get_curated_domains() -> set[str]:
     curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list('name', flat=True))
     return curated_domains
 
