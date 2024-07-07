@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import requests
 from redis import Redis
 
-from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.batch import HashedBatch, Link
 from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.indexer import process_batch
@@ -66,14 +66,9 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
                 except ValueError:
                     logger.info(f"Couldn't parse URL {item.url}")
                     continue
-                for link in item.content.links:
+                for link in item.content.all_links:
                     process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
                                  blacklist_domains, domain_links)
-
-                if item.content.extra_links:
-                    for link in item.content.extra_links:
-                        process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
-                                     blacklist_domains, domain_links)
 
     found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
                   for url in url_statuses.keys() | url_users.keys()]
@@ -110,20 +105,21 @@ def add_hn_links(new_item_queue: RedisURLQueue):
         logger.info(f"Added {len(urls)} HN links, {hn_count} total, max item ID: {max_item}")
 
 
-def process_link(user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users, blacklist_domains,
-                 domain_links):
+def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timestamp: datetime,
+                 url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_domains: set[str],
+                 domain_links: dict[str, set[str]]):
     try:
-        parsed_link = urlparse(link)
+        parsed_link = urlparse(link.url)
     except ValueError:
-        logger.debug(f"Couldn't parse link: {link}")
+        logger.debug(f"Couldn't parse link: {link.url}")
         return
 
     if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
         logger.debug(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 
-    url_users[link] = user_id_hash
-    url_timestamps[link] = timestamp
+    url_users[link.url] = user_id_hash
+    url_timestamps[link.url] = timestamp
     root_url = f'{parsed_link.scheme}://{parsed_link.netloc}/'
     url_users[root_url] = user_id_hash
     url_timestamps[root_url] = timestamp
