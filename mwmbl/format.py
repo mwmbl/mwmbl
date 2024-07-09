@@ -10,6 +10,7 @@ DOCUMENT_SOURCES = {
     DocumentState.ORGANIC_APPROVED: 'mwmbl',
     DocumentState.FROM_GOOGLE_APPROVED: 'google',
     DocumentState.FROM_USER_APPROVED: 'user',
+    DocumentState.FROM_WIKI: 'wikipedia',
 }
 
 

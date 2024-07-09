@@ -8,16 +8,9 @@ from joblib import Memory
 
 from mwmbl.rankeval.evaluation.evaluate import evaluate
 from mwmbl.tinysearchengine.indexer import Document
-
-WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
-WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
-
+from mwmbl.tinysearchengine.rank import WIKI_SEARCH_API_URL, get_wiki_url
 
 memory = Memory(location="devdata/cache")
-
-
-def get_wiki_url(title: str):
-    return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
 
 
 @memory.cache

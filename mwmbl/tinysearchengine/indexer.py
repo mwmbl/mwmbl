@@ -40,6 +40,7 @@ class DocumentState(IntEnum):
     ORGANIC_APPROVED = 7
     FROM_USER_APPROVED = 8
     FROM_GOOGLE_APPROVED = 9
+    FROM_WIKI = 10
 
 
 @dataclass

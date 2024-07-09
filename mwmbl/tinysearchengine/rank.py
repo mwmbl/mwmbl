@@ -1,10 +1,15 @@
 import math
 import re
+import urllib
 from abc import abstractmethod
+from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
 from typing import Optional
 from urllib.parse import urlparse
+
+import requests
+from requests_cache import CachedSession
 
 from mwmbl.format import format_result_with_pattern, get_query_regex
 from mwmbl.tokenizer import tokenize, get_bigrams
@@ -19,7 +24,7 @@ MATCH_SCORE_THRESHOLD = 0.0
 SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
-DOMAIN_SCORE_SMOOTHING = 50
+DOMAIN_SCORE_SMOOTHING = 0.1
 HTTPS_STRING = 'https://'
 
 
@@ -77,10 +82,16 @@ def get_features(terms, title, url, extract, score, is_complete):
     return features
 
 
+DOMAIN_MAX_SCORE = max(DOMAINS.values())
+DOMAIN_MIN_SCORE = min(DOMAINS.values())
+
+
 def get_domain_score(url):
     domain = urlparse(url).netloc
-    domain_score = DOMAINS.get(domain, 0.0)
-    return domain_score
+    if domain in DOMAINS:
+        normalised_score = (DOMAINS[domain] - DOMAIN_MIN_SCORE) / (DOMAIN_MAX_SCORE - DOMAIN_MIN_SCORE)
+        return normalised_score * normalised_score
+    return 0.0
 
 
 def get_match_features(terms, result_string, is_complete, is_url):
@@ -234,3 +245,33 @@ class Ranker:
 class HeuristicRanker(Ranker):
     def order_results(self, terms, pages, is_complete):
         return order_results(terms, pages, is_complete)
+
+
+WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
+WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
+
+
+def get_wiki_url(title: str):
+    return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
+
+
+HTML_TAG_REGEX = re.compile(r'<[^>]+>')
+
+
+def clean_html(s: str):
+    return HTML_TAG_REGEX.sub('', s)
+
+
+class HeuristicAndWikiRanker(HeuristicRanker):
+    max_wiki_results = 5
+
+    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
+        with CachedSession(expire_after=timedelta(weeks=12)) as session:
+            escaped_query = urllib.parse.quote(s, safe='')
+            wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
+            wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
+                                     0.0, s, state=DocumentState.FROM_WIKI)
+                            for result in wiki_response['query']['search'][:self.max_wiki_results]]
+
+        return super().search(s, wiki_results + additional_results)
+

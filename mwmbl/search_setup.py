@@ -9,7 +9,7 @@ from mwmbl.models import DomainSubmission
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.tinysearchengine.rank import HeuristicRanker, HeuristicAndWikiRanker
 
 
 def get_curated_domains() -> set[str]:
@@ -24,5 +24,5 @@ index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-ranker = HeuristicRanker(tiny_index, completer)
+ranker = HeuristicAndWikiRanker(tiny_index, completer)
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
