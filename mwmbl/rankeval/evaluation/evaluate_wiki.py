@@ -30,14 +30,14 @@ def fetch_results(query: str) -> list[str]:
     return [get_wiki_url(result['title']) for result in results['query']['search']]
 
 
-class WikiRanker:
+class WikiModel:
     def predict(self, query):
         return fetch_results(query)
 
 
 def run():
-    ranker = WikiRanker()
-    evaluate(ranker, fraction=0.01)
+    model = WikiModel()
+    evaluate(model, fraction=0.01)
 
 
 if __name__ == "__main__":
