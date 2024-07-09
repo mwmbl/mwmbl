@@ -26,6 +26,7 @@ def fetch_results(url: str, query: str):
 
 def run():
     ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
+    # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     model = MwmblRankingModel(ranker)
     evaluate(model, fraction=0.01)
 

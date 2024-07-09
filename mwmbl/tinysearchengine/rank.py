@@ -1,3 +1,4 @@
+import html
 import math
 import re
 import urllib
@@ -88,9 +89,11 @@ DOMAIN_MIN_SCORE = min(DOMAINS.values())
 
 def get_domain_score(url):
     domain = urlparse(url).netloc
+
     if domain in DOMAINS:
         normalised_score = (DOMAINS[domain] - DOMAIN_MIN_SCORE) / (DOMAIN_MAX_SCORE - DOMAIN_MIN_SCORE)
-        return normalised_score * normalised_score
+        return normalised_score
+
     return 0.0
 
 
@@ -118,10 +121,12 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     if len(results) == 0:
         return []
 
-    results_and_scores = [(score_result(terms, result, is_complete), result) for result in results]
+    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
+    other_results = [result for result in results if result.state != DocumentState.FROM_WIKI]
+    results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
-    return filtered_results
+    return wiki_results + filtered_results
 
 
 def deduplicate(results, seen_titles):
@@ -259,7 +264,7 @@ HTML_TAG_REGEX = re.compile(r'<[^>]+>')
 
 
 def clean_html(s: str):
-    return HTML_TAG_REGEX.sub('', s)
+    return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
 class HeuristicAndWikiRanker(HeuristicRanker):
