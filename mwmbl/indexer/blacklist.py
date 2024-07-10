@@ -1,13 +1,12 @@
 from datetime import timedelta
 
-from requests_cache import CachedSession
-
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.settings import BLACKLIST_DOMAINS_URL, EXCLUDED_DOMAINS, DOMAIN_BLACKLIST_REGEX
+from mwmbl.utils import request_cache
 
 
 def get_blacklist_domains() -> set[str]:
-    with CachedSession(expire_after=timedelta(days=1)) as session:
+    with request_cache(expire_after=timedelta(days=1)) as session:
         response = session.get(BLACKLIST_DOMAINS_URL)
         return set(response.text.split())
 

@@ -6,17 +6,14 @@ from abc import abstractmethod
 from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
-from typing import Optional
 from urllib.parse import urlparse
 
-import requests
-from requests_cache import CachedSession
-
-from mwmbl.format import format_result_with_pattern, get_query_regex
-from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.tinysearchengine.completer import Completer
+from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
+from mwmbl.tokenizer import tokenize, get_bigrams
+from mwmbl.utils import request_cache
 
 logger = getLogger(__name__)
 
@@ -271,12 +268,13 @@ class HeuristicAndWikiRanker(HeuristicRanker):
     max_wiki_results = 5
 
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
-        with CachedSession(expire_after=timedelta(weeks=12)) as session:
-            escaped_query = urllib.parse.quote(s, safe='')
+        escaped_query = urllib.parse.quote(s, safe='')
+        with request_cache(timedelta(weeks=10)) as session:
             wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
-            wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                                     0.0, s, state=DocumentState.FROM_WIKI)
-                            for result in wiki_response['query']['search'][:self.max_wiki_results]]
+
+        wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
+                                 0.0, s, state=DocumentState.FROM_WIKI)
+                        for result in wiki_response['query']['search'][:self.max_wiki_results]]
 
         return super().search(s, wiki_results + additional_results)
 
