@@ -1,4 +1,5 @@
 import html
+import json
 import math
 import re
 import urllib
@@ -6,6 +7,7 @@ from abc import abstractmethod
 from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
+from pathlib import Path
 from urllib.parse import urlparse
 
 from mwmbl.format import get_query_regex
@@ -114,12 +116,25 @@ def get_match_features(terms, result_string, is_complete, is_url):
     return last_match_char, match_length, total_possible_match_length, len(seen_matches)
 
 
+WIKI_SCORES = json.load(open(Path(__file__).parent.parent / "resources" / "wiki_stats.json"))
+WIKI_MAX_SCORE = next(iter(WIKI_SCORES.values()))
+
+
+def get_wiki_score(url):
+    title = url.split('/')[-1]
+    score = WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
+    print(f"Score for {url}: {score}")
+    return score
+
+
 def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
     if len(results) == 0:
         return []
 
-    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
-    other_results = [result for result in results if result.state != DocumentState.FROM_WIKI]
+    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI
+                    and get_wiki_score(result.url) > 0.000001]
+    wiki_urls = {result.url for result in wiki_results}
+    other_results = [result for result in results if result.url not in wiki_urls]
     results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
     ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
     filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
