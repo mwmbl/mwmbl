@@ -131,8 +131,7 @@ def order_results(terms: list[str], results: list[Document], is_complete: bool) 
     if len(results) == 0:
         return []
 
-    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI
-                    and get_wiki_score(result.url) > 0.000001]
+    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
     wiki_urls = {result.url for result in wiki_results}
     other_results = [result for result in results if result.url not in wiki_urls]
     results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
@@ -282,14 +281,24 @@ def clean_html(s: str):
 class HeuristicAndWikiRanker(HeuristicRanker):
     max_wiki_results = 5
 
+    def __init__(self, tiny_index: TinyIndex, completer: Completer, return_none_if_no_mwmbl_results=False):
+        super().__init__(tiny_index, completer)
+        self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
+
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
+        results = super().search(s, additional_results)
+
+        if len(results) == 0 and self.return_none_if_no_mwmbl_results:
+            return []
+
         escaped_query = urllib.parse.quote(s, safe='')
         with request_cache(timedelta(weeks=10)) as session:
             wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
 
         wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                                 0.0, s, state=DocumentState.FROM_WIKI)
-                        for result in wiki_response['query']['search'][:self.max_wiki_results]]
+                                 self.max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
+                        for i, result in enumerate(wiki_response['query']['search'])]
 
-        return super().search(s, wiki_results + additional_results)
+        return wiki_results + results
+
 

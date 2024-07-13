@@ -47,7 +47,7 @@ def run():
 
     predictor = PREDICTORS[args.predictor]
 
-    dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH)
+    dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH, lineterminator='\n')
     dataset['gold_discount'] = dataset['gold_standard_rank'].apply(get_discount)
 
     print("Gold standard", dataset['gold_discount'])
