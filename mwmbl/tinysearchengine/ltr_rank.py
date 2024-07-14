@@ -4,22 +4,24 @@ from sklearn.base import BaseEstimator
 
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
-from mwmbl.tinysearchengine.rank import Ranker, order_results
+from mwmbl.tinysearchengine.ltr import FeatureExtractor
+from mwmbl.tinysearchengine.rank import Ranker
+from mwmbl.tokenizer import tokenize
 
 
-class LTRRanker(Ranker):
-    def __init__(self, model: BaseEstimator, tiny_index: TinyIndex, completer: Completer):
-        super().__init__(tiny_index, completer)
+class LTRRanker:
+    def __init__(self, base_ranker: Ranker, model: BaseEstimator, top_n: int = 20):
+        self.base_ranker = base_ranker
         self.model = model
-        self.top_n = 20
+        self.top_n = top_n
 
-    def order_results(self, terms, pages: list[Document], is_complete):
+    def search(self, query: str, additional_results: list[Document]) -> list[Document]:
+        pages = self.base_ranker.search(query, additional_results)
         if len(pages) == 0:
             return []
 
-        top_pages = order_results(terms, pages, is_complete)[:self.top_n]
+        top_pages = pages[:self.top_n]
 
-        query = ' '.join(terms)
         data = {
             'query': [query] * len(top_pages),
             'url': [page.url for page in top_pages],
@@ -29,6 +31,9 @@ class LTRRanker(Ranker):
         }
 
         dataframe = DataFrame(data)
+        # feature_extractor = FeatureExtractor()
+        # features = feature_extractor.transform(dataframe)
+
         print("Ordering results", dataframe)
         predictions = self.model.predict(dataframe)
         indexes = np.argsort(predictions)[::-1]

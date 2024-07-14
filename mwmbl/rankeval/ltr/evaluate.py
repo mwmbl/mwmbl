@@ -41,6 +41,7 @@ def get_discount(rank: float):
 def run():
     parser = ArgumentParser()
     parser.add_argument('--predictor', required=True, choices=sorted(PREDICTORS))
+    parser.add_argument("--binary-labels", required=False, action="store_true")
     parser.add_argument('--note', required=True)
 
     args = parser.parse_args()
@@ -48,7 +49,10 @@ def run():
     predictor = PREDICTORS[args.predictor]
 
     dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH, lineterminator='\n')
-    dataset['gold_discount'] = dataset['gold_standard_rank'].apply(get_discount)
+    if args.binary_labels:
+        dataset['gold_discount'] = dataset['gold_standard_rank'].apply(lambda x: 1 if x > 0 else 0)
+    else:
+        dataset['gold_discount'] = dataset['gold_standard_rank'].apply(get_discount)
 
     print("Gold standard", dataset['gold_discount'])
 
