@@ -26,6 +26,8 @@ LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
 DOMAIN_SCORE_SMOOTHING = 0.1
 HTTPS_STRING = 'https://'
+WIKI_SCORES = json.load(open(Path(__file__).parent.parent / "resources" / "wiki_stats.json"))
+WIKI_MAX_SCORE = next(iter(WIKI_SCORES.values()))
 
 
 def score_result(terms: list[str], result: Document, is_complete: bool):
@@ -78,6 +80,7 @@ def get_features(terms, title, url, extract, score, is_complete):
     features['domain_score'] = get_domain_score(url)
     features['path_length'] = len(path)
     features['domain_length'] = len(domain)
+    features['wiki_score'] = get_wiki_score(url)
     features['item_score'] = score
     return features
 
@@ -116,15 +119,9 @@ def get_match_features(terms, result_string, is_complete, is_url):
     return last_match_char, match_length, total_possible_match_length, len(seen_matches)
 
 
-WIKI_SCORES = json.load(open(Path(__file__).parent.parent / "resources" / "wiki_stats.json"))
-WIKI_MAX_SCORE = next(iter(WIKI_SCORES.values()))
-
-
 def get_wiki_score(url):
     title = url.split('/')[-1]
-    score = WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
-    print(f"Score for {url}: {score}")
-    return score
+    return WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
 
 
 def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:

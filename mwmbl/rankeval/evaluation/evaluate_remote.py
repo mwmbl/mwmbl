@@ -33,7 +33,7 @@ def run():
     ranker = LTRRanker(ranker, model, 1000)
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     model = MwmblRankingModel(ranker)
-    evaluate(model, fraction=0.01)
+    evaluate(model, fraction=0.01, use_test=True)
 
 
 def single_query(query: str):
