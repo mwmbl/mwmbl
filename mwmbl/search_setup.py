@@ -7,12 +7,10 @@ from redis import Redis
 
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.models import DomainSubmission
-from mwmbl.rankeval.paths import MODEL_PATH
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import HeuristicRanker, HeuristicAndWikiRanker
 
 
 def get_curated_domains() -> set[str]:
@@ -27,7 +25,8 @@ index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-model = pickle.load(open(MODEL_PATH, 'rb'))
+model_path = Path(__file__).parent / "resources" / "model.pickle"
+model = pickle.load(open(model_path, 'rb'))
 ranker = LTRRanker(tiny_index, completer, model, 1000, True, 5)
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
