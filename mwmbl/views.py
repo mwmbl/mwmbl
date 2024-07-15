@@ -210,12 +210,16 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
         return DocumentState.FROM_GOOGLE_APPROVED
     if state == DocumentState.FROM_USER:
         return DocumentState.FROM_USER_APPROVED
+    if state == DocumentState.FROM_WIKI:
+        return DocumentState.FROM_WIKI_APPROVED
     if state == DocumentState.FROM_GOOGLE_APPROVED:
         return DocumentState.FROM_GOOGLE
     if state == DocumentState.FROM_USER_APPROVED:
         return DocumentState.FROM_USER
     if state == DocumentState.ORGANIC_APPROVED:
         return None
+    if state == DocumentState.FROM_WIKI_APPROVED:
+        return DocumentState.FROM_WIKI
     raise ValueError(f"Unexpected state {repr(state)}")
 
 

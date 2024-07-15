@@ -37,10 +37,11 @@ class DocumentState(IntEnum):
     DELETED = -1
     FROM_USER = 2
     FROM_GOOGLE = 3
+    FROM_WIKI = 4
     ORGANIC_APPROVED = 7
     FROM_USER_APPROVED = 8
     FROM_GOOGLE_APPROVED = 9
-    FROM_WIKI = 10
+    FROM_WIKI_APPROVED = 10
 
 
 @dataclass
