@@ -5,23 +5,25 @@ from sklearn.base import BaseEstimator
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.ltr import FeatureExtractor
-from mwmbl.tinysearchengine.rank import Ranker
+from mwmbl.tinysearchengine.rank import Ranker, HeuristicRanker, get_wiki_results
 from mwmbl.tokenizer import tokenize
 
 
-class LTRRanker:
-    def __init__(self, base_ranker: Ranker, model: BaseEstimator, top_n: int = 20):
-        self.base_ranker = base_ranker
+class LTRRanker(HeuristicRanker):
+    def __init__(self, tiny_index: TinyIndex, completer: Completer, model: BaseEstimator,
+                 top_n: int, include_wiki: bool = True, num_wiki_results: int = 5):
+        super().__init__(tiny_index, completer)
         self.model = model
         self.top_n = top_n
+        self.include_wiki = include_wiki
+        self.num_wiki_results = num_wiki_results
 
-    def search(self, query: str, additional_results: list[Document]) -> list[Document]:
-        pages = self.base_ranker.search(query, additional_results)
-        if len(pages) == 0:
+    def order_results(self, terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
+        if len(results) == 0:
             return []
 
-        top_pages = pages[:self.top_n]
-
+        query = ' '.join(terms)
+        top_pages = results[:self.top_n]
         data = {
             'query': [query] * len(top_pages),
             'url': [page.url for page in top_pages],
@@ -31,10 +33,13 @@ class LTRRanker:
         }
 
         dataframe = DataFrame(data)
-        # feature_extractor = FeatureExtractor()
-        # features = feature_extractor.transform(dataframe)
 
         print("Ordering results", dataframe)
         predictions = self.model.predict(dataframe)
         indexes = np.argsort(predictions)[::-1]
         return [top_pages[i] for i in indexes]
+
+    def external_search(self, query: str) -> list[Document]:
+        if self.include_wiki:
+            return get_wiki_results(query, self.num_wiki_results)
+        return []

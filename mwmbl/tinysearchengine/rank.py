@@ -244,10 +244,14 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        ordered_results = self.order_results(terms, pages + additional_results, is_complete)
+        external_search_items = self.external_search(q)
+        ordered_results = self.order_results(terms, pages + additional_results + external_search_items, is_complete)
         deduplicated_results = deduplicate(curated_items + ordered_results, set())
         state_fixed = [fix_document_state(result) for result in deduplicated_results]
         return state_fixed, terms, completions
+
+    def external_search(self, q: str):
+        return []
 
     def get_raw_results(self, query: str):
         tokens = tokenize(query)
@@ -275,6 +279,16 @@ def clean_html(s: str):
     return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
+def get_wiki_results(s: str, max_wiki_results: int):
+    escaped_query = urllib.parse.quote(s, safe='')
+    with request_cache(timedelta(weeks=10)) as session:
+        wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
+    wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
+                             max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
+                    for i, result in enumerate(wiki_response['query']['search'])]
+    return wiki_results
+
+
 class HeuristicAndWikiRanker(HeuristicRanker):
     max_wiki_results = 5
 
@@ -288,13 +302,7 @@ class HeuristicAndWikiRanker(HeuristicRanker):
         if len(results) == 0 and self.return_none_if_no_mwmbl_results:
             return []
 
-        escaped_query = urllib.parse.quote(s, safe='')
-        with request_cache(timedelta(weeks=10)) as session:
-            wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
-
-        wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                                 self.max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
-                        for i, result in enumerate(wiki_response['query']['search'])]
+        wiki_results = get_wiki_results(s, self.max_wiki_results)
 
         return wiki_results + results
 

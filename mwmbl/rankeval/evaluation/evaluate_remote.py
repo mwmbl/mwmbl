@@ -27,10 +27,10 @@ def fetch_results(url: str, query: str):
 
 
 def run():
-    ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
+    # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
 
     model = pickle.load(open(MODEL_PATH, 'rb'))
-    ranker = LTRRanker(ranker, model, 1000)
+    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 5)
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     model = MwmblRankingModel(ranker)
     evaluate(model, fraction=0.01, use_test=True)
