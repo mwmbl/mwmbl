@@ -4,6 +4,7 @@ import math
 import re
 import urllib
 from abc import abstractmethod
+from collections import defaultdict
 from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
@@ -37,9 +38,7 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
         'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
 
-    max_match_terms = max(features[f'match_terms_{name}']
-                          for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
-    if max_match_terms <= len(terms) / 2 and result.state is None:
+    if features[f'match_terms'] <= len(terms) / 2 and result.state is None:
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
@@ -63,12 +62,14 @@ def get_features(terms, title, url, extract, score, is_complete):
     parsed_url = urlparse(url)
     domain = parsed_url.netloc
     path = parsed_url.path
+    query = parsed_url.query
     for part, name, is_url in [(title, 'title', False),
                                (extract, 'extract', False),
                                (domain, 'domain', True),
                                (domain, 'domain_tokenized', False),
-                               (path, 'path', True)]:
-        last_match_char, match_length, total_possible_match_length, match_terms = \
+                               (path, 'path', True),
+                               (query, 'query', False)]:
+        last_match_char, match_length, total_possible_match_length, match_terms, match_counts = \
             get_match_features(terms, part, is_complete, is_url)
         features[f'last_match_char_{name}'] = last_match_char
         features[f'match_length_{name}'] = match_length
@@ -82,6 +83,9 @@ def get_features(terms, title, url, extract, score, is_complete):
     features['domain_length'] = len(domain)
     features['wiki_score'] = get_wiki_score(url)
     features['item_score'] = score
+    features['match_terms'] = max(features[f'match_terms_{name}']
+                                  for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
+
     return features
 
 
@@ -108,15 +112,17 @@ def get_match_features(terms, result_string, is_complete, is_url):
     last_match_char = 1
     seen_matches = set()
     match_length = 0
+    match_counts = defaultdict(int)
     for match in matches:
         value = match.group(0).lower()
+        match_counts[value] += 1
         if value not in seen_matches:
             last_match_char = match.span()[1]
             seen_matches.add(value)
             match_length += len(value)
 
     total_possible_match_length = sum(len(x) for x in terms)
-    return last_match_char, match_length, total_possible_match_length, len(seen_matches)
+    return last_match_char, match_length, total_possible_match_length, len(seen_matches), match_counts
 
 
 def get_wiki_score(url):

@@ -44,5 +44,5 @@ def single_query(query: str):
 
 
 if __name__ == '__main__':
-    run()
-    # single_query("beethoven - wikipedia")
+    # run()
+    single_query("beethoven - wikipedia")
