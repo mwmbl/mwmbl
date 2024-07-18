@@ -2,29 +2,29 @@ import os
 from collections import Counter
 from datetime import date, timedelta, datetime
 from logging import getLogger
-from multiprocessing import Pool
 from pathlib import Path
+from random import Random
 from time import sleep
 
 from django.conf import settings
+from pydistinct.ensemble_estimators import median_estimator
 from redis import Redis
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.utils import batch, parse_url
+from mwmbl.utils import parse_url
 
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
 INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
 INDEX_URL_COUNT_KEY = "index-url-count-{date}"
 INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
-INDEX_URL_HLL_KEY = "index-hll-{date}"
-INDEX_DOMAIN_HLL_KEY = "index-domain-hll-{date}"
-SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
-NUM_PAGES_IN_BATCH = 10240
+
+PAGE_PROPORTION_TO_SAMPLE = 0.0001
 
 
 logger = getLogger(__name__)
+random = Random(1)
 
 
 def get_redis():
@@ -43,73 +43,42 @@ def count_urls_continuously():
 
 
 def count_urls():
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
-    with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
-        page_indexes = batch(range(tiny_index.num_pages), NUM_PAGES_IN_BATCH)
-
     start_time = datetime.utcnow()
-    with Pool(processes=4) as pool:
-        num_results = sum(pool.map(count_urls_in_batch, page_indexes))
 
-    logger.info(f"Processed {num_results} results in total.")
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    with TinyIndex(item_factory=Document, index_path=index_path) as index:
+        page_sample = set()
+        num_pages_to_sample = max(100, int(index.num_pages * PAGE_PROPORTION_TO_SAMPLE))
+        logger.info(f"Sampling {num_pages_to_sample} pages.")
+        while len(page_sample) < num_pages_to_sample:
+            page_sample.add(random.randrange(index.num_pages))
 
-    domain_count_key, domain_hll_key, url_hll_key = _get_keys()
+        url_counts = Counter()
+        domain_counts = Counter()
+        total_docs = 0
+        for i in page_sample:
+            page = index.get_page(i)
+            url_counts.update({doc.url for doc in page})
+            domains = [parse_url(doc.url).netloc for doc in page]
+            domain_counts.update(domains)
+            total_docs += len(page)
+
+    url_count_estimate = median_estimator(attributes=dict(url_counts.items()))
+    domain_count_estimate = median_estimator(attributes=dict(domain_counts.items()))
+    num_results_estimate = total_docs / PAGE_PROPORTION_TO_SAMPLE
+
+    logger.info(f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
+                f"and {num_results_estimate} results in the index.")
 
     redis = get_redis()
-    redis.expire(url_hll_key, SHORT_EXPIRE_SECONDS)
-    url_count = redis.pfcount(url_hll_key)
-    logger.info("Counted %d unique URLs", url_count)
-
-    redis.expire(domain_hll_key, SHORT_EXPIRE_SECONDS)
-    domain_count = redis.pfcount(domain_hll_key)
-    logger.info("Counted %d unique domains", domain_count)
-
-    redis.expire(domain_count_key, SHORT_EXPIRE_SECONDS)
 
     today = date.today()
-    _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
-    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
-    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results)
+    _set_count(INDEX_URL_COUNT_KEY, redis, today, int(url_count_estimate))
+    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
+    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, int(num_results_estimate))
 
     end_time = datetime.utcnow()
     logger.info(f"Counting took {end_time - start_time}.")
-
-
-def count_urls_in_batch(page_indexes: list[int]):
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
-    redis = get_redis()
-
-    logger.info(f"Counting URLs in index {index_path}")
-
-    domain_count_key, domain_hll_key, url_hll_key = _get_keys()
-    num_results = 0
-    with TinyIndex(item_factory=Document, index_path=index_path) as tiny_index:
-            urls = set()
-            domains = set()
-            domain_counts = Counter()
-            for i in page_indexes:
-                docs = tiny_index.get_page(i)
-                urls |= {doc.url for doc in docs}
-                page_domains = [parse_url(doc.url).netloc for doc in docs]
-                domain_counts.update(page_domains)
-                domains |= set(page_domains)
-                num_results += len(docs)
-
-            for domain, count in domain_counts.items():
-                redis.zincrby(domain_count_key, count, domain)
-
-            redis.pfadd(url_hll_key, *urls)
-            redis.pfadd(domain_hll_key, *domains)
-            logger.info(f"Counted {i} pages of {tiny_index.num_pages}.")
-    return num_results
-
-
-def _get_keys():
-    today = date.today()
-    url_hll_key = INDEX_URL_HLL_KEY.format(date=today)
-    domain_hll_key = INDEX_DOMAIN_HLL_KEY.format(date=today)
-    domain_count_key = INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today)
-    return domain_count_key, domain_hll_key, url_hll_key
 
 
 def _set_count(key, redis, today, count):
