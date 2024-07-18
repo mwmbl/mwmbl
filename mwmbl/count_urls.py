@@ -8,6 +8,7 @@ from time import sleep
 
 from django.conf import settings
 from pydistinct.ensemble_estimators import median_estimator
+from pydistinct.stats_estimators import smoothed_jackknife_estimator
 from redis import Redis
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -20,7 +21,7 @@ INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
-PAGE_PROPORTION_TO_SAMPLE = 0.0001
+PAGE_PROPORTION_TO_SAMPLE = 0.001
 
 
 logger = getLogger(__name__)
@@ -63,9 +64,9 @@ def count_urls():
             domain_counts.update(domains)
             total_docs += len(page)
 
-    url_count_estimate = median_estimator(attributes=dict(url_counts.items()))
-    domain_count_estimate = median_estimator(attributes=dict(domain_counts.items()))
-    num_results_estimate = total_docs / PAGE_PROPORTION_TO_SAMPLE
+    num_results_estimate = int(total_docs / PAGE_PROPORTION_TO_SAMPLE)
+    url_count_estimate = smoothed_jackknife_estimator(attributes=dict(url_counts.items()), n_pop=num_results_estimate)
+    domain_count_estimate = smoothed_jackknife_estimator(attributes=dict(domain_counts.items()), n_pop=num_results_estimate)
 
     logger.info(f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
                 f"and {num_results_estimate} results in the index.")
@@ -75,7 +76,7 @@ def count_urls():
     today = date.today()
     _set_count(INDEX_URL_COUNT_KEY, redis, today, int(url_count_estimate))
     _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
-    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, int(num_results_estimate))
+    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results_estimate)
 
     end_time = datetime.utcnow()
     logger.info(f"Counting took {end_time - start_time}.")
