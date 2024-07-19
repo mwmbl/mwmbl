@@ -53,20 +53,23 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
     count_frequencies = Counter(url_counts.values())
 
     frequencies = dict(sorted(count_frequencies.items()))
+    max_freq = max(frequencies.keys())
+    frequencies[max_freq + 1] = 0
+
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
-    def poiss(x, m1, m2, s1, s2):
-        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
-    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values)[0]
-    print("Estimated parameter m", m1_fit, m2_fit, s1_fit, s2_fit)
+    def poiss(x, m1, m2, m3, s1, s2, s3):
+        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2 + poisson.pmf(x, m3) * s3
+    m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit = curve_fit(poiss, freq, values)[0]
+    print("Estimated parameter m", m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
 
-    predictions = poiss(freq, m1_fit, m2_fit, s1_fit, s2_fit)
+    predictions = poiss(freq, m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
     print("Predictions", predictions.tolist())
     print("Actual", values)
     print("Differences", predictions - values)
 
-    pages_per_url = (m1_fit * s1_fit + m2_fit * s2_fit) / (s1_fit + s2_fit)
+    pages_per_url = (m1_fit * s1_fit + m2_fit * s2_fit + m3_fit * s3_fit) / (s1_fit + s2_fit + s3_fit)
     print("Pages per url", pages_per_url)
 
     adjusted_pages_per_url = pages_per_url * total_pages / num_pages_observed
