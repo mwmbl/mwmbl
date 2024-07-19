@@ -25,15 +25,15 @@ logger = getLogger(__name__)
 def run(data_path: str):
     logger.info("Started background process")
 
-    historical.run()
+    # historical.run()
     index_path = Path(data_path) / settings.INDEX_NAME
     batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
 
     while True:
-        try:
-            batch_cache.retrieve_batches(num_batches=10000)
-        except Exception:
-            logger.exception("Error retrieving batches")
+        # try:
+        #     batch_cache.retrieve_batches(num_batches=10000)
+        # except Exception:
+        #     logger.exception("Error retrieving batches")
         try:
             index_batches.run(batch_cache, index_path)
         except Exception:

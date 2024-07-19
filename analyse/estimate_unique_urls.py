@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from random import Random
 
+import pymc as pm
 import numpy as np
 from pydistinct.ensemble_estimators import median_estimator
 from pydistinct.stats_estimators import bootstrap_estimator, goodmans_estimator, smoothed_jackknife_estimator, \
@@ -31,8 +32,54 @@ def count_unique_urls(index_path: str) -> int:
     return len(urls)
 
 
+MAX_TOKENS = 25
+
+
+def binomial_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num_pages_observed: int, total_pages: int):
+    print(f"Estimating for {mean_urls_per_page} mean urls per page and {num_pages_observed} pages observed.")
+    with pm.Model() as model:
+        p = pm.Beta("p", alpha=1000, beta=1)
+        pm.Binomial("obs", n=num_pages_observed, p=p, observed=np.array(list(url_counts.values())))
+
+        trace = pm.sample(1000)
+        print("Trace", trace.posterior["p"])
+        mean_tokens_per_url = trace.posterior["p"].mean() * total_pages
+        print("Estimated mean tokens per URL", mean_tokens_per_url)
+        return mean_urls_per_page * total_pages / mean_tokens_per_url
+
+
+def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num_pages_observed: int, total_pages: int):
+    print(f"Estimating for {mean_urls_per_page} mean urls per page and {num_pages_observed} pages observed.")
+    count_frequencies = Counter(url_counts.values())
+
+    frequencies = dict(sorted(count_frequencies.items()))
+    freq = np.array(list(frequencies.keys()))
+    values = np.array(list(frequencies.values()))
+
+    def poiss(x, m1, m2, s1, s2):
+        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
+    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values)[0]
+    print("Estimated parameter m", m1_fit, m2_fit, s1_fit, s2_fit)
+
+    predictions = poiss(freq, m1_fit, m2_fit, s1_fit, s2_fit)
+    print("Predictions", predictions.tolist())
+    print("Actual", values)
+    print("Differences", predictions - values)
+
+    pages_per_url = (m1_fit * s1_fit + m2_fit * s2_fit) / (s1_fit + s2_fit)
+    print("Pages per url", pages_per_url)
+
+    adjusted_pages_per_url = pages_per_url * total_pages / num_pages_observed
+    print("Adjusted pages per url", adjusted_pages_per_url)
+
+    total_urls = mean_urls_per_page * total_pages
+    return total_urls / adjusted_pages_per_url
+
+
+
 def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
     with TinyIndex(Document, index_path) as index:
+        total_pages = index.num_pages
         page_sample = set()
         while len(page_sample) < num_pages_to_sample:
             page_sample.add(random.randrange(index.num_pages))
@@ -44,11 +91,14 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
             url_counts.update({doc.url for doc in page})
             total_docs += len(page)
 
-    return median_estimator(attributes=dict(url_counts.items()))
+    return poisson_estimator(url_counts, mean_urls_per_page=total_docs / num_pages_to_sample,
+                              num_pages_observed=num_pages_to_sample, total_pages=total_pages)
+    # return median_estimator(attributes=dict(url_counts.items()))
 
 
 if __name__ == "__main__":
-    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
+    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 1500)
+    print(f"Estimated number of unique URLs: {estimate}")
 
     num_urls = count_unique_urls(str(DEV_INDEX_PATH))
     print(f"Actual number of unique URLs: {num_urls}")

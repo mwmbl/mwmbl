@@ -73,6 +73,7 @@ def preprocess_documents(documents, index_path):
                 logger.info(f"Preprocessing document {i} of {len(documents)}")
 
             tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
+            logger.info(f"Tokenized {document.url} into {len(tokenized.tokens)} tokens")
             for token in tokenized.tokens:
                 page = indexer.get_key_page_index(token)
                 term_document = Document(document.title, document.url, document.extract, document.score, token)
