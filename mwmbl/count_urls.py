@@ -22,7 +22,7 @@ INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
-PAGE_PROPORTION_TO_SAMPLE = 0.001
+PAGE_PROPORTION_TO_SAMPLE = 0.005
 
 
 logger = getLogger(__name__)
