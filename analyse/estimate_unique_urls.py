@@ -16,7 +16,7 @@ from scipy.stats import binom, poisson, betabinom
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
-random = Random(1)
+random = Random()
 
 DEV_INDEX_PATH = Path(__file__).parent.parent / "devdata" / "index-v2.tinysearch"
 
@@ -73,7 +73,16 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
     pages_per_url = (m1_fit * s1_fit + m2_fit * s2_fit + m3_fit * s3_fit) / (s1_fit + s2_fit + s3_fit)
     print("Pages per url", pages_per_url)
 
-    adjusted_pages_per_url = pages_per_url * total_pages / num_pages_observed
+    input_freq = np.arange(100)
+    predictions = poiss(input_freq, m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
+
+    # Adjust the zero prediction since we have already seen some of these URLs
+    predictions[0] *= (1 - num_pages_observed / total_pages)
+
+    pages_per_url_mean = ((input_freq * predictions) / sum(predictions)).sum()
+    print("Pages per url mean", pages_per_url_mean)
+
+    adjusted_pages_per_url = pages_per_url_mean * total_pages / num_pages_observed
     print("Adjusted pages per url", adjusted_pages_per_url)
 
     total_urls = mean_urls_per_page * total_pages
@@ -136,7 +145,7 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 
 if __name__ == "__main__":
-    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 1500)
+    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 1000)
     print(f"Estimated number of unique URLs: {estimate}")
 
     num_urls = count_unique_urls(str(DEV_INDEX_PATH))
