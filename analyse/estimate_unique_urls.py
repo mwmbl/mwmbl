@@ -72,17 +72,14 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
     print("Actual", values)
     print("Differences", predictions - values)
 
-    total_estimate = s1_fit + s2_fit
+    total_estimate = len(url_counts)
     print("Total estimate", total_estimate)
 
-    zero_adjustment = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
-    print("Zero adjustment", zero_adjustment)
+    zero_estimate = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
+    print("Zero estimate", zero_estimate)
 
-    adjusted_total_estimate = total_estimate - (zero_adjustment * (1 - num_pages_observed / total_pages))
-    print("Adjusted total estimate", adjusted_total_estimate)
-
+    adjusted_total_estimate = total_estimate + zero_estimate * (1 - num_pages_observed / total_pages)
     return adjusted_total_estimate
-
 
 
 def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
@@ -106,8 +103,8 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 if __name__ == "__main__":
     estimates = []
-    for i in range(10):
-        estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 2000)
+    for i in range(100):
+        estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
         estimates.append(estimate)
     print(f"Estimated number of unique URLs: {np.mean(estimates)} ± {np.std(estimates)}")
 
