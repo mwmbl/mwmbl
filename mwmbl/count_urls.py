@@ -6,10 +6,11 @@ from pathlib import Path
 from random import Random
 from time import sleep
 
+import numpy as np
 from django.conf import settings
-from pydistinct.ensemble_estimators import median_estimator
-from pydistinct.stats_estimators import smoothed_jackknife_estimator
 from redis import Redis
+from scipy.optimize import curve_fit
+from scipy.stats import poisson
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.utils import parse_url
@@ -21,7 +22,7 @@ INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
-PAGE_PROPORTION_TO_SAMPLE = 0.01
+PAGE_PROPORTION_TO_SAMPLE = 0.001
 
 
 logger = getLogger(__name__)
@@ -30,6 +31,20 @@ random = Random(1)
 
 def get_redis():
     return Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+
+
+def poisson_estimator(url_counts: dict[str, int], num_pages_observed: int, total_pages: int):
+    count_frequencies = Counter(url_counts.values())
+    frequencies = dict(sorted(count_frequencies.items()))
+    freq = np.array(list(frequencies.keys()))
+    values = np.array(list(frequencies.values()))
+
+    def poiss(x, m1, m2, s1, s2):
+        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
+
+    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
+    zero_estimate = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
+    return len(url_counts) + zero_estimate * (1 - num_pages_observed / total_pages)
 
 
 def count_urls_continuously():
@@ -48,8 +63,9 @@ def count_urls():
 
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     with TinyIndex(item_factory=Document, index_path=index_path) as index:
+        total_pages = index.num_pages
         page_sample = set()
-        num_pages_to_sample = max(100, int(index.num_pages * PAGE_PROPORTION_TO_SAMPLE))
+        num_pages_to_sample = max(500, int(index.num_pages * PAGE_PROPORTION_TO_SAMPLE))
         logger.info(f"Sampling {num_pages_to_sample} pages.")
         while len(page_sample) < num_pages_to_sample:
             page_sample.add(random.randrange(index.num_pages))
@@ -65,8 +81,8 @@ def count_urls():
             total_docs += len(page)
 
     num_results_estimate = int(total_docs / PAGE_PROPORTION_TO_SAMPLE)
-    url_count_estimate = smoothed_jackknife_estimator(attributes=dict(url_counts.items()), n_pop=num_results_estimate)
-    domain_count_estimate = smoothed_jackknife_estimator(attributes=dict(domain_counts.items()), n_pop=num_results_estimate)
+    url_count_estimate = poisson_estimator(url_counts, num_pages_to_sample, total_pages)
+    domain_count_estimate = poisson_estimator(domain_counts, num_pages_to_sample, total_pages)
 
     logger.info(f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
                 f"and {num_results_estimate} results in the index.")
