@@ -60,25 +60,22 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
-    def poiss(x, m1, m2, m3, s1, s2, s3):
-        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2 + poisson.pmf(x, m3) * s3
+    def poiss(x, m1, m2, s1, s2):
+        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
 
     # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
-    m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
-    print("Estimated parameter m", m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
+    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
+    print("Estimated parameter m", m1_fit, m2_fit, s1_fit, s2_fit)
 
-    predictions = poiss(freq, m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
+    predictions = poiss(freq, m1_fit, m2_fit, s1_fit, s2_fit)
     print("Predictions", predictions.tolist())
     print("Actual", values)
     print("Differences", predictions - values)
 
-    pages_per_url = (m1_fit * s1_fit + m2_fit * s2_fit + m3_fit * s3_fit) / (s1_fit + s2_fit + s3_fit)
-    print("Pages per url", pages_per_url)
-
-    total_estimate = s1_fit + s2_fit + s3_fit
+    total_estimate = s1_fit + s2_fit
     print("Total estimate", total_estimate)
 
-    zero_adjustment = poiss(0, m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
+    zero_adjustment = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
     print("Zero adjustment", zero_adjustment)
 
     adjusted_total_estimate = total_estimate - (zero_adjustment * (1 - num_pages_observed / total_pages))
@@ -86,20 +83,6 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
 
     return adjusted_total_estimate
 
-    # input_freq = np.arange(100)
-    # predictions = poiss(input_freq, m1_fit, m2_fit, m3_fit, s1_fit, s2_fit, s3_fit)
-    #
-    # # Adjust the zero prediction since we have already seen some of these URLs
-    # predictions[0] *= (1 - num_pages_observed / total_pages)
-    #
-    # pages_per_url_mean = ((input_freq * predictions) / sum(predictions)).sum()
-    # print("Pages per url mean", pages_per_url_mean)
-    #
-    # adjusted_pages_per_url = pages_per_url_mean * total_pages / num_pages_observed
-    # print("Adjusted pages per url", adjusted_pages_per_url)
-    #
-    # total_urls = mean_urls_per_page * total_pages
-    # return total_urls / adjusted_pages_per_url
 
 
 def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
@@ -124,7 +107,7 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 if __name__ == "__main__":
     estimates = []
     for i in range(10):
-        estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 1500)
+        estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 2000)
         estimates.append(estimate)
     print(f"Estimated number of unique URLs: {np.mean(estimates)} ± {np.std(estimates)}")
 
