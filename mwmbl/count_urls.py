@@ -36,6 +36,7 @@ def get_redis():
 def poisson_estimator(url_counts: dict[str, int], num_pages_observed: int, total_pages: int):
     count_frequencies = Counter(url_counts.values())
     frequencies = dict(sorted(count_frequencies.items()))
+    logger.info(f"Frequencies: {frequencies}")
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
@@ -81,17 +82,23 @@ def count_urls():
             total_docs += len(page)
 
     num_results_estimate = int(total_docs / PAGE_PROPORTION_TO_SAMPLE)
-    url_count_estimate = poisson_estimator(url_counts, num_pages_to_sample, total_pages)
-    domain_count_estimate = poisson_estimator(domain_counts, num_pages_to_sample, total_pages)
 
-    logger.info(f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
+    try:
+        url_count_estimate = poisson_estimator(url_counts, num_pages_to_sample, total_pages)
+    except RuntimeError:
+        logger.exception("Error estimating unique URLs.")
+        return
+
+    # domain_count_estimate = poisson_estimator(domain_counts, num_pages_to_sample, total_pages)
+
+    logger.info(f"Estimated {url_count_estimate} unique URLs, "
                 f"and {num_results_estimate} results in the index.")
 
     redis = get_redis()
 
     today = date.today()
     _set_count(INDEX_URL_COUNT_KEY, redis, today, int(url_count_estimate))
-    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
+    # _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
     _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results_estimate)
 
     end_time = datetime.utcnow()
