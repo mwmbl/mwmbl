@@ -54,7 +54,8 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
 
     frequencies = dict(sorted(count_frequencies.items()))
     max_freq = max(frequencies.keys())
-    frequencies[max_freq + 1] = 0
+    # for i in range(1, 100):
+    #     frequencies[max_freq + i] = 0
 
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
@@ -77,6 +78,41 @@ def poisson_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num
 
     total_urls = mean_urls_per_page * total_pages
     return total_urls / adjusted_pages_per_url
+
+
+def binomial_mixture_estimator(url_counts: dict[str, int], mean_urls_per_page: float, num_pages_observed: int, total_pages: int):
+    print(f"Estimating for {mean_urls_per_page} mean urls per page and {num_pages_observed} pages observed.")
+    count_frequencies = Counter(url_counts.values())
+
+    frequencies = dict(sorted(count_frequencies.items()))
+    max_freq = max(frequencies.keys())
+    frequencies[max_freq + 1] = 0
+
+    freq = np.array(list(frequencies.keys()))
+    values = np.array(list(frequencies.values()))
+
+    def binomial(x, p1, s1, p2, s2):
+        return binom.pmf(x, 25, p1) * s1 + binom.pmf(x, 25, p2) * s2
+
+    bounds = ([0, 1, 0, 1], [1, 1e6, 1, 1e6])
+    p1, s1, p2, s2 = curve_fit(binomial, freq, values, bounds=bounds)[0]
+    print("Estimated parameter p", p1, s1, p2, s2)
+
+    predictions = binomial(freq, p1, s1, p2, s2)
+    print("Predictions", predictions.tolist())
+    print("Actual", values)
+    print("Differences", (predictions - values).tolist())
+
+    pages_per_url = (p1 * s1 + p2 * s2) * 25 / (s1 + s2)
+    print("Pages per url", pages_per_url)
+
+    adjusted_pages_per_url = pages_per_url * total_pages / num_pages_observed
+    print("Adjusted pages per url", adjusted_pages_per_url)
+
+    total_urls = mean_urls_per_page * total_pages
+    return total_urls / adjusted_pages_per_url
+
+
 
 
 
