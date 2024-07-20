@@ -145,8 +145,11 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 
 if __name__ == "__main__":
-    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 1000)
-    print(f"Estimated number of unique URLs: {estimate}")
+    estimates = []
+    for i in range(10):
+        estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 2000)
+        estimates.append(estimate)
+    print(f"Estimated number of unique URLs: {np.mean(estimates)} ± {np.std(estimates)}")
 
     num_urls = count_unique_urls(str(DEV_INDEX_PATH))
     print(f"Actual number of unique URLs: {num_urls}")
