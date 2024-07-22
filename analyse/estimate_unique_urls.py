@@ -48,15 +48,20 @@ def poisson_estimator_freq(frequencies, num_pages_observed, total_pages):
     values = np.array(list(frequencies.values()))
 
     def log_likelihood(x):
-        m1 = x
-        logpmf = poisson.logpmf(freq, m1)
-        return -np.dot(logpmf, values)
+        m1, m2 = x[:2]
+        weights = x[2:]
+        log1 = -np.dot(poisson.logpmf(freq, m1), values * weights)
+        log2 = -np.dot(poisson.logpmf(freq, m2), values * (1 - weights))
+        print("Log1", log1)
+        print("Log2", log2)
+        return log1 + log2
 
     def poiss(x, m1, s1):
         return poisson.pmf(x, m1) * s1
 
-    res = minimize(log_likelihood, np.array([1.0]), method='L-BFGS-B')
-    m1_fit = res.x
+    # TODO: use the EM algorithm
+    res = minimize(log_likelihood, np.array([0.5, 5.5] + [random.uniform(0.0, 1.0) for _ in range(len(frequencies))]), method='dogleg')
+    m1_fit = res.x.tolist()
 
     # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
     # m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
@@ -91,13 +96,13 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 
 if __name__ == "__main__":
-    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
-    print(f"Estimated number of unique URLs: {estimate}")
-
-    num_urls = count_unique_urls(str(DEV_INDEX_PATH))
-    print(f"Actual number of unique URLs: {num_urls}")
-
-    # frequencies = {1: 10151439, 2: 91401, 3: 767, 4: 14, 5: 4, 6: 2, 7: 3, 9: 2, 10: 2, 14: 1}
-    # total_num_pages = 102400000
-    # estimate = poisson_estimator_freq(frequencies, total_num_pages * 0.005, total_num_pages)
+    # estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
     # print(f"Estimated number of unique URLs: {estimate}")
+    #
+    # num_urls = count_unique_urls(str(DEV_INDEX_PATH))
+    # print(f"Actual number of unique URLs: {num_urls}")
+
+    frequencies = {1: 10151439, 2: 91401, 3: 767, 4: 14, 5: 4, 6: 2, 7: 3, 9: 2, 10: 2, 14: 1}
+    total_num_pages = 102400000
+    estimate = poisson_estimator_freq(frequencies, total_num_pages * 0.005, total_num_pages)
+    print(f"Estimated number of unique URLs: {estimate}")

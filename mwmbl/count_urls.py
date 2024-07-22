@@ -40,11 +40,11 @@ def poisson_estimator(url_counts: dict[str, int], num_pages_observed: int, total
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
-    def poiss(x, m1, m2, s1, s2):
-        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
+    def poiss(x, m1, s1):
+        return poisson.pmf(x, m1) * s1
 
-    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
-    zero_estimate = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
+    m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
+    zero_estimate = poiss(0, m1_fit, s1_fit)
     return len(url_counts) + zero_estimate * (1 - num_pages_observed / total_pages)
 
 
