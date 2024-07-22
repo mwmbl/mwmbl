@@ -40,27 +40,27 @@ def poisson_estimator(url_counts: dict[str, int], num_pages_observed: int, total
     # for i in range(1, 100):
     #     frequencies[max_freq + i] = 0
 
+    return poisson_estimator_freq(frequencies, num_pages_observed, total_pages)
+
+
+def poisson_estimator_freq(frequencies, num_pages_observed, total_pages):
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
-    def poiss(x, m1, m2, s1, s2):
-        return poisson.pmf(x, m1) * s1 + poisson.pmf(x, m2) * s2
+    def poiss(x, m1, s1):
+        return poisson.pmf(x, m1) * s1 #+ poisson.pmf(x, m2) * s2
 
     # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
-    m1_fit, m2_fit, s1_fit, s2_fit = curve_fit(poiss, freq, values, maxfev=10000)[0]
-    print("Estimated parameter m", m1_fit, m2_fit, s1_fit, s2_fit)
-
-    predictions = poiss(freq, m1_fit, m2_fit, s1_fit, s2_fit)
+    m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
+    print("Estimated parameter m", m1_fit, s1_fit)
+    predictions = poiss(freq, m1_fit, s1_fit)
     print("Predictions", predictions.tolist())
     print("Actual", values)
     print("Differences", predictions - values)
-
-    total_estimate = len(url_counts)
+    total_estimate = sum(frequencies.values())
     print("Total estimate", total_estimate)
-
-    zero_estimate = poiss(0, m1_fit, m2_fit, s1_fit, s2_fit)
+    zero_estimate = poiss(0, m1_fit, s1_fit)
     print("Zero estimate", zero_estimate)
-
     adjusted_total_estimate = total_estimate + zero_estimate * (1 - num_pages_observed / total_pages)
     return adjusted_total_estimate
 
@@ -82,7 +82,13 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 
 if __name__ == "__main__":
-    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
+    # estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
+    # print(f"Estimated number of unique URLs: {estimate}")
+    #
+    # num_urls = count_unique_urls(str(DEV_INDEX_PATH))
+    # print(f"Actual number of unique URLs: {num_urls}")
 
-    num_urls = count_unique_urls(str(DEV_INDEX_PATH))
-    print(f"Actual number of unique URLs: {num_urls}")
+    frequencies = {1: 10151439, 2: 91401, 3: 767, 4: 14, 5: 4, 6: 2, 7: 3, 9: 2, 10: 2, 14: 1}
+    total_num_pages = 102400000
+    estimate = poisson_estimator_freq(frequencies, total_num_pages * 0.005, total_num_pages)
+    print(f"Estimated number of unique URLs: {estimate}")
