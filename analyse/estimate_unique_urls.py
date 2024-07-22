@@ -10,12 +10,12 @@ import numpy as np
 from pydistinct.ensemble_estimators import median_estimator
 from pydistinct.stats_estimators import bootstrap_estimator, goodmans_estimator, smoothed_jackknife_estimator, \
     horvitz_thompson_estimator
-from scipy.optimize import curve_fit, differential_evolution
+from scipy.optimize import curve_fit, differential_evolution, minimize
 from scipy.stats import binom, poisson, betabinom
 
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
-random = Random(1)
+random = Random()
 
 DEV_INDEX_PATH = Path(__file__).parent.parent / "devdata" / "index-v2.tinysearch"
 
@@ -47,12 +47,21 @@ def poisson_estimator_freq(frequencies, num_pages_observed, total_pages):
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
 
+    def log_likelihood(x):
+        m1 = x
+        logpmf = poisson.logpmf(freq, m1)
+        return -np.dot(logpmf, values)
+
     def poiss(x, m1, s1):
-        return poisson.pmf(x, m1) * s1 #+ poisson.pmf(x, m2) * s2
+        return poisson.pmf(x, m1) * s1
+
+    res = minimize(log_likelihood, np.array([1.0]), method='L-BFGS-B')
+    m1_fit = res.x
 
     # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
-    m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
-    print("Estimated parameter m", m1_fit, s1_fit)
+    # m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
+    print("Estimated parameter m", m1_fit)
+    s1_fit = sum(frequencies.values())
     predictions = poiss(freq, m1_fit, s1_fit)
     print("Predictions", predictions.tolist())
     print("Actual", values)
@@ -82,13 +91,13 @@ def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
 
 
 if __name__ == "__main__":
-    # estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
-    # print(f"Estimated number of unique URLs: {estimate}")
-    #
-    # num_urls = count_unique_urls(str(DEV_INDEX_PATH))
-    # print(f"Actual number of unique URLs: {num_urls}")
-
-    frequencies = {1: 10151439, 2: 91401, 3: 767, 4: 14, 5: 4, 6: 2, 7: 3, 9: 2, 10: 2, 14: 1}
-    total_num_pages = 102400000
-    estimate = poisson_estimator_freq(frequencies, total_num_pages * 0.005, total_num_pages)
+    estimate = estimate_unique_urls(str(DEV_INDEX_PATH), 500)
     print(f"Estimated number of unique URLs: {estimate}")
+
+    num_urls = count_unique_urls(str(DEV_INDEX_PATH))
+    print(f"Actual number of unique URLs: {num_urls}")
+
+    # frequencies = {1: 10151439, 2: 91401, 3: 767, 4: 14, 5: 4, 6: 2, 7: 3, 9: 2, 10: 2, 14: 1}
+    # total_num_pages = 102400000
+    # estimate = poisson_estimator_freq(frequencies, total_num_pages * 0.005, total_num_pages)
+    # print(f"Estimated number of unique URLs: {estimate}")
