@@ -48,35 +48,40 @@ def poisson_estimator_freq(frequencies, num_pages_observed, total_pages):
     values = np.array(list(frequencies.values()))
 
     def log_likelihood(x):
-        m1, m2 = x[:2]
-        weights = x[2:]
-        log1 = -np.dot(poisson.logpmf(freq, m1), values * weights)
-        log2 = -np.dot(poisson.logpmf(freq, m2), values * (1 - weights))
-        print("Log1", log1)
-        print("Log2", log2)
-        return log1 + log2
+        m1 = x
+        logpmf = poisson.logpmf(freq, m1)
+        return -np.dot(logpmf, values)
 
     def poiss(x, m1, s1):
         return poisson.pmf(x, m1) * s1
 
-    # TODO: use the EM algorithm
-    res = minimize(log_likelihood, np.array([0.5, 5.5] + [random.uniform(0.0, 1.0) for _ in range(len(frequencies))]), method='dogleg')
-    m1_fit = res.x.tolist()
-
-    # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
-    # m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
+    res = minimize(log_likelihood, np.array([1.0]), method='L-BFGS-B')
+    m1_fit = res.x
     print("Estimated parameter m", m1_fit)
-    s1_fit = sum(frequencies.values())
-    predictions = poiss(freq, m1_fit, s1_fit)
-    print("Predictions", predictions.tolist())
-    print("Actual", values)
-    print("Differences", predictions - values)
+
+    p0 = poisson.pmf(0, m1_fit)
     total_estimate = sum(frequencies.values())
     print("Total estimate", total_estimate)
-    zero_estimate = poiss(0, m1_fit, s1_fit)
-    print("Zero estimate", zero_estimate)
+
+    zero_estimate = p0 * total_estimate / (1 - p0)
+    print("Estimated unseen URLs", zero_estimate)
     adjusted_total_estimate = total_estimate + zero_estimate * (1 - num_pages_observed / total_pages)
     return adjusted_total_estimate
+
+    # # bounds = ([0, 0, 0, 0, 0, 0], [100, 100, 100, 1e10, 1e10, 1e10])
+    # # m1_fit, s1_fit = curve_fit(poiss, freq, values, maxfev=50000)[0]
+    # print("Estimated parameter m", m1_fit)
+    # s1_fit = sum(frequencies.values())
+    # predictions = poiss(freq, m1_fit, s1_fit)
+    # print("Predictions", predictions.tolist())
+    # print("Actual", values)
+    # print("Differences", predictions - values)
+    # total_estimate = sum(frequencies.values())
+    # print("Total estimate", total_estimate)
+    # zero_estimate = poiss(0, m1_fit, s1_fit)
+    # print("Zero estimate", zero_estimate)
+    # adjusted_total_estimate = total_estimate + zero_estimate * (1 - num_pages_observed / total_pages)
+    # return adjusted_total_estimate
 
 
 def estimate_unique_urls(index_path: str, num_pages_to_sample: int = 100):
