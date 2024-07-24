@@ -44,8 +44,15 @@ def poisson_estimator(url_counts: dict[str, int], num_pages_observed: int, total
 
 
 def poisson_estimator_freq(frequencies, num_pages_observed, total_pages):
+    print("Frequencies", frequencies)
     freq = np.array(list(frequencies.keys()))
     values = np.array(list(frequencies.values()))
+
+    m = np.dot(freq, values) / sum(values)
+    print("Initial estimate", m)
+
+    total_estimate = sum(values) * total_pages / num_pages_observed
+    return total_estimate / m
 
     def log_likelihood(x):
         m1 = x
