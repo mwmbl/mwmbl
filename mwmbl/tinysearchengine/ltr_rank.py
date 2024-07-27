@@ -33,8 +33,6 @@ class LTRRanker(HeuristicRanker):
         }
 
         dataframe = DataFrame(data)
-
-        print("Ordering results", dataframe)
         predictions = self.model.predict(dataframe)
         indexes = np.argsort(predictions)[::-1]
         return [top_pages[i] for i in indexes]
