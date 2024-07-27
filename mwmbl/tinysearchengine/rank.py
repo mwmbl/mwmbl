@@ -184,19 +184,6 @@ def get_wiki_score(url):
     return WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
 
 
-def order_results(terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
-    if len(results) == 0:
-        return []
-
-    wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
-    wiki_urls = {result.url for result in wiki_results}
-    other_results = [result for result in results if result.url not in wiki_urls]
-    results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
-    ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
-    filtered_results = [result for score, result in ordered_results if score > SCORE_THRESHOLD]
-    return wiki_results + filtered_results
-
-
 def deduplicate(results, seen_titles):
     deduplicated_results = []
     for result in results:
@@ -320,8 +307,21 @@ class Ranker:
 
 
 class HeuristicRanker(Ranker):
-    def order_results(self, terms, pages, is_complete):
-        return order_results(terms, pages, is_complete)
+    def __init__(self, tiny_index: TinyIndex, completer: Completer, score_threshold: float = 0.0):
+        super().__init__(tiny_index, completer)
+        self.score_threshold = score_threshold
+
+    def order_results(self, terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
+        if len(results) == 0:
+            return []
+
+        wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
+        wiki_urls = {result.url for result in wiki_results}
+        other_results = [result for result in results if result.url not in wiki_urls]
+        results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
+        ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
+        filtered_results = [result for score, result in ordered_results if score > self.score_threshold]
+        return wiki_results + filtered_results
 
 
 WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
@@ -350,11 +350,17 @@ def get_wiki_results(s: str, max_wiki_results: int):
 
 
 class HeuristicAndWikiRanker(HeuristicRanker):
-    max_wiki_results = 5
-
-    def __init__(self, tiny_index: TinyIndex, completer: Completer, return_none_if_no_mwmbl_results=False):
-        super().__init__(tiny_index, completer)
+    def __init__(
+            self,
+            tiny_index: TinyIndex,
+            completer: Completer,
+            return_none_if_no_mwmbl_results: bool = False,
+            score_threshold: float = 0.0,
+            max_wiki_results: int = 5
+    ):
+        super().__init__(tiny_index, completer, score_threshold)
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
+        self.max_wiki_results = max_wiki_results
 
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         results = super().search(s, additional_results)
