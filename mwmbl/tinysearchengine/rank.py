@@ -11,6 +11,8 @@ from operator import itemgetter
 from pathlib import Path
 from urllib.parse import urlparse
 
+import numpy as np
+
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.tinysearchengine.completer import Completer
@@ -29,6 +31,8 @@ DOMAIN_SCORE_SMOOTHING = 0.1
 HTTPS_STRING = 'https://'
 WIKI_SCORES = json.load(open(Path(__file__).parent.parent / "resources" / "wiki_stats.json"))
 WIKI_MAX_SCORE = next(iter(WIKI_SCORES.values()))
+DOCUMENT_FREQUENCIES = json.load(open(Path(__file__).parent.parent / "resources" / "document_counts.json"))
+N_DOCUMENTS = max(DOCUMENT_FREQUENCIES.values())
 
 
 def score_result(terms: list[str], result: Document, is_complete: bool):
@@ -54,6 +58,50 @@ def score_match(last_match_char, match_length, total_possible_match_length):
     return MATCH_EXPONENT ** (match_length - total_possible_match_length) / last_match_char
 
 
+def get_tf_idf_features(match_counts: dict[str, int]) -> dict[str, float]:
+    if len(match_counts) == 0:
+        return {
+            "max_tf_idf": 0.0,
+            "min_tf_idf": 0.0,
+            "mean_tf_idf": 0.0,
+            "std_tf_idf": 0.0,
+            "sum_tf_idf": 0.0,
+            "max_tf": 0.0,
+            "min_tf": 0.0,
+            "mean_tf": 0.0,
+            "std_tf": 0.0,
+            "sum_tf": 0.0,
+            "max_idf": 0.0,
+            "min_idf": 0.0,
+            "mean_idf": 0.0,
+            "std_idf": 0.0,
+            "sum_idf": 0.0,
+        }
+
+    inv_dfs = np.array([math.log(N_DOCUMENTS / DOCUMENT_FREQUENCIES.get(term, 1)) for term in match_counts])
+    tfs = np.array(list(match_counts.values()))
+    tf_idfs = tfs * inv_dfs
+    features = {
+        "max_tf_idf": np.max(tf_idfs),
+        "min_tf_idf": np.min(tf_idfs),
+        "mean_tf_idf": np.mean(tf_idfs),
+        "std_tf_idf": np.std(tf_idfs),
+        "sum_tf_idf": np.sum(tf_idfs),
+        "max_tf": np.max(tfs),
+        "min_tf": np.min(tfs),
+        "mean_tf": np.mean(tfs),
+        "std_tf": np.std(tfs),
+        "sum_tf": np.sum(tfs),
+        "max_idf": np.max(inv_dfs),
+        "min_idf": np.min(inv_dfs),
+        "mean_idf": np.mean(inv_dfs),
+        "std_idf": np.std(inv_dfs),
+        "sum_idf": np.sum(inv_dfs),
+    }
+
+    return features
+
+
 def get_features(terms, title, url, extract, score, is_complete):
     assert url is not None
     assert title is not None
@@ -63,12 +111,14 @@ def get_features(terms, title, url, extract, score, is_complete):
     domain = parsed_url.netloc
     path = parsed_url.path
     query = parsed_url.query
+    whole = title + ' ' + extract + ' ' + domain + ' ' + path + ' ' + query
     for part, name, is_url in [(title, 'title', False),
                                (extract, 'extract', False),
                                (domain, 'domain', True),
                                (domain, 'domain_tokenized', False),
                                (path, 'path', True),
-                               (query, 'query', False)]:
+                               (query, 'query', False),
+                               (whole, 'whole', False)]:
         last_match_char, match_length, total_possible_match_length, match_terms, match_counts = \
             get_match_features(terms, part, is_complete, is_url)
         features[f'last_match_char_{name}'] = last_match_char
@@ -76,6 +126,10 @@ def get_features(terms, title, url, extract, score, is_complete):
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
         features[f'match_score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
         features[f'match_terms_{name}'] = match_terms
+
+        tf_idf_features = get_tf_idf_features(match_counts)
+        features.update({f"{name}_{k}": v for k, v in tf_idf_features.items()})
+
     features['num_terms'] = len(terms)
     features['num_chars'] = len(' '.join(terms))
     features['domain_score'] = get_domain_score(url)
