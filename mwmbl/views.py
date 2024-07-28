@@ -2,7 +2,7 @@ import re
 from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
-from typing import Optional
+from typing import Optional, Any
 from urllib.parse import urlencode
 
 import justext
@@ -63,10 +63,21 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
+def _prepare_results(results: list[Document]) -> list[dict[str, Any]]:
+    return [{
+        "title": result.title,
+        "url": result.url,
+        "extract": result.extract,
+        "score": result.score,
+        "state": result.state,
+        }
+        for result in results]
+
+
 def index(request):
     activity, query, results = _get_results_and_activity(request)
     return render(request, "index.html", {
-        "results": results,
+        "results": _prepare_results(results),
         "query": query,
         "user": request.user,
         "activity": activity,
@@ -77,7 +88,7 @@ def index(request):
 def home_fragment(request):
     activity, query, results = _get_results_and_activity(request)
     response = render(request, "home.html", {
-        "results": results,
+        "results": _prepare_results(results),
         "query": query,
         "activity": activity,
     })
@@ -146,7 +157,7 @@ def add_url(request):
     _save_to_index(query, reranked_documents)
 
     return render(request, "home.html", {
-        "results": reranked_documents,
+        "results": _prepare_results(reranked_documents),
         "query": query,
         "activity": None,
         "curation": curation,
@@ -251,7 +262,7 @@ def approve(request):
     _save_to_index(query, reranked_documents)
 
     response = render(request, "home.html", {
-        "results": reranked_documents,
+        "results": _prepare_results(reranked_documents),
         "query": query,
         "activity": None,
         "curation": curation,
@@ -273,7 +284,7 @@ def revert_current_curation(request):
     original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
     original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
     return render(request, "home.html", {
-        "results": original_documents,
+        "results": _prepare_results(original_documents),
         "query": (curation.query),
         "activity": None,
         "curation": None,
