@@ -126,6 +126,7 @@ def get_features(terms, title, url, extract, score, is_complete):
         features[f'total_possible_match_length_{name}'] = total_possible_match_length
         features[f'match_score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
         features[f'match_terms_{name}'] = match_terms
+        features[f'match_term_proportion_{name}'] = match_terms / len(terms)
 
         tf_idf_features = get_tf_idf_features(match_counts)
         features.update({f"{name}_{k}": v for k, v in tf_idf_features.items()})
