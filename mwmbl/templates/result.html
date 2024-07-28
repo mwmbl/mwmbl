@@ -6,21 +6,19 @@
   <input type="hidden" name="score" value="{{result.score}}" />
   <input type="hidden" name="state" value="{{result.state.value}}" />
   <div class="result-container">
+    {% if user.is_authenticated %}
+      <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
+              hx-post="/app/approve/"
+              hx-target=".main"
+              hx-include=".result,[name='csrfmiddlewaretoken']"
+              hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>✓</button>
+    {% endif %}
     <div class="result-link">
       <a href="{{result.url}}">
         <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
         <p class='title'>{{result.title|format_for_query:query}}</p>
       </a>
-      <p class='extract'>{{result.extract|format_for_query:query}}</p>
+    <p class='extract'>{{result.extract|format_for_query:query}}</p>
     </div>
-    {% if user.is_authenticated %}
-      <div class="curation-buttons">
-        <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
-                hx-post="/app/approve/"
-                hx-target=".main"
-                hx-include=".result,[name='csrfmiddlewaretoken']"
-                hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>✓</button>
-      </div>
-    </div>
-  {% endif %}
+  </div>
 </li>
