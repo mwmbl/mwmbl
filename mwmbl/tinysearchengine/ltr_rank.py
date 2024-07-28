@@ -35,7 +35,7 @@ class LTRRanker(HeuristicRanker):
         dataframe = DataFrame(data)
         predictions = self.model.predict(dataframe)
         indexes = np.argsort(predictions)[::-1]
-        return [top_pages[i] for i in indexes]
+        return [top_pages[i] for i in indexes if predictions[i] > 0.0]
 
     def external_search(self, query: str) -> list[Document]:
         if self.include_wiki:

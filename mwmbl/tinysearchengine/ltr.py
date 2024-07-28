@@ -37,7 +37,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
     def transform(self, X: DataFrame, y=None):
         features = X.apply(get_features_as_series, axis=1)
-        print("Features", features.columns)
         return features
 
 
