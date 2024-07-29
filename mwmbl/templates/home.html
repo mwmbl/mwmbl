@@ -32,7 +32,7 @@ For recent crawling activity see <a href="/stats">stats</a>.</p>
   {% endif %}
   {% if results %}
     <ul class='results'>
-      {% for result in results %}
+      {% for domain, domain_results in results.items %}
         {% include "result.html" %}
       {% endfor %}
     </ul>

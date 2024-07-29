@@ -64,34 +64,20 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-def _prepare_results(results: list[Document]) -> list[dict[str, Any]]:
+class Optionallist:
+    pass
+
+
+def _prepare_results(results: Optional[list[Document]]) -> Optional[dict[str, list[Document]]]:
+    if results is None:
+        return None
+
     grouped_domain_results = defaultdict(list)
     for result in results:
         domain = parse_url(result.url).netloc
         grouped_domain_results[domain].append(result)
 
-    rearranged_results = []
-    for domain, domain_results in grouped_domain_results.items():
-        result = domain_results[0]
-        rearranged_results.append({
-            "title": result.title,
-            "url": result.url,
-            "extract": result.extract,
-            "score": result.score,
-            "state": result.state,
-            "compact": False,
-        })
-
-        for result in domain_results[1:]:
-            rearranged_results.append({
-                "title": result.title,
-                "url": result.url,
-                "extract": result.extract,
-                "score": result.score,
-                "state": result.state,
-                "compact": True,
-            })
-    return rearranged_results
+    return dict(grouped_domain_results)
 
 
 def index(request):

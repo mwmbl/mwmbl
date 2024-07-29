@@ -1,11 +1,12 @@
 {% load result_filters %}
-<li is="mwmbl-result" class="result {% if result.compact %}compact{% else %}expanded{% endif %}">
+<li is="mwmbl-result" class="result">
+  {% for result in domain_results %}
   <input type="hidden" name="url" value="{{result.url}}" />
   <input type="hidden" name="title" value="{{result.title}}" />
   <input type="hidden" name="extract" value="{{result.extract}}" />
   <input type="hidden" name="score" value="{{result.score}}" />
   <input type="hidden" name="state" value="{{result.state.value}}" />
-  <div class="result-container">
+  <div class="result-container{% if forloop.counter == 1 and domain_results|length > 1 %} first-result{% endif %}">
     {% if user.is_authenticated %}
       <button class="button curate-approve{% if result.state >= 7 %} validated{% endif %}"
               hx-post="/app/approve/"
@@ -13,16 +14,20 @@
               hx-include=".result,[name='csrfmiddlewaretoken']"
               hx-vals='{"approve_url": "{{ result.url }}", "query": "{{ query }}"{% if curation %}, "curation_id": {{ curation.id }}{% endif %}}'>✓</button>
     {% endif %}
-    <div class="result-link">
-      <a href="{{result.url}}">
-        {% if not result.compact %}
-          <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
-        {% endif %}
-        <p class='title'>{{result.title|format_for_query:query}}</p>
-      </a>
-    {% if not result.compact %}
-      <p class='extract'>{{result.extract|format_for_query:query}}</p>
+    {% if forloop.counter == 1 %}
+      <div class="result-link">
+          <a href="{{result.url}}">
+            <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
+            <p class='title'>{{result.title|format_for_query:query}}</p>
+          </a>
+          <p class='extract'>{{result.extract|format_for_query:query}}</p>
+      </div>
+    {% else %}
+      <div class="result-link-more">
+        <a href="{{result.url}}" class="more"><span class="more-title">{{result.title|format_for_query:query}}</span>
+          <span class="more-extract">{{ result.extract|format_for_query:query }}</span></a>
+      </div>
     {% endif %}
-    </div>
   </div>
+{% endfor %}
 </li>

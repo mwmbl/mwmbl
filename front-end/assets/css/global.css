@@ -120,6 +120,10 @@ body {
   padding: 0;
 }
 
+.result {
+  margin-bottom: 35px;
+}
+
 .result.expanded {
   min-height: 120px;
 }
@@ -256,8 +260,8 @@ a {
 .result-container .button {
   background-color: var(--dark-gray-color);
   color: white;
-  padding: 5px 10px;
-  margin: 0 10px 0 0;
+  padding: 8px;
+  margin: 3px 10px 0 0;
   width: 18px;
   height: 18px;
   display: flex;
@@ -265,6 +269,35 @@ a {
   justify-content: center;
   font-size: var(--small-font-size);
   font-weight: bolder;
+}
+
+.result-link-more {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.result-link-more a.more {
+  font-weight: var(--regular-font);
+}
+
+.result-link-more a.more {
+  font-weight: var(--regular-font);
+}
+
+.result-link-more a.more .more-title {
+  font-weight: var(--bold-font-weight);
+  color: var(--primary-color);
+}
+
+.result-link-more a.more .more-title strong {
+  font-weight: 900;
+  color: var(--primary-color);
+}
+
+.first-result {
+  padding-bottom: 10px;
 }
 
 .validated {
