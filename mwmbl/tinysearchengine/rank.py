@@ -346,7 +346,7 @@ def get_wiki_results(s: str, max_wiki_results: int):
         wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
                              max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
-                    for i, result in enumerate(wiki_response['query']['search'])]
+                    for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
     return wiki_results
 
 

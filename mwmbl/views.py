@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
@@ -64,14 +65,33 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
 
 
 def _prepare_results(results: list[Document]) -> list[dict[str, Any]]:
-    return [{
-        "title": result.title,
-        "url": result.url,
-        "extract": result.extract,
-        "score": result.score,
-        "state": result.state,
-        }
-        for result in results]
+    grouped_domain_results = defaultdict(list)
+    for result in results:
+        domain = parse_url(result.url).netloc
+        grouped_domain_results[domain].append(result)
+
+    rearranged_results = []
+    for domain, domain_results in grouped_domain_results.items():
+        result = domain_results[0]
+        rearranged_results.append({
+            "title": result.title,
+            "url": result.url,
+            "extract": result.extract,
+            "score": result.score,
+            "state": result.state,
+            "compact": False,
+        })
+
+        for result in domain_results[1:]:
+            rearranged_results.append({
+                "title": result.title,
+                "url": result.url,
+                "extract": result.extract,
+                "score": result.score,
+                "state": result.state,
+                "compact": True,
+            })
+    return rearranged_results
 
 
 def index(request):

@@ -1,5 +1,5 @@
 {% load result_filters %}
-<li class="result" is="mwmbl-result">
+<li is="mwmbl-result" class="result {% if result.compact %}compact{% else %}expanded{% endif %}">
   <input type="hidden" name="url" value="{{result.url}}" />
   <input type="hidden" name="title" value="{{result.title}}" />
   <input type="hidden" name="extract" value="{{result.extract}}" />
@@ -15,10 +15,14 @@
     {% endif %}
     <div class="result-link">
       <a href="{{result.url}}">
-        <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
+        {% if not result.compact %}
+          <p><span class='link'>{{result.url}}</span> <span class="via">— found via <span class="source">{{result.state|convert_state_to_source|title}}</span></span></p>
+        {% endif %}
         <p class='title'>{{result.title|format_for_query:query}}</p>
       </a>
-    <p class='extract'>{{result.extract|format_for_query:query}}</p>
+    {% if not result.compact %}
+      <p class='extract'>{{result.extract|format_for_query:query}}</p>
+    {% endif %}
     </div>
   </div>
 </li>

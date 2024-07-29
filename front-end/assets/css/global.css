@@ -120,7 +120,7 @@ body {
   padding: 0;
 }
 
-.result {
+.result.expanded {
   min-height: 120px;
 }
 
@@ -257,9 +257,9 @@ a {
   background-color: var(--dark-gray-color);
   color: white;
   padding: 5px 10px;
-  margin: 10px 10px 10px 0;
-  width: 22px;
-  height: 22px;
+  margin: 0 10px 0 0;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
