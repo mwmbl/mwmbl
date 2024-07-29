@@ -7,9 +7,11 @@ from mwmbl.tokenizer import tokenize, clean_unicode
 DOCUMENT_SOURCES = {
     DocumentState.FROM_GOOGLE: 'google',
     DocumentState.FROM_USER: 'user',
+    DocumentState.FROM_WIKI: 'wikipedia',
     DocumentState.ORGANIC_APPROVED: 'mwmbl',
     DocumentState.FROM_GOOGLE_APPROVED: 'google',
     DocumentState.FROM_USER_APPROVED: 'user',
+    DocumentState.FROM_WIKI_APPROVED: 'wikipedia',
 }
 
 

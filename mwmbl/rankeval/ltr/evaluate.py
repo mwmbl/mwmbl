@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 import numpy as np
 import pandas as pd
-from mwmbl.tinysearchengine.ltr import ThresholdPredictor, FeatureExtractor
+from mwmbl.tinysearchengine.ltr import ThresholdPredictor, FeatureExtractor, RankingPredictor
 from scipy.stats import sem
 from sklearn.base import clone
 from sklearn.dummy import DummyRegressor
@@ -25,6 +25,7 @@ PREDICTORS = {
     'constant': DummyRegressor(),
     'decision_tree': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, DecisionTreeClassifier())),
     'xgb': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
+    'xgb_limit_terms': RankingPredictor(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
     'xgb_regressor': make_pipeline(FeatureExtractor(), XGBRegressor(objective="reg:pseudohubererror")),
     'xgb_ranker': make_pipeline(FeatureExtractor(), XGBRanker(objective="rank:map", reg_lambda=2)),
 }
@@ -41,14 +42,18 @@ def get_discount(rank: float):
 def run():
     parser = ArgumentParser()
     parser.add_argument('--predictor', required=True, choices=sorted(PREDICTORS))
+    parser.add_argument("--binary-labels", required=False, action="store_true")
     parser.add_argument('--note', required=True)
 
     args = parser.parse_args()
 
     predictor = PREDICTORS[args.predictor]
 
-    dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH)
-    dataset['gold_discount'] = dataset['gold_standard_rank'].apply(get_discount)
+    dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH, lineterminator='\n')
+    if args.binary_labels:
+        dataset['gold_discount'] = dataset['gold_standard_rank'].apply(lambda x: 1 if x > 0 else 0)
+    else:
+        dataset['gold_discount'] = dataset['gold_standard_rank'].apply(get_discount)
 
     print("Gold standard", dataset['gold_discount'])
 

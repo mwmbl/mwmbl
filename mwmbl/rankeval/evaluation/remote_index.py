@@ -1,19 +1,12 @@
 """
 Pretend to be an index but retrieve results from a remote index.
 """
+import time
+
 import requests
-from joblib import Memory
 
 from mwmbl.tinysearchengine.indexer import Document
-
-memory = Memory(location='devdata/cache')
-
-
-@memory.cache
-def retrieve_url(url: str):
-    response = requests.get(url)
-    print(f"Retrieved {url}", response.content)
-    return response.json()
+from mwmbl.utils import request_cache
 
 
 class RemoteIndex:
@@ -21,5 +14,17 @@ class RemoteIndex:
 
     def retrieve(self, query: str):
         url = self.url + query
-        results = retrieve_url(url)
+        response = None
+        with request_cache() as session:
+            for i in range(3):
+                try:
+                    response = session.get(url, timeout=15)
+                    break
+                except requests.exceptions.Timeout:
+                    print(f"Timeout fetching {url}, sleeping")
+                    time.sleep(1)
+        if response is None:
+            raise ValueError(f"Failed to fetch {url}")
+        print(f"Retrieved {url}", response.content)
+        results = response.json()
         return [Document(**result) for result in results["results"]]

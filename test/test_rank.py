@@ -1,5 +1,5 @@
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.rank import order_results
+from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 
 def test_order_result():
@@ -9,7 +9,9 @@ def test_order_result():
 
     documents = [doc1, doc2, doc3]
 
+    ranker = HeuristicRanker(None, None)
+
     # Sort the documents
-    ordered_results = order_results(["bananas"], documents, True)
+    ordered_results = ranker.order_results(["bananas"], documents, True)
 
     assert ordered_results[0].title == 'Bananas and apples'

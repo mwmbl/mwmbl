@@ -37,7 +37,22 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
     def transform(self, X: DataFrame, y=None):
         features = X.apply(get_features_as_series, axis=1)
-        print("Features", features.columns)
         return features
 
 
+class RankingPredictor(BaseEstimator, RegressorMixin):
+    def __init__(self, feature_extractor: FeatureExtractor, model: BaseEstimator):
+        self.feature_extractor = feature_extractor
+        self.model = model
+
+    def fit(self, X, y) -> BaseEstimator:
+        features = self.feature_extractor.fit_transform(X)
+        self.model.fit(features, y)
+        return self
+
+    def predict(self, X):
+        features = self.feature_extractor.transform(X)
+        predictions = self.model.predict(features)
+        too_few_match_terms = (features["match_term_proportion_whole"] <= 0.5) & (features["match_terms_whole"] <= 1.0)
+        predictions[too_few_match_terms] = 0.0
+        return predictions

@@ -1,8 +1,9 @@
 import re
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
-from typing import Optional
+from typing import Optional, Any
 from urllib.parse import urlencode
 
 import justext
@@ -63,10 +64,26 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
+class Optionallist:
+    pass
+
+
+def _prepare_results(results: Optional[list[Document]]) -> Optional[dict[str, list[Document]]]:
+    if results is None:
+        return None
+
+    grouped_domain_results = defaultdict(list)
+    for result in results:
+        domain = parse_url(result.url).netloc
+        grouped_domain_results[domain].append(result)
+
+    return dict(grouped_domain_results)
+
+
 def index(request):
     activity, query, results = _get_results_and_activity(request)
     return render(request, "index.html", {
-        "results": results,
+        "results": _prepare_results(results),
         "query": query,
         "user": request.user,
         "activity": activity,
@@ -77,7 +94,7 @@ def index(request):
 def home_fragment(request):
     activity, query, results = _get_results_and_activity(request)
     response = render(request, "home.html", {
-        "results": results,
+        "results": _prepare_results(results),
         "query": query,
         "activity": activity,
     })
@@ -146,7 +163,7 @@ def add_url(request):
     _save_to_index(query, reranked_documents)
 
     return render(request, "home.html", {
-        "results": reranked_documents,
+        "results": _prepare_results(reranked_documents),
         "query": query,
         "activity": None,
         "curation": curation,
@@ -210,12 +227,16 @@ def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
         return DocumentState.FROM_GOOGLE_APPROVED
     if state == DocumentState.FROM_USER:
         return DocumentState.FROM_USER_APPROVED
+    if state == DocumentState.FROM_WIKI:
+        return DocumentState.FROM_WIKI_APPROVED
     if state == DocumentState.FROM_GOOGLE_APPROVED:
         return DocumentState.FROM_GOOGLE
     if state == DocumentState.FROM_USER_APPROVED:
         return DocumentState.FROM_USER
     if state == DocumentState.ORGANIC_APPROVED:
         return None
+    if state == DocumentState.FROM_WIKI_APPROVED:
+        return DocumentState.FROM_WIKI
     raise ValueError(f"Unexpected state {repr(state)}")
 
 
@@ -247,7 +268,7 @@ def approve(request):
     _save_to_index(query, reranked_documents)
 
     response = render(request, "home.html", {
-        "results": reranked_documents,
+        "results": _prepare_results(reranked_documents),
         "query": query,
         "activity": None,
         "curation": curation,
@@ -269,7 +290,7 @@ def revert_current_curation(request):
     original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
     original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
     return render(request, "home.html", {
-        "results": original_documents,
+        "results": _prepare_results(original_documents),
         "query": (curation.query),
         "activity": None,
         "curation": None,

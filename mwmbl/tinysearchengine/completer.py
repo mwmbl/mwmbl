@@ -28,7 +28,6 @@ class Completer:
 
         matching_terms = zip(self.counts[start_index:end_index], self.terms[start_index:end_index])
         top_terms = sorted(matching_terms, reverse=True)[:self.num_matches]
-        print("Top terms, counts", top_terms)
         if not top_terms:
             return []
 

@@ -1,8 +1,12 @@
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from datetime import timedelta
+from typing import Sequence, Optional
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from requests_cache import CachedSession
+from requests.adapters import Retry, HTTPAdapter
 
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -81,3 +85,6 @@ def validate_domain(domain_or_url: str):
         if domain is None or VALID_DOMAIN_REGEX.fullmatch(domain) is None:
             raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
 
+
+def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
+    return CachedSession(expire_after=expire_after, backend="sqlite", cache_name=settings.REQUEST_CACHE_PATH)
