@@ -3,6 +3,7 @@ import pickle
 from pathlib import Path
 
 from django.conf import settings
+from django_cache_decorator import django_cache_decorator
 from redis import Redis
 
 from mwmbl.indexer.batch_cache import BatchCache
@@ -13,6 +14,7 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 
 
+@django_cache_decorator(time=300)
 def get_curated_domains() -> set[str]:
     curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list('name', flat=True))
     return curated_domains

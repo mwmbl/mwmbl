@@ -564,6 +564,16 @@ mfa = ["qrcode (>=7.0.0)"]
 saml = ["python3-saml (>=1.15.0,<2.0.0)"]
 
 [[package]]
+name = "django-cache-decorator"
+version = "0.4.1"
+description = "Easily add caching to functions within a django project."
+optional = false
+python-versions = "*"
+files = [
+    {file = "django-cache-decorator-0.4.1.tar.gz", hash = "sha256:cbaf919b57b0095f4a06a1b356a339cc8c158eae65c6229a1255787c1510b3cc"},
+]
+
+[[package]]
 name = "django-htmx"
 version = "1.18.0"
 description = "Extensions for using Django with htmx."
@@ -3010,4 +3020,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "d44a4f54a5a5ee4fd70ce03c11bd761dc2e8af94de206fd0423dc1fb128f0783"
+content-hash = "e97ead7ee7a04babb13f57ac86702f7c6f20bb51ae2b79604f0f06df3916182e"
