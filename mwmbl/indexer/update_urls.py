@@ -40,9 +40,9 @@ def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int
 
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
-    start = datetime.now()
+    start = datetime.utcnow()
     blacklist_domains = get_blacklist_domains()
-    blacklist_retrieval_time = datetime.now() - start
+    blacklist_retrieval_time = datetime.utcnow() - start
     logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
                 f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
 
@@ -78,6 +78,9 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
     with DomainLinkDatabase() as domain_link_db:
         for source_domain, target_domains in domain_links.items():
             domain_link_db.update_domain_links(source_domain, target_domains)
+
+    end = datetime.utcnow()
+    logger.info(f"Recorded URLs in database in {end - start}")
 
 
 def _add_found_urls_to_db_and_queue(found_urls, new_item_queue):

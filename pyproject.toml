@@ -20,7 +20,6 @@ psycopg2-binary = "^2.9.3"
 spacy = "==3.2.1"
 pytest = "^7.2.1"
 pytest-mock = "^3.10.0"
-jusText = "==3.0.0"
 
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.

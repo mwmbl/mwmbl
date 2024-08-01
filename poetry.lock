@@ -837,20 +837,6 @@ files = [
 ]
 
 [[package]]
-name = "justext"
-version = "3.0.0"
-description = "Heuristic based boilerplate removal tool"
-optional = false
-python-versions = "*"
-files = [
-    {file = "jusText-3.0.0-py2.py3-none-any.whl", hash = "sha256:86b48f5b1d99505acd072f5831def6cd3f1306043651c524a1c609e62e3544e4"},
-    {file = "jusText-3.0.0.tar.gz", hash = "sha256:7640e248218795f6be65f6c35fe697325a3280fcb4675d1525bcdff2b86faadf"},
-]
-
-[package.dependencies]
-lxml = ">=4.4.2"
-
-[[package]]
 name = "langcodes"
 version = "3.4.0"
 description = "Tools for labeling human languages with IETF language tags"
@@ -3010,4 +2996,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "d44a4f54a5a5ee4fd70ce03c11bd761dc2e8af94de206fd0423dc1fb128f0783"
+content-hash = "5e727460fd3c6e62a73ab5c878da7c25e9d3ffdf9ad217861c8c312bf9b8a548"

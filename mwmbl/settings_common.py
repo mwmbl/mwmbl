@@ -187,3 +187,5 @@ CACHES = {
         "KEY_PREFIX": "c_",
     }
 }
+
+SETUP_DATABASE = True
