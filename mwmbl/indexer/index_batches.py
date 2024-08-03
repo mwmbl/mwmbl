@@ -1,8 +1,10 @@
 """
 Index batches that are stored locally.
 """
+import math
 from collections import defaultdict
 from datetime import datetime
+from functools import reduce
 from logging import getLogger
 from typing import Collection, Iterable
 
@@ -13,6 +15,7 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS
 from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
@@ -42,7 +45,7 @@ def get_url_score(url):
 def index_batches(batch_data: Collection[HashedBatch], index_path: str):
     start_time = datetime.utcnow()
     document_tuples = list(get_documents_from_batches(batch_data))
-    documents = [Document(title, url, extract, get_url_score(url)) for title, url, extract in document_tuples]
+    documents = [Document(title, url, extract, 0.0) for title, url, extract in document_tuples]
     page_documents = preprocess_documents(documents, index_path)
     index_pages(index_path, page_documents)
     end_time = datetime.utcnow()
@@ -78,11 +81,42 @@ def preprocess_documents(documents, index_path):
 
             tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
             for token in tokenized.tokens:
+                score = score_document(token, document)
+                logger.info(f"Score for {repr(token)} in {document.url} with title {document.title}: {score}")
                 page = indexer.get_key_page_index(token)
-                term_document = Document(document.title, document.url, document.extract, document.score, token)
+                term_document = Document(document.title, document.url, document.extract, score, token)
                 page_documents[page].append(term_document)
     print(f"Preprocessed for {len(page_documents)} pages")
     return page_documents
+
+
+DOCUMENT_FREQ_DENOMINATOR = sum(DOCUMENT_FREQUENCIES.values()) / len(DOCUMENT_FREQUENCIES)
+
+
+def round_sig(x, sig=2):
+    """
+    https://stackoverflow.com/a/3413529/660902
+    """
+    return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
+
+
+def score_document(token, document):
+    doc_score = score_result(token.split(), document, True) * 1000 + 1
+    # TODO: are we emphasising common words too much?
+    #       It feels like we need something more like TF-IDF rather than just DF
+    token_score = get_token_score(token)
+    score = doc_score * token_score
+    rounded_score = round_sig(score)
+    if score > 10:
+        return int(rounded_score)
+    return rounded_score
+
+
+def get_token_score(token):
+    terms = token.split()
+    doc_frequencies = [DOCUMENT_FREQUENCIES.get(term, 1) for term in terms]
+    doc_probs = [doc_freq/DOCUMENT_FREQ_DENOMINATOR for doc_freq in doc_frequencies]
+    return reduce(lambda x, y: x * y, doc_probs)
 
 
 def get_url_error_status(item: Item):

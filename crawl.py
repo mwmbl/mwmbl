@@ -25,17 +25,19 @@ from mwmbl.indexer.index_batches import index_batches
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
 
 
 def run():
-    for i in range(10):
-        process = Process(target=process_batch_continuously())
-        process.start()
+    # for i in range(10):
+    #     process = Process(target=process_batch_continuously)
+    #     process.start()
+    #     time.sleep(1)
 
-    index_process = Process(target=run_indexing)
+    index_process = Process(target=run_indexing_continuously)
     index_process.start()
 
 
@@ -51,7 +53,7 @@ def process_batch_continuously():
 def process_batch():
     user_id = "test"
     urls = url_queue.get_batch(user_id)
-    results = crawl_batch(list(urls)[:10], 20)
+    results = crawl_batch(urls, 20)
     for result in results:
         print("Result", result)
     js_timestamp = int(time.time() * 1000)
@@ -64,18 +66,26 @@ def process_batch():
     redis.rpush(BATCH_QUEUE_KEY, batch_json)
 
 
+def run_indexing_continuously():
+    while True:
+        try:
+            run_indexing()
+        except Exception:
+            logger.exception("Error running indexing")
+            time.sleep(10)
+
+
 def run_indexing():
     redis = Redis(host='localhost', port=6379, decode_responses=True)
     index_path = data_path / settings.INDEX_NAME
-    while True:
-        batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1000)
-        logger.info(f"Got {len(batch_jsons)} batches to index")
-        if batch_jsons is None:
-            logger.info("No more batches to index. Sleeping for 10 seconds.")
-            time.sleep(10)
-            continue
-        batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
-        index_batches(batches, index_path)
+    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1)
+    if batch_jsons is None:
+        logger.info("No more batches to index. Sleeping for 10 seconds.")
+        time.sleep(10)
+        return
+    logger.info(f"Got {len(batch_jsons)} batches to index")
+    batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
+    index_batches(batches, index_path)
 
 
 if __name__ == "__main__":

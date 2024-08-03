@@ -114,7 +114,6 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
 
     for paragraph in paragraphs:
         if len(paragraph.links) > 0:
-            logger.debug(f"Paragraph: {paragraph.text, paragraph.links}")
             for link in paragraph.links:
                 if not link.startswith("http"):
                     if "://" in link:
