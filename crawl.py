@@ -32,10 +32,10 @@ BATCH_QUEUE_KEY = "batch-queue"
 
 
 def run():
-    # for i in range(10):
-    #     process = Process(target=process_batch_continuously)
-    #     process.start()
-    #     time.sleep(1)
+    for i in range(10):
+        process = Process(target=process_batch_continuously)
+        process.start()
+        time.sleep(5)
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
@@ -59,8 +59,8 @@ def process_batch():
     js_timestamp = int(time.time() * 1000)
     batch = HashedBatch.parse_obj({"user_id_hash": user_id, "timestamp": js_timestamp, "items": results})
     record_urls_in_database([batch], url_queue)
-    index_path = data_path / settings.INDEX_NAME
     redis = Redis(host='localhost', port=6379, decode_responses=True)
+
     # Push the batch into the Redis queue
     batch_json = batch.json()
     redis.rpush(BATCH_QUEUE_KEY, batch_json)
@@ -78,7 +78,7 @@ def run_indexing_continuously():
 def run_indexing():
     redis = Redis(host='localhost', port=6379, decode_responses=True)
     index_path = data_path / settings.INDEX_NAME
-    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1)
+    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1000)
     if batch_jsons is None:
         logger.info("No more batches to index. Sleeping for 10 seconds.")
         time.sleep(10)

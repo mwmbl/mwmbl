@@ -61,12 +61,9 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
             seen_urls = set()
             seen_titles = set()
 
-            # TODO: what about curated documents?
             sorted_documents = sort_documents(documents, existing_documents, ranker)
 
-            # TODO: for now we add the term here, until all the documents in the index have terms
-            sorted_documents_with_terms = add_term_infos(sorted_documents, indexer, page)
-            for document in sorted_documents_with_terms:
+            for document in sorted_documents:
                 if document.title in seen_titles or document.url in seen_urls:
                     continue
                 new_documents.append(document)
