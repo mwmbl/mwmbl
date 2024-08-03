@@ -220,7 +220,7 @@ class Ranker:
         self.completer = completer
 
     @abstractmethod
-    def order_results(self, terms, pages, is_complete):
+    def order_results(self, terms: list[str], pages: list[Document], is_complete: bool):
         pass
 
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:

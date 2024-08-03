@@ -15,7 +15,7 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
-from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS
+from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
@@ -45,7 +45,7 @@ def get_url_score(url):
 def index_batches(batch_data: Collection[HashedBatch], index_path: str):
     start_time = datetime.utcnow()
     document_tuples = list(get_documents_from_batches(batch_data))
-    documents = [Document(title, url, extract, 0.0) for title, url, extract in document_tuples]
+    documents = [Document(title, url, extract) for title, url, extract in document_tuples]
     page_documents = preprocess_documents(documents, index_path)
     index_pages(index_path, page_documents)
     end_time = datetime.utcnow()
@@ -54,12 +54,16 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str):
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
     with TinyIndex(Document, index_path, 'w') as indexer:
+        ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
             new_documents = []
             existing_documents = indexer.get_page(page)
             seen_urls = set()
             seen_titles = set()
-            sorted_documents = sorted(documents + existing_documents, key=lambda x: x.score, reverse=True)
+
+            # TODO: what about curated documents?
+            sorted_documents = sort_documents(documents, existing_documents, ranker)
+
             # TODO: for now we add the term here, until all the documents in the index have terms
             sorted_documents_with_terms = add_term_infos(sorted_documents, indexer, page)
             for document in sorted_documents_with_terms:
@@ -72,6 +76,34 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
             indexer.store_in_page(page, new_documents)
 
 
+def sort_documents(documents, all_existing_documents, ranker):
+    curated_documents = [doc for doc in all_existing_documents if doc.state is not None]
+    existing_documents = [doc for doc in all_existing_documents if doc.state is None]
+
+    term_documents = defaultdict(list)
+
+    for document in documents:
+        if document.term is not None:
+            term_documents[document.term].append(document)
+
+    ordered_term_docs = defaultdict(list)
+    for term, docs in term_documents.items():
+        docs += [doc for doc in existing_documents if doc.term == term]
+        ordered_docs = ranker.order_results(term.split(), docs, True)
+        ordered_term_docs[term] = ordered_docs
+
+    # Existing docs are already ordered
+    other_terms = {doc.term for doc in existing_documents if doc.term not in ordered_term_docs}
+    for doc in existing_documents:
+        if doc.term in other_terms:
+            ordered_term_docs[doc.term].append(doc)
+
+    numbered_docs = [enumerate(docs) for docs in ordered_term_docs.values()]
+    combined_docs = [doc for docs in numbered_docs for doc in docs]
+    indexes, sorted_documents = zip(*sorted(combined_docs, key=lambda x: x[0]))
+    return curated_documents + list(sorted_documents)
+
+
 def preprocess_documents(documents, index_path):
     page_documents = defaultdict(list)
     with TinyIndex(Document, index_path, 'r') as indexer:
@@ -81,42 +113,11 @@ def preprocess_documents(documents, index_path):
 
             tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
             for token in tokenized.tokens:
-                score = score_document(token, document)
-                logger.info(f"Score for {repr(token)} in {document.url} with title {document.title}: {score}")
                 page = indexer.get_key_page_index(token)
-                term_document = Document(document.title, document.url, document.extract, score, token)
+                term_document = Document(document.title, document.url, document.extract, term=token)
                 page_documents[page].append(term_document)
     print(f"Preprocessed for {len(page_documents)} pages")
     return page_documents
-
-
-DOCUMENT_FREQ_DENOMINATOR = sum(DOCUMENT_FREQUENCIES.values()) / len(DOCUMENT_FREQUENCIES)
-
-
-def round_sig(x, sig=2):
-    """
-    https://stackoverflow.com/a/3413529/660902
-    """
-    return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
-
-
-def score_document(token, document):
-    doc_score = score_result(token.split(), document, True) * 1000 + 1
-    # TODO: are we emphasising common words too much?
-    #       It feels like we need something more like TF-IDF rather than just DF
-    token_score = get_token_score(token)
-    score = doc_score * token_score
-    rounded_score = round_sig(score)
-    if score > 10:
-        return int(rounded_score)
-    return rounded_score
-
-
-def get_token_score(token):
-    terms = token.split()
-    doc_frequencies = [DOCUMENT_FREQUENCIES.get(term, 1) for term in terms]
-    doc_probs = [doc_freq/DOCUMENT_FREQ_DENOMINATOR for doc_freq in doc_frequencies]
-    return reduce(lambda x, y: x * y, doc_probs)
 
 
 def get_url_error_status(item: Item):
