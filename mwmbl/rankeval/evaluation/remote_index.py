@@ -10,7 +10,7 @@ from mwmbl.utils import request_cache
 
 
 class RemoteIndex:
-    url = "https://mwmbl.org/api/v1/search/raw?s="
+    url = "https://beta.mwmbl.org/api/v1/search/raw?s="
 
     def retrieve(self, query: str):
         url = self.url + query

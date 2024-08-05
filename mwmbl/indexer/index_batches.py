@@ -2,7 +2,7 @@
 Index batches that are stored locally.
 """
 import math
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime
 from functools import reduce
 from logging import getLogger
@@ -14,7 +14,7 @@ from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.utils import add_term_infos
 
@@ -42,27 +42,28 @@ def get_url_score(url):
     return 1/len(url)
 
 
-def index_batches(batch_data: Collection[HashedBatch], index_path: str):
+def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
     start_time = datetime.utcnow()
     document_tuples = list(get_documents_from_batches(batch_data))
     documents = [Document(title, url, extract) for title, url, extract in document_tuples]
     page_documents = preprocess_documents(documents, index_path)
-    index_pages(index_path, page_documents)
+    new_page_doc_counts = index_pages(index_path, page_documents)
     end_time = datetime.utcnow()
     logger.info(f"Indexing took {end_time - start_time}")
+    return new_page_doc_counts
 
 
-def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
+def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> Counter:
+    term_new_doc_counts = Counter()
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
-            new_documents = []
             existing_documents = indexer.get_page(page)
-            seen_urls = set()
-            seen_titles = set()
-
             sorted_documents = sort_documents(documents, existing_documents, ranker)
 
+            seen_urls = set()
+            seen_titles = set()
+            new_documents = []
             for document in sorted_documents:
                 if document.title in seen_titles or document.url in seen_urls:
                     continue
@@ -71,6 +72,10 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]]):
                 seen_titles.add(document.title)
             logger.info(f"Storing {len(new_documents)} documents for page {page}, originally {len(existing_documents)}")
             indexer.store_in_page(page, new_documents)
+
+            term_new_doc_counts.update(document.term for document in new_documents
+                                       if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX.value)
+    return term_new_doc_counts
 
 
 def sort_documents(documents, all_existing_documents, ranker):

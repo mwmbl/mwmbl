@@ -125,8 +125,6 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
             urls = queued_batches.get_batch(user_id_hash)
         except Empty:
             return []
-        # TODO: track which URLs are currently being crawled
-
         return urls
 
     @router.get('/batches/{date_str}/users/{public_user_id}')

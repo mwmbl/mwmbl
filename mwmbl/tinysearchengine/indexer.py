@@ -34,6 +34,7 @@ class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
     """
+    SYNCED_WITH_MAIN_INDEX = -2
     DELETED = -1
     FROM_USER = 2
     FROM_GOOGLE = 3

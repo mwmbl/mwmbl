@@ -8,6 +8,9 @@ import django
 from django.conf import settings
 from redis import Redis
 
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
@@ -78,14 +81,30 @@ def run_indexing_continuously():
 def run_indexing():
     redis = Redis(host='localhost', port=6379, decode_responses=True)
     index_path = data_path / settings.INDEX_NAME
-    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1000)
+    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 100)
     if batch_jsons is None:
         logger.info("No more batches to index. Sleeping for 10 seconds.")
         time.sleep(10)
         return
     logger.info(f"Got {len(batch_jsons)} batches to index")
     batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
-    index_batches(batches, index_path)
+    term_new_doc_count = index_batches(batches, index_path)
+    logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
+
+    remote_index = RemoteIndex()
+    with TinyIndex(Document, index_path, 'r') as local_index:
+        for term, count in term_new_doc_count.most_common(10):
+            remote_items = remote_index.retrieve(term)
+            remote_item_urls = {item.url for item in remote_items}
+            local_items = local_index.retrieve(term)
+            new_items = [item for item in local_items if item.url not in remote_item_urls]
+            logger.info(f"Found {len(new_items)} new items for term {term}")
+            for item in new_items:
+                logger.info(f"New item: {item}")
+
+
+
+
 
 
 if __name__ == "__main__":
