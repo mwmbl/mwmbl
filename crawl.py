@@ -9,6 +9,7 @@ from django.conf import settings
 from redis import Redis
 
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
+from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
@@ -22,7 +23,6 @@ django.setup()
 
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch
-from mwmbl.search_setup import queued_batches as url_queue
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.indexer.index_batches import index_batches
 
@@ -32,6 +32,10 @@ FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
+
+
+redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
