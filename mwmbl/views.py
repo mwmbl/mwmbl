@@ -64,10 +64,6 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
     return paragraphs, title
 
 
-class Optionallist:
-    pass
-
-
 def _prepare_results(results: Optional[list[Document]]) -> Optional[dict[str, list[Document]]]:
     if results is None:
         return None

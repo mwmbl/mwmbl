@@ -5,6 +5,7 @@ from multiprocessing import Process
 from pathlib import Path
 
 import django
+import requests
 from django.conf import settings
 from redis import Redis
 
@@ -23,7 +24,7 @@ django.setup()
 
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch
-from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches
 
 
@@ -39,10 +40,10 @@ url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
-    for i in range(10):
-        process = Process(target=process_batch_continuously)
-        process.start()
-        time.sleep(5)
+    # for i in range(10):
+    #     process = Process(target=process_batch_continuously)
+    #     process.start()
+    #     time.sleep(5)
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
@@ -66,7 +67,6 @@ def process_batch():
     js_timestamp = int(time.time() * 1000)
     batch = HashedBatch.parse_obj({"user_id_hash": user_id, "timestamp": js_timestamp, "items": results})
     record_urls_in_database([batch], url_queue)
-    redis = Redis(host='localhost', port=6379, decode_responses=True)
 
     # Push the batch into the Redis queue
     batch_json = batch.json()
@@ -83,9 +83,8 @@ def run_indexing_continuously():
 
 
 def run_indexing():
-    redis = Redis(host='localhost', port=6379, decode_responses=True)
     index_path = data_path / settings.INDEX_NAME
-    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 100)
+    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1)
     if batch_jsons is None:
         logger.info("No more batches to index. Sleeping for 10 seconds.")
         time.sleep(10)
@@ -106,7 +105,13 @@ def run_indexing():
             for item in new_items:
                 logger.info(f"New item: {item}")
 
+            result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
+                                   score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
+            results = Results(api_key="test", results=result_items)
+            response = requests.post("http://localhost:8000/api/v1/crawler/results", json=results.dict())
+            response.raise_for_status()
 
+            print("Response", response.text)
 
 
 

@@ -46,11 +46,16 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Count
     start_time = datetime.utcnow()
     document_tuples = list(get_documents_from_batches(batch_data))
     documents = [Document(title, url, extract) for title, url, extract in document_tuples]
+    end_time, new_page_doc_counts = index_documents(documents, index_path)
+    logger.info(f"Indexing took {end_time - start_time}")
+    return new_page_doc_counts
+
+
+def index_documents(documents, index_path):
     page_documents = preprocess_documents(documents, index_path)
     new_page_doc_counts = index_pages(index_path, page_documents)
     end_time = datetime.utcnow()
-    logger.info(f"Indexing took {end_time - start_time}")
-    return new_page_doc_counts
+    return end_time, new_page_doc_counts
 
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> Counter:

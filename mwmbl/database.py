@@ -1,5 +1,6 @@
-from django.conf import settings
 from psycopg2 import connect
+
+from mwmbl import settings
 
 
 class Database:
