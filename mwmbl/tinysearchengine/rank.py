@@ -23,6 +23,7 @@ from mwmbl.utils import request_cache
 logger = getLogger(__name__)
 
 
+MAX_QUERY_CHARS = 100
 MATCH_SCORE_THRESHOLD = 0.0
 SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.04
@@ -364,12 +365,14 @@ class HeuristicAndWikiRanker(HeuristicRanker):
         self.max_wiki_results = max_wiki_results
 
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
-        results = super().search(s, additional_results)
+        s_shortened = s[:MAX_QUERY_CHARS]
+
+        results = super().search(s_shortened, additional_results)
 
         if len(results) == 0 and self.return_none_if_no_mwmbl_results:
             return []
 
-        wiki_results = get_wiki_results(s, self.max_wiki_results)
+        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results)
 
         return wiki_results + results
 
