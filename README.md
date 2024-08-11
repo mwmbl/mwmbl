@@ -16,7 +16,7 @@ Bing.
 We have our own index powered by our community. Our index is currently
 much smaller than those of commercial search engines, with around 500
 million unique URLs ([more stats](https://mwmbl.org/stats/)). The
-quality is a long way off the commercial engines at the moment, but
+quality is a long way's off from matching the commercial engines at the moment, but
 you can help change that by joining us! We aim to have 1 billion
 unique URLs indexed by the end of 2024, 10 billion by the end of 2025
 and 100 billion by the end of 2026 by which point we should be
@@ -48,7 +48,7 @@ Crawling
 Crawling is distributed across the community, while indexing is
 centralised on the main server.
 
-If you have spare compute and bandwidth, the best way you can help is
+If you have spare computer power and bandwidth, the best way you can help is
 by running our [command line
 crawler](https://github.com/mwmbl/crawler-script) with as many threads
 as you can spare.
@@ -64,7 +64,7 @@ indexed.
 Why a non-profit search engine?
 ===============================
 
-The motives of ad-funded search engine are at odds with providing an
+The motives of ad-funded search engines are at odds with providing an
 optimal user experience. These sites are optimised for ad revenue,
 with user experience taking second place. This means that pages are
 loaded with ads which are often not clearly distinguished from search
@@ -89,19 +89,17 @@ years. Here's a very incomplete list of some that have interested me:
  - [SearXNG](https://github.com/searxng/searxng) - an open source meta
    search engine
  - [YaCy](https://yacy.net/) - an open source distributed search engine
- - [Gigablast](https://gigablast.com/) - a privacy-focused search
-   engine whose owner makes money by selling the technology to third
-   parties
+ - [Stract](https://stract.com/) - an open source, private search engine with a focus on privacy and customizability
  - [Brave](https://search.brave.com/)
  - [DuckDuckGo](https://duckduckgo.com/)
  - [Kagi](https://kagi.com/)
 
 Of these, YaCy is the closest in spirit to the idea of a non-profit
 search engine. The index is distributed across a peer-to-peer
-network. Unfortunately this design decision makes search very slow.
+network. Unfortunately this design decision slows the fetching of search results.
 
 Marginalia Search is fantastic, but our goals are different: we aim to
-be a replacement for commercial search engines but Marginalia aims to
+be a replacement for commercial search engines whereas Marginalia aims to
 provide a different type of search.
 
 All other search engines that I've come across are for-profit. Please
@@ -135,19 +133,19 @@ can be done very quickly.
 
 Because we compress the list of items, we can rank for more than a
 single term and maintain an index smaller than the inverted index
-design. Well, that's the theory. This idea has yet to be tested out on
+design. At least, that's the theory. This idea has yet to be tested on
 a large scale.
 
 How to contribute
 =================
 
-There are lots of ways to help:
+There are multiple ways to help:
  - [Help us crawl the
    web](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/)
  - [Donate some money](https://opencollective.com/mwmbl) towards
    hosting costs and supporting our volunteers
  - Give feedback/suggestions
- - Help out with development of the engine itself
+ - Assist in development of the engine itself
 
 If you would like to help in any of these or other ways, thank you!
 Please join our [Matrix chat
@@ -163,8 +161,8 @@ For trying out the service locally see the section in the Mwmbl [book](https://b
 
 ### Using Dokku
 
-Note: this method is not recommended as it is more involved, and your index will not have any data in it unless you 
-set up a crawler to crawl to your server. You will need to set  up your own Backblaze or S3 equivalent storage, or 
+Note: this method is not recommended as it is more involved, and your index will not include any data unless you 
+set up a crawler to crawl to your server. You will need to set up your own Backblaze or S3 equivalent storage, or 
 have access to the production keys, which we probably won't give you.
 
 Follow the [deployment instructions](https://github.com/mwmbl/mwmbl/wiki/Deployment)
