@@ -341,10 +341,17 @@ def clean_html(s: str):
     return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
-def get_wiki_results(s: str, max_wiki_results: int):
+def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     escaped_query = urllib.parse.quote(s, safe='')
     with request_cache(timedelta(weeks=10)) as session:
         wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
+
+    if 'query' not in wiki_response or 'search' not in wiki_response['query']:
+        if 'error' in wiki_response:
+            logger.warning("Error in wiki response: %s", wiki_response['error'])
+
+        return []
+
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
                              max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
                     for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
