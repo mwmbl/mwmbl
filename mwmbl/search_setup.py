@@ -12,7 +12,7 @@ from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-
+from mwmbl.tinysearchengine.rank import HeuristicAndWikiRanker
 
 CURATED_DOMAINS_CACHE_KEY = "curated-domains"
 CURATED_DOMAINS_CACHE_TIMEOUT = 300
@@ -35,6 +35,7 @@ tiny_index.__enter__()
 
 model_path = Path(__file__).parent / "resources" / "model.pickle"
 model = pickle.load(open(model_path, 'rb'))
-ranker = LTRRanker(tiny_index, completer, model, 1000, True, 5)
+# ranker = LTRRanker(tiny_index, completer, model, 1000, True, 5)
+ranker = HeuristicAndWikiRanker(tiny_index, completer)
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
