@@ -108,7 +108,7 @@ def run_indexing():
             result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                    score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
             results = Results(api_key="test", results=result_items)
-            response = requests.post("http://localhost:8000/api/v1/crawler/results", json=results.dict())
+            response = requests.post("https://beta.mwmbl.org/api/v1/crawler/results", json=results.dict())
             response.raise_for_status()
 
             print("Response", response.text)
