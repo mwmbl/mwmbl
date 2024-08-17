@@ -178,7 +178,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         # Check the API key
         api_key = ApiKey.objects.filter(key=results.api_key).first()
         if api_key is None:
-            raise HTTPException(401, "Invalid API key")
+            return 401, {"message": "Invalid API key"}
 
         documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
