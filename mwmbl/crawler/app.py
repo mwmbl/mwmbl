@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from ninja import NinjaAPI, Schema
 from redis import Redis
 
-from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results
+from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -173,7 +173,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
             'status': 'ok'
         }
 
-    @router.post('/results')
+    @router.post('/results', response={200: PostResultsResponse, 401: Error})
     def post_results(request, results: Results):
         # Check the API key
         api_key = ApiKey.objects.filter(key=results.api_key).first()

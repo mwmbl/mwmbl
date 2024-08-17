@@ -72,3 +72,12 @@ class Result(Schema):
 class Results(Schema):
     api_key: str
     results: list[Result]
+
+
+class PostResultsResponse(Schema):
+    status: str
+    url: str
+
+
+class Error(Schema):
+    message: str
