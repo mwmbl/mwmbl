@@ -176,7 +176,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
     @router.post('/results')
     def post_results(request, results: Results):
         # Check the API key
-        api_key = ApiKey.objects.get(key=results.api_key)
+        api_key = ApiKey.objects.filter(key=results.api_key).first()
         if api_key is None:
             raise HTTPException(401, "Invalid API key")
 
