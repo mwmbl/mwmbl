@@ -1,24 +1,23 @@
-import re
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
-from typing import Optional, Any
+from typing import Optional
 from urllib.parse import urlencode
 
-import justext
+from mwmbl import justext
 import objgraph
 import psutil
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.forms import ModelForm, ModelChoiceField, RadioSelect, CharField
+from django.forms import ModelForm, RadioSelect, CharField
 from django.http import HttpResponseBadRequest
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
-from justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
+from mwmbl.justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
     LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
     STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException

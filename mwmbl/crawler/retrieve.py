@@ -1,5 +1,4 @@
 import re
-import re
 import time
 from logging import getLogger
 from multiprocessing.pool import ThreadPool
@@ -8,11 +7,12 @@ from urllib.parse import urlparse, urlunsplit, urljoin
 from urllib.robotparser import RobotFileParser
 
 import requests
-from justext import core, utils
-from justext.core import html_to_dom
-from justext.paragraph import Paragraph
+from mwmbl.justext import core, utils
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
+
+from mwmbl.justext.core import html_to_dom
+from mwmbl.justext.paragraph import Paragraph
 
 ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
