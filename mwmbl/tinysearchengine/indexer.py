@@ -141,13 +141,19 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 
-def _get_page_data(page_size: int, items: list[T]):
+def _get_page_data(page_size: int, items: list[T]) -> tuple[bytes, int]:
+    """
+    Compress the data, removing items that don't fit.
+
+    Returns the compressed data and number of items that are included.
+    """
+
     compressor = ZstdCompressor()
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
     assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
-    return _pad_to_page_size(compressed_data, page_size)
+    return _pad_to_page_size(compressed_data, page_size), num_fitting
 
 
 def _pad_to_page_size(data: bytes, page_size: int):
@@ -220,21 +226,30 @@ class TinyIndex(Generic[T]):
             return []
         return json.loads(decompressed_data.decode('utf8'))
 
-    def store_in_page(self, page_index: int, values: list[T]):
-        value_tuples = [astuple(value) for value in values]
-        self._write_page(value_tuples, page_index)
+    def store_in_page(self, page_index: int, values: list[T]) -> int:
+        """
+        Store as many items in the page as possible in the given order.
 
-    def _write_page(self, data, i: int):
+        Returns the number of items stored in the page.
+        """
+        value_tuples = [astuple(value) for value in values]
+        num_fitting = self._write_page(value_tuples, page_index)
+        return num_fitting
+
+    def _write_page(self, data, i: int) -> int:
         """
         Serialise the data using JSON, compress it and store it at index i.
         If the data is too big, it will store the first items in the list and discard the rest.
+
+        Returns the number of items stored in the page.
         """
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.page_size, data)
+        page_data, num_fitting = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        return num_fitting
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
@@ -245,7 +260,7 @@ class TinyIndex(Generic[T]):
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
-        page_bytes = _get_page_data(page_size, [])
+        page_bytes, num_fitting = _get_page_data(page_size, [])
 
         with open(index_path, 'wb') as index_file:
             index_file.write(metadata_padded)
