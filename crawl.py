@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from collections import Counter
 from multiprocessing import Process
 from pathlib import Path
 
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
+API_KEY = os.environ["MWMBL_API_KEY"]
 BATCH_QUEUE_KEY = "batch-queue"
 
 
@@ -91,7 +93,8 @@ def run_indexing():
         return
     logger.info(f"Got {len(batch_jsons)} batches to index")
     batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
-    term_new_doc_count = index_batches(batches, index_path)
+    term_new_docs = index_batches(batches, index_path)
+    term_new_doc_count = Counter({term: len(docs) for term, docs in term_new_docs.items()})
     logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
     remote_index = RemoteIndex()
@@ -107,11 +110,11 @@ def run_indexing():
 
             result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                    score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
-            results = Results(api_key="test", results=result_items)
+            results = Results(api_key=API_KEY, results=result_items)
             response = requests.post("https://beta.mwmbl.org/api/v1/crawler/results", json=results.dict())
+            print("Response", response.text)
             response.raise_for_status()
 
-            print("Response", response.text)
 
 
 
