@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from collections import Counter
 from multiprocessing import Process
 from pathlib import Path
 
@@ -28,7 +27,7 @@ django.setup()
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch
 from mwmbl.crawler.batch import HashedBatch, Result, Results
-from mwmbl.indexer.index_batches import index_batches, index_documents, index_pages
+from mwmbl.indexer.index_batches import index_batches, index_pages
 
 logger = logging.getLogger(__name__)
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
@@ -43,10 +42,10 @@ url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
-    # for i in range(10):
-    #     process = Process(target=process_batch_continuously)
-    #     process.start()
-    #     time.sleep(5)
+    for i in range(10):
+        process = Process(target=process_batch_continuously)
+        process.start()
+        time.sleep(5)
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
