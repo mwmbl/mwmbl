@@ -42,29 +42,24 @@ def get_url_score(url):
     return 1/len(url)
 
 
-def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> dict[str, list[Document]]:
+def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
     start_time = datetime.utcnow()
     document_tuples = list(get_documents_from_batches(batch_data))
     documents = [Document(title, url, extract) for title, url, extract in document_tuples]
-    new_page_documents = index_documents(documents, index_path)
-    end_time = datetime.utcnow()
+    end_time, new_page_doc_counts = index_documents(documents, index_path)
     logger.info(f"Indexing took {end_time - start_time}")
-    return new_page_documents
+    return new_page_doc_counts
 
 
-def index_documents(documents: list[Document], index_path: str) -> dict[str, list[Document]]:
+def index_documents(documents, index_path):
     page_documents = preprocess_documents(documents, index_path)
-    new_page_documents = index_pages(index_path, page_documents)
-    return new_page_documents
+    new_page_doc_counts = index_pages(index_path, page_documents)
+    end_time = datetime.utcnow()
+    return end_time, new_page_doc_counts
 
 
-def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> dict[str, list[Document]]:
-    """
-    Index the pages with the given documents.
-
-    Returns a dictionary of term to the new documents that were added.
-    """
-    term_new_docs = defaultdict(list)
+def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> Counter:
+    term_new_doc_counts = Counter()
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
@@ -80,14 +75,12 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> d
                 new_documents.append(document)
                 seen_urls.add(document.url)
                 seen_titles.add(document.title)
-            num_fitting = indexer.store_in_page(page, new_documents)
-            logger.info(f"Stored {num_fitting} documents of {len(new_documents)} for page {page}, originally {len(existing_documents)}")
+            logger.info(f"Storing {len(new_documents)} documents for page {page}, originally {len(existing_documents)}")
+            indexer.store_in_page(page, new_documents)
 
-            for document in new_documents[:num_fitting]:
-                if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX.value:
-                    term_new_docs[document.term].append(document)
-
-    return term_new_docs
+            term_new_doc_counts.update(document.term for document in new_documents
+                                       if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX.value)
+    return term_new_doc_counts
 
 
 def sort_documents(documents, all_existing_documents, ranker):

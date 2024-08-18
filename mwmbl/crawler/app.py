@@ -182,7 +182,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
         documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
-        new_doc_count = index_documents(documents, index_path)
+        index_documents(documents, index_path)
 
         now = datetime.now(timezone.utc)
         filename = upload_object(results, now, api_key.user.username, "results")

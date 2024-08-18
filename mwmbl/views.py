@@ -403,8 +403,8 @@ def _save_to_index(query: str, new_results: list[Document]):
             doc.state = states.get(doc.url, doc.state)
 
         all_documents = documents + other_documents
-        num_fitting = indexer.store_in_page(page_index, all_documents)
-        logger.info(f"Stored {num_fitting} of {len(all_documents)} documents at page {page_index}")
+        logger.info(f"Storing {len(all_documents)} documents at page {page_index}")
+        indexer.store_in_page(page_index, all_documents)
 
     return {"curation": "ok"}
 
