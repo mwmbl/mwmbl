@@ -7,7 +7,6 @@ from random import Random
 from time import sleep
 
 from django.conf import settings
-from pydistinct.ensemble_estimators import median_estimator
 from pydistinct.stats_estimators import smoothed_jackknife_estimator
 from redis import Redis
 

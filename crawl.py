@@ -26,8 +26,7 @@ django.setup()
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch
 from mwmbl.crawler.batch import HashedBatch, Result, Results
-from mwmbl.indexer.index_batches import index_batches
-
+from mwmbl.indexer.index_batches import index_batches, index_documents, index_pages
 
 logger = logging.getLogger(__name__)
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
@@ -93,30 +92,34 @@ def run_indexing():
         return
     logger.info(f"Got {len(batch_jsons)} batches to index")
     batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
-    term_new_docs = index_batches(batches, index_path)
-    term_new_doc_count = Counter({term: len(docs) for term, docs in term_new_docs.items()})
+    term_new_doc_count = index_batches(batches, index_path)
     logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
     remote_index = RemoteIndex()
-    with TinyIndex(Document, index_path, 'r') as local_index:
+    with TinyIndex(Document, index_path, 'w') as local_index:
         for term, count in term_new_doc_count.most_common(10):
             remote_items = remote_index.retrieve(term)
             remote_item_urls = {item.url for item in remote_items}
             local_items = local_index.retrieve(term)
             new_items = [item for item in local_items if item.url not in remote_item_urls]
             logger.info(f"Found {len(new_items)} new items for term {term}")
-            for item in new_items:
-                logger.info(f"New item: {item}")
-
             result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                    score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
             results = Results(api_key=API_KEY, results=result_items)
+            logger.info(f"Posting {len(result_items)} results")
             response = requests.post("https://beta.mwmbl.org/api/v1/crawler/results", json=results.dict())
             print("Response", response.text)
             response.raise_for_status()
 
+            new_remote_items = remote_index.retrieve(term)
+            # Check how many of our items were indexed
+            new_remote_item_urls = {item.url for item in new_remote_items}
+            indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)
+            logger.info(f"Indexed items: {indexed_items}/{len(new_items)} for term {term}")
 
-
+            page_index = local_index.get_key_page_index(term)
+            index_pages(index_path, {page_index: new_remote_items}, mark_synced=True)
+            logger.info(f"Completed indexing for term {term}")
 
 
 if __name__ == "__main__":

@@ -36,5 +36,3 @@ NUM_URLS_IN_BLOOM_FILTER = 100_000
 
 DOMAIN_LINKS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "links_{domain_group}.bloom")
 NUM_DOMAINS_IN_BLOOM_FILTER = 100_000
-
-REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache.sqlite"

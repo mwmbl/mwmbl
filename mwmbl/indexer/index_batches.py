@@ -58,7 +58,7 @@ def index_documents(documents, index_path):
     return end_time, new_page_doc_counts
 
 
-def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> Counter:
+def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
@@ -68,17 +68,19 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]]) -> C
 
             seen_urls = set()
             seen_titles = set()
-            new_documents = []
+            combined_documents = []
             for document in sorted_documents:
                 if document.title in seen_titles or document.url in seen_urls:
                     continue
-                new_documents.append(document)
+                if mark_synced:
+                    document.state = DocumentState.SYNCED_WITH_MAIN_INDEX.value
+                combined_documents.append(document)
                 seen_urls.add(document.url)
                 seen_titles.add(document.title)
-            logger.info(f"Storing {len(new_documents)} documents for page {page}, originally {len(existing_documents)}")
-            indexer.store_in_page(page, new_documents)
+            logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
+            indexer.store_in_page(page, combined_documents)
 
-            term_new_doc_counts.update(document.term for document in new_documents
+            term_new_doc_counts.update(document.term for document in combined_documents
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX.value)
     return term_new_doc_counts
 
