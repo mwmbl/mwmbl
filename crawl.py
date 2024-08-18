@@ -13,6 +13,8 @@ from redis import Redis
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.rank import score_result
+from mwmbl.tokenizer import tokenize
 
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
@@ -98,11 +100,25 @@ def run_indexing():
     remote_index = RemoteIndex()
     with TinyIndex(Document, index_path, 'w') as local_index:
         for term, count in term_new_doc_count.most_common(10):
+            logger.info(f"Syncing term {term} with {count} new local items")
             remote_items = remote_index.retrieve(term)
             remote_item_urls = {item.url for item in remote_items}
             local_items = local_index.retrieve(term)
             new_items = [item for item in local_items if item.url not in remote_item_urls]
             logger.info(f"Found {len(new_items)} new items for term {term}")
+            if len(new_items) == 0:
+                continue
+
+            terms = tokenize(term)
+            remote_item_scores = [score_result(terms, item, True) for item in remote_items]
+            min_remote_score = min(remote_item_scores, default=0.0)
+            local_scores = [score_result(terms, item, True) for item in new_items]
+            max_local_score = max(local_scores, default=0.0)
+            logger.info(f"Max local score: {max_local_score}, min remote score: {min_remote_score}")
+
+            if max_local_score < min_remote_score:
+                continue
+
             result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                    score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
             results = Results(api_key=API_KEY, results=result_items)
@@ -111,7 +127,7 @@ def run_indexing():
             print("Response", response.text)
             response.raise_for_status()
 
-            new_remote_items = remote_index.retrieve(term)
+            new_remote_items = remote_index.retrieve(term, refresh=True)
             # Check how many of our items were indexed
             new_remote_item_urls = {item.url for item in new_remote_items}
             indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)

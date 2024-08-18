@@ -14,7 +14,7 @@ from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.utils import add_term_infos
 
@@ -86,8 +86,8 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
 
 
 def sort_documents(documents, all_existing_documents, ranker):
-    curated_documents = [doc for doc in all_existing_documents if doc.state is not None]
-    existing_documents = [doc for doc in all_existing_documents if doc.state is None]
+    curated_documents = [doc for doc in all_existing_documents if doc.state in CURATED_STATES]
+    existing_documents = [doc for doc in all_existing_documents if doc.state not in CURATED_STATES]
 
     term_documents = defaultdict(list)
 

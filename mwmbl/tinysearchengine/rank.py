@@ -50,8 +50,6 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     if match_score > MATCH_SCORE_THRESHOLD:
         return match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
 
-    # best_match_score = max(features[f'match_score_{name}'] for name in ['title', 'extract', 'domain', 'domain_tokenized'])
-    # score = best_match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING)
     return 0.0
 
 

@@ -45,6 +45,9 @@ class DocumentState(IntEnum):
     FROM_WIKI_APPROVED = 10
 
 
+CURATED_STATES = {state.value for state in DocumentState if state.value >= 7}
+
+
 @dataclass
 class Document:
     title: str
