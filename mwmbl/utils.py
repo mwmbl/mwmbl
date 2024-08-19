@@ -89,6 +89,4 @@ def validate_domain(domain_or_url: str):
 
 
 def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
-    redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"))
-    redis_cache = RedisCache(connection=redis)
-    return CachedSession(expire_after=expire_after, backend=redis_cache)
+    return CachedSession(expire_after=expire_after, backend="sqlite", cache_name=settings.REQUEST_CACHE_PATH)
