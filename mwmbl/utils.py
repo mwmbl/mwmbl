@@ -89,4 +89,4 @@ def validate_domain(domain_or_url: str):
 
 
 def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
-    return CachedSession(expire_after=expire_after, backend="sqlite", cache_name=settings.REQUEST_CACHE_PATH)
+    return CachedSession(expire_after=expire_after, backend="filesystem", cache_name=settings.REQUEST_CACHE_PATH)
