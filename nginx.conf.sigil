@@ -97,7 +97,6 @@ server {
     proxy_set_header X-Request-Start $msec;
     {{ if $.PROXY_X_FORWARDED_SSL }}proxy_set_header X-Forwarded-Ssl {{ $.PROXY_X_FORWARDED_SSL }};{{ end }}
 
-    include proxy_params;
     proxy_cache custom_cache;
     proxy_cache_valid any 10m;
     add_header X-Proxy-Cache $upstream_cache_status always;
