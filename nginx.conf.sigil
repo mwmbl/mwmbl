@@ -99,7 +99,7 @@ server {
 
     proxy_cache custom_cache;
     proxy_cache_valid any 10m;
-    add_header X-Proxy-Cache $upstream_cache_status;
+    add_header X-Proxy-Cache $upstream_cache_status always;
   }
 
   {{ if $.CLIENT_MAX_BODY_SIZE }}client_max_body_size {{ $.CLIENT_MAX_BODY_SIZE }};{{ end }}
