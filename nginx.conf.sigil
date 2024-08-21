@@ -4,6 +4,8 @@
 {{ $listen_port := index $port_map_list 1 }}
 {{ $upstream_port := index $port_map_list 2 }}
 
+proxy_cache_path /var/cache/nginx/{{ $.APP }} levels=1:2 keys_zone=custom_cache:1000m inactive=60m;
+
 {{ if eq $scheme "http" }}
 server {
   listen      [{{ $.NGINX_BIND_ADDRESS_IP6 }}]:{{ $listen_port }};
@@ -93,6 +95,10 @@ server {
     proxy_set_header X-Forwarded-Proto {{ $.PROXY_X_FORWARDED_PROTO }};
     proxy_set_header X-Request-Start $msec;
     {{ if $.PROXY_X_FORWARDED_SSL }}proxy_set_header X-Forwarded-Ssl {{ $.PROXY_X_FORWARDED_SSL }};{{ end }}
+
+    proxy_cache custom_cache;
+    proxy_cache_valid any 10m;
+    add_header X-Proxy-Cache $upstream_cache_status;
   }
 
   {{ if $.CLIENT_MAX_BODY_SIZE }}client_max_body_size {{ $.CLIENT_MAX_BODY_SIZE }};{{ end }}
@@ -100,12 +106,12 @@ server {
 
   ## Static file hosting
   location /static/ {
-    alias /var/lib/dokku/data/storage/mwmbl-org/;
+    alias /var/lib/dokku/data/storage/{{ $.APP }}/;
   }
 
   ## Stats served statically
   location ~ ^\/stats\/?$ {
-    root /var/lib/dokku/data/storage/mwmbl-org;
+    root /var/lib/dokku/data/storage/{{ $.APP }};
     try_files /stats/index.html =404;
   }
 
