@@ -43,7 +43,7 @@ server {
 
   location    / {
 
-    add_header 'X-Proxy-Cache' "Test";
+    add_header 'X-Proxy-Cache' 'Test';
 
 ## Start CORS here.  See http://enable-cors.org/server_nginx.html for comments
 
