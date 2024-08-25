@@ -63,6 +63,7 @@ def process_batch_continuously():
 def process_batch():
     user_id = "test"
     urls = url_queue.get_batch(user_id)
+    logger.info(f"Processing batch of {len(urls)} URLs")
     results = crawl_batch(urls, 20)
     for result in results:
         print("Result", result)

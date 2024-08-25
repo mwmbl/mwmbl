@@ -7,6 +7,7 @@ import re
 import os
 import sys
 import pkgutil
+from pathlib import Path
 
 MULTIPLE_WHITESPACE_PATTERN = re.compile(r"\s+", re.UNICODE)
 
@@ -36,8 +37,7 @@ def is_blank(string):
 
 def get_stoplists():
     """Returns a collection of built-in stop-lists."""
-    path_to_stoplists = os.path.dirname(sys.modules["justext"].__file__)
-    path_to_stoplists = os.path.join(path_to_stoplists, "stoplists")
+    path_to_stoplists = Path(__file__).parent / "stoplists"
 
     stoplist_names = []
     for filename in os.listdir(path_to_stoplists):
