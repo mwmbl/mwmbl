@@ -83,7 +83,8 @@ class RedisURLQueue:
                 domain_score = link_db.get_domain_score(domain) + url_score
                 domain_scores[domain] = max(domain_score, domain_scores.get(domain, 0.0))
 
-        self.redis.zadd(DOMAIN_SCORE_KEY, domain_scores, gt=True)
+        if len(domain_scores) > 0:
+            self.redis.zadd(DOMAIN_SCORE_KEY, domain_scores, gt=True)
 
         for domain in domain_scores.keys():
             self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), dict(url_scores[domain]))
