@@ -124,7 +124,7 @@ def run_indexing():
             results = Results(api_key=API_KEY, results=result_items)
             logger.info(f"Posting {len(result_items)} results")
             response = requests.post("https://beta.mwmbl.org/api/v1/crawler/results", json=results.dict())
-            print("Response", response.text)
+            logger.info(f"Response: {response.text}")
             response.raise_for_status()
 
             new_remote_items = remote_index.retrieve(term, refresh=True)
