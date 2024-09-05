@@ -30,7 +30,7 @@ from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.tinysearchengine.rank import fix_document_state
 from mwmbl.tokenizer import tokenize
-from mwmbl.utils import add_term_infos, parse_url, validate_domain
+from mwmbl.utils import add_term_infos, parse_url, validate_domain, float_or_none
 
 MAX_CURATED_SCORE = 1_111_111.0
 
@@ -375,7 +375,7 @@ def _get_documents(request, term: str):
         except ValueError:
             state_enum = None
         documents[url] = Document(
-            title=title, url=url, extract=extract, score=float(score), term=term, state=state_enum)
+            title=title, url=url, extract=extract, score=float_or_none(score), term=term, state=state_enum)
     return documents
 
 
