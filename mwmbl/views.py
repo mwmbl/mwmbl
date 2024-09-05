@@ -143,10 +143,11 @@ def add_url(request):
 
     try:
         response = requests.get(new_url, timeout=5)
-    except RequestException:
-        return HttpResponseBadRequest("Could not fetch URL")
+    except RequestException as e:
+        return HttpResponseBadRequest(f"Could not fetch URL: {str(e)}")
 
-    paragraphs, title = justext_with_dom(response.content, justext.get_stoplist("English"))
+    print("Content", response.encoding)
+    paragraphs, title = justext_with_dom(response.text, justext.get_stoplist("English"))
     good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
 
     extract = ' '.join([p.text for p in good_paragraphs])
