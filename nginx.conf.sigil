@@ -19,9 +19,6 @@ server {
   }
 }
 {{ else if eq $scheme "https"}}
-
-proxy_cache_path /var/cache/nginx/{{ $.APP }} levels=1:2 keys_zone=custom_cache:1000m inactive=60m;
-
 server {
   listen      [{{ $.NGINX_BIND_ADDRESS_IP6 }}]:{{ $listen_port }} ssl {{ if eq $.HTTP2_SUPPORTED "true" }}http2{{ else if eq $.SPDY_SUPPORTED "true" }}spdy{{ end }};
   listen      {{ if $.NGINX_BIND_ADDRESS_IP4 }}{{ $.NGINX_BIND_ADDRESS_IP4 }}:{{end}}{{ $listen_port }} ssl {{ if eq $.HTTP2_SUPPORTED "true" }}http2{{ else if eq $.SPDY_SUPPORTED "true" }}spdy{{ end }};
@@ -39,10 +36,8 @@ server {
   keepalive_timeout   70;
   {{ if and (eq $.SPDY_SUPPORTED "true") (ne $.HTTP2_SUPPORTED "true") }}add_header          Alternate-Protocol  {{ $.PROXY_SSL_PORT }}:npn-spdy/2;{{ end }}
 
-  proxy_cache custom_cache;
-  add_header 'X-Proxy-Cache' 'Test';
-
   location    / {
+
 
 ## Start CORS here.  See http://enable-cors.org/server_nginx.html for comments
 
