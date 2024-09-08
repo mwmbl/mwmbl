@@ -4,9 +4,10 @@
     import PhMagnifyingGlass from '~icons/ph/magnifying-glass'
 </script>
 
-<form class="flex flex-row relative items-center max-w-2xl w-full px-4">
+<form class="flex flex-row relative items-center max-w-2xl w-full px-4" action="https://mwmbl.org/" method="get">
     <Input
         type="search"
+        name="q"
         placeholder="Search with Mwmbl..."
         class="p-6 text-lg rounded-lg"
     />
