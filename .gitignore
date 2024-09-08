@@ -163,3 +163,20 @@ devdata/batches/
 devdata/cache/
 devdata/rankeval-2024-06/remote-datasets/
 front-end/node_modules/
+
+# Manually added SvelteKit ignores
+sveltekit-frontend/node_modules
+!sveltekit-frontend/src/lib/
+# Output
+sveltekit-frontend/.output
+sveltekit-frontend/.vercel
+sveltekit-frontend/.svelte-kit
+sveltekit-frontend/build
+# Env
+sveltekit-frontend/.env
+sveltekit-frontend/.env.*
+!sveltekit-frontend/.env.example
+!sveltekit-frontend/.env.test
+# Vite
+sveltekit-frontend/vite.config.js.timestamp-*
+sveltekit-frontend/vite.config.ts.timestamp-*
