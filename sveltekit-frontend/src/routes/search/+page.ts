@@ -8,7 +8,7 @@ export async function load({ url }) {
 	}> = await response.json();
 
 	return {
-		query: url.searchParams.get('q'),
+		query: url.searchParams.get('q') as string | undefined,
 		results: results
 	};
 }
