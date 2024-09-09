@@ -2,6 +2,7 @@
 	"name": "sveltekit-frontend",
 	"version": "0.0.1",
 	"private": true,
+	"packageManager": "pnpm@9.1.0",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -9,7 +10,8 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check . && eslint .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"start": "node build/index.js"
 	},
 	"devDependencies": {
 		"@iconify/json": "^2.2.245",
@@ -36,6 +38,7 @@
 	},
 	"type": "module",
 	"dependencies": {
+		"@sveltejs/adapter-node": "^5.2.2",
 		"bits-ui": "^0.21.13",
 		"clsx": "^2.1.1",
 		"lucide-svelte": "^0.439.0",
