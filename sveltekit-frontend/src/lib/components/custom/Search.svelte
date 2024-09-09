@@ -7,11 +7,11 @@
 	import PhArrowSquareOutFill from '~icons/ph/arrow-square-out-fill';
 	import MaterialSymbolsCloseRounded from '~icons/material-symbols/close-rounded';
 
-	let { query = null }: { query: string | null } = $props();
+	let { query }: { query?: string } = $props();
 
 	let searchCompletions: string[] = $state([]);
-	async function fetchSearchCompletions(query: string | null) {
-		if (query != null) {
+	async function fetchSearchCompletions(query: string | undefined) {
+		if (query != undefined) {
 			const res = await fetch('https://mwmbl.org/api/v1/search/complete?q=' + query);
 			searchCompletions = (await res.json())[1];
 		}
