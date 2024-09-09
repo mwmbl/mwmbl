@@ -87,7 +87,7 @@ def run_indexing_continuously():
 
 def run_indexing():
     index_path = data_path / settings.INDEX_NAME
-    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 1)
+    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 10)
     if batch_jsons is None:
         logger.info("No more batches to index. Sleeping for 10 seconds.")
         time.sleep(10)
