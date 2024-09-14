@@ -57,23 +57,28 @@ class URLDatabase:
 
     def __enter__(self):
         month_date = datetime.utcnow()
+
         for i in range(3):
             # Start from current month and go back two months
             month_date = datetime(month_date.year, month_date.month, 1)
             urls_path = settings.URLS_BLOOM_FILTER_PATH.format(month=month_date.month, year=month_date.year)
-            try:
-                self.urls[month_date] = BloomFilter.open(urls_path)
-            except FileNotFoundError:
-                if i == 0:
-                    logger.info("No existing bloom filter found, creating a new one")
-                    self.urls[month_date] = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, urls_path, perm=0o666)
-                else:
-                    logger.info("No existing bloom filter found, using fallback")
-            month_date -= timedelta(days=1)
+            month_date = self._construct_bloom_filter(i, month_date, urls_path)
 
-        self.urls[datetime(2024, 1, 1)] = BloomFilter.open(settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
+        self._construct_bloom_filter(3, datetime(2024, 1, 1), settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
         logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
         return self
+
+    def _construct_bloom_filter(self, i, month_date, urls_path):
+        try:
+            self.urls[month_date] = BloomFilter.open(urls_path)
+        except FileNotFoundError:
+            if i == 0:
+                logger.info("No existing bloom filter found, creating a new one")
+                self.urls[month_date] = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, urls_path, perm=0o666)
+            else:
+                logger.info("No existing bloom filter found, using fallback")
+        month_date -= timedelta(days=1)
+        return month_date
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for month_date, bloom_filter in self.urls.items():
