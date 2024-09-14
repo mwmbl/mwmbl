@@ -20,6 +20,7 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.utils import request_cache
 
+
 logger = getLogger(__name__)
 
 
@@ -49,8 +50,6 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     if match_score > MATCH_SCORE_THRESHOLD:
         return match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
 
-    # best_match_score = max(features[f'match_score_{name}'] for name in ['title', 'extract', 'domain', 'domain_tokenized'])
-    # score = best_match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING)
     return 0.0
 
 
@@ -221,7 +220,7 @@ class Ranker:
         self.completer = completer
 
     @abstractmethod
-    def order_results(self, terms, pages, is_complete):
+    def order_results(self, terms: list[str], pages: list[Document], is_complete: bool):
         pass
 
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:

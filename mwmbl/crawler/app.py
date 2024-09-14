@@ -3,20 +3,23 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone, date
-from queue import Queue, Empty
 from typing import Union
 from uuid import uuid4
 
 import boto3
 import requests
-from ninja import NinjaAPI
+from django.conf import settings
+from fastapi import HTTPException
+from ninja import NinjaAPI, Schema
 from redis import Redis
 
-from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch
+from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.index_batches import index_documents
 from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
+from mwmbl.models import ApiKey
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
     ENDPOINT_URL,
@@ -30,6 +33,7 @@ from mwmbl.settings import (
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
     DATE_REGEX)
+from mwmbl.tinysearchengine.indexer import Document
 
 stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
 
@@ -78,25 +82,14 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
                                      f" {invalid_urls}. To suggest a domain to crawl, please visit "
                                      f"https://mwmbl.org/app/domain-submissions/new")
 
-        now = datetime.now(timezone.utc)
-        seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
-
-        # How to pad a string with zeros: https://stackoverflow.com/a/39402910
-        # Maximum seconds in a day is 60*60*24 = 86400, so 5 digits is enough
-        padded_seconds = str(seconds).zfill(5)
-
-        # See discussion here: https://stackoverflow.com/a/13484764
-        uid = str(uuid4())[:8]
-        filename = f'1/{VERSION}/{now.date()}/1/{user_id_hash}/{padded_seconds}__{uid}.json.gz'
-
         # Using an approach from https://stackoverflow.com/a/30476450
+        now = datetime.now(timezone.utc)
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
         hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
 
         stats_manager.record_batch(hashed_batch)
 
-        data = gzip.compress(hashed_batch.json().encode('utf8'))
-        upload(data, filename)
+        filename = upload_object(hashed_batch, now, user_id_hash, "batch")
 
         global last_batch
         last_batch = hashed_batch
@@ -117,16 +110,31 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
             'url': batch_url,
         }
 
+    def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object_type: str):
+        seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
+
+        # How to pad a string with zeros: https://stackoverflow.com/a/39402910
+        # Maximum seconds in a day is 60*60*24 = 86400, so 5 digits is enough
+        padded_seconds = str(seconds).zfill(5)
+
+        # See discussion here: https://stackoverflow.com/a/13484764
+        uid = str(uuid4())[:8]
+
+        filename = f'1/{VERSION}/{now.date()}/{object_type}/{user_id_hash}/{padded_seconds}__{uid}.json.gz'
+        data = gzip.compress(model_object.json().encode('utf8'))
+        upload(data, filename)
+        return filename
+
     @router.post('/batches/new')
     def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
-        # TODO: temporarily disable crawling
-        return []
         # user_id_hash = _get_user_id_hash(batch_request)
         # try:
         #     urls = queued_batches.get_batch(user_id_hash)
         # except Empty:
         #     return []
         # return urls
+        # TODO: temporarily disable crawling
+        return []
 
     @router.get('/batches/{date_str}/users/{public_user_id}')
     def get_batches_for_date_and_user(request, date_str, public_user_id):
@@ -162,6 +170,25 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
     def status(request):
         return {
             'status': 'ok'
+        }
+
+    @router.post('/results', response={200: PostResultsResponse, 401: Error})
+    def post_results(request, results: Results):
+        # Check the API key
+        api_key = ApiKey.objects.filter(key=results.api_key).first()
+        if api_key is None:
+            return 401, {"message": "Invalid API key"}
+
+        documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
+        index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
+        index_documents(documents, index_path)
+
+        now = datetime.now(timezone.utc)
+        filename = upload_object(results, now, api_key.user.username, "results")
+
+        return {
+            'status': 'ok',
+            'url': f'{PUBLIC_URL_PREFIX}{filename}',
         }
 
     return router

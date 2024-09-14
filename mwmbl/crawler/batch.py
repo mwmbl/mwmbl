@@ -58,3 +58,26 @@ class HashedBatch(Schema):
     user_id_hash: str
     timestamp: int
     items: list[Item]
+
+
+class Result(Schema):
+    url: str
+    title: str
+    extract: str
+    score: Optional[float]
+    term: Optional[str]
+    state: Optional[int]
+
+
+class Results(Schema):
+    api_key: str
+    results: list[Result]
+
+
+class PostResultsResponse(Schema):
+    status: str
+    url: str
+
+
+class Error(Schema):
+    message: str

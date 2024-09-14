@@ -1,3 +1,5 @@
+import secrets
+
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
@@ -93,3 +95,13 @@ class DomainSubmission(models.Model):
     status_changed_on = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
     rejection_detail = models.CharField(max_length=300, blank=True)
+
+
+def random_api_key():
+    return secrets.token_urlsafe(64)
+
+
+class ApiKey(models.Model):
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    key = models.CharField(max_length=300, unique=True, default=random_api_key)
+    created_on = models.DateTimeField()

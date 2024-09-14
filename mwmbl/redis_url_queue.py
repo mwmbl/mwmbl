@@ -106,12 +106,12 @@ class RedisURLQueue:
         domains = list(CORE_DOMAINS)
         top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
         if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
-            domains += random.sample(top_curated_domains, NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
+            domains += random.sample(list(top_curated_domains), NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
         else:
             domains += list(top_curated_domains)
 
         if len(top_other_domains) > NUM_OTHER_URLS_TO_INCLUDE:
-            domains += random.sample(top_other_domains, NUM_OTHER_URLS_TO_INCLUDE)
+            domains += random.sample(list(top_other_domains), NUM_OTHER_URLS_TO_INCLUDE)
         else:
             domains += list(top_other_domains)
 

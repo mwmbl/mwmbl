@@ -34,6 +34,7 @@ class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
     """
+    SYNCED_WITH_MAIN_INDEX = -2
     DELETED = -1
     FROM_USER = 2
     FROM_GOOGLE = 3
@@ -44,16 +45,27 @@ class DocumentState(IntEnum):
     FROM_WIKI_APPROVED = 10
 
 
+CURATED_STATES = {state.value for state in DocumentState if state.value >= 7}
+
+
 @dataclass
 class Document:
     title: str
     url: str
     extract: str
-    score: float
+    score: Optional[float] = None
     term: Optional[str] = None
     state: Optional[int] = None
 
-    def __init__(self, title, url, extract, score, term=None, state=None):
+    def __init__(
+            self,
+            title: str,
+            url: str,
+            extract: str,
+            score: Optional[float] = None,
+            term: Optional[str] = None,
+            state: Optional[int] = None
+    ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
         self.title = title if title is not None else ''

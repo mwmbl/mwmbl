@@ -18,7 +18,6 @@ requests = "^2.27.1"
 psycopg2-binary = "^2.9.3"
 pytest = "^7.2.1"
 pytest-mock = "^3.10.0"
-jusText = "==3.0.0"
 
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.
@@ -47,6 +46,7 @@ psutil = "^6.0.0"
 xgboost = "^2.1.0"
 pydistinct = "^0.6.4"
 django-ninja-jwt = "^5.3.3"
+sentry-sdk = "^2.13.0"
 
 [tool.poetry.extras]
 indexer = [

@@ -11,9 +11,8 @@ DEFAULT_SCORE = 0
 
 HTTP_START = 'http://'
 HTTPS_START = 'https://'
-BATCH_SIZE = 100
-NUM_FIRST_TOKENS = 3
-NUM_BIGRAMS = 5
+NUM_FIRST_TOKENS = 10
+NUM_BIGRAMS = 10
 
 
 STOPWORDS = set("0,1,2,3,4,5,6,7,8,9,a,A,about,above,across,after,again,against,all,almost,alone,along,already,also," \
@@ -44,15 +43,6 @@ def prepare_url_for_tokenizing(url: str):
         if c in url:
             url = url.replace(c, ' ')
     return url
-
-
-def get_pages(nlp, titles_urls_and_extracts, link_counts) -> Iterable[TokenizedDocument]:
-    for i, (title_cleaned, url, extract) in enumerate(titles_urls_and_extracts):
-        score = link_counts.get(url, DEFAULT_SCORE)
-        yield tokenize_document(url, title_cleaned, extract, score)
-
-        if i % 1000 == 0:
-            print("Processed", i)
 
 
 def get_index_tokens(tokens):

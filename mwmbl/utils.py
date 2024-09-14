@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -5,7 +6,8 @@ from typing import Sequence, Optional
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from requests_cache import CachedSession
+from redis import Redis
+from requests_cache import CachedSession, RedisCache
 from requests.adapters import Retry, HTTPAdapter
 
 from mwmbl.indexer.index import tokenize_document
@@ -87,7 +89,7 @@ def validate_domain(domain_or_url: str):
 
 
 def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
-    return CachedSession(expire_after=expire_after, backend="sqlite", cache_name=settings.REQUEST_CACHE_PATH)
+    return CachedSession(expire_after=expire_after, backend="filesystem", cache_name=settings.REQUEST_CACHE_PATH)
 
 
 def float_or_none(s: str) -> Optional[float]:
