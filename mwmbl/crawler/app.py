@@ -3,14 +3,12 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone, date
-from queue import Queue, Empty
 from typing import Union
 from uuid import uuid4
 
 import boto3
 import requests
 from django.conf import settings
-from fastapi import HTTPException
 from ninja import NinjaAPI, Schema
 from redis import Redis
 
@@ -34,7 +32,7 @@ from mwmbl.settings import (
     PUBLIC_USER_ID_LENGTH,
     FILE_NAME_SUFFIX,
     DATE_REGEX)
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.indexer import Document
 
 stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
 
@@ -64,10 +62,10 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         """
 
         if len(batch.items) > MAX_BATCH_SIZE:
-            raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
+            return router.create_response(request, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}", status=400)
 
         if len(batch.user_id) != USER_ID_LENGTH:
-            raise HTTPException(400, f"User ID length is incorrect, should be {USER_ID_LENGTH} characters")
+            return router.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
 
         if len(batch.items) == 0:
             return {
@@ -79,9 +77,9 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         urls = [item.url for item in batch.items]
         invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
         if invalid_urls:
-            raise HTTPException(400, f"The following URLs were not assigned to the user for crawling:"
-                                     f" {invalid_urls}. To suggest a domain to crawl, please visit "
-                                     f"https://mwmbl.org/app/domain-submissions/new")
+            return router.create_response(request, f"The following URLs were not assigned to the user for crawling:"
+                                                   f" {invalid_urls}. To suggest a domain to crawl, please visit "
+                                                   f"https://mwmbl.org/app/domain-submissions/new", status=400)
 
         # Using an approach from https://stackoverflow.com/a/30476450
         now = datetime.now(timezone.utc)
