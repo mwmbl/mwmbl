@@ -33,11 +33,8 @@ COPY mwmbl /app/mwmbl
 # Use pip to install the mwmbl python package
 # PEP 518, PEP 517 and others have allowed for a standardized python packaging API, which allows
 # pip to be able to install poetry packages.
-# en-core-web-sm requires a compatible version of spacy
 RUN /venv/bin/pip install pip wheel --upgrade && \
-    /venv/bin/pip install . && \
-    /venv/bin/python -m spacy download en_core_web_sm-3.2.0 --direct && \
-    /venv/bin/python -m spacy validate
+    /venv/bin/pip install .
 
 FROM base as final
 

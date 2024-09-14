@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import boto3
 import requests
-from fastapi import HTTPException
 from ninja import NinjaAPI
 from redis import Redis
 
@@ -60,10 +59,10 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         """
 
         if len(batch.items) > MAX_BATCH_SIZE:
-            raise HTTPException(400, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}")
+            return router.create_response(request, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}", status=400)
 
         if len(batch.user_id) != USER_ID_LENGTH:
-            raise HTTPException(400, f"User ID length is incorrect, should be {USER_ID_LENGTH} characters")
+            return router.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
 
         if len(batch.items) == 0:
             return {
