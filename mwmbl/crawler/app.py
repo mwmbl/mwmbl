@@ -9,7 +9,6 @@ from uuid import uuid4
 import boto3
 import requests
 from django.conf import settings
-from fastapi import HTTPException
 from ninja import NinjaAPI, Schema
 from redis import Redis
 
@@ -78,9 +77,9 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         urls = [item.url for item in batch.items]
         invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
         if invalid_urls:
-            raise HTTPException(400, f"The following URLs were not assigned to the user for crawling:"
-                                     f" {invalid_urls}. To suggest a domain to crawl, please visit "
-                                     f"https://mwmbl.org/app/domain-submissions/new")
+            return router.create_response(request, f"The following URLs were not assigned to the user for crawling:"
+                                                   f" {invalid_urls}. To suggest a domain to crawl, please visit "
+                                                   f"https://mwmbl.org/app/domain-submissions/new", status=400)
 
         # Using an approach from https://stackoverflow.com/a/30476450
         now = datetime.now(timezone.utc)
