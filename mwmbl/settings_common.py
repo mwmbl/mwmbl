@@ -14,6 +14,8 @@ from pathlib import Path
 
 import sentry_sdk
 
+from mwmbl.auth import require_email_confirmation
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -201,3 +203,7 @@ if SENTRY_DSN is not None:
     )
 else:
     print("No SENTRY_DSN set, skipping Sentry initialization")
+
+
+# Django ninja-jwt settings - custom auth rule
+USER_AUTHENTICATION_RULE = require_email_confirmation
