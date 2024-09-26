@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone, date
+from queue import Empty
 from typing import Union
 from uuid import uuid4
 
@@ -126,14 +127,12 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
     @router.post('/batches/new')
     def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
-        # user_id_hash = _get_user_id_hash(batch_request)
-        # try:
-        #     urls = queued_batches.get_batch(user_id_hash)
-        # except Empty:
-        #     return []
-        # return urls
-        # TODO: temporarily disable crawling
-        return []
+        user_id_hash = _get_user_id_hash(batch_request)
+        try:
+            urls = queued_batches.get_batch(user_id_hash)
+        except Empty:
+            return []
+        return urls
 
     @router.get('/batches/{date_str}/users/{public_user_id}')
     def get_batches_for_date_and_user(request, date_str, public_user_id):
