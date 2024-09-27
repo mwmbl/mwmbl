@@ -162,6 +162,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
     @router.get('/stats')
     def get_stats(request) -> MwmblStats:
+        # TODO check that the types are right here, it's not validating!
         return stats_manager.get_stats()
 
     @router.get('/')
