@@ -1,5 +1,5 @@
 from allauth.account.adapter import get_adapter
-from allauth.account.models import EmailConfirmationHMAC
+from allauth.account.models import EmailConfirmationHMAC, EmailAddress
 from allauth.account.utils import setup_user_email, send_email_confirmation
 from ninja_extra import NinjaExtraAPI, http_post
 from ninja_jwt.authentication import JWTAuth
@@ -60,4 +60,7 @@ def confirm_email(request, confirm: ConfirmEmail):
 
 @api.get("/protected", auth=JWTAuth())
 def protected(request):
+    from_email_address = request.user.emailaddress_set.first()
+    if not from_email_address.verified:
+        return {"status": "error", "message": "You not are authenticated!"}
     return {"status": "ok", "message": "You are authenticated!"}
