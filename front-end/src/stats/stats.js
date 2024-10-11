@@ -94,10 +94,6 @@ function numberWithCommas(x) {
         const numUrlsInIndexSpan = document.getElementById("num-index-urls");
         numUrlsInIndexSpan.innerText = numberWithCommas(numUrlsInIndex);
 
-        const numDomainsInIndex = Object.values(stats.domains_in_index_daily)[Object.keys(stats.domains_in_index_daily).length - 1];
-        const numDomainsInIndexSpan = document.getElementById("num-index-domains");
-        numDomainsInIndexSpan.innerText = numberWithCommas(numDomainsInIndex);
-
         const numResultsInIndex = Object.values(stats.results_in_index_daily)[Object.keys(stats.results_in_index_daily).length - 1];
         const numResultsInIndexSpan = document.getElementById("num-index-results");
         numResultsInIndexSpan.innerText = numberWithCommas(numResultsInIndex);
