@@ -12,12 +12,12 @@ class Link(Schema):
 class ItemContent(Schema):
     title: str
     extract: str
-    link_details: Optional[list[Link]]
+    link_details: Optional[list[Link]] = None
 
     # Deprecated
-    links: Optional[list[str]]
-    extra_links: Optional[list[str]]
-    links_only: Optional[bool]
+    links: Optional[list[str]] = None
+    extra_links: Optional[list[str]] = None
+    links_only: Optional[bool] = None
 
     @property
     def all_links(self) -> list[Link]:
@@ -33,7 +33,7 @@ class ItemContent(Schema):
 
 class ItemError(Schema):
     name: str
-    message: Optional[str]
+    message: Optional[str] = None
 
 
 class Item(Schema):
