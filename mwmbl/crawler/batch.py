@@ -38,11 +38,11 @@ class ItemError(Schema):
 
 class Item(Schema):
     url: str
-    resolved_url: Optional[str]
-    status: Optional[int]
+    resolved_url: Optional[str] = None
+    status: Optional[int] = None
     timestamp: int
-    content: Optional[ItemContent]
-    error: Optional[ItemError]
+    content: Optional[ItemContent] = None
+    error: Optional[ItemError] = None
 
 
 class Batch(Schema):
@@ -64,9 +64,9 @@ class Result(Schema):
     url: str
     title: str
     extract: str
-    score: Optional[float]
-    term: Optional[str]
-    state: Optional[int]
+    score: Optional[float] = None
+    term: Optional[str] = None
+    state: Optional[int] = None
 
 
 class Results(Schema):
