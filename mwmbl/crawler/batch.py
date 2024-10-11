@@ -40,7 +40,7 @@ class Item(Schema):
     url: str
     resolved_url: Optional[str] = None
     status: Optional[int] = None
-    timestamp: int
+    timestamp: float
     content: Optional[ItemContent] = None
     error: Optional[ItemError] = None
 
@@ -56,7 +56,7 @@ class NewBatchRequest(Schema):
 
 class HashedBatch(Schema):
     user_id_hash: str
-    timestamp: int
+    timestamp: float
     items: list[Item]
 
 
