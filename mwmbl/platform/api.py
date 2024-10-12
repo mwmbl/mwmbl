@@ -62,5 +62,18 @@ def confirm_email(request, confirm: ConfirmEmail):
 def protected(request):
     from_email_address = request.user.emailaddress_set.first()
     if not from_email_address.verified:
-        return {"status": "error", "message": "You not are authenticated!"}
+        return {"status": "error", "message": "Email address is not verified."}
     return {"status": "ok", "message": "You are authenticated!"}
+
+
+@api.delete("/users/{username}", auth=JWTAuth())
+def delete_user(request, username: str):
+    user = MwmblUser.objects.get(username=username)
+    if user is None:
+        return {"status": "error", "message": "User not found."}
+
+    if user != request.user:
+        return {"status": "error", "message": "You can only delete your own account."}
+
+    user.delete()
+    return {"status": "ok", "message": "User deleted."}
