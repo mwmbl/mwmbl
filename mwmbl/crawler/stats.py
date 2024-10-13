@@ -97,36 +97,40 @@ class StatsManager:
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
 
-        # Currently commented out for performance reasons
-        # host_key = HOST_COUNT_KEY.format(date=date)
-        # host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
-        # with URLDatabase() as url_db:
-        #     for item in hashed_batch.items:
-        #         host = urlparse(item.url).netloc
-        #         self.redis.zincrby(host_all_key, 1, host)
-        #
-        #         if item.content is None:
-        #             continue
-        #
-        #         self.redis.zincrby(host_key, 1, host)
-        #
-        #         links = []
-        #         if item.content.links is not None:
-        #             links += item.content.links
-        #         if item.content.extra_links is not None:
-        #             links += item.content.extra_links
-        #         if item.content.link_details is not None:
-        #             links += [link.url for link in item.content.link_details]
-        #
-        #         for link in links:
-        #             link_host = urlparse(link).netloc
-        #             self.redis.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
-        #
-        #             if link not in url_db:
-        #                 self.redis.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
-        #
-        # self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
-        # self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
+        start_time = datetime.utcnow()
+        host_key = HOST_COUNT_KEY.format(date=date)
+        host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
+        pipeline = self.redis.pipeline()
+        with URLDatabase() as url_db:
+            for item in hashed_batch.items:
+                host = urlparse(item.url).netloc
+                pipeline.zincrby(host_all_key, 1, host)
+
+                if item.content is None:
+                    continue
+
+                pipeline.zincrby(host_key, 1, host)
+
+                links = []
+                if item.content.links is not None:
+                    links += item.content.links
+                if item.content.extra_links is not None:
+                    links += item.content.extra_links
+                if item.content.link_details is not None:
+                    links += [link.url for link in item.content.link_details]
+
+                for link in links:
+                    link_host = urlparse(link).netloc
+                    pipeline.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
+
+                    if link not in url_db:
+                        pipeline.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
+
+        pipeline.execute()
+        total_time = (datetime.utcnow() - start_time).total_seconds()
+        logger.info(f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds")
+        self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
+        self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.utcnow()
@@ -226,7 +230,11 @@ if __name__ == '__main__':
     batches = get_test_batches()
     start = datetime.now()
     processed = 0
+    import logging
+    logging.basicConfig(level=logging.INFO)
     for batch in islice(batches, 10000):
+        if len(batch.items) <= 2:
+            continue
         stats.record_batch(batch)
         processed += 1
     total_time = (datetime.now() - start).total_seconds()
