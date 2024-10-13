@@ -108,12 +108,13 @@ function numberWithCommas(x) {
         urlsCrawledDailyChart.data.datasets[0].data = Object.values(stats.urls_crawled_daily);
         urlsCrawledDailyChart.update();
 
-        byUserChart.data.labels = Object.keys(stats.top_users);
-        byUserChart.data.datasets[0].data = Object.values(stats.top_users);
+        console.log("Top users", stats.top_users);
+        byUserChart.data.labels = stats.top_users.map(u => u[0]);
+        byUserChart.data.datasets[0].data = stats.top_users.map(u => u[1]);
         byUserChart.update();
 
-        byDomainChart.data.labels = Object.keys(stats.top_domains);
-        byDomainChart.data.datasets[0].data = Object.values(stats.top_domains);
+        byDomainChart.data.labels = stats.top_domains.map(d => d[0]);
+        byDomainChart.data.datasets[0].data = stats.top_domains.map(d => d[1]);
         byDomainChart.update();
 
         numUrlsInIndexDailyChart.data.labels = Object.keys(stats.urls_in_index_daily);
