@@ -121,10 +121,6 @@ function numberWithCommas(x) {
         numUrlsInIndexDailyChart.data.datasets[0].data = Object.values(stats.urls_in_index_daily);
         numUrlsInIndexDailyChart.update();
 
-        numDomainsInIndexDailyChart.data.labels = Object.keys(stats.domains_in_index_daily);
-        numDomainsInIndexDailyChart.data.datasets[0].data = Object.values(stats.domains_in_index_daily);
-        numDomainsInIndexDailyChart.update();
-
         numResultsInIndexDailyChart.data.labels = Object.keys(stats.results_in_index_daily);
         numResultsInIndexDailyChart.data.datasets[0].data = Object.values(stats.results_in_index_daily);
         numResultsInIndexDailyChart.update();
