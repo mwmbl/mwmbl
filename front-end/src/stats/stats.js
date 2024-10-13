@@ -29,7 +29,6 @@ import {Chart} from "chart.js/auto";
   const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour")
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day")
   const numUrlsInIndexDailyChart = createChart('num-index-urls-by-day', null, "Number of URLs in index by day")
-  const numDomainsInIndexDailyChart = createChart('num-index-domains-by-day', null, "Number of domains in index by day")
   const numResultsInIndexDailyChart = createChart('num-index-results-by-day', null, "Number of results in index by day")
 
   const urlsByUserCanvas = document.getElementById('urls-by-user');
