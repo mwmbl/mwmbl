@@ -3,6 +3,7 @@ import secrets
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from ninja import ModelSchema
 from ninja.orm import create_schema
 
 
@@ -97,9 +98,6 @@ class DomainSubmission(models.Model):
     status_changed_on = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
     rejection_detail = models.CharField(max_length=300, blank=True)
-
-
-UpdateDomainSubmission = create_schema(DomainSubmission, fields=["status", "rejection_reason", "rejection_detail"])
 
 
 def random_api_key():

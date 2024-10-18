@@ -6,8 +6,8 @@ from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.controller import NinjaJWTDefaultController
 
-from mwmbl.models import MwmblUser, DomainSubmission, UpdateDomainSubmission
-from mwmbl.platform.schemas import Registration, ConfirmEmail
+from mwmbl.models import MwmblUser, DomainSubmission
+from mwmbl.platform.schemas import Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission
 
 api = NinjaExtraAPI(urls_namespace="platform")
 api.register_controllers(NinjaJWTDefaultController)
@@ -98,13 +98,13 @@ def delete_user(request, username: str):
     return {"status": "ok", "message": "User deleted."}
 
 
-@api.get("/domain-submissions/domains/{domain}", response=list[DomainSubmission])
+@api.get("/domain-submissions/domains/{domain}", response=list[DomainSubmissionSchema])
 @paginate
-def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmission]:
+def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmissionSchema]:
     return DomainSubmission.objects.filter(name=domain).all()
 
 
-@api.get("/domain-submissions", response=list[DomainSubmission])
+@api.get("/domain-submissions", response=list[DomainSubmissionSchema])
 @paginate
 def get_domain_submissions(request) -> list[DomainSubmission]:
     return DomainSubmission.objects.all()
