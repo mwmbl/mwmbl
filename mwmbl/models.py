@@ -2,6 +2,8 @@ import secrets
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.utils import timezone
+from ninja.orm import create_schema
 
 
 class MwmblUser(AbstractUser):
@@ -89,12 +91,15 @@ class DomainSubmission(models.Model):
 
     name = models.CharField(max_length=300)
     submitted_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="domain_submissions")
-    submitted_on = models.DateTimeField()
+    submitted_on = models.DateTimeField(default=timezone.now)
     status = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_SUBMISSION_STATUS.items()], default="PENDING")
     status_changed_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, null=True, blank=True, related_name="domain_submissions_changed")
     status_changed_on = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
     rejection_detail = models.CharField(max_length=300, blank=True)
+
+
+UpdateDomainSubmission = create_schema(DomainSubmission, fields=["status", "rejection_reason", "rejection_detail"])
 
 
 def random_api_key():
