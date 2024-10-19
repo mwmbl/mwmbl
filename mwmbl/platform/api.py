@@ -110,7 +110,7 @@ def get_domain_submissions(request) -> list[DomainSubmission]:
     return DomainSubmission.objects.all()
 
 
-@api.post("/app/domain-submissions/", auth=JWTAuth())
+@api.post("/domain-submissions/", auth=JWTAuth())
 def submit_domain(request, domain: str):
     check_email_verified(request)
     submission = DomainSubmission(name=domain, submitted_by=request.user)
@@ -118,7 +118,7 @@ def submit_domain(request, domain: str):
     return {"status": "ok", "message": "Domain submitted for review."}
 
 
-@api.delete("app/domain-submissions/ids/{submission_id}", auth=JWTAuth())
+@api.delete("/domain-submissions/ids/{submission_id}", auth=JWTAuth())
 def delete_submission(request, submission_id: int):
     check_email_verified(request)
     submission = DomainSubmission.objects.get(id=submission_id)
@@ -132,7 +132,7 @@ def delete_submission(request, submission_id: int):
     return {"status": "ok", "message": "Submission deleted."}
 
 
-@api.post("app/domain-submissions/ids/{submission_id}", auth=JWTAuth())
+@api.post("/domain-submissions/ids/{submission_id}", auth=JWTAuth())
 def update_submission_status(request, submission_id: int, update_submission: UpdateDomainSubmission):
     check_email_verified(request)
     submission = DomainSubmission.objects.get(id=submission_id)
