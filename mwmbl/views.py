@@ -23,6 +23,7 @@ from mwmbl.justext.core import html_to_dom, ParagraphMaker, classify_paragraphs,
 from requests.exceptions import RequestException
 
 from mwmbl.crawler.app import stats_manager
+from mwmbl.justext.utils import get_stoplist
 from mwmbl.models import Curation, FlagCuration, DomainSubmission
 from mwmbl.search_setup import ranker, index_path
 from mwmbl.settings import NUM_EXTRACT_CHARS
@@ -142,7 +143,7 @@ def add_url(request):
         return HttpResponseBadRequest(f"Could not fetch URL: {str(e)}")
 
     print("Content", response.encoding)
-    paragraphs, title = justext_with_dom(response.text, justext.get_stoplist("English"))
+    paragraphs, title = justext_with_dom(response.text, get_stoplist("English"))
     good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
 
     extract = ' '.join([p.text for p in good_paragraphs])
