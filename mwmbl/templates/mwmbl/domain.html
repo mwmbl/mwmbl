@@ -2,7 +2,7 @@
 {%  load humanize %}
 
 {% block content %}
-<h1>Stats for <a href="{{ domain_stats.domain_name }}"></a></h1>
+<h1>Stats for <a href="https://{{ domain_stats.domain_name }}">{{ domain_stats.domain_name }}</a></h1>
 <ul>
 <li>Number of URLs crawled today: {{ domain_stats.num_crawled }}</li>
 <li>Number successfully retrieved: {{ domain_stats.num_successful }}</li>
