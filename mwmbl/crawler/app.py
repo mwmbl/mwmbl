@@ -185,6 +185,9 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         now = datetime.now(timezone.utc)
         filename = upload_object(results, now, api_key.user.username, "results")
 
+        # Update stats for the user
+        stats_manager.record_results(results, api_key.user.username)
+
         return {
             'status': 'ok',
             'url': f'{PUBLIC_URL_PREFIX}{filename}',
