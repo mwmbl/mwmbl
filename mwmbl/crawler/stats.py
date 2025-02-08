@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
-from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
@@ -27,6 +27,9 @@ HOST_COUNT_KEY = "host-count-{date}"
 HOST_COUNT_ALL_KEY = "host-count-all-{date}"
 HOST_COUNT_LINK_KEY = "host-count-link-{date}"
 HOST_COUNT_LINK_NEW_KEY = "host-count-link-new-{date}"
+RESULTS_COUNT_KEY = "results-count-{date}"
+USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
+
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
@@ -47,6 +50,8 @@ class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
     top_users: list[tuple[str, int]]
     top_domains: list[tuple[str, int]]
+    results_indexed_daily: dict[str, int]
+    top_user_results: list[tuple[str, int]]
     urls_in_index_daily: dict[str, int]
     domains_in_index_daily: dict[str, int]
     results_in_index_daily: dict[str, int]
@@ -138,6 +143,7 @@ class StatsManager:
 
         urls_crawled_daily = {}
         users_crawled_daily = {}
+        results_indexed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
             url_count_key = URL_DATE_COUNT_KEY.format(date=date_i)
@@ -149,6 +155,12 @@ class StatsManager:
             user_day_count_key = USERS_KEY.format(date=date_i)
             user_day_count = self.redis.scard(user_day_count_key)
             users_crawled_daily[str(date_i)] = user_day_count
+
+            result_count_key = RESULTS_COUNT_KEY.format(date=date_i)
+            result_count = self.redis.get(result_count_key)
+            if result_count is None:
+                result_count = 0
+            results_indexed_daily[str(date_i)] = result_count
 
         hour_counts = []
         for i in range(date_time.hour + 1):
@@ -167,6 +179,10 @@ class StatsManager:
 
         urls_crawled_today = list(urls_crawled_daily.values())[-1]
         index_stats = get_counts()
+
+        user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
+        user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
+
         return MwmblStats(
             urls_crawled_today=urls_crawled_today,
             urls_crawled_daily=urls_crawled_daily,
@@ -174,6 +190,8 @@ class StatsManager:
             users_crawled_daily=users_crawled_daily,
             top_users=user_counts,
             top_domains=host_counts,
+            results_indexed_daily=results_indexed_daily,
+            top_user_results=user_results_counts,
             **index_stats,
         )
 
@@ -214,6 +232,16 @@ class StatsManager:
             num_index_results=num_index_results,
         )
         return domain_stats
+
+    def record_results(self, results: Results, username: str) -> None:
+        num_results = len(results.results)
+        result_count_key = RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        self.redis.incrby(result_count_key, num_results)
+        self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
+
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        self.redis.zincrby(user_result_count_key, num_results, username)
+        self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
 
 
 def get_test_batches():
