@@ -20,16 +20,6 @@ PAGE_SIZE = 4096
 logger = getLogger(__name__)
 
 
-def astuple(dc):
-    """
-    Convert a type to a tuple - values at the end that are None can be truncated.
-    """
-    value = tuple(dc.__dict__.values())
-    while value[-1] is None:
-        value = value[:-1]
-    return value
-
-
 class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
@@ -45,7 +35,7 @@ class DocumentState(IntEnum):
     FROM_WIKI_APPROVED = 10
 
 
-CURATED_STATES = {state.value for state in DocumentState if state.value >= 7}
+CURATED_STATES = {state for state in DocumentState if state.value >= 7}
 
 
 @dataclass
@@ -64,7 +54,7 @@ class Document:
             extract: str,
             score: Optional[float] = None,
             term: Optional[str] = None,
-            state: Optional[int] = None
+            state: Optional[int | DocumentState] = None
     ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
@@ -73,7 +63,19 @@ class Document:
         self.extract = extract if extract is not None else ''
         self.score = score
         self.term = term
-        self.state = state
+        self.state = None if state is None else DocumentState(state)
+
+    def as_tuple(self):
+        """
+        Convert a type to a tuple - values at the end that are None can be truncated.
+        """
+        values = list(self.__dict__.values())
+        if values[-1] is not None:
+            values[-1] = values[-1].value
+
+        while values[-1] is None:
+            values = values[:-1]
+        return tuple(values)
 
 
 @dataclass
@@ -224,7 +226,7 @@ class TinyIndex(Generic[T]):
         return json.loads(decompressed_data.decode('utf8'))
 
     def store_in_page(self, page_index: int, values: list[T]):
-        value_tuples = [astuple(value) for value in values]
+        value_tuples = [value.as_tuple() for value in values]
         self._write_page(value_tuples, page_index)
 
     def _write_page(self, data, i: int):

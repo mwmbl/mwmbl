@@ -1,4 +1,4 @@
-from mwmbl.indexer.index_batches import sort_documents
+from mwmbl.indexer.index_batches import sort_documents, combine_documents
 from mwmbl.tinysearchengine.indexer import Document, DocumentState
 
 
@@ -61,4 +61,23 @@ def test_sort_documents_curated_items_first():
         Document(title="title6", url="3", extract="extract6", term="term2"),
         Document(title="title5", url="2", extract="extract5", term="term1"),
         Document(title="title2", url="4", extract="extract2", term="term2"),
+    ]
+
+
+def test_sort_documents_duplicates_keep_synced_state():
+    existing_documents = [
+        Document(title="title1", url="1", extract="extract1", term="term1", state=DocumentState.SYNCED_WITH_MAIN_INDEX),
+    ]
+
+    documents = [
+        Document(title="title1", url="1", extract="extract1", term="term1"),
+    ]
+
+    # Sort the documents
+    combined_documents = combine_documents(documents, existing_documents, mark_synced=False, ranker=UrlRanker())
+    print("Combined documents", combined_documents)
+
+    # Curated items should be first
+    assert combined_documents == [
+        Document(title="title1", url="1", extract="extract1", term="term1", state=DocumentState.SYNCED_WITH_MAIN_INDEX),
     ]

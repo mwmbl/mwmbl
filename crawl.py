@@ -99,15 +99,13 @@ def run_indexing():
 
     remote_index = RemoteIndex()
     with TinyIndex(Document, index_path, 'w') as local_index:
-        for term, count in term_new_doc_count.most_common(10):
+        for term, count in term_new_doc_count.most_common(100):
             logger.info(f"Syncing term {term} with {count} new local items")
             remote_items = remote_index.retrieve(term)
             remote_item_urls = {item.url for item in remote_items}
             local_items = local_index.retrieve(term)
             new_items = [item for item in local_items if item.url not in remote_item_urls]
             logger.info(f"Found {len(new_items)} new items for term {term}")
-            if len(new_items) == 0:
-                continue
 
             terms = tokenize(term)
             remote_item_scores = [score_result(terms, item, True) for item in remote_items]
@@ -116,26 +114,29 @@ def run_indexing():
             max_local_score = max(local_scores, default=0.0)
             logger.info(f"Max local score: {max_local_score}, min remote score: {min_remote_score}")
 
-            if max_local_score < min_remote_score:
-                continue
+            new_high_score = max_local_score < min_remote_score
 
-            result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
-                                   score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
-            results = Results(api_key=API_KEY, results=result_items)
-            logger.info(f"Posting {len(result_items)} results")
-            response = requests.post("https://mwmbl.org/api/v1/crawler/results", json=results.dict())
-            logger.info(f"Response: {response.text}")
-            response.raise_for_status()
+            if new_high_score:
+                result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
+                                       score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
+                results = Results(api_key=API_KEY, results=result_items)
+                logger.info(f"Posting {len(result_items)} results")
+                response = requests.post("https://mwmbl.org/api/v1/crawler/results", json=results.dict())
+                logger.info(f"Response: {response.text}")
+                response.raise_for_status()
 
             new_remote_items = remote_index.retrieve(term, refresh=True)
             # Check how many of our items were indexed
             new_remote_item_urls = {item.url for item in new_remote_items}
             indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)
-            logger.info(f"Indexed items: {indexed_items}/{len(new_items)} for term {term}")
+            logger.info(f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}"')
 
             page_index = local_index.get_key_page_index(term)
             index_pages(index_path, {page_index: new_remote_items}, mark_synced=True)
             logger.info(f"Completed indexing for term {term}")
+
+            new_page_content = local_index.get_page(page_index)
+            logger.info(f"Page content: {new_page_content}")
 
 
 if __name__ == "__main__":
