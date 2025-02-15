@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 
 from zstandard import ZstdCompressor
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _binary_search_fitting_size, astuple, \
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _binary_search_fitting_size, \
     _trim_items_to_page, _pad_to_page_size, _get_page_data
 
 
@@ -45,12 +45,12 @@ def test_binary_search_fitting_size_none_fit():
     # We should not fit anything
     assert count_fit == -1
     assert data is None
-    
+
+
 def test_get_page_data_single_doc():
     document1 = Document(title='title1',url='url1',extract='extract1',score=1.0)
-    documents = [document1]
-    items = [astuple(value) for value in documents]
-    
+    items = [document1.as_tuple()]
+
     compressor = ZstdCompressor()
     page_size = 4096
     
@@ -76,7 +76,7 @@ def test_get_page_data_many_docs_all_fit():
         txt = 'text{}'.format(x)
         document = Document(title=txt,url=txt,extract=txt,score=x)
         documents.append(document)
-    items = [astuple(value) for value in documents]
+    items = [document.as_tuple() for document in documents]
     
     # Trim the items
     compressor = ZstdCompressor()
@@ -91,7 +91,8 @@ def test_get_page_data_many_docs_all_fit():
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
     
     assert serialized_data == padded_trimmed_data
-    
+
+
 def test_get_page_data_many_docs_subset_fit():
     # Build giant documents item
     documents = []
@@ -101,7 +102,7 @@ def test_get_page_data_many_docs_subset_fit():
         txt = 'text{}'.format(x)
         document = Document(title=txt,url=txt,extract=txt,score=x)
         documents.append(document)
-    items = [astuple(value) for value in documents]
+    items = [document.as_tuple() for document in documents]
     
     # Trim the items
     compressor = ZstdCompressor()

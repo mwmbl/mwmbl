@@ -10,7 +10,7 @@ from random import Random
 import numpy as np
 from scipy.stats import sem
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _trim_items_to_page, astuple
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _trim_items_to_page
 
 from zstandard import ZstdCompressor
 
@@ -37,7 +37,7 @@ def run():
                 term_document = add_term_info(document, index, i)
                 term_documents.append(term_document)
 
-            value_tuples = [astuple(value) for value in term_documents]
+            value_tuples = [document.as_tuple() for document in term_documents]
             num_fitting, compressed = _trim_items_to_page(compressor, index.page_size, value_tuples)
 
             new_sizes.append(num_fitting)
