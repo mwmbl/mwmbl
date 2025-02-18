@@ -17,22 +17,20 @@ FROM base as builder
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
-    POETRY_VERSION=1.1.12
-
+    PIP_NO_CACHE_DIR=1
 
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
 RUN python -m venv /venv
 
 # Copy only the necessary files to build/install the python package
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml uv.lock /app/
 COPY mwmbl /app/mwmbl
 
 # Working directory is /app
 # Use pip to install the mwmbl python package
 # PEP 518, PEP 517 and others have allowed for a standardized python packaging API, which allows
-# pip to be able to install poetry packages.
+# pip to be able to install uv packages.
 RUN /venv/bin/pip install pip wheel --upgrade && \
     /venv/bin/pip install .
 
