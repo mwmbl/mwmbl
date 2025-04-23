@@ -1,0 +1,47 @@
+name: mwmbl-crawler
+base: core22
+version: "1.0"
+summary: Web crawler for the Mwmbl search engine
+description: |
+  A web crawler for the non-profit open source search engine Mwmbl.
+  It is built using Python and Poetry, and it requires Redis as a dependency.
+
+grade: stable
+confinement: strict  # Consider 'devmode' for testing
+
+apps:
+  crawler:
+    command: bin/crawl
+    daemon: simple
+    environment:
+      MWMBL_API_KEY: $MWMBL_API_KEY
+    plugs:
+      - network
+      - network-bind
+
+parts:
+  mwmbl-crawler:
+    plugin: python
+    python-packages: []
+    source: .
+    build-packages:
+      - python3
+      - python3-venv
+      - poetry  # Install Poetry as a package
+    stage-packages:
+      - redis-server
+    override-build: |
+      set -eux
+      
+      # Ensure Poetry is in PATH
+      export PATH="/usr/bin:$PATH"
+
+      # Install dependencies using Poetry
+      poetry install --no-dev --no-interaction --no-ansi
+
+      # Make the crawl script executable
+      install -m 755 crawl.py $SNAPCRAFT_PART_INSTALL/bin/crawl
+    override-prime: |
+      set -eux
+      mkdir -p $SNAPCRAFT_PRIME/bin
+      mv $SNAPCRAFT_PART_INSTALL/bin/crawl $SNAPCRAFT_PRIME/bin/crawl
