@@ -52,7 +52,7 @@ def get_stoplist(language):
     """Returns an built-in stop-list for the language as a set of words."""
     file_path = os.path.join("stoplists", "%s.txt" % language)
     try:
-        stopwords = pkgutil.get_data("justext", file_path)
+        stopwords = pkgutil.get_data("mwmbl.justext", file_path)
     except IOError:
         raise ValueError(
             "Stoplist for language '%s' is missing. "
