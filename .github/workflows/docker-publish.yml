@@ -26,5 +26,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile.crawler
           push: true
           tags: mwmbl/crawler:latest
