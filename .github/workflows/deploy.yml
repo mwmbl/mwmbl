@@ -1,0 +1,47 @@
+# .github/workflows/deploy.yml
+
+name: Deploy to Dokku
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Dokku
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy mwmbl.org
+        run: |
+          git remote add dokku-mwmbl-org dokku@mwmbl.org:mwmbl.org
+          git push dokku-mwmbl-org main:master --force
+
+      - name: Deploy api.mwmbl.org
+        run: |
+          git remote add dokku-api-mwmbl-org dokku@mwmbl.org:api.mwmbl.org
+          git push dokku-api-mwmbl-org main:master --force
+
+      - name: Deploy mwmbl-count-urls
+        run: |
+          git remote add dokku-mwmbl-count-urls dokku@mwmbl.org:mwmbl-count-urls
+          git push dokku-mwmbl-count-urls main:master --force
+
+      - name: Deploy mwmbl-update-batches
+        run: |
+          git remote add dokku-mwmbl-update-batches dokku@mwmbl.org:mwmbl-update-batches
+          git push dokku-mwmbl-update-batches main:master --force
+
+      - name: Deploy mwmbl-update-urls
+        run: |
+          git remote add dokku-mwmbl-update-urls dokku@mwmbl.org:mwmbl-update-urls
+          git push dokku-mwmbl-update-urls main:master --force
