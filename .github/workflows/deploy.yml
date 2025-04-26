@@ -21,6 +21,11 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      - name: Add Dokku server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan mwmbl.org >> ~/.ssh/known_hosts
+
       - name: Deploy mwmbl.org
         run: |
           git remote add dokku-mwmbl-org dokku@mwmbl.org:mwmbl.org
