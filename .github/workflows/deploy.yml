@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Don't do a shallow clone (which happens by default)
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.8.0
