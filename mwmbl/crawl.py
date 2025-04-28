@@ -42,13 +42,37 @@ url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
-    for i in range(10):
+    workers_str = os.environ.get("CRAWLER_WORKERS", "10")
+    try:
+        workers = int(workers_str)
+    except ValueError:
+        logger.error(f"Unable to parse CRAWLER_WORKERS environment variable (set to {workers_str})")
+        return
+
+    batch_processes: list[Process] = []
+    for i in range(workers):
         process = Process(target=process_batch_continuously)
         process.start()
+        batch_processes.append(process)
         time.sleep(5)
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
+
+    while True:
+        if not index_process.is_alive():
+            logger.warning("Indexing process [pid={process.pid}] died, respawning.")
+            index_process = Process(target=run_indexing_continuously)
+            index_process.start()
+
+        for i in range(workers):
+            if not batch_processes[i].is_alive():
+                logger.info(f"Batch process [pid={batch_processes[i].pid}] died, respawning.")
+                batch_processes[i] = Process(target=process_batch_continuously)
+                batch_processes[i].start()
+                time.sleep(5)
+
+        time.sleep(10)
 
 
 def process_batch_continuously():
