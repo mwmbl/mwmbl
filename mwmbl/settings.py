@@ -13,14 +13,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://username:password@loca
 
 APPLICATION_KEY = os.environ.get('MWMBL_APPLICATION_KEY', 'SECRETAPPLICATIONKEY')
 KEY_ID = os.environ.get('MWMBL_KEY_ID', 'SECRETKEYID')
-ENDPOINT_URL = os.environ.get('MWMBL_ENDPOINT_URL', 'https://s3.us-west-004.backblazeb2.com')
-BUCKET_NAME = os.environ.get('MWMBL_BUCKET_NAME', 'mwmbl-crawl')
+ENDPOINT_URL = os.environ.get('MWMBL_ENDPOINT_URL', 'https://s3.eu-central-003.backblazeb2.com')
+BUCKET_NAME = os.environ.get('MWMBL_BUCKET_NAME', 'mwmbl-eu-crawl')
 MAX_BATCH_SIZE = 100
 USER_ID_LENGTH = 36
 PUBLIC_USER_ID_LENGTH = 64
 VERSION = 'v1'
 DATE_REGEX = re.compile(r'\d{4}-\d{2}-\d{2}')
-PUBLIC_URL_PREFIX = f'https://f004.backblazeb2.com/file/{BUCKET_NAME}/'
+PUBLIC_URL_PREFIX = f'https://f003.backblazeb2.com/file/{BUCKET_NAME}/'
 FILE_NAME_SUFFIX = '.json.gz'
 
 NUM_TITLE_CHARS = 65
