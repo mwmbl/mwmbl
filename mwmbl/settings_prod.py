@@ -43,3 +43,32 @@ DOMAIN_LINKS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "links_{domain_group}.blo
 NUM_DOMAINS_IN_BLOOM_FILTER = 100_000_000
 
 REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache"
+
+
+# Disable logging for requests
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,  # Keep other loggers intact
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Suppress INFO-level noise
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'ninja': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
+}
