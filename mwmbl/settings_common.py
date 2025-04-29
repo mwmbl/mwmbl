@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import sentry_sdk
 
@@ -201,10 +202,21 @@ if SENTRY_DSN is not None:
         # We recommend adjusting this value in production.
         profiles_sample_rate=0.1,
         send_default_pii=False,
+        before_send=lambda event, hint: strip_query_string(event),
     )
 else:
     print("No SENTRY_DSN set, skipping Sentry initialization")
 
+
+def strip_query_string(event):
+    request = event.get("request")
+    if request and "url" in request:
+        parsed = urlparse(request["url"])
+        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        event["request"]["url"] = clean_url
+        if "query_string" in request:
+            del event["request"]["query_string"]
+    return event
 
 # Django ninja-jwt settings - custom auth rule
 USER_AUTHENTICATION_RULE = require_email_confirmation
