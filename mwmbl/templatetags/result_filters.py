@@ -12,7 +12,9 @@ register = Library()
 
 
 @register.filter(needs_autoescape=True)
-def format_for_query(text: str, query: str, autoescape=True):
+def format_for_query(text: str | None, query: str, autoescape=True):
+    if text is None:
+        return ""
     escape = conditional_escape if autoescape else lambda x: x
     tokens = tokenize(query)
     pattern = get_query_regex(tokens, True, False)
