@@ -200,6 +200,11 @@ body {
   gap: 10px;
 }
 
+.footer-terms {
+  margin: 20px;
+  text-align: center;
+}
+
 .footer-link {
   display: flex;
   align-items: center;
