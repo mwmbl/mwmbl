@@ -43,7 +43,8 @@ url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
-    workers = CRAWLER_WORKERS
+    workers: int = CRAWLER_WORKERS
+    assert workers > 0, f"Invalid value for CRAWLER_WORKERS: {workers}"
 
     batch_processes: list[Process] = []
     for i in range(workers):
