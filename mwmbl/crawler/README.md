@@ -26,6 +26,9 @@ The crawler can be configured using the following environment variables:
 
 **Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 10 crawler processes × 20 threads = 200 total crawling threads, plus 1 indexing process.
 
+### Rate Limiting Configuration
+- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds between crawling each URL within a batch. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
+
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats
 

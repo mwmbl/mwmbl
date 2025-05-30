@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import time
 from multiprocessing import Process
 from pathlib import Path
@@ -9,7 +10,7 @@ import requests
 from django.conf import settings
 from redis import Redis
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -26,7 +27,7 @@ django.setup()
 
 
 from mwmbl.indexer.update_urls import record_urls_in_database
-from mwmbl.crawler.retrieve import crawl_batch
+from mwmbl.crawler.retrieve import crawl_batch, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
@@ -85,8 +86,17 @@ def process_batch():
     user_id = "test"
     urls = url_queue.get_batch(user_id)
     logger.info(f"Processing batch of {len(urls)} URLs")
-    results = crawl_batch(batch=urls, num_threads=CRAWL_THREADS)
-    for result in results:
+    
+    # Process URLs sequentially with rate limiting
+    results = []
+    for i, url in enumerate(urls):
+        if i > 0:  # Don't delay before the first URL
+            # Add delay with 10% random fuzz
+            delay = CRAWL_DELAY_SECONDS * (0.9 + 0.2 * random.random())
+            time.sleep(delay)
+        
+        result = crawl_url(url)
+        results.append(result)
         logger.debug("Result", result)
     js_timestamp = int(time.time() * 1000)
     batch = HashedBatch.parse_obj({"user_id_hash": user_id, "timestamp": js_timestamp, "items": results})
