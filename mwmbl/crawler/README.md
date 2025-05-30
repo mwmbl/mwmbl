@@ -21,7 +21,7 @@ The crawler can be configured using the following environment variables:
 - `MAX_SITE_URLS` (default: 100) - TODO: clarify usage of this variable
 
 ### Worker Configuration
-- `CRAWLER_WORKERS` (default: 10) - Number of parallel crawler worker processes to run
+- `CRAWLER_WORKERS` (default: 10) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
 - `CRAWL_THREADS` (default: 20) - Number of threads per worker process for concurrent URL crawling
 
 ### Redis Configuration
