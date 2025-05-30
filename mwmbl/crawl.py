@@ -11,6 +11,8 @@ import requests
 from django.conf import settings
 from redis import Redis
 
+CRAWLER_VERSION: str = "0.2.0"
+
 from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
@@ -138,7 +140,12 @@ def process_batch():
         results.append(result)
         logger.debug("Result", result)
     js_timestamp = int(time.time() * 1000)
-    batch = HashedBatch.parse_obj({"user_id_hash": user_id, "timestamp": js_timestamp, "items": results})
+    batch = HashedBatch.parse_obj({
+        "user_id_hash": user_id, 
+        "timestamp": js_timestamp, 
+        "items": results,
+        "crawler_version": CRAWLER_VERSION
+    })
     record_urls_in_database([batch], url_queue)
 
     # Push the batch into the Redis queue

@@ -15,6 +15,7 @@ from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
 from mwmbl.crawler.env_vars import REDIS_URL
+from mwmbl.crawl import CRAWLER_VERSION
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -86,7 +87,12 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         # Using an approach from https://stackoverflow.com/a/30476450
         now = datetime.now(timezone.utc)
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
-        hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
+        hashed_batch = HashedBatch(
+            user_id_hash=user_id_hash, 
+            timestamp=epoch_time, 
+            items=batch.items,
+            crawler_version=CRAWLER_VERSION
+        )
 
         stats_manager.record_batch(hashed_batch)
 
