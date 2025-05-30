@@ -9,6 +9,7 @@ import requests
 from django.conf import settings
 from redis import Redis
 
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -42,12 +43,7 @@ url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
-    workers_str = os.environ.get("CRAWLER_WORKERS", "10")
-    try:
-        workers = int(workers_str)
-    except ValueError:
-        logger.error(f"Unable to parse CRAWLER_WORKERS environment variable (set to {workers_str})")
-        return
+    workers = CRAWLER_WORKERS
 
     batch_processes: list[Process] = []
     for i in range(workers):
