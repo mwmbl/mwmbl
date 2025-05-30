@@ -20,6 +20,9 @@ The crawler can be configured using the following environment variables:
 - `MAX_EXTRA_LINKS` (default: 50) - Maximum extra links to extract from non-good paragraphs
 - `MAX_SITE_URLS` (default: 100) - TODO: clarify usage of this variable
 
+### Rate Limiting Configuration
+- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds between crawl requests to reduce bursting. Change this only if necessary.
+
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats
 

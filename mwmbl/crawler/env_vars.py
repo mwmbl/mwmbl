@@ -18,5 +18,8 @@ MAX_NEW_LINKS = int(os.environ.get('MAX_NEW_LINKS', '50'))
 MAX_EXTRA_LINKS = int(os.environ.get('MAX_EXTRA_LINKS', '50'))
 MAX_SITE_URLS = int(os.environ.get('MAX_SITE_URLS', '100'))
 
+# Rate limiting configuration - delay in seconds between crawl requests to reduce bursting
+CRAWL_DELAY_SECONDS = float(os.environ.get('CRAWL_DELAY_SECONDS', '0.0'))
+
 # Redis configuration
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
