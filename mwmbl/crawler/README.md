@@ -20,6 +20,9 @@ The crawler can be configured using the following environment variables:
 - `MAX_EXTRA_LINKS` (default: 50) - Maximum extra links to extract from non-good paragraphs
 - `MAX_SITE_URLS` (default: 100) - TODO: clarify usage of this variable
 
+### Worker Configuration
+- `CRAWLER_WORKERS` (default: 10) - Number of parallel crawler worker processes to run
+
 ### Rate Limiting Configuration
 - `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds between crawl requests to reduce bursting. Change this only if necessary.
 
