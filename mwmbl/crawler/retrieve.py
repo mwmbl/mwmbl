@@ -13,7 +13,7 @@ from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
-from mwmbl.crawler.env_vars import TIMEOUT_SECONDS, MAX_FETCH_SIZE, MAX_NEW_LINKS, MAX_EXTRA_LINKS, MAX_SITE_URLS, CRAWL_DELAY_SECONDS
+from mwmbl.crawler.env_vars import TIMEOUT_SECONDS, MAX_FETCH_SIZE, MAX_NEW_LINKS, MAX_EXTRA_LINKS, MAX_SITE_URLS
 
 ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
@@ -145,11 +145,6 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
 
 def crawl_url(url):
     logger.info(f"Crawling URL {url}")
-    
-    # Rate limiting to reduce bursting - add delay between requests if configured
-    if CRAWL_DELAY_SECONDS > 0:
-        time.sleep(CRAWL_DELAY_SECONDS)
-    
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url)
     if not allowed:

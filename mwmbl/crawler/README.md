@@ -23,9 +23,6 @@ The crawler can be configured using the following environment variables:
 ### Worker Configuration
 - `CRAWLER_WORKERS` (default: 10) - Number of parallel crawler worker processes to run
 
-### Rate Limiting Configuration
-- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds between crawl requests to reduce bursting. Change this only if necessary.
-
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats
 
