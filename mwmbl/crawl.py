@@ -2,6 +2,7 @@ import logging
 import os
 import random
 import time
+from datetime import datetime, timedelta
 from multiprocessing import Process
 from pathlib import Path
 
@@ -56,10 +57,36 @@ def run():
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
+    
+    # Track index process crashes - list of (timestamp, exit_code, pid) tuples
+    index_crash_history: list[tuple[datetime, int, int]] = []
 
     while True:
         if not index_process.is_alive():
-            logger.warning("Indexing process [pid={process.pid}] died, respawning.")
+            crash_time = datetime.now()
+            exit_code = index_process.exitcode or -1
+            pid = index_process.pid
+            
+            # Record this crash
+            index_crash_history.append((crash_time, exit_code, pid))
+            
+            # Remove crashes older than 1 hour
+            one_hour_ago = crash_time - timedelta(hours=1)
+            index_crash_history = [(t, c, p) for t, c, p in index_crash_history if t > one_hour_ago]
+            
+            # Check if we've exceeded the crash threshold
+            if len(index_crash_history) > 5:
+                crash_details = []
+                for crash_time, exit_code, pid in index_crash_history:
+                    crash_details.append(f"  - {crash_time.isoformat()}: pid={pid}, exit_code={exit_code}")
+                
+                error_msg = (f"Index process crashed {len(index_crash_history)} times in the last hour "
+                           f"(threshold: 5). Recent crashes:\n" + "\n".join(crash_details))
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+            
+            logger.warning(f"Indexing process [pid={pid}] died with exit code {exit_code}, respawning. "
+                         f"Crash count in last hour: {len(index_crash_history)}")
             index_process = Process(target=run_indexing_continuously)
             index_process.start()
 
