@@ -65,7 +65,8 @@ The crawler processes data through several stages:
 2. **Link Discovery**: Finds and validates new links (up to 50 content links + 50 navigation links per page)
 3. **Data Validation**: Filters out problematic URLs (localhost, binary files like .jpg/.pdf, etc.)
 4. **Deduplication**: Uses bloom filters to track which URLs have already been crawled
-5. **Statistics Tracking**: Records detailed crawl statistics per domain and user in Redis
+5. **Domain Authority Scoring**: Tracks which domains link to which other domains using `DOMAIN_GROUPS` - a predefined list of high-authority domains and their scoring weights (e.g., GitHub, Wikipedia, HackerNews get weight 10; Lemmy/Mastodon get weight 2; top domains get weight 5; others get weight 1). This creates a domain authority system where links from high-authority sources boost the ranking of target pages.
+6. **Statistics Tracking**: Records detailed crawl statistics per domain and user in Redis
 
 ### What Data Gets Uploaded
 
