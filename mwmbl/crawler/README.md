@@ -22,6 +22,7 @@ The crawler can be configured using the following environment variables:
 
 ### Worker Configuration
 - `CRAWLER_WORKERS` (default: 10) - Number of parallel crawler worker processes to run
+- `CRAWL_THREADS` (default: 20) - Number of threads per worker process for concurrent URL crawling
 
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats

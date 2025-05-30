@@ -20,6 +20,7 @@ MAX_SITE_URLS = int(os.environ.get('MAX_SITE_URLS', '100'))
 
 # Crawler worker configuration
 CRAWLER_WORKERS = int(os.environ.get('CRAWLER_WORKERS', '10'))
+CRAWL_THREADS = int(os.environ.get('CRAWL_THREADS', '20'))
 
 # Redis configuration
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')

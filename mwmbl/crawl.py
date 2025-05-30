@@ -9,7 +9,7 @@ import requests
 from django.conf import settings
 from redis import Redis
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -84,7 +84,7 @@ def process_batch():
     user_id = "test"
     urls = url_queue.get_batch(user_id)
     logger.info(f"Processing batch of {len(urls)} URLs")
-    results = crawl_batch(urls, 20)
+    results = crawl_batch(batch=urls, num_threads=CRAWL_THREADS)
     for result in results:
         print("Result", result)
     js_timestamp = int(time.time() * 1000)
