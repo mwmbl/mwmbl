@@ -87,7 +87,7 @@ def process_batch():
     logger.info(f"Processing batch of {len(urls)} URLs")
     results = crawl_batch(batch=urls, num_threads=CRAWL_THREADS)
     for result in results:
-        print("Result", result)
+        logger.debug("Result", result)
     js_timestamp = int(time.time() * 1000)
     batch = HashedBatch.parse_obj({"user_id_hash": user_id, "timestamp": js_timestamp, "items": results})
     record_urls_in_database([batch], url_queue)
