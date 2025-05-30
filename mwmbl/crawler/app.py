@@ -14,6 +14,7 @@ from ninja import NinjaAPI, Schema, HTTPException
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
+from mwmbl.crawler.env_vars import REDIS_URL
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -35,7 +36,7 @@ from mwmbl.settings import (
     DATE_REGEX)
 from mwmbl.tinysearchengine.indexer import Document
 
-stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
+stats_manager = StatsManager(Redis.from_url(REDIS_URL, decode_responses=True))
 
 
 def get_bucket(name):
