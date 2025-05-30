@@ -1,0 +1,38 @@
+services:
+  mwmbl-crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawler
+    image: mwmbl/crawler
+    container_name: mwmbl-crawler
+    pull_policy: always
+    depends_on:
+      - redis
+    environment:
+      # Add your API key here:
+      # - MWMBL_API_KEY=
+
+      # Set number of parallel processes (defaults to 10)
+      - CRAWLER_WORKERS=10
+
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379
+
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+    # CPU restrictions if needed:
+    #     resources:
+    #       limits:
+    #         cpus: '0.50'
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+volumes:
+  redis_data:
+
