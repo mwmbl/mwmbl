@@ -10,7 +10,7 @@ from uuid import uuid4
 import boto3
 import requests
 from django.conf import settings
-from ninja import NinjaAPI, Schema
+from ninja import NinjaAPI, Schema, HTTPException
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
