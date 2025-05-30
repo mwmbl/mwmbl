@@ -75,8 +75,8 @@ def process_batch_continuously():
     while True:
         try:
             process_batch()
-        except Exception:
-            logger.exception("Error processing batch")
+        except Exception as err:
+            logger.exception(f"Error processing batch: '{err}'")
             time.sleep(10)
 
 
@@ -100,8 +100,8 @@ def run_indexing_continuously():
     while True:
         try:
             run_indexing()
-        except Exception:
-            logger.exception("Error running indexing")
+        except Exception as err:
+            logger.exception(f"Error running indexing: '{err}'")
             time.sleep(10)
 
 
