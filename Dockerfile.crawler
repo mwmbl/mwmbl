@@ -8,26 +8,21 @@ WORKDIR /app
 
 FROM base AS builder
 
-ENV PIP_DEFAULT_TIMEOUT=100 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
-    POETRY_VERSION=1.1.12
-
+# Install uv for fast Python package management
+RUN pip install uv
 
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
-RUN python -m venv /venv
+RUN uv venv /venv
 
 # Copy only the necessary files to build/install the python package
 COPY pyproject.toml poetry.lock /app/
 COPY mwmbl /app/mwmbl
 
 # Working directory is /app
-# Use pip to install the mwmbl python package
-# PEP 518, PEP 517 and others have allowed for a standardized python packaging API, which allows
-# pip to be able to install poetry packages.
-RUN /venv/bin/pip install pip wheel --upgrade && \
-    /venv/bin/pip install .
+# Use uv to install the mwmbl python package
+# uv is a fast Python package installer and resolver, compatible with pip
+RUN uv pip install . --python /venv/bin/python
 
 FROM base AS final
 
