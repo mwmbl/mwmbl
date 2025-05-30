@@ -83,6 +83,18 @@ def process_batch_continuously():
 
 
 def process_batch():
+    """
+    Process a single batch of URLs by crawling them sequentially with rate limiting.
+    
+    This function handles the core crawling workflow:
+    1. Gets a batch of URLs from the Redis URL queue
+    2. Crawls each URL sequentially with configurable delay between requests
+    3. Records crawl results in the database for URL tracking
+    4. Pushes the completed batch to Redis queue for indexing
+    
+    The sequential crawling with delays respects rate limits and reduces load on target servers.
+    Each batch is processed as a HashedBatch object containing metadata and crawl results.
+    """
     user_id = "test"
     urls = url_queue.get_batch(user_id)
     logger.info(f"Processing batch of {len(urls)} URLs")
@@ -117,6 +129,22 @@ def run_indexing_continuously():
 
 
 def run_indexing():
+    """
+    Process completed crawl batches and integrate results into the search index.
+    
+    This function handles the indexing workflow:
+    1. Pulls completed crawl batches from Redis queue (up to 10 at once)
+    2. Indexes batches locally using the tiny search engine indexer
+    3. For top terms, syncs high-scoring local results with the remote Mwmbl index
+    4. Downloads updated remote results and merges them back into local index
+    
+    The sync process ensures that high-quality local crawl results get submitted
+    to the main Mwmbl search index, while also keeping the local index updated
+    with the latest remote results for better search quality.
+    
+    Only results that score higher than existing remote results are submitted,
+    preventing low-quality content from polluting the main index.
+    """
     index_path = data_path / settings.INDEX_NAME
     batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 10)
     if batch_jsons is None:

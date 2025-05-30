@@ -90,6 +90,33 @@ Real-time monitoring data:
 - Domain link relationships for scoring
 - Error rates and success metrics
 
+### Batch Processing Workflow
+
+The **batch processing** handles the actual web crawling work:
+
+1. **URL Assignment**: Gets batches of URLs from the Redis URL queue 
+2. **Sequential Crawling**: Crawls each URL one-by-one with configurable delays between requests (respects rate limits)
+3. **Content Extraction**: Uses justext library to extract clean text content and discover new links
+4. **Result Recording**: Records crawl results in database for URL tracking and deduplication
+5. **Queue Handoff**: Pushes completed batches to Redis queue for the indexing process
+
+Each batch is processed as a `HashedBatch` object containing metadata (user ID, timestamp) and an array of crawl results (URL, title, extract, links, errors).
+
+### Indexing Workflow  
+
+The **indexing process** transforms crawl results into searchable content:
+
+1. **Batch Retrieval**: Pulls completed crawl batches from Redis queue (processes up to 10 batches at once)
+2. **Local Indexing**: Uses the tiny search engine indexer to build local search index from crawl results
+3. **Quality Filtering**: For high-activity search terms, compares local results against the remote Mwmbl index
+4. **Selective Sync**: Only submits local results that score higher than existing remote results (prevents low-quality content pollution)
+5. **Remote Integration**: Downloads updated remote results and merges them back into local index
+
+This two-stage process ensures that:
+- High-quality crawl results reach the main Mwmbl search index
+- Local crawlers maintain up-to-date search indexes
+- The main index maintains quality standards through score-based filtering
+
 ### Community-Driven Approach
 
 The distributed nature allows the crawler to:
