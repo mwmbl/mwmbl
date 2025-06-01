@@ -92,6 +92,7 @@ years. Here's a very incomplete list of some that have interested me:
  - [Brave](https://search.brave.com/)
  - [DuckDuckGo](https://duckduckgo.com/)
  - [Kagi](https://kagi.com/)
+ - [Mojeek](https://www.mojeek.com/)
 
 Of these, YaCy is the closest in spirit to the idea of a non-profit
 search engine. The index is distributed across a peer-to-peer
