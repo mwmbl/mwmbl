@@ -194,8 +194,13 @@ class TinyIndex(Generic[T]):
             temp_dict = SafeLmdbDict(index_path)
             if "__metadata__" in temp_dict:
                 raise FileExistsError(f"Index database '{index_path}' already exists")
-        except:
-            pass  # Database doesn't exist yet, which is what we want
+        except Exception as e:
+            # Only ignore exceptions that indicate the database doesn't exist
+            # Re-raise FileExistsError and other meaningful exceptions
+            if isinstance(e, FileExistsError):
+                raise
+            # Database doesn't exist yet, which is what we want
+            pass
         
         # Create metadata
         metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
@@ -209,5 +214,5 @@ class TinyIndex(Generic[T]):
             'item_factory': metadata.item_factory
         }
         
-        return TinyIndex(item_factory, index_path=index_path)
+        return TinyIndex(item_factory, index_path=index_path, mode='w')
 
