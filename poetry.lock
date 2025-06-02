@@ -1597,13 +1597,13 @@ numpy = ">=1.16.6"
 
 [[package]]
 name = "pybloomfiltermmap3"
-version = "0.5.7"
+version = "0.6.0"
 description = "A fast implementation of Bloom filter for Python 3 built on mmap"
 optional = false
-python-versions = ">=3.5, <4"
+python-versions = "<4,>=3.5"
 groups = ["main"]
 files = [
-    {file = "pybloomfiltermmap3-0.5.7.tar.gz", hash = "sha256:fe2cf925a1623b886ff12b8ab3f31c33392cd5c192ecd60d55af66d162bb9e71"},
+    {file = "pybloomfiltermmap3-0.6.0.tar.gz", hash = "sha256:ce9dbe24c25bbbb3244e573a2bdb7af3ef203c6bc8fd512abbba1ee6248fd619"},
 ]
 
 [[package]]
@@ -2647,4 +2647,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
-content-hash = "ffc56ba77cf16dc0ceef6a088d86fa9b55d7e75593c5d404cc09421663ea5a92"
+content-hash = "ba8f9852abc019069aa216d61177c6c119c9b2fb20f5503db4bbad1c41a0631a"
