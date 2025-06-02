@@ -41,7 +41,6 @@ from mwmbl.crawler.retrieve import crawl_batch, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
-API_KEY = MWMBL_API_KEY
 BATCH_QUEUE_KEY = "batch-queue"
 
 
@@ -242,7 +241,7 @@ def run_indexing():
                     )
                     for doc in new_items
                 ]
-                results = Results(api_key=API_KEY, results=result_items)
+                results = Results(api_key=MWMBL_API_KEY, results=result_items)
                 logger.info(f"Posting {len(result_items)} results")
                 response = requests.post(
                     "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
