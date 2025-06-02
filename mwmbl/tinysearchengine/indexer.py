@@ -108,7 +108,7 @@ class TinyIndex(Generic[T]):
         
         # Load metadata to get num_pages and page_size for compatibility
         try:
-            temp_dict = SafeLmdbDict(index_path)
+            temp_dict = SafeLmdbDict(index_path, map_size=2147483648)  # 2GB map size
             if "__metadata__" not in temp_dict:
                 # Index exists but has no metadata - likely uninitialized
                 # Create default metadata for an empty index
@@ -145,7 +145,7 @@ class TinyIndex(Generic[T]):
         logger.info(f"Loaded LMDB index with {self.num_pages} pages")
 
     def __enter__(self):
-        self.lmdb_dict = SafeLmdbDict(self.index_path)
+        self.lmdb_dict = SafeLmdbDict(self.index_path, map_size=2147483648)  # 2GB map size
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -201,7 +201,7 @@ class TinyIndex(Generic[T]):
         metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
         
         # Initialize LMDB database with metadata
-        lmdb_dict = SafeLmdbDict(index_path)
+        lmdb_dict = SafeLmdbDict(index_path, map_size=2147483648)  # 2GB map size
         lmdb_dict["__metadata__"] = {
             'version': metadata.version,
             'page_size': metadata.page_size, 
