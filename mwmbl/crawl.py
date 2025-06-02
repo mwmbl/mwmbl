@@ -34,10 +34,6 @@ from mwmbl.crawler.retrieve import crawl_batch, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
-logger = logging.getLogger(__name__)
-FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
-logging.basicConfig(level=logging.INFO, format=FORMAT)
-
 API_KEY = os.environ["MWMBL_API_KEY"]
 BATCH_QUEUE_KEY = "batch-queue"
 

@@ -6,19 +6,8 @@ This module handles the distributed crawling functionality for Mwmbl. The crawle
 
 The crawler can be configured using the following environment variables:
 
-### Crawling Assignment
-- `REASSIGN_MIN_HOURS` (default: 5) - Hours before a URL assigned to a client is reassigned if not crawled
-- `BATCH_SIZE` (default: 100) - Number of URLs in each crawling batch
-- `MAX_URLS_PER_TOP_DOMAIN` (default: 100) - Maximum URLs per top domain (for example wikipedia, reddit, etc)
-- `MAX_TOP_DOMAINS` (default: 500) - Maximum number of top domains to process
-- `MAX_OTHER_DOMAINS` (default: 50000) - Maximum number of other domains to process
-
-### URL Retrieval Configuration  
-- `TIMEOUT_SECONDS` (default: 3) - Timeout for fetching individual URLs
-- `MAX_FETCH_SIZE` (default: 1048576) - Maximum size in bytes to fetch per URL (1MB)
-- `MAX_NEW_LINKS` (default: 50) - Maximum new links to extract from good content paragraphs
-- `MAX_EXTRA_LINKS` (default: 50) - Maximum extra links to extract from non-good paragraphs
-- `MAX_SITE_URLS` (default: 100) - TODO: clarify usage of this variable
+### Required Configuration
+- `MWMBL_API_KEY` - **Required** API key for submitting results to the Mwmbl search index
 
 ### Worker Configuration
 - `CRAWLER_WORKERS` (default: 10) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
