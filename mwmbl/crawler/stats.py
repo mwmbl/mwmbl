@@ -81,7 +81,9 @@ class StatsManager:
     def record_batch(self, hashed_batch: HashedBatch):
         date_time = get_datetime_from_timestamp(hashed_batch.timestamp)
 
-        num_crawled_urls = sum(1 for item in hashed_batch.items if item.content is not None)
+        num_crawled_urls = sum(
+            1 for item in hashed_batch.items if item.content is not None
+        )
 
         date = date_time.date()
         url_count_key = URL_DATE_COUNT_KEY.format(date=date)
@@ -126,14 +128,20 @@ class StatsManager:
 
                 for link in links:
                     link_host = urlparse(link).netloc
-                    pipeline.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
+                    pipeline.zincrby(
+                        HOST_COUNT_LINK_KEY.format(date=date), 1, link_host
+                    )
 
                     if link not in url_db:
-                        pipeline.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
+                        pipeline.zincrby(
+                            HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host
+                        )
 
         pipeline.execute()
         total_time = (datetime.utcnow() - start_time).total_seconds()
-        logger.info(f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds")
+        logger.info(
+            f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds"
+        )
         self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
         self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
@@ -181,7 +189,9 @@ class StatsManager:
         index_stats = get_counts()
 
         user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
-        user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
+        user_results_counts = self.redis.zrevrange(
+            user_results_count_key, 0, 100, withscores=True
+        )
 
         return MwmblStats(
             urls_crawled_today=urls_crawled_today,
@@ -201,9 +211,15 @@ class StatsManager:
         host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
         all_domain_stats = []
         for host, count in host_counts_all:
-            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
-            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
-            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+            num_successful = self.redis.zscore(
+                HOST_COUNT_KEY.format(date=date_time.date()), host
+            )
+            num_links = self.redis.zscore(
+                HOST_COUNT_LINK_KEY.format(date=date_time.date()), host
+            )
+            num_links_new = self.redis.zscore(
+                HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host
+            )
             num_index_results = get_domain_result_count(host)
             domain_stats = DomainStats(
                 domain_name=host,
@@ -218,10 +234,18 @@ class StatsManager:
 
     def get_stats_for_domain(self, host: str) -> DomainStats:
         date_time = datetime.utcnow()
-        num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=date_time.date()), host)
-        num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
-        num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
-        num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+        num_crawled = self.redis.zscore(
+            HOST_COUNT_ALL_KEY.format(date=date_time.date()), host
+        )
+        num_successful = self.redis.zscore(
+            HOST_COUNT_KEY.format(date=date_time.date()), host
+        )
+        num_links = self.redis.zscore(
+            HOST_COUNT_LINK_KEY.format(date=date_time.date()), host
+        )
+        num_links_new = self.redis.zscore(
+            HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host
+        )
         num_index_results = get_domain_result_count(host)
         domain_stats = DomainStats(
             domain_name=host,
@@ -239,7 +263,9 @@ class StatsManager:
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(
+            date=datetime.utcnow().date()
+        )
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
 
@@ -251,14 +277,15 @@ def get_test_batches():
             yield HashedBatch.parse_raw(gzip_file.read())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     django.setup()
-    redis = Redis(host='localhost', port=6379, decode_responses=True)
+    redis = Redis(host="localhost", port=6379, decode_responses=True)
     stats = StatsManager(redis)
     batches = get_test_batches()
     start = datetime.now()
     processed = 0
     import logging
+
     logging.basicConfig(level=logging.INFO)
     for batch in islice(batches, 10000):
         if len(batch.items) <= 2:
@@ -268,4 +295,4 @@ if __name__ == '__main__':
     total_time = (datetime.now() - start).total_seconds()
     print("Processed", processed)
     print("Total time", total_time)
-    print("Time per batch", total_time/processed)
+    print("Time per batch", total_time / processed)

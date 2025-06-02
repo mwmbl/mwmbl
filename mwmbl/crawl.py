@@ -42,7 +42,9 @@ API_KEY = os.environ["MWMBL_API_KEY"]
 BATCH_QUEUE_KEY = "batch-queue"
 
 
-redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+redis = Redis.from_url(
+    os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True
+)
 url_queue = RedisURLQueue(redis, lambda: set())
 
 
@@ -59,7 +61,7 @@ def run():
 
     index_process = Process(target=run_indexing_continuously)
     index_process.start()
-    
+
     # Track index process crashes - list of (timestamp, exit_code, pid) tuples
     index_crash_history: list[tuple[datetime, int, int]] = []
 
@@ -68,33 +70,43 @@ def run():
             crash_time = datetime.now()
             exit_code = index_process.exitcode or -1
             pid = index_process.pid
-            
+
             # Record this crash
             index_crash_history.append((crash_time, exit_code, pid))
-            
+
             # Remove crashes older than 1 hour
             one_hour_ago = crash_time - timedelta(hours=1)
-            index_crash_history = [(t, c, p) for t, c, p in index_crash_history if t > one_hour_ago]
-            
+            index_crash_history = [
+                (t, c, p) for t, c, p in index_crash_history if t > one_hour_ago
+            ]
+
             # Check if we've exceeded the crash threshold
             if len(index_crash_history) > 5:
                 crash_details = []
                 for crash_time, exit_code, pid in index_crash_history:
-                    crash_details.append(f"  - {crash_time.isoformat()}: pid={pid}, exit_code={exit_code}")
-                
-                error_msg = (f"Index process crashed {len(index_crash_history)} times in the last hour "
-                           f"(threshold: 5). Recent crashes:\n" + "\n".join(crash_details))
+                    crash_details.append(
+                        f"  - {crash_time.isoformat()}: pid={pid}, exit_code={exit_code}"
+                    )
+
+                error_msg = (
+                    f"Index process crashed {len(index_crash_history)} times in the last hour "
+                    f"(threshold: 5). Recent crashes:\n" + "\n".join(crash_details)
+                )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
-            
-            logger.warning(f"Indexing process [pid={pid}] died with exit code {exit_code}, respawning. "
-                         f"Crash count in last hour: {len(index_crash_history)}")
+
+            logger.warning(
+                f"Indexing process [pid={pid}] died with exit code {exit_code}, respawning. "
+                f"Crash count in last hour: {len(index_crash_history)}"
+            )
             index_process = Process(target=run_indexing_continuously)
             index_process.start()
 
         for i in range(workers):
             if not batch_processes[i].is_alive():
-                logger.info(f"Batch process [pid={batch_processes[i].pid}] died, respawning.")
+                logger.info(
+                    f"Batch process [pid={batch_processes[i].pid}] died, respawning."
+                )
                 batch_processes[i] = Process(target=process_batch_continuously)
                 batch_processes[i].start()
                 time.sleep(5)
@@ -114,20 +126,20 @@ def process_batch_continuously():
 def process_batch():
     """
     Process a single batch of URLs by crawling them sequentially with rate limiting.
-    
+
     This function handles the core crawling workflow:
     1. Gets a batch of URLs from the Redis URL queue
     2. Crawls each URL sequentially with configurable delay between requests
     3. Records crawl results in the database for URL tracking
     4. Pushes the completed batch to Redis queue for indexing
-    
+
     The sequential crawling with delays respects rate limits and reduces load on target servers.
     Each batch is processed as a HashedBatch object containing metadata and crawl results.
     """
     user_id = "test"
     urls = url_queue.get_batch(user_id)
     logger.info(f"Processing batch of {len(urls)} URLs")
-    
+
     # Process URLs sequentially with rate limiting
     results = []
     for i, url in enumerate(urls):
@@ -135,17 +147,19 @@ def process_batch():
             # Add delay with 10% random fuzz
             delay = CRAWL_DELAY_SECONDS * (0.9 + 0.2 * random.random())
             time.sleep(delay)
-        
+
         result = crawl_url(url)
         results.append(result)
         logger.debug("Result", result)
     js_timestamp = int(time.time() * 1000)
-    batch = HashedBatch.parse_obj({
-        "user_id_hash": user_id, 
-        "timestamp": js_timestamp, 
-        "items": results,
-        "crawler_version": CRAWLER_VERSION
-    })
+    batch = HashedBatch.parse_obj(
+        {
+            "user_id_hash": user_id,
+            "timestamp": js_timestamp,
+            "items": results,
+            "crawler_version": CRAWLER_VERSION,
+        }
+    )
     record_urls_in_database([batch], url_queue)
 
     # Push the batch into the Redis queue
@@ -165,17 +179,17 @@ def run_indexing_continuously():
 def run_indexing():
     """
     Process completed crawl batches and integrate results into the search index.
-    
+
     This function handles the indexing workflow:
     1. Pulls completed crawl batches from Redis queue (up to 10 at once)
     2. Indexes batches locally using the tiny search engine indexer
     3. For top terms, syncs high-scoring local results with the remote Mwmbl index
     4. Downloads updated remote results and merges them back into local index
-    
+
     The sync process ensures that high-quality local crawl results get submitted
     to the main Mwmbl search index, while also keeping the local index updated
     with the latest remote results for better search quality.
-    
+
     Only results that score higher than existing remote results are submitted,
     preventing low-quality content from polluting the main index.
     """
@@ -191,38 +205,59 @@ def run_indexing():
     logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
     remote_index = RemoteIndex()
-    with TinyIndex(Document, index_path, 'w') as local_index:
+    with TinyIndex(Document, index_path, "w") as local_index:
         for term, count in term_new_doc_count.most_common(100):
             logger.info(f"Syncing term {term} with {count} new local items")
             remote_items = remote_index.retrieve(term)
             remote_item_urls = {item.url for item in remote_items}
             local_items = local_index.retrieve(term)
-            new_items = [item for item in local_items if item.url not in remote_item_urls]
+            new_items = [
+                item for item in local_items if item.url not in remote_item_urls
+            ]
             logger.info(f"Found {len(new_items)} new items for term {term}")
 
             terms = tokenize(term)
-            remote_item_scores = [score_result(terms, item, True) for item in remote_items]
+            remote_item_scores = [
+                score_result(terms, item, True) for item in remote_items
+            ]
             min_remote_score = min(remote_item_scores, default=0.0)
             local_scores = [score_result(terms, item, True) for item in new_items]
             max_local_score = max(local_scores, default=0.0)
-            logger.info(f"Max local score: {max_local_score}, min remote score: {min_remote_score}")
+            logger.info(
+                f"Max local score: {max_local_score}, min remote score: {min_remote_score}"
+            )
 
             new_high_score = max_local_score < min_remote_score
 
             if new_high_score:
-                result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
-                                       score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
+                result_items = [
+                    Result(
+                        url=doc.url,
+                        title=doc.title,
+                        extract=doc.extract,
+                        score=doc.score,
+                        term=doc.term,
+                        state=doc.state,
+                    )
+                    for doc in new_items
+                ]
                 results = Results(api_key=API_KEY, results=result_items)
                 logger.info(f"Posting {len(result_items)} results")
-                response = requests.post("https://mwmbl.org/api/v1/crawler/results", json=results.dict())
+                response = requests.post(
+                    "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
+                )
                 logger.info(f"Response: {response.text}")
                 response.raise_for_status()
 
             new_remote_items = remote_index.retrieve(term, refresh=True)
             # Check how many of our items were indexed
             new_remote_item_urls = {item.url for item in new_remote_items}
-            indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)
-            logger.info(f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}"')
+            indexed_items = sum(
+                1 for item in new_items if item.url in new_remote_item_urls
+            )
+            logger.info(
+                f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}"'
+            )
 
             page_index = local_index.get_key_page_index(term)
             index_pages(index_path, {page_index: new_remote_items}, mark_synced=True)

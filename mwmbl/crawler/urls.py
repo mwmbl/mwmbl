@@ -1,6 +1,7 @@
 """
 Database storing info on URLs
 """
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -29,17 +30,24 @@ class URLStatus(Enum):
     """
     URL state update is idempotent and can only progress forwards.
     """
-    NEW = 0                   # One user has identified this URL
-    QUEUED = 5                # The URL has been queued for crawling
-    ASSIGNED = 10             # The crawler has given the URL to a user to crawl
-    ERROR_TIMEOUT = 20        # Timeout while retrieving
-    ERROR_404 = 30            # 404 response
-    ERROR_OTHER = 40          # Some other error
+
+    NEW = 0  # One user has identified this URL
+    QUEUED = 5  # The URL has been queued for crawling
+    ASSIGNED = 10  # The crawler has given the URL to a user to crawl
+    ERROR_TIMEOUT = 20  # Timeout while retrieving
+    ERROR_404 = 30  # 404 response
+    ERROR_OTHER = 40  # Some other error
     ERROR_ROBOTS_DENIED = 50  # Robots disallow this page
-    CRAWLED = 100             # At least one user has crawled the URL
+    CRAWLED = 100  # At least one user has crawled the URL
 
 
-CRAWLED_STATUSES = {URLStatus.CRAWLED, URLStatus.ERROR_TIMEOUT, URLStatus.ERROR_404, URLStatus.ERROR_OTHER, URLStatus.ERROR_ROBOTS_DENIED}
+CRAWLED_STATUSES = {
+    URLStatus.CRAWLED,
+    URLStatus.ERROR_TIMEOUT,
+    URLStatus.ERROR_404,
+    URLStatus.ERROR_OTHER,
+    URLStatus.ERROR_ROBOTS_DENIED,
+}
 
 
 @dataclass
@@ -61,10 +69,14 @@ class URLDatabase:
         for i in range(3):
             # Start from current month and go back two months
             month_date = datetime(month_date.year, month_date.month, 1)
-            urls_path = settings.URLS_BLOOM_FILTER_PATH.format(month=month_date.month, year=month_date.year)
+            urls_path = settings.URLS_BLOOM_FILTER_PATH.format(
+                month=month_date.month, year=month_date.year
+            )
             month_date = self._construct_bloom_filter(i, month_date, urls_path)
 
-        self._construct_bloom_filter(3, datetime(2024, 1, 1), settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
+        self._construct_bloom_filter(
+            3, datetime(2024, 1, 1), settings.URLS_BLOOM_FILTER_FALLBACK_PATH
+        )
         logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
         return self
 
@@ -74,7 +86,9 @@ class URLDatabase:
         except FileNotFoundError:
             if i == 0:
                 logger.info("No existing bloom filter found, creating a new one")
-                self.urls[month_date] = BloomFilter(settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, urls_path, perm=0o666)
+                self.urls[month_date] = BloomFilter(
+                    settings.NUM_URLS_IN_BLOOM_FILTER, 1e-6, urls_path, perm=0o666
+                )
             else:
                 logger.info("No existing bloom filter found, using fallback")
         month_date -= timedelta(days=1)
@@ -101,7 +115,11 @@ class URLDatabase:
             if url.status in CRAWLED_STATUSES:
                 most_recent_urls.add(url.url)
 
-            new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
+            new_urls.append(
+                FoundURL(
+                    url.url, url.user_id_hash, url.status, url.timestamp, found_date
+                )
+            )
         return new_urls
 
     def __contains__(self, url):
