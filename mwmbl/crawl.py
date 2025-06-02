@@ -14,7 +14,7 @@ from redis import Redis
 
 CRAWLER_VERSION: str = "0.2.0"
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS, CRAWLER_LOG_LEVEL, MWMBL_API_KEY
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS, CRAWLER_LOG_LEVEL, MWMBL_API_KEY, REDIS_URL
 
 # Configure log level using imported env var
 logger.remove()  # Remove default handler
@@ -45,9 +45,7 @@ API_KEY = MWMBL_API_KEY
 BATCH_QUEUE_KEY = "batch-queue"
 
 
-redis = Redis.from_url(
-    os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True
-)
+redis = Redis.from_url(REDIS_URL, decode_responses=True)
 url_queue = RedisURLQueue(redis, lambda: set())
 
 
