@@ -144,7 +144,7 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
 
 
 def crawl_url(url):
-    logger.info(f"Crawling URL {url}")
+    logger.info(url)
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url)
     if not allowed:
