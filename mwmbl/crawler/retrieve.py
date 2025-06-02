@@ -1,12 +1,12 @@
 import re
 import time
-from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
 from urllib.parse import urlparse, urlunsplit, urljoin
 from urllib.robotparser import RobotFileParser
 
 import requests
+from loguru import logger
 from mwmbl.justext import core, utils
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
@@ -43,9 +43,6 @@ NUM_TITLE_CHARS = 65
 NUM_EXTRACT_CHARS = 155
 DEFAULT_ENCODING = "utf8"
 DEFAULT_ENC_ERRORS = "replace"
-
-
-logger = getLogger(__name__)
 
 
 def fetch(url):

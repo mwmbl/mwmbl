@@ -2,12 +2,12 @@ import gzip
 from datetime import datetime, timedelta
 from glob import glob
 from itertools import islice
-from logging import getLogger
 from pathlib import Path
 from urllib.parse import urlparse
 
 import django
 from django.conf import settings
+from loguru import logger
 from pydantic import BaseModel
 from redis import Redis
 
@@ -16,8 +16,6 @@ from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
-
-logger = getLogger(__name__)
 
 URL_DATE_COUNT_KEY = "url-count-{date}"
 URL_HOUR_COUNT_KEY = "url-count-hour-{hour}"
@@ -90,7 +88,7 @@ class StatsManager:
         self.redis.incrby(url_count_key, num_crawled_urls)
         self.redis.expire(url_count_key, LONG_EXPIRE_SECONDS)
 
-        print("Date time", date_time)
+        logger.debug("Date time", date_time)
         hour = datetime(date_time.year, date_time.month, date_time.day, date_time.hour)
         hour_key = URL_HOUR_COUNT_KEY.format(hour=hour)
         self.redis.incrby(hour_key, num_crawled_urls)
@@ -272,7 +270,7 @@ class StatsManager:
 
 def get_test_batches():
     for path in glob("./devdata/batches/**/*.json.gz", recursive=True):
-        print("Processing path", path)
+        logger.info("Processing path", path)
         with gzip.open(path) as gzip_file:
             yield HashedBatch.parse_raw(gzip_file.read())
 
@@ -284,15 +282,12 @@ if __name__ == "__main__":
     batches = get_test_batches()
     start = datetime.now()
     processed = 0
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
     for batch in islice(batches, 10000):
         if len(batch.items) <= 2:
             continue
         stats.record_batch(batch)
         processed += 1
     total_time = (datetime.now() - start).total_seconds()
-    print("Processed", processed)
-    print("Total time", total_time)
-    print("Time per batch", total_time / processed)
+    logger.info("Processed", processed)
+    logger.info("Total time", total_time)
+    logger.info("Time per batch", total_time / processed)

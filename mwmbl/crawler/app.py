@@ -10,6 +10,7 @@ from uuid import uuid4
 import boto3
 import requests
 from django.conf import settings
+from loguru import logger
 from ninja import NinjaAPI, Schema, HTTPException
 from redis import Redis
 
@@ -305,7 +306,7 @@ def get_batches_for_date(date_str):
     cache_url = PUBLIC_URL_PREFIX + cache_filename
     try:
         cached_batches = json.loads(gzip.decompress(requests.get(cache_url).content))
-        print(f"Got cached batches for {date_str}")
+        logger.info(f"Got cached batches for {date_str}")
         return cached_batches
     except gzip.BadGzipFile:
         pass
@@ -318,6 +319,6 @@ def get_batches_for_date(date_str):
         # Don't cache data from today since it may change
         data = gzip.compress(json.dumps(result).encode("utf8"))
         upload(data, cache_filename)
-        print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
-    print(f"Returning {len(result['batch_urls'])} batches for {date_str}")
+        logger.info(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
+    logger.info(f"Returning {len(result['batch_urls'])} batches for {date_str}")
     return result

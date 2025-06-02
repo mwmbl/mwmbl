@@ -4,15 +4,12 @@ destination domains.
 """
 
 from itertools import islice
-from logging import getLogger
 
 from django.conf import settings
+from loguru import logger
 from pybloomfilter import BloomFilter
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
-
-
-logger = getLogger(__name__)
 
 DOMAIN_GROUPS = [
     ("github.com", 10),

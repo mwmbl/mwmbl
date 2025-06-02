@@ -1,5 +1,6 @@
-import logging
 import os
+import sys
+from loguru import logger
 import random
 import time
 from datetime import datetime, timedelta
@@ -13,7 +14,11 @@ from redis import Redis
 
 CRAWLER_VERSION: str = "0.2.0"
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS, CRAWLER_LOG_LEVEL
+
+# Configure log level using imported env var
+logger.remove()  # Remove default handler
+logger.add(sys.stderr, level=CRAWLER_LOG_LEVEL)
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -23,7 +28,7 @@ from mwmbl.tokenizer import tokenize
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
-print("Data path", data_path)
+logger.info(f"Data path: {data_path}")
 data_path.mkdir(exist_ok=True, parents=True)
 
 django.setup()
@@ -33,10 +38,6 @@ from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
-
-logger = logging.getLogger(__name__)
-FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
-logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 API_KEY = os.environ["MWMBL_API_KEY"]
 BATCH_QUEUE_KEY = "batch-queue"

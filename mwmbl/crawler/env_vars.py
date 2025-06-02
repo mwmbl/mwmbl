@@ -28,3 +28,6 @@ CRAWL_DELAY_SECONDS = float(os.environ.get("CRAWL_DELAY_SECONDS", "0.0"))
 
 # Redis configuration
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+# Logging configuration
+CRAWLER_LOG_LEVEL = os.environ.get("CRAWLER_LOG_LEVEL", "INFO").upper()

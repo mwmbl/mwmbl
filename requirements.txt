@@ -14,3 +14,4 @@ mmh3~=3.1.0
 numpy~=1.26.0
 scipy~=1.11.3
 pybloomfilter3~=0.5.7
+loguru~=0.7.3

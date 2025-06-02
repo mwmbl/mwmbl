@@ -5,11 +5,11 @@ Database storing info on URLs
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from logging import getLogger
 from pathlib import Path
 from typing import Optional
 
 from django.conf import settings
+from loguru import logger
 from psycopg2.extras import execute_values
 from pybloomfilter import BloomFilter
 
@@ -21,9 +21,6 @@ from mwmbl.crawler.env_vars import (
     MAX_OTHER_DOMAINS,
 )
 from mwmbl.utils import batch
-
-
-logger = getLogger(__name__)
 
 
 class URLStatus(Enum):
