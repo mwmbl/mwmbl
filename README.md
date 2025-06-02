@@ -48,7 +48,7 @@ Crawling
 Crawling is distributed across the community, while indexing is
 centralised on the main server.
 
-If you have spare computer power and bandwidth, the best way you can help is
+If you have spare computer power and bandwidth, for now the best way you can help is
 by running our [command line
 crawler](https://github.com/mwmbl/crawler-script) with as many threads
 as you can spare.
