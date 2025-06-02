@@ -243,11 +243,46 @@ def run_indexing():
                 ]
                 results = Results(api_key=MWMBL_API_KEY, results=result_items)
                 logger.info(f"Posting {len(result_items)} results")
-                response = requests.post(
-                    "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
-                )
-                logger.info(f"Response: {response.text}")
-                response.raise_for_status()
+                
+                # Retry logic for handling transient server errors (like 504)
+                max_retries = 5
+                base_delay = 1.0
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        response = requests.post(
+                            "https://mwmbl.org/api/v1/crawler/results", 
+                            json=results.dict(),
+                            timeout=30  # Add timeout to prevent hanging
+                        )
+                        logger.info(f"Response: {response.text}")
+                        response.raise_for_status()
+                        break  # Success, exit retry loop
+                        
+                    except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
+                        is_last_attempt = attempt == max_retries
+                        
+                        # Check if this is a retryable error
+                        should_retry = False
+                        if hasattr(e, 'response') and e.response is not None:
+                            # Retry on 5xx server errors (including 504)
+                            should_retry = 500 <= e.response.status_code < 600
+                        else:
+                            # Retry on connection errors, timeouts, etc.
+                            should_retry = True
+                        
+                        if should_retry and not is_last_attempt:
+                            delay = base_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(
+                                f"Request failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            time.sleep(delay)
+                        else:
+                            # Either not retryable or last attempt failed
+                            if is_last_attempt:
+                                logger.error(f"All {max_retries + 1} attempts failed. Last error: {e}")
+                            raise
 
             new_remote_items = remote_index.retrieve(term, refresh=True)
             # Check how many of our items were indexed
