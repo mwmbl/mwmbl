@@ -8,7 +8,6 @@ from typing import TypeVar, Generic, Callable, List, Optional
 
 import mmh3
 from lmdb_dict import SafeLmdbDict
-from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 VERSION = 1
 PAGE_SIZE = 4096
@@ -165,21 +164,18 @@ class TinyIndex(Generic[T]):
         return key_hash % self.num_pages
 
     def get_page(self, i) -> list[T]:
-        """Get the page at index i from LMDB, decompress and deserialise it using JSON"""
+        """Get the page at index i from LMDB and deserialise it"""
         page_key = f"page_{i}"
         if page_key not in self.lmdb_dict:
             return []
         
-        page_data = self.lmdb_dict[page_key]
-        decompressor = ZstdDecompressor()
+        # SafeLmdbDict automatically handles decompression and deserialization
         try:
-            decompressed_data = decompressor.decompress(page_data)
-        except ZstdError as e:
-            logger.exception(f"Error decompressing page {i}: {e}")
+            results = self.lmdb_dict[page_key]
+            return [self.item_factory(*item) for item in results]
+        except Exception as e:
+            logger.exception(f"Error retrieving page {i}: {e}")
             return []
-        
-        results = json.loads(decompressed_data.decode('utf8'))
-        return [self.item_factory(*item) for item in results]
 
     def store_in_page(self, page_index: int, values: list[T]):
         if self.mode != 'w':
@@ -188,11 +184,8 @@ class TinyIndex(Generic[T]):
         value_tuples = [value.as_tuple() for value in values]
         page_key = f"page_{page_index}"
         
-        # Compress the data (keeping compression for efficiency)
-        compressor = ZstdCompressor()
-        compressed_data = compressor.compress(json.dumps(value_tuples).encode('utf8'))
-        
-        self.lmdb_dict[page_key] = compressed_data
+        # SafeLmdbDict automatically handles compression and serialization
+        self.lmdb_dict[page_key] = value_tuples
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
