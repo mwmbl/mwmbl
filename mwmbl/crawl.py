@@ -14,7 +14,7 @@ from redis import Redis
 
 CRAWLER_VERSION: str = "0.2.0"
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS, CRAWLER_LOG_LEVEL
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_THREADS, CRAWL_DELAY_SECONDS, CRAWLER_LOG_LEVEL, MWMBL_API_KEY
 
 # Configure log level using imported env var
 logger.remove()  # Remove default handler
@@ -39,7 +39,7 @@ from mwmbl.crawler.retrieve import crawl_batch, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
-API_KEY = os.environ["MWMBL_API_KEY"]
+API_KEY = MWMBL_API_KEY
 BATCH_QUEUE_KEY = "batch-queue"
 
 

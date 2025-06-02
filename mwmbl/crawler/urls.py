@@ -13,14 +13,15 @@ from loguru import logger
 from psycopg2.extras import execute_values
 from pybloomfilter import BloomFilter
 
-from mwmbl.crawler.env_vars import (
-    REASSIGN_MIN_HOURS,
-    BATCH_SIZE,
-    MAX_URLS_PER_TOP_DOMAIN,
-    MAX_TOP_DOMAINS,
-    MAX_OTHER_DOMAINS,
-)
 from mwmbl.utils import batch
+
+# URL database configuration constants
+# Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
+REASSIGN_MIN_HOURS = 5
+BATCH_SIZE = 100
+MAX_URLS_PER_TOP_DOMAIN = 100
+MAX_TOP_DOMAINS = 500
+MAX_OTHER_DOMAINS = 50000
 
 
 class URLStatus(Enum):

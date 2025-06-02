@@ -13,13 +13,13 @@ from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
-from mwmbl.crawler.env_vars import (
-    TIMEOUT_SECONDS,
-    MAX_FETCH_SIZE,
-    MAX_NEW_LINKS,
-    MAX_EXTRA_LINKS,
-    MAX_SITE_URLS,
-)
+
+# Retrieval configuration constants
+TIMEOUT_SECONDS = 3
+MAX_FETCH_SIZE = 1024 * 1024
+MAX_NEW_LINKS = 50
+MAX_EXTRA_LINKS = 50
+MAX_SITE_URLS = 100
 
 ALLOWED_EXCEPTIONS = (
     ValueError,
