@@ -212,7 +212,9 @@ def run_indexing():
                                        score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
                 results = Results(api_key=API_KEY, results=result_items)
                 logger.info(f"Posting {len(result_items)} results")
-                response = requests.post("https://mwmbl.org/api/v1/crawler/results", json=results.dict())
+                response = requests.post(
+                    "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
+                )
                 logger.info(f"Response: {response.text}")
                 response.raise_for_status()
 
