@@ -40,11 +40,25 @@ API_KEY = MWMBL_API_KEY
 BATCH_QUEUE_KEY = "batch-queue"
 
 
-redis = Redis.from_url(REDIS_URL, decode_responses=True)
+redis = Redis.from_url(
+    REDIS_URL,
+    decode_responses=True,
+    health_check_interval=30,
+)
+
+def check_redis():
+    try:
+        redis.ping()
+        logger.debug("Redis ping successful")
+    except ConnectionError as e:
+        raise SystemExit(f"Cannot reach Redis at {REDIS_URL}. Make sure your Redis server is running.")
+check_redis()
+
 url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
+    check_redis()
     workers: int = CRAWLER_WORKERS
     assert workers > 0, f"Invalid value for CRAWLER_WORKERS: {workers}"
 
@@ -102,6 +116,7 @@ def run():
 
 def process_batch_continuously():
     while True:
+        check_redis()
         try:
             process_batch()
         except Exception as err:
@@ -153,6 +168,7 @@ def process_batch():
 
 def run_indexing_continuously():
     while True:
+        check_redis()
         try:
             run_indexing()
         except Exception as err:
