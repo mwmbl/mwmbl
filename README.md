@@ -15,12 +15,10 @@ Bing.
 
 We have our own index powered by our community. Our index is currently
 much smaller than those of commercial search engines, with around 500
-million unique URLs ([more stats](https://mwmbl.org/stats/)). The
+million unique URLs and 2.5 million results in the index (as of mid 2025 - [more stats](https://mwmbl.org/stats/)). The
 quality is a long way's off from matching the commercial engines at the moment, but
-you can help change that by joining us! We aim to have 1 billion
-unique URLs indexed by the end of 2024, 10 billion by the end of 2025
-and 100 billion by the end of 2026 by which point we should be
-comparable with the commercial search engines.
+you can help change that by joining us! We aim to have 1 billion unique URLs indexed by the end of 2025
+and more than 10 billion by the end of 2026.
 
 
 Community
@@ -93,6 +91,7 @@ years. Here's a very incomplete list of some that have interested me:
  - [Brave](https://search.brave.com/)
  - [DuckDuckGo](https://duckduckgo.com/)
  - [Kagi](https://kagi.com/)
+ - [Mojeek](https://www.mojeek.com/)
 
 Of these, YaCy is the closest in spirit to the idea of a non-profit
 search engine. The index is distributed across a peer-to-peer
