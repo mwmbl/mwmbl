@@ -108,7 +108,10 @@ class TinyIndex(Generic[T]):
         
         # Load metadata to get num_pages and page_size for compatibility
         try:
-            temp_dict = SafeLmdbDict(index_path, map_size=2147483648)  # 2GB map size
+            temp_dict = SafeLmdbDict(index_path, map_size=536870912000)  # 500GB map size
+            # To quote from lmdb documentation:
+            # https://lmdb.readthedocs.io/en/release/#lmdb.Environment
+            # On 64-bit there is no penalty for making this huge (say 1TB). Must be <2GB on 32-bit.
             if "__metadata__" not in temp_dict:
                 # Index exists but has no metadata - likely uninitialized
                 # Create default metadata for an empty index
