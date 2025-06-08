@@ -76,6 +76,9 @@ class DomainSubmission(models.Model):
         permissions = [
             ("change_domain_submission_status", "Can change the domain submission status"),
         ]
+        indexes = [
+            models.Index(fields=['submitted_on']),
+        ]
 
     DOMAIN_SUBMISSION_STATUS = {
         "PENDING": "The domain submission is awaiting review",
