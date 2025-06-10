@@ -1,12 +1,12 @@
 import re
 import time
-from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
 from urllib.parse import urlparse, urlunsplit, urljoin
 from urllib.robotparser import RobotFileParser
 
 import requests
+from loguru import logger
 from mwmbl.justext import core, utils
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
@@ -14,26 +14,35 @@ from urllib3.exceptions import NewConnectionError, MaxRetryError
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
-ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
-                      OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
-
-POST_BATCH_URL = '/api/v1/crawler/batches/'
-POST_NEW_BATCH_URL = '/api/v1/crawler/batches/new'
-
+# Retrieval configuration constants
 TIMEOUT_SECONDS = 3
-MAX_FETCH_SIZE = 1024*1024
-MAX_URL_LENGTH = 150
-BAD_URL_REGEX = re.compile(r'\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$')
+MAX_FETCH_SIZE = 1024 * 1024
 MAX_NEW_LINKS = 50
 MAX_EXTRA_LINKS = 50
-NUM_TITLE_CHARS = 65
-NUM_EXTRACT_CHARS = 155
-DEFAULT_ENCODING = 'utf8'
-DEFAULT_ENC_ERRORS = 'replace'
 MAX_SITE_URLS = 100
 
+ALLOWED_EXCEPTIONS = (
+    ValueError,
+    ConnectionError,
+    ReadTimeout,
+    TimeoutError,
+    OSError,
+    NewConnectionError,
+    MaxRetryError,
+    SSLCertVerificationError,
+)
 
-logger = getLogger(__name__)
+POST_BATCH_URL = "/api/v1/crawler/batches/"
+POST_NEW_BATCH_URL = "/api/v1/crawler/batches/new"
+
+MAX_URL_LENGTH = 150
+BAD_URL_REGEX = re.compile(
+    r"\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$"
+)
+NUM_TITLE_CHARS = 65
+NUM_EXTRACT_CHARS = 155
+DEFAULT_ENCODING = "utf8"
+DEFAULT_ENC_ERRORS = "replace"
 
 
 def fetch(url):
@@ -51,7 +60,7 @@ def fetch(url):
     content = b""
     for chunk in r.iter_content(1024):
         if time.time() - start > TIMEOUT_SECONDS:
-            raise ValueError('Timeout reached')
+            raise ValueError("Timeout reached")
 
         content += chunk
 
@@ -70,11 +79,13 @@ def robots_allowed(url):
         logger.info(f"Unable to parse URL: {url}")
         return False
 
-    if parsed_url.path.rstrip('/') == '' and parsed_url.query == '':
+    if parsed_url.path.rstrip("/") == "" and parsed_url.query == "":
         logger.debug(f"Allowing root domain for URL: {url}")
         return True
 
-    robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, 'robots.txt', '', ''))
+    robots_url = urlunsplit(
+        (parsed_url.scheme, parsed_url.netloc, "robots.txt", "", "")
+    )
 
     parse_robots = RobotFileParser(robots_url)
 
@@ -89,7 +100,7 @@ def robots_allowed(url):
         return True
 
     decoded = None
-    for encoding in ['utf-8', 'iso-8859-1']:
+    for encoding in ["utf-8", "iso-8859-1"]:
         try:
             decoded = content.decode(encoding).splitlines()
             break
@@ -99,9 +110,9 @@ def robots_allowed(url):
     if decoded is None:
         logger.info(f"Unable to decode robots file {robots_url}")
         return True
-    
+
     parse_robots.parse(decoded)
-    allowed = parse_robots.can_fetch('Mwmbl', url)
+    allowed = parse_robots.can_fetch("Mwmbl", url)
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
@@ -126,7 +137,7 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
                     else:
                         link = urljoin(current_url, link)
 
-                if link.startswith('http') and len(link) <= MAX_URL_LENGTH:
+                if link.startswith("http") and len(link) <= MAX_URL_LENGTH:
                     if BAD_URL_REGEX.search(link):
                         logger.debug(f"Found bad URL: {link}")
                         continue
@@ -135,32 +146,46 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
                     except ValueError:
                         logger.info(f"Unable to parse link {link}")
                         continue
-                    url_without_hash = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.query, ''))
-                    if paragraph.class_type == 'good':
+                    url_without_hash = urlunsplit(
+                        (
+                            parsed_url.scheme,
+                            parsed_url.netloc,
+                            parsed_url.path,
+                            parsed_url.query,
+                            "",
+                        )
+                    )
+                    if paragraph.class_type == "good":
                         if len(new_links) < MAX_NEW_LINKS:
                             new_links.add(url_without_hash)
                     else:
-                        if len(extra_links) < MAX_EXTRA_LINKS and url_without_hash not in new_links:
+                        if (
+                            len(extra_links) < MAX_EXTRA_LINKS
+                            and url_without_hash not in new_links
+                        ):
                             extra_links.add(url_without_hash)
-                if len(new_links) >= MAX_NEW_LINKS and len(extra_links) >= MAX_EXTRA_LINKS:
+                if (
+                    len(new_links) >= MAX_NEW_LINKS
+                    and len(extra_links) >= MAX_EXTRA_LINKS
+                ):
                     return new_links, extra_links
     return new_links, extra_links
 
 
 def crawl_url(url):
-    logger.info(f"Crawling URL {url}")
+    logger.info(url)
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url)
     if not allowed:
         return {
-            'url': url,
-            'status': None,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'RobotsDenied',
-                'message': 'Robots do not allow this URL',
-            }
+            "url": url,
+            "status": None,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "RobotsDenied",
+                "message": "Robots do not allow this URL",
+            },
         }
 
     try:
@@ -168,26 +193,26 @@ def crawl_url(url):
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Exception crawling URl {url}: {e}")
         return {
-            'url': url,
-            'status': None,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'AbortError',
-                'message': str(e),
-            }
+            "url": url,
+            "status": None,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "AbortError",
+                "message": str(e),
+            },
         }
 
     if len(content) == 0:
         return {
-            'url': url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'NoResponseText',
-                'message': 'No response found',
-            }
+            "url": url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "NoResponseText",
+                "message": "No response found",
+            },
         }
 
     try:
@@ -195,16 +220,16 @@ def crawl_url(url):
     except Exception as e:
         logger.exception(f"Error parsing dom: {url}")
         return {
-            'url': url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': e.__class__.__name__,
-                'message': str(e),
-            }
+            "url": url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": e.__class__.__name__,
+                "message": str(e),
+            },
         }
-        
+
     title_element = dom.xpath("//title")
     title = ""
     if len(title_element) > 0:
@@ -213,47 +238,47 @@ def crawl_url(url):
             title = title_text.strip()
 
     if len(title) > NUM_TITLE_CHARS:
-        title = title[:NUM_TITLE_CHARS - 1] + '…'
+        title = title[: NUM_TITLE_CHARS - 1] + "…"
 
     try:
         paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
     except Exception as e:
         logger.exception("Error parsing paragraphs")
         return {
-            'url': url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': e.__class__.__name__,
-                'message': str(e),
-            }
+            "url": url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": e.__class__.__name__,
+                "message": str(e),
+            },
         }
 
     new_links, extra_links = get_new_links(paragraphs, url)
     logger.debug(f"Got new links {new_links}")
     logger.debug(f"Got extra links {extra_links}")
 
-    extract = ''
+    extract = ""
     for paragraph in paragraphs:
-        if paragraph.class_type != 'good':
+        if paragraph.class_type != "good":
             continue
-        extract += ' ' + paragraph.text.strip()
+        extract += " " + paragraph.text.strip()
         if len(extract) > NUM_EXTRACT_CHARS:
-            extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
+            extract = extract[: NUM_EXTRACT_CHARS - 1] + "…"
             break
 
     return {
-      'url': url,
-      'status': status_code,
-      'timestamp': js_timestamp,
-      'content': {
-        'title': title,
-        'extract': extract,
-        'links': sorted(new_links),
-        'extra_links': sorted(extra_links),
-      },
-      'error': None
+        "url": url,
+        "status": status_code,
+        "timestamp": js_timestamp,
+        "content": {
+            "title": title,
+            "extract": extract,
+            "links": sorted(new_links),
+            "extra_links": sorted(extra_links),
+        },
+        "error": None,
     }
 
 
@@ -261,6 +286,3 @@ def crawl_batch(batch, num_threads):
     with ThreadPool(num_threads) as pool:
         result = pool.map(crawl_url, batch)
     return result
-
-
-

@@ -58,6 +58,7 @@ class HashedBatch(Schema):
     user_id_hash: str
     timestamp: float
     items: list[Item]
+    crawler_version: Optional[str] = None
 
 
 class Result(Schema):
