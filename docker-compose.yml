@@ -9,15 +9,12 @@ services:
     depends_on:
       - redis
     environment:
-      # Add your API key here:
-      # - MWMBL_API_KEY=
-
-      # Set number of parallel processes (defaults to 10)
-      - CRAWLER_WORKERS=10
-
+      - MWMBL_API_KEY=${MWMBL_API_KEY}
+      - CRAWLER_WORKERS=2
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
-
+    volumes:
+      - crawler_data:/root/.mwmbl
     deploy:
       restart_policy:
         condition: on-failure
@@ -33,6 +30,7 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+
 volumes:
   redis_data:
-
+  crawler_data:
