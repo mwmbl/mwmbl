@@ -33,7 +33,7 @@ NUM_EXTRACT_CHARS = 155
 DEFAULT_ENCODING = 'utf8'
 DEFAULT_ENC_ERRORS = 'replace'
 MAX_SITE_URLS = 100
-HEADERS = {"User-Agent": f"mwmbl/{VERSION} (https://mwmbl.org)"}
+HEADERS = {"User-Agent": f"Mozilla/5.0 (compatible; mwmbl/{VERSION}; +https://mwmbl.org)"}
 
 logger = getLogger(__name__)
 
