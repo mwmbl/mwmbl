@@ -327,7 +327,7 @@ class TinyIndex(Generic[T]):
                     temp_index_path = os.path.join(temp_dir, "temp_index")
 
                     # Create new LMDB index
-                    temp_env = lmdb.open(temp_index_path, map_size=1024**4)
+                    temp_env = lmdb.open(str(temp_index_path), map_size=1024**4)
 
                     # Prepare metadata for new format
                     metadata_padded = _pad_to_page_size(metadata.to_bytes(), METADATA_SIZE)
