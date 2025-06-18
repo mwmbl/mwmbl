@@ -1,5 +1,5 @@
 /data
-/redis_data
+*_data
 .idea
 *~
 
