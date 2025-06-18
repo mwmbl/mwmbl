@@ -11,7 +11,7 @@ The crawler can be configured using the following environment variables:
 - `MWMBL_CONTACT_INFO` - **Required** Contact information for website administrators (email or website URL). This is included in the user-agent string so website administrators can contact you if there are issues with the crawler. Example: `contact@yourdomain.com` or `https://your-mwmbl-instance.com`
 
 ### Worker Configuration
-- `CRAWLER_WORKERS` (default: 10) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
+- `CRAWLER_WORKERS` (default: 2) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
 - `CRAWL_THREADS` (default: 20) - Number of threads per worker process for concurrent URL crawling (total threads = CRAWLER_WORKERS × CRAWL_THREADS)
 
 **Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 10 crawler processes × 20 threads = 200 total crawling threads, plus 1 indexing process.

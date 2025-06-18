@@ -16,7 +16,7 @@ services:
       - MWMBL_CONTACT_INFO=CHANGE_ME@example.com
 
       # Set value of ./mwmbl/crawler/env_vars.py
-      - CRAWLER_WORKERS=10
+      - CRAWLER_WORKERS=2
       - CRAWLER_THREADS=20
       - CRAWL_DELAY_SECONDS=0.0
 

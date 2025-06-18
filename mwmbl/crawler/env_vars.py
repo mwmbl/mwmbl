@@ -6,7 +6,7 @@ import os
 
 
 # Crawler worker configuration
-CRAWLER_WORKERS = int(os.environ.get("CRAWLER_WORKERS", "10"))
+CRAWLER_WORKERS = int(os.environ.get("CRAWLER_WORKERS", "2"))
 CRAWL_THREADS = int(os.environ.get("CRAWL_THREADS", "20"))
 
 # Rate limiting configuration
