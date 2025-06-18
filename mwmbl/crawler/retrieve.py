@@ -36,6 +36,7 @@ MAX_SITE_URLS = 100
 CRAWLER_VERSION: str = "0.2.0"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
+
 logger = getLogger(__name__)
 
 
