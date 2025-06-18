@@ -889,6 +889,48 @@ files = [
 rapidfuzz = ">=1.8.2,<1.9"
 
 [[package]]
+name = "lmdb"
+version = "1.6.2"
+description = "Universal Python binding for the LMDB 'Lightning' Database"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "lmdb-1.6.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:18422de2b4e70fc91b6d845a83f5b7355f85ea1c02f8180be0ab42c15191bead"},
+    {file = "lmdb-1.6.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:167328892282950cbb5a358fa6c05b60ffa00b2f40fb240e2e676359720256ac"},
+    {file = "lmdb-1.6.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9d3efbbded74b9d213059a5a4048fb5bb47b5b7c4c2b366e43685cb6dd9d3100"},
+    {file = "lmdb-1.6.2-cp310-cp310-win_amd64.whl", hash = "sha256:13d4fdab8ac9ea90c317d2a5711feb9977e675b4ce50cf4706860d3617ade996"},
+    {file = "lmdb-1.6.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:c42b3eae0437edb95dda96e582816766a9964436f844cc9c8ddb5d4219a63ff8"},
+    {file = "lmdb-1.6.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e365a09be1926dbc3ed2d4eacd9ab6125cb1f211c37e417917c26494dea24b64"},
+    {file = "lmdb-1.6.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eae318f72cac81363f5218f529016c2fde6fcf7acc0d1cde55c18e2952cbf34a"},
+    {file = "lmdb-1.6.2-cp311-cp311-win_amd64.whl", hash = "sha256:40f7824888a8821adc4028cf70bd031395463aaf832d4c0460f5dab8ca0e0c7a"},
+    {file = "lmdb-1.6.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:5dc6885b764aaccd2ecb6b244dc3ecbcce8b65d6f7e5b36fb39a603359909650"},
+    {file = "lmdb-1.6.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:de252e4a7895a0f1f8422b30c7f5b432612145538cf09e073b57f68fc5a88977"},
+    {file = "lmdb-1.6.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4c45d63a49a17ab2caa5ec0d1da35bc81c5c85fa38dfb6ab7eacf817242334a7"},
+    {file = "lmdb-1.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:129379009c65e67187208eff75cdad74f4ae6f840521498f3e2da407ce5aaf66"},
+    {file = "lmdb-1.6.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:3be24aa18f160958b90605fe5882b66998f9fa3d97221478d49782bd8f88392a"},
+    {file = "lmdb-1.6.2-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:32154f561d5cdbe833798401a752868bb1a9c056d8de1e8faf92e62ca8f22999"},
+    {file = "lmdb-1.6.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:45c772f24089a7ff1ebd8c59c6dc7f2da0c7b8b704b5e83ee9687c44c764554b"},
+    {file = "lmdb-1.6.2-cp313-cp313-win_amd64.whl", hash = "sha256:d9676fcba2cd388f24a5d15055e4a6de351e1df9febf5b176c93cd39cc80585e"},
+    {file = "lmdb-1.6.2-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b530f1bb092e85d344989bbf9d6555a5057f49ad97a95436af2e710b3ca824ed"},
+    {file = "lmdb-1.6.2-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:de6918cd36e1c10868b6a50e6a799238cb049e3db876c2d18a4dc7d32f516f4e"},
+    {file = "lmdb-1.6.2-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e79c2dfe94f02e29424e9acb51de654ca992064b8379b0c1432d6639af5c40c2"},
+    {file = "lmdb-1.6.2-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f07b91f2b2e5d120fca11b6b1e1aeeea41d25f9785df48308bc6daeedc75974"},
+    {file = "lmdb-1.6.2-cp37-cp37m-win_amd64.whl", hash = "sha256:a65f78ebfd8b1d0d444e6ca904a2041edc2154d795ef0285dfbd2398d92d3564"},
+    {file = "lmdb-1.6.2-cp38-cp38-macosx_11_0_universal2.whl", hash = "sha256:fe6ffea8c003b5766115429b8d2da17d6b3e05f644f6c535148a66c68ee3defb"},
+    {file = "lmdb-1.6.2-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0651d4287fbb022556361842073049193767662c0896d9976cb46977471fc247"},
+    {file = "lmdb-1.6.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cf7cc99172dfa5acb766bdb1802f6c3f8467e85d0f7f9055211a604c884d758c"},
+    {file = "lmdb-1.6.2-cp38-cp38-win_amd64.whl", hash = "sha256:27d659daf93f555f518e6c3aa9c39028035ed5f387a197e54f87986130861695"},
+    {file = "lmdb-1.6.2-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:9ae8e082cf587d06a8aef2753c959003eca3963be778e0d29762d3520e61ecd2"},
+    {file = "lmdb-1.6.2-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0ab9f270988fbca983b8381882cd271951cc5b2e4eb8bfac87caea828339c2ec"},
+    {file = "lmdb-1.6.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b13d0028ac8993c967b158b78b66cc170353635cdcc823f42adf93d0114bce48"},
+    {file = "lmdb-1.6.2-cp39-cp39-win_amd64.whl", hash = "sha256:3c2cdfa34a2d0d5a465eeeabd6f4db219118fe1e71b50965b172e0803dafd236"},
+    {file = "lmdb-1.6.2-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:b2730b7be6667beb77b26dcc5e5668bfb16673715ca173af82c49be1783ae218"},
+    {file = "lmdb-1.6.2-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:d1d1d2eef0f898b7f6b37b8c72d57c6ce67b56dc4a854ee64ddbbdd3cc07a7fb"},
+    {file = "lmdb-1.6.2.tar.gz", hash = "sha256:d28e3fa59935ff688858760ec52f202ecb8c1089a3f68d1f162ea3078d151e73"},
+]
+
+[[package]]
 name = "lxml"
 version = "5.3.0"
 description = "Powerful and Pythonic XML processing library combining libxml2/libxslt with the ElementTree API."
@@ -2529,4 +2571,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
-content-hash = "5298a46e92e4a53c9607d0b868d3619d748536d959e7174174e0ac2d12f9d8f0"
+content-hash = "92935238ba9f902b1d10bc29ad3e6ab141d274c1a0afcb7ef439d41bb83fb92b"

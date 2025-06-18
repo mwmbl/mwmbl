@@ -1,12 +1,15 @@
 import json
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
-from mmap import mmap, PROT_READ, PROT_WRITE
+from mmap import mmap, PROT_READ
 from typing import TypeVar, Generic, Callable, List, Optional
 
+import lmdb
 import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
@@ -169,10 +172,30 @@ class TinyIndex(Generic[T]):
         if mode not in {'r', 'w'}:
             raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
 
-        with open(index_path, 'rb') as index_file:
-            metadata_page = index_file.read(METADATA_SIZE)
+        # Initialize LMDB environment with 1TB map size
+        readonly = mode == "r"
 
-        metadata_bytes = metadata_page.rstrip(b'\x00')
+        # Check if index_path points to a file (old mmap format) vs directory (LMDB format)
+        lmdb_path = str(index_path)
+        if os.path.isfile(str(index_path)):
+            # Old mmap format detected - check for converted LMDB directory
+            lmdb_path = str(index_path) + ".lmdb"
+            if not os.path.exists(lmdb_path):
+                logger.info(f"Converting old mmap format index at '{index_path}' to LMDB format")
+                self._convert_mmap_to_lmdb(str(index_path), item_factory, lmdb_path)
+            else:
+                logger.info(f"Using existing LMDB index at '{lmdb_path}'")
+
+        self.env = lmdb.open(lmdb_path, readonly=readonly, map_size=1024**4)
+
+        # Read metadata from LMDB
+        with self.env.begin() as txn:
+            metadata_bytes = txn.get(b'metadata')
+            if metadata_bytes is None:
+                raise ValueError("No metadata found in index")
+
+        # Remove padding before parsing metadata
+        metadata_bytes = metadata_bytes.rstrip(b"\x00")
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
             raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
@@ -185,18 +208,20 @@ class TinyIndex(Generic[T]):
         self.num_pages = metadata.num_pages
         self.page_size = metadata.page_size
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
-        self.index_file = None
-        self.mmap = None
+        self.txn = None
 
     def __enter__(self):
-        self.index_file = open(self.index_path, 'r+b')
-        prot = PROT_READ if self.mode == 'r' else PROT_READ | PROT_WRITE
-        self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
+        # Begin transaction - readonly for read mode, write for write mode
+        self.txn = self.env.begin(write=(self.mode == 'w'))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.mmap.close()
-        self.index_file.close()
+        if self.txn:
+            if exc_type is None and self.mode == 'w':
+                self.txn.commit()
+            else:
+                self.txn.abort()
+        self.env.close()
 
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
@@ -216,7 +241,16 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
+        page_key = f'page_{i}'.encode('utf-8')
+        page_data = self.txn.get(page_key)
+        if page_data is None:
+            return []
+
+        # Remove padding if present
+        page_data = page_data.rstrip(b'\x00')
+        if not page_data:
+            return []
+
         decompressor = ZstdDecompressor()
         try:
             decompressed_data = decompressor.decompress(page_data)
@@ -239,23 +273,82 @@ class TinyIndex(Generic[T]):
 
         page_data = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        page_key = f'page_{i}'.encode('utf-8')
+        self.txn.put(page_key, page_data)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
-        if os.path.isfile(index_path):
-            raise FileExistsError(f"Index file '{index_path}' already exists")
+        if os.path.exists(index_path):
+            raise FileExistsError(f"Index directory '{index_path}' already exists")
 
-        metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
+        # Create LMDB environment with 1TB map size
+        env = lmdb.open(str(index_path), map_size=1024**4)
+
+        metadata = TinyIndexMetadata(
+            VERSION, page_size, num_pages, item_factory.__name__
+        )
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
         page_bytes = _get_page_data(page_size, [])
 
-        with open(index_path, 'wb') as index_file:
-            index_file.write(metadata_padded)
+        with env.begin(write=True) as txn:
+            # Store metadata
+            txn.put(b'metadata', metadata_padded)
+            # Initialize empty pages
             for i in range(num_pages):
-                index_file.write(page_bytes)
+                page_key = f'page_{i}'.encode('utf-8')
+                txn.put(page_key, page_bytes)
 
+        env.close()
         return TinyIndex(item_factory, index_path=index_path)
 
+
+    def _convert_mmap_to_lmdb(self, old_index_path: str, item_factory: Callable[..., T], lmdb_path: str):
+        """
+        Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
+        """
+        # Read old format metadata and data
+        with open(old_index_path, 'rb') as index_file:
+            # Read and parse metadata
+            metadata_page = index_file.read(METADATA_SIZE)
+            metadata_bytes = metadata_page.rstrip(b'\x00')
+            metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
+
+            # Verify item factory matches
+            if metadata.item_factory != item_factory.__name__:
+                raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the old index "
+                               f"does not match the passed item factory: '{item_factory.__name__}'")
+
+            # Read all page data using mmap for efficiency
+            with mmap(index_file.fileno(), 0, prot=PROT_READ) as old_mmap:
+                # Create temporary directory for new LMDB index
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_index_path = os.path.join(temp_dir, "temp_index")
+
+                    # Create new LMDB index
+                    temp_env = lmdb.open(temp_index_path, map_size=1024**4)
+
+                    # Prepare metadata for new format
+                    metadata_padded = _pad_to_page_size(metadata.to_bytes(), METADATA_SIZE)
+
+                    with temp_env.begin(write=True) as txn:
+                        # Store metadata
+                        txn.put(b"metadata", metadata_padded)
+
+                        # Convert each page
+                        for i in range(metadata.num_pages):
+                            # Read page from old format
+                            start_offset = i * metadata.page_size + METADATA_SIZE
+                            end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
+                            page_data = old_mmap[start_offset:end_offset]
+
+                            # Store page in new format with same compression/padding
+                            page_key = f"page_{i}".encode("utf-8")
+                            txn.put(page_key, page_data)
+
+                    temp_env.close()
+
+                    # Move new LMDB directory to target location (next to original file)
+                    shutil.move(temp_index_path, lmdb_path)
+                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'")
