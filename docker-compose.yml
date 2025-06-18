@@ -22,6 +22,8 @@ services:
 
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
+    volumes:
+      - crawler_data:/root/.mwmbl
 
     deploy:
       restart_policy:
@@ -40,4 +42,4 @@ services:
       - redis_data:/data
 volumes:
   redis_data:
-
+  crawler_data:
