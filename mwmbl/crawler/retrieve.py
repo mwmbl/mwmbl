@@ -11,11 +11,11 @@ from mwmbl.justext import core, utils
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 
+from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
 
-VERSION = "2.0"
 ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
 
@@ -33,7 +33,9 @@ NUM_EXTRACT_CHARS = 155
 DEFAULT_ENCODING = 'utf8'
 DEFAULT_ENC_ERRORS = 'replace'
 MAX_SITE_URLS = 100
-HEADERS = {"User-Agent": f"Mozilla/5.0 (compatible; mwmbl/{VERSION}; +https://mwmbl.org)"}
+CRAWLER_VERSION: str = "0.2.0"
+USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
+
 
 logger = getLogger(__name__)
 
@@ -45,7 +47,7 @@ def fetch(url):
     https://stackoverflow.com/a/22347526
     """
 
-    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers=HEADERS)
+    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
 
     size = 0
     start = time.time()
@@ -150,7 +152,7 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
 
 
 def crawl_url(url):
-    logger.info(f"Crawling URL {url}")
+    logger.info(url)
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url)
     if not allowed:

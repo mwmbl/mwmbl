@@ -10,10 +10,12 @@ from uuid import uuid4
 import boto3
 import requests
 from django.conf import settings
-from ninja import NinjaAPI, Schema
+from ninja import NinjaAPI, Schema, HTTPException
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
+from mwmbl.crawler.env_vars import REDIS_URL
+from mwmbl.crawl import CRAWLER_VERSION
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -35,7 +37,7 @@ from mwmbl.settings import (
     DATE_REGEX)
 from mwmbl.tinysearchengine.indexer import Document
 
-stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
+stats_manager = StatsManager(Redis.from_url(REDIS_URL, decode_responses=True))
 
 
 def get_bucket(name):
@@ -85,7 +87,12 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         # Using an approach from https://stackoverflow.com/a/30476450
         now = datetime.now(timezone.utc)
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
-        hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
+        hashed_batch = HashedBatch(
+            user_id_hash=user_id_hash, 
+            timestamp=epoch_time, 
+            items=batch.items,
+            crawler_version=CRAWLER_VERSION
+        )
 
         stats_manager.record_batch(hashed_batch)
 
