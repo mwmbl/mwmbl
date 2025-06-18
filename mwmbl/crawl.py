@@ -29,7 +29,7 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 django.setup()
 
 from mwmbl.indexer.update_urls import record_urls_in_database
-from mwmbl.crawler.retrieve import crawl_batch, crawl_url
+from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
@@ -38,7 +38,6 @@ FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
-CRAWLER_VERSION: str = "0.2.0"
 
 
 redis = Redis.from_url(
