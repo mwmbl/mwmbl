@@ -15,6 +15,8 @@ from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 from mwmbl.crawler.env_vars import TIMEOUT_SECONDS, MAX_FETCH_SIZE, MAX_NEW_LINKS, MAX_EXTRA_LINKS, MAX_SITE_URLS
 
+
+VERSION = "2.0"
 ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
 
@@ -27,7 +29,8 @@ NUM_TITLE_CHARS = 65
 NUM_EXTRACT_CHARS = 155
 DEFAULT_ENCODING = 'utf8'
 DEFAULT_ENC_ERRORS = 'replace'
-
+MAX_SITE_URLS = 100
+HEADERS = {"User-Agent": f"mwmbl/{VERSION} (https://mwmbl.org)"}
 
 logger = getLogger(__name__)
 
@@ -39,7 +42,7 @@ def fetch(url):
     https://stackoverflow.com/a/22347526
     """
 
-    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS)
+    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers=HEADERS)
 
     size = 0
     start = time.time()
