@@ -12,8 +12,10 @@ services:
       # Add your API key here:
       # - MWMBL_API_KEY=
 
-      # Set number of parallel processes (defaults to 10)
+      # Set value of ./mwmbl/crawler/env_vars.py
       - CRAWLER_WORKERS=10
+      - CRAWLER_THREADS=20
+      - CRAWL_DELAY_SECONDS=0.0
 
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
