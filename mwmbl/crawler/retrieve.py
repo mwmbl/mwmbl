@@ -11,6 +11,7 @@ from mwmbl.justext import core, utils
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 
+from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
@@ -33,7 +34,7 @@ DEFAULT_ENCODING = 'utf8'
 DEFAULT_ENC_ERRORS = 'replace'
 MAX_SITE_URLS = 100
 CRAWLER_VERSION: str = "0.2.0"
-USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://mwmbl.org)"
+USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
 logger = getLogger(__name__)
 

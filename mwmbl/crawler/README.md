@@ -8,6 +8,7 @@ The crawler can be configured using the following environment variables:
 
 ### Required Configuration
 - `MWMBL_API_KEY` - **Required** API key for submitting results to the Mwmbl search index
+- `MWMBL_CONTACT_INFO` - **Required** Contact information for website administrators (email or website URL). This is included in the user-agent string so website administrators can contact you if there are issues with the crawler. Example: `contact@yourdomain.com` or `https://your-mwmbl-instance.com`
 
 ### Worker Configuration
 - `CRAWLER_WORKERS` (default: 10) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
