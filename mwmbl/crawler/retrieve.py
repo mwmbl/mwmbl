@@ -13,7 +13,6 @@ from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
-from mwmbl.crawler.env_vars import TIMEOUT_SECONDS, MAX_FETCH_SIZE, MAX_NEW_LINKS, MAX_EXTRA_LINKS, MAX_SITE_URLS
 
 
 VERSION = "2.0"
@@ -23,8 +22,12 @@ ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
 POST_BATCH_URL = '/api/v1/crawler/batches/'
 POST_NEW_BATCH_URL = '/api/v1/crawler/batches/new'
 
+TIMEOUT_SECONDS = 3
+MAX_FETCH_SIZE = 1024*1024
 MAX_URL_LENGTH = 150
 BAD_URL_REGEX = re.compile(r'\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$')
+MAX_NEW_LINKS = 50
+MAX_EXTRA_LINKS = 50
 NUM_TITLE_CHARS = 65
 NUM_EXTRACT_CHARS = 155
 DEFAULT_ENCODING = 'utf8'
