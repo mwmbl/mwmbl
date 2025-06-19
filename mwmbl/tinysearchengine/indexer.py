@@ -151,8 +151,7 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 
-def _get_page_data(page_size: int, items: list[T]):
-    compressor = ZstdCompressor()
+def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
@@ -212,6 +211,10 @@ class TinyIndex(Generic[T]):
         self.page_size = metadata.page_size
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         self.txn = None
+        
+        # Reuse compressor/decompressor instances to avoid repeated creation overhead
+        self.compressor = ZstdCompressor()
+        self.decompressor = ZstdDecompressor()
 
     def __enter__(self):
         # Begin transaction - readonly for read mode, write for write mode
@@ -251,9 +254,8 @@ class TinyIndex(Generic[T]):
         if not page_data:
             return []
 
-        decompressor = ZstdDecompressor()
         try:
-            decompressed_data = decompressor.decompress(page_data)
+            decompressed_data = self.decompressor.decompress(page_data)
         except ZstdError as e:
             logger.exception(f"Error decompressing page {i}: {e}")
             return []
@@ -271,7 +273,7 @@ class TinyIndex(Generic[T]):
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.page_size, data)
+        page_data = _get_page_data(self.compressor, self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         self.txn.put(str(i), page_data)
 
@@ -289,7 +291,9 @@ class TinyIndex(Generic[T]):
         )
         metadata_bytes = metadata.to_bytes()
 
-        page_bytes = _get_page_data(page_size, [])
+        # Create temporary compressor for index creation 
+        temp_compressor = ZstdCompressor()
+        page_bytes = _get_page_data(temp_compressor, page_size, [])
 
         with env.begin(write=True) as txn:
             # Store metadata
