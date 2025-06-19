@@ -116,11 +116,13 @@ class TinyIndexMetadata:
         return TinyIndexMetadata(**values)
 
 
-# Find the optimal amount of data that fits onto a page
-# We do this by leveraging binary search to quickly find the index where:
-#     - index+1 cannot fit onto a page
-#     - <=index can fit on a page
 def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items:list[T], lo:int, hi:int):
+    """
+    Find the optimal amount of data that fits onto a page
+    We do this by leveraging binary search to quickly find the index where:
+        - index+1 cannot fit onto a page
+        - <=index can fit on a page
+    """
     # Base case: our binary search has gone too far
     if lo > hi:
         return -1, None
@@ -145,7 +147,7 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
 
 
 def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
-    # Find max number of items that fit on a page
+    "Find max number of items that fit on a page"
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 
@@ -275,6 +277,7 @@ class TinyIndex(Generic[T]):
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
+        "Create an empty LMDB index"
         if os.path.exists(index_path):
             raise FileExistsError(f"Index directory '{index_path}' already exists")
 
