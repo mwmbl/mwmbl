@@ -241,7 +241,7 @@ class TinyIndex(Generic[T]):
 
     def _get_page_tuples(self, i):
         with self.env.begin() as txn:
-            page_data = txn.get(str(i))
+            page_data = txn.get(str(i).encode())
             if page_data is None:
                 return []
 
@@ -271,7 +271,7 @@ class TinyIndex(Generic[T]):
         logger.debug(f"Got page data of length {len(page_data)}")
         
         with self.env.begin(write=True) as txn:
-            txn.put(str(i), page_data)
+            txn.put(str(i).encode(), page_data)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
@@ -293,10 +293,10 @@ class TinyIndex(Generic[T]):
 
         with env.begin(write=True) as txn:
             # Store metadata
-            txn.put('metadata', metadata_bytes)
+            txn.put(b'metadata', metadata_bytes)
             # Initialize empty pages
             for i in range(num_pages):
-                txn.put(str(i), page_bytes)
+                txn.put(str(i).encode(), page_bytes)
 
         env.close()
         return TinyIndex(item_factory, index_path=index_path)
@@ -337,7 +337,7 @@ class TinyIndex(Generic[T]):
 
                     # Store metadata first
                     with temp_env.begin(write=True) as txn:
-                        txn.put("metadata", metadata.to_bytes())
+                        txn.put(b"metadata", metadata.to_bytes())
 
                     # Process pages in batches to limit memory usage and transaction duration
                     batch_size = 100  # Process 100 pages at a time for shorter transactions
@@ -353,11 +353,11 @@ class TinyIndex(Generic[T]):
                                 # Read page from old format
                                 start_offset = i * metadata.page_size + METADATA_SIZE
                                 end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
-                                page_data = old_mmap[start_offset:end_offset]
+                                page_data = old_mmap[start_offset:end_offset].rstrip(b'\x00')
 
                                 # Perform read test to detect corruption
                                 is_corrupted = False
-                                if page_data and not page_data.startswith(b'\x00'):  # Skip empty pages
+                                if page_data:  # Skip empty pages
                                     try:
                                         # Try to decompress the page data
                                         decompressed_data = test_decompressor.decompress(page_data)
@@ -370,7 +370,7 @@ class TinyIndex(Generic[T]):
 
                                 # Only store non-corrupted pages
                                 if not is_corrupted:
-                                    txn.put(str(i), page_data)
+                                    txn.put(str(i).encode(), page_data)
                                 
                                 # Clear reference to page_data to help garbage collection
                                 del page_data
