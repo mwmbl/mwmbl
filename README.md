@@ -49,7 +49,8 @@ centralised on the main server.
 If you have spare computer power and bandwidth, for now the best way you can help is
 by running our [command line
 crawler](https://github.com/mwmbl/crawler-script) with as many threads
-as you can spare. A new crawler is in the works in `docker-compose.yml`.
+as you can spare.
+Some documentation about the new crawler can be found in its [README.md](./mwmbl/crawler/README.md).
 
 If you have Firefox you can help out by [installing our
 extension](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/). This

@@ -1,20 +1,34 @@
 import json
+import logging
 import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
-from mmap import mmap, PROT_READ, PROT_WRITE
-from typing import TypeVar, Generic, Callable, List, Optional
+from mmap import mmap, PROT_READ
+from typing import TypeVar, Generic, Callable, List, Optional, Union
 
+import lmdb
 import mmh3
+import orjson
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
-VERSION = 1
-METADATA_CONSTANT = b'mwmbl-tiny-search'
+VERSION = 2
+METADATA_CONSTANT = b"mwmbl-tiny-search"
 METADATA_SIZE = 4096
 
 PAGE_SIZE = 4096
+
+# Default compression level for zstandard compression
+# Higher values = better compression but slower performance
+# Range: 1-22, where 3 is zstd default, 1 is fastest, 22 is best compression.
+# According to mwmbl benchmark, using level 8 with orjson is as fast as using level 3 (=default) with json (the original implementation) so we get better compression for the same duration. Setting it to 3 with orjson is twice as fast as with json.
+# Benchmark here: https://github.com/mwmbl/mwmbl/issues/252#issuecomment-2987532698
+DEFAULT_COMPRESSION_LEVEL = 8
 
 
 logger = getLogger(__name__)
@@ -24,6 +38,7 @@ class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
     """
+
     SYNCED_WITH_MAIN_INDEX = -2
     DELETED = -1
     FROM_USER = 2
@@ -48,19 +63,19 @@ class Document:
     state: Optional[int] = None
 
     def __init__(
-            self,
-            title: str,
-            url: str,
-            extract: str,
-            score: Optional[float] = None,
-            term: Optional[str] = None,
-            state: Optional[int | DocumentState] = None
+        self,
+        title: str,
+        url: str,
+        extract: str,
+        score: Optional[float] = None,
+        term: Optional[str] = None,
+        state: Optional[int | DocumentState] = None,
     ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
-        self.title = title if title is not None else ''
+        self.title = title if title is not None else ""
         self.url = url
-        self.extract = extract if extract is not None else ''
+        self.extract = extract if extract is not None else ""
         self.score = score
         self.term = term
         self.state = None if state is None else DocumentState(state)
@@ -83,7 +98,7 @@ class TokenizedDocument(Document):
     tokens: List[str] = field(default_factory=list)
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class PageError(Exception):
@@ -98,8 +113,7 @@ class TinyIndexMetadata:
     item_factory: str
 
     def to_bytes(self) -> bytes:
-        metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode('utf8')
-        assert len(metadata_bytes) <= METADATA_SIZE
+        metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode("utf8")
         return metadata_bytes
 
     @staticmethod
@@ -109,74 +123,76 @@ class TinyIndexMetadata:
         if metadata_constant != METADATA_CONSTANT:
             raise ValueError("This doesn't seem to be an index file")
 
-        values = json.loads(data[constant_length:].decode('utf8'))
+        values = json.loads(data[constant_length:].decode("utf8"))
         return TinyIndexMetadata(**values)
 
 
-# Find the optimal amount of data that fits onto a page
-# We do this by leveraging binary search to quickly find the index where:
-#     - index+1 cannot fit onto a page
-#     - <=index can fit on a page
-def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items:list[T], lo:int, hi:int):
-    # Base case: our binary search has gone too far
-    if lo > hi:
-        return -1, None
-    # Check the midpoint to see if it will fit onto a page
-    mid = (lo+hi)//2
-    compressed_data = compressor.compress(json.dumps(items[:mid]).encode('utf8'))
-    size = len(compressed_data)
-    if size > page_size:
-        # We cannot fit this much data into a page
-        # Reduce the hi boundary, and try again
-        return _binary_search_fitting_size(compressor, page_size, items, lo, mid-1)
-    else:
-        # We can fit this data into a page, but maybe we can fit more data
-        # Try to see if we have a better match
-        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid+1, hi)
-        if potential_target != -1:
-            # We found a larger index that can still fit onto a page, so use that
-            return potential_target, potential_data
-        else:
-            # No better match, use our index
-            return mid, compressed_data
-
-
-def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
-    # Find max number of items that fit on a page
-    return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
-
-
-def _get_page_data(page_size: int, items: list[T]):
-    compressor = ZstdCompressor()
-    num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
-
-    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
-    assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
-    return _pad_to_page_size(compressed_data, page_size)
-
-
-def _pad_to_page_size(data: bytes, page_size: int):
-    page_length = len(data)
-    if page_length > page_size:
-        raise PageError(f"Data is too big ({page_length}) for page size ({page_size})")
-    padding = b'\x00' * (page_size - page_length)
-    page_data = data + padding
-    return page_data
+def _compress_data(items: list[T]) -> bytes:
+    """
+    Compress a list of items directly without page size constraints.
+    LMDB handles variable-length data efficiently, so no padding or trimming needed.
+    """
+    compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
+    # Convert items to tuples if they have as_tuple method, otherwise use them directly
+    serializable_items = [
+        item.as_tuple() if hasattr(item, "as_tuple") else item for item in items
+    ]
+    return compressor.compress(orjson.dumps(serializable_items))
 
 
 class TinyIndex(Generic[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path, mode='r'):
-        if mode not in {'r', 'w'}:
+    def __init__(
+        self,
+        item_factory: Callable[..., T],
+        index_path: Union[str, Path],
+        mode: str = "r",
+    ):
+        if mode not in {"r", "w"}:
             raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
 
-        with open(index_path, 'rb') as index_file:
-            metadata_page = index_file.read(METADATA_SIZE)
+        # Initialize LMDB environment with 1TB map size
+        readonly = mode == "r"
 
-        metadata_bytes = metadata_page.rstrip(b'\x00')
+        index_path = Path(index_path)
+        assert not index_path.name.endswith(".lmdb"), (
+            "Unexpected index_path ending with .lmdb, it should not be the case at this point in the code"
+        )
+        lmdb_path = index_path.with_suffix(".lmdb")
+
+        # Check if index_path points to a file (old mmap format) vs directory (LMDB format)
+        if lmdb_path.is_dir():
+            logger.info(f"Using existing LMDB index at '{lmdb_path}'")
+        elif index_path.is_file():
+            # Old mmap format detected - check for converted LMDB directory
+            logger.warning(
+                f"Converting old mmap format index at '{index_path}' to LMDB format"
+            )
+            self._convert_mmap_to_lmdb(index_path, item_factory, lmdb_path)
+        else:
+            raise ValueError(
+                f"Expected directory for the LMDB index at location '{lmdb_path}'"
+            )
+
+        # Read metadata from LMDB to validate the index
+        env = lmdb.open(str(lmdb_path), readonly=readonly, map_size=1024**4)
+        try:
+            with env.begin() as txn:
+                metadata_bytes = txn.get(b"metadata")
+                if metadata_bytes is None:
+                    raise ValueError("No metadata found in index")
+        finally:
+            env.close()
+
+        # Store path and readonly flag for opening fresh environments
+        self.lmdb_path = lmdb_path
+        self.readonly = readonly
+
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
-            raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
-                             f"does not match the passed item factory: '{item_factory.__name__}'")
+            raise ValueError(
+                f"Metadata item factory '{metadata.item_factory}' in the index "
+                f"does not match the passed item factory: '{item_factory.__name__}'"
+            )
 
         self.item_factory = item_factory
         self.index_path = index_path
@@ -184,19 +200,20 @@ class TinyIndex(Generic[T]):
 
         self.num_pages = metadata.num_pages
         self.page_size = metadata.page_size
-        logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
-        self.index_file = None
-        self.mmap = None
+        logger.info(
+            f"Loaded index with {self.num_pages} pages and {self.page_size} page size"
+        )
+
+        # Reuse compressor/decompressor instances to avoid repeated creation overhead
+        self.compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
+        self.decompressor = ZstdDecompressor()
 
     def __enter__(self):
-        self.index_file = open(self.index_path, 'r+b')
-        prot = PROT_READ if self.mode == 'r' else PROT_READ | PROT_WRITE
-        self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.mmap.close()
-        self.index_file.close()
+        # No persistent environment to close
+        pass
 
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
@@ -216,14 +233,25 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
-        decompressor = ZstdDecompressor()
+        # Open fresh LMDB environment for each operation to avoid sharing issues
+        env = lmdb.open(str(self.lmdb_path), readonly=self.readonly, map_size=1024**4)
         try:
-            decompressed_data = decompressor.decompress(page_data)
-        except ZstdError as e:
-            logger.exception(f"Error decompressing page {i}: {e}")
-            return []
-        return json.loads(decompressed_data.decode('utf8'))
+            with env.begin() as txn:
+                page_data = txn.get(str(i).encode())
+                if page_data is None:
+                    return []
+
+                if not page_data:
+                    return []
+
+                try:
+                    decompressed_data = self.decompressor.decompress(page_data)
+                except ZstdError as e:
+                    logger.exception(f"Error decompressing page {i}: {e}")
+                    return []
+                return orjson.loads(decompressed_data)
+        finally:
+            env.close()
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [value.as_tuple() for value in values]
@@ -231,31 +259,260 @@ class TinyIndex(Generic[T]):
 
     def _write_page(self, data, i: int):
         """
-        Serialise the data using JSON, compress it and store it at index i.
-        If the data is too big, it will store the first items in the list and discard the rest.
+        Serialize the data using orjson, compress it and store it at index i.
+        LMDB handles variable-length data efficiently, so no trimming or padding needed.
         """
-        if self.mode != 'w':
-            raise UnsupportedOperation("The file is open in read mode, you cannot write")
+        if self.mode != "w":
+            raise UnsupportedOperation(
+                "The file is open in read mode, you cannot write"
+            )
 
-        page_data = _get_page_data(self.page_size, data)
-        logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        compressed_data = _compress_data(data)
+        logger.debug(f"Got compressed data of length {len(compressed_data)}")
+
+        # Open fresh LMDB environment for each write operation to avoid sharing issues
+        env = lmdb.open(str(self.lmdb_path), readonly=self.readonly, map_size=1024**4)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(str(i).encode(), compressed_data)
+        finally:
+            env.close()
 
     @staticmethod
-    def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
-        if os.path.isfile(index_path):
-            raise FileExistsError(f"Index file '{index_path}' already exists")
+    def create(
+        item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int
+    ):
+        "Create an empty LMDB index"
+        # Convert to Path and get the LMDB path that __init__ expects
+        index_path = Path(index_path)
+        lmdb_path = index_path.with_suffix(".lmdb")
 
-        metadata = TinyIndexMetadata(VERSION, page_size, num_pages, item_factory.__name__)
+        if lmdb_path.exists():
+            raise FileExistsError(f"Index directory '{lmdb_path}' already exists")
+
+        # Create LMDB environment with 1TB map size
+        env = lmdb.open(str(lmdb_path), map_size=1024**4)
+
+        metadata = TinyIndexMetadata(
+            version=VERSION,
+            page_size=page_size,
+            num_pages=num_pages,
+            item_factory=item_factory.__name__,
+        )
         metadata_bytes = metadata.to_bytes()
-        metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
-        page_bytes = _get_page_data(page_size, [])
+        # Create compressed empty data for initializing pages
+        # LMDB handles variable-length data efficiently, so no padding needed
+        empty_compressed_data = _compress_data([])
 
-        with open(index_path, 'wb') as index_file:
-            index_file.write(metadata_padded)
+        with env.begin(write=True) as txn:
+            # Store metadata
+            txn.put(b"metadata", metadata_bytes)
+            # Initialize empty pages
             for i in range(num_pages):
-                index_file.write(page_bytes)
+                txn.put(str(i).encode(), empty_compressed_data)
 
+        env.close()
         return TinyIndex(item_factory, index_path=index_path)
 
+    def _convert_mmap_to_lmdb(
+        self, old_index_path: Path, item_factory: Callable[..., T], lmdb_path: Path
+    ):
+        """
+        Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
+        Process pages in batches to avoid excessive memory usage.
+        Performs read tests on each page to detect corruption.
+        Converts serialization format from JSON (old) to orjson (new).
+        """
+        # Get size of original mmap file
+        mmap_size = old_index_path.stat().st_size
+
+        # Create decompressor for read testing pages and compressor for new format
+        test_decompressor = ZstdDecompressor()
+        conversion_compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
+        corrupted_pages = 0
+
+        # Read old format metadata and data
+        with old_index_path.open("rb") as index_file:
+            # Read and parse metadata
+            metadata_bytes = index_file.read(METADATA_SIZE).rstrip(b"\x00")
+            metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
+
+            # Verify item factory matches
+            if metadata.item_factory != item_factory.__name__:
+                raise ValueError(
+                    f"Metadata item factory '{metadata.item_factory}' in the old index "
+                    f"does not match the passed item factory: '{item_factory.__name__}'"
+                )
+
+            # Read all page data using mmap for efficiency
+            with mmap(index_file.fileno(), 0, prot=PROT_READ) as old_mmap:
+                # Create temporary directory for new LMDB index
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_index_path = os.path.join(temp_dir, "temp_index")
+
+                    # Create new LMDB index
+                    temp_env = lmdb.open(str(temp_index_path), map_size=1024**4)
+
+                    # Store metadata first
+                    with temp_env.begin(write=True) as txn:
+                        txn.put(b"metadata", metadata.to_bytes())
+
+                    # Process pages in batches to limit memory usage and transaction duration
+                    batch_size = (
+                        100  # Process 100 pages at a time for shorter transactions
+                    )
+
+                    # Show initial progress
+                    logger.info(
+                        f"Converting index: 0/{metadata.num_pages} pages (0.0%)"
+                    )
+                    last_reported_pct = 0
+
+                    for batch_start in range(0, metadata.num_pages, batch_size):
+                        batch_end = min(batch_start + batch_size, metadata.num_pages)
+
+                        with temp_env.begin(write=True) as txn:
+                            for i in range(batch_start, batch_end):
+                                # Read page from old format
+                                start_offset = i * metadata.page_size + METADATA_SIZE
+                                end_offset = (
+                                    i + 1
+                                ) * metadata.page_size + METADATA_SIZE
+                                page_data = old_mmap[start_offset:end_offset].rstrip(
+                                    b"\x00"
+                                )
+
+                                # Perform read test and convert JSON->orjson for non-corrupted pages
+                                is_corrupted = False
+                                converted_page_data = None
+
+                                if page_data:  # Skip empty pages
+                                    try:
+                                        # Try to decompress the page data (old format)
+                                        decompressed_data = (
+                                            test_decompressor.decompress(page_data)
+                                        )
+                                        # Try to parse as JSON (old format) - decode UTF-8 first
+                                        json_data = json.loads(
+                                            decompressed_data.decode("utf8")
+                                        )
+
+                                        # Convert to new orjson format - LMDB handles variable length efficiently
+                                        converted_page_data = (
+                                            conversion_compressor.compress(
+                                                orjson.dumps(json_data)
+                                            )
+                                        )
+
+                                    except ZstdError as e:
+                                        logger.warning(
+                                            f"Corrupted page {i} detected and skipped: on decompress: {e}"
+                                        )
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+                                    except json.JSONDecodeError as e:
+                                        logger.warning(
+                                            f"Corrupted page {i} detected and skipped: on JSON parsing: {e}"
+                                        )
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Corrupted page {i} detected and skipped: unknown: {e}"
+                                        )
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+
+                                # Only store non-corrupted pages with converted format
+                                if not is_corrupted and converted_page_data is not None:
+                                    # Store compressed data directly without padding - LMDB handles variable length efficiently
+                                    txn.put(str(i).encode(), converted_page_data)
+
+                                # Clear reference to page_data to help garbage collection
+                                del page_data
+
+                        # Update progress - only log every 5% or at completion
+                        progress_pct = (batch_end * 100.0) / metadata.num_pages
+                        current_pct_milestone = int(progress_pct // 5) * 5
+
+                        if (
+                            current_pct_milestone > last_reported_pct
+                            or batch_end == metadata.num_pages
+                        ):
+                            logger.info(
+                                f"Converting index: {batch_end}/{metadata.num_pages} pages ({progress_pct:.1f}%)"
+                            )
+                            last_reported_pct = current_pct_milestone
+
+                    temp_env.close()
+
+                    # Move new LMDB directory to target location (next to original file)
+                    shutil.move(temp_index_path, lmdb_path)
+
+                    # Show completion
+                    logger.info(
+                        f"Converting index: {metadata.num_pages}/{metadata.num_pages} pages (100.0%) - Complete!"
+                    )
+
+                    # Get size of new LMDB directory
+                    lmdb_size = sum(
+                        f.stat().st_size for f in lmdb_path.rglob("*") if f.is_file()
+                    )
+
+                    # Format file sizes for display
+                    def format_size(size_bytes):
+                        """Format size in bytes to human readable format"""
+                        for unit in ["B", "KB", "MB", "GB", "TB"]:
+                            if size_bytes < 1024.0:
+                                return f"{size_bytes:.1f} {unit}"
+                            size_bytes /= 1024.0
+                        return f"{size_bytes:.1f} PB"
+
+                    logger.info(
+                        f"Successfully converted index to LMDB format at '{lmdb_path}'. "
+                        f"Original mmap file preserved at '{old_index_path}'. "
+                        f"Pages converted: {metadata.num_pages - corrupted_pages}/{metadata.num_pages}. "
+                        f"Corrupted pages skipped: {corrupted_pages}. "
+                        f"Original size: {format_size(mmap_size)}, "
+                        f"LMDB size: {format_size(lmdb_size)}."
+                    )
+
+
+if __name__ == "__main__":
+    # Configure logging to show INFO level messages when run as CLI
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    if len(sys.argv) != 2:
+        print("Usage: python indexer.py <index_path>")
+        sys.exit(1)
+
+    index_path = sys.argv[1]
+
+    try:
+        # Try to load the index using Document as the item factory
+        with TinyIndex(Document, index_path, mode="r") as index:
+            print(f"Successfully loaded index from: {index_path}")
+            print(f"Number of pages: {index.num_pages}")
+            print(f"Page size: {index.page_size} bytes")
+            print(f"Item factory: {index.item_factory.__name__}")
+
+            ans = input("Press enter to continue with testing")
+            # Try to load the pages to verify they're readable
+            print(f"\nTesting {index.num_pages} pages:")
+
+            for i in range(index.num_pages):
+                try:
+                    page_data = index.get_page(i)
+                    print(f"  Page {i}: {len(page_data)} items")
+                except Exception as e:
+                    print(f"  Page {i}: ERROR - {e}")
+
+            print("\nIndex appears to be working correctly!")
+
+    except Exception as e:
+        print(f"Error loading index from '{index_path}': {e}")
+        raise

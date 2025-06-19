@@ -9,14 +9,21 @@ services:
     depends_on:
       - redis
     environment:
-      # Add your API key here:
-      # - MWMBL_API_KEY=
+      # REQUIRED: API key
+      - MWMBL_API_KEY=${MWMBL_API_KEY}
 
-      # Set number of parallel processes (defaults to 10)
-      - CRAWLER_WORKERS=10
+      # REQUIRED: Contact info for website administrators
+      - MWMBL_CONTACT_INFO=CHANGE_ME@example.com
+
+      # Set value of ./mwmbl/crawler/env_vars.py
+      - CRAWLER_WORKERS=2
+      - CRAWLER_THREADS=20
+      - CRAWL_DELAY_SECONDS=0.0
 
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
+    volumes:
+      - crawler_data:/root/.mwmbl
 
     deploy:
       restart_policy:
@@ -35,4 +42,4 @@ services:
       - redis_data:/data
 volumes:
   redis_data:
-
+  crawler_data:
