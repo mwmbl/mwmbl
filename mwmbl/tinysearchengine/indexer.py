@@ -345,6 +345,7 @@ class TinyIndex(Generic[T]):
                     
                     # Show initial progress
                     logger.info(f"Converting index: 0/{metadata.num_pages} pages (0.0%)")
+                    last_reported_pct = 0
                     
                     for batch_start in range(0, metadata.num_pages, batch_size):
                         batch_end = min(batch_start + batch_size, metadata.num_pages)
@@ -376,13 +377,13 @@ class TinyIndex(Generic[T]):
                                 # Clear reference to page_data to help garbage collection
                                 del page_data
 
-                        # Update progress
+                        # Update progress - only log every 5% or at completion
                         progress_pct = (batch_end * 100.0) / metadata.num_pages
-                        logger.info(f"Converting index: {batch_end}/{metadata.num_pages} pages ({progress_pct:.1f}%)")
+                        current_pct_milestone = int(progress_pct // 5) * 5
                         
-                        # Log progress for large conversions
-                        if batch_end % 10000 == 0 or batch_end == metadata.num_pages:
-                            logger.info(f"Converted {batch_end}/{metadata.num_pages} pages")
+                        if current_pct_milestone > last_reported_pct or batch_end == metadata.num_pages:
+                            logger.info(f"Converting index: {batch_end}/{metadata.num_pages} pages ({progress_pct:.1f}%)")
+                            last_reported_pct = current_pct_milestone
 
                     temp_env.close()
 
