@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 import sys
@@ -191,11 +192,11 @@ class TinyIndex(Generic[T]):
         else:
             raise ValueError(f"Expected directory for the LMDB index at location '{lmdb_path}'")
 
-        self.env = lmdb.open(lmdb_path, readonly=readonly, map_size=1024**4)  # map size set to 1TB, does not hurt performance according to the LMDB team
+        self.env = lmdb.open(str(lmdb_path), readonly=readonly, map_size=1024**4)  # map size set to 1TB, does not hurt performance according to the LMDB team
 
         # Read metadata from LMDB
         with self.env.begin() as txn:
-            metadata_bytes = txn.get('metadata')
+            metadata_bytes = txn.get(b'metadata')
             if metadata_bytes is None:
                 raise ValueError("No metadata found in index")
 
@@ -412,6 +413,12 @@ class TinyIndex(Generic[T]):
 
 
 if __name__ == '__main__':
+    # Configure logging to show INFO level messages when run as CLI
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     if len(sys.argv) != 2:
         print("Usage: python indexer.py <index_path>")
         sys.exit(1)
