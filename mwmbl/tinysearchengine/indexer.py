@@ -376,8 +376,8 @@ class TinyIndex(Generic[T]):
                                         # Try to parse as JSON (old format) - decode UTF-8 first
                                         json_data = json.loads(decompressed_data.decode('utf8'))
                                         
-                                        # Convert to new orjson format and ensure it fits the page size
-                                        converted_page_data = _get_page_data(conversion_compressor, metadata.page_size, json_data)
+                                        # Convert to new orjson format without padding (LMDB handles variable length efficiently)
+                                        converted_page_data = conversion_compressor.compress(orjson.dumps(json_data))
                                         
                                     except (ZstdError) as e:
                                         logger.warning(f"Corrupted page {i} detected and skipped: on decompress: {e}")
@@ -394,7 +394,7 @@ class TinyIndex(Generic[T]):
 
                                 # Only store non-corrupted pages with converted format
                                 if not is_corrupted and converted_page_data is not None:
-                                    # The data is already padded by _get_page_data
+                                    # Store compressed data directly without padding - LMDB handles variable length efficiently
                                     txn.put(str(i).encode(), converted_page_data)
                                 
                                 # Clear reference to page_data to help garbage collection
