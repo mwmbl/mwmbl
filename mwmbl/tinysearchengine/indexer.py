@@ -14,6 +14,7 @@ from typing import TypeVar, Generic, Callable, List, Optional, Union
 
 import lmdb
 import mmh3
+import msgpack
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 VERSION = 2
@@ -135,7 +136,7 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
         return -1, None
     # Check the midpoint to see if it will fit onto a page
     mid = (lo+hi)//2
-    compressed_data = compressor.compress(json.dumps(items[:mid]).encode('utf8'))
+    compressed_data = compressor.compress(msgpack.packb(items[:mid]))
     size = len(compressed_data)
     if size > page_size:
         # We cannot fit this much data into a page
@@ -161,7 +162,7 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
 def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
-    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
+    compressed_data = compressor.compress(msgpack.packb(items[:num_fitting]))
     assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
@@ -259,7 +260,7 @@ class TinyIndex(Generic[T]):
             except ZstdError as e:
                 logger.exception(f"Error decompressing page {i}: {e}")
                 return []
-            return json.loads(decompressed_data.decode('utf8'))
+            return msgpack.unpackb(decompressed_data)
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [value.as_tuple() for value in values]
@@ -313,12 +314,14 @@ class TinyIndex(Generic[T]):
         Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
         Process pages in batches to avoid excessive memory usage.
         Performs read tests on each page to detect corruption.
+        Converts serialization format from JSON (old) to msgpack (new).
         """
         # Get size of original mmap file
         mmap_size = old_index_path.stat().st_size
         
-        # Create decompressor for read testing pages
+        # Create decompressor for read testing pages and compressor for new format
         test_decompressor = ZstdDecompressor()
+        conversion_compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
         corrupted_pages = 0
         
         # Read old format metadata and data
@@ -362,30 +365,39 @@ class TinyIndex(Generic[T]):
                                 end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
                                 page_data = old_mmap[start_offset:end_offset].rstrip(b'\x00')
 
-                                # Perform read test to detect corruption
+                                # Perform read test and convert JSON->msgpack for non-corrupted pages
                                 is_corrupted = False
+                                converted_page_data = None
+                                
                                 if page_data:  # Skip empty pages
                                     try:
-                                        # Try to decompress the page data
+                                        # Try to decompress the page data (old format)
                                         decompressed_data = test_decompressor.decompress(page_data)
-                                        # Try to parse as JSON
-                                        json.loads(decompressed_data.decode('utf8'))
+                                        # Try to parse as JSON (old format)
+                                        json_data = json.loads(decompressed_data)
+                                        
+                                        # Convert to new msgpack format
+                                        msgpack_data = msgpack.packb(json_data)
+                                        converted_page_data = conversion_compressor.compress(msgpack_data)
+                                        
                                     except (ZstdError) as e:
                                         logger.warning(f"Corrupted page {i} detected and skipped: on decompress: {e}")
                                         corrupted_pages += 1
                                         is_corrupted = True
-                                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                                        logger.warning(f"Corrupted page {i} detected and skipped: on parsing: {e}")
+                                    except (json.JSONDecodeError) as e:
+                                        logger.warning(f"Corrupted page {i} detected and skipped: on JSON parsing: {e}")
                                         corrupted_pages += 1
                                         is_corrupted = True
                                     except Exception as e:
-                                        logger.warning(f"Corrupted page {i} detected and skipped: unknown: {e}\nData was: '{page_data}'")
+                                        logger.warning(f"Corrupted page {i} detected and skipped: unknown: {e}")
                                         corrupted_pages += 1
                                         is_corrupted = True
 
-                                # Only store non-corrupted pages
-                                if not is_corrupted:
-                                    txn.put(str(i).encode(), page_data)
+                                # Only store non-corrupted pages with converted format
+                                if not is_corrupted and converted_page_data is not None:
+                                    # Pad the converted data to page size
+                                    padded_data = _pad_to_page_size(converted_page_data, metadata.page_size)
+                                    txn.put(str(i).encode(), padded_data)
                                 
                                 # Clear reference to page_data to help garbage collection
                                 del page_data
