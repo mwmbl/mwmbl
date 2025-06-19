@@ -14,7 +14,7 @@ from typing import TypeVar, Generic, Callable, List, Optional, Union
 
 import lmdb
 import mmh3
-import msgpack
+import orjson
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
 VERSION = 2
@@ -136,7 +136,7 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
         return -1, None
     # Check the midpoint to see if it will fit onto a page
     mid = (lo+hi)//2
-    compressed_data = compressor.compress(msgpack.packb(items[:mid]))
+    compressed_data = compressor.compress(orjson.dumps(items[:mid]))
     size = len(compressed_data)
     if size > page_size:
         # We cannot fit this much data into a page
@@ -162,7 +162,7 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
 def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
-    compressed_data = compressor.compress(msgpack.packb(items[:num_fitting]))
+    compressed_data = compressor.compress(orjson.dumps(items[:num_fitting]))
     assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size)
 
@@ -260,7 +260,7 @@ class TinyIndex(Generic[T]):
             except ZstdError as e:
                 logger.exception(f"Error decompressing page {i}: {e}")
                 return []
-            return msgpack.unpackb(decompressed_data)
+            return orjson.loads(decompressed_data)
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [value.as_tuple() for value in values]
@@ -314,7 +314,7 @@ class TinyIndex(Generic[T]):
         Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
         Process pages in batches to avoid excessive memory usage.
         Performs read tests on each page to detect corruption.
-        Converts serialization format from JSON (old) to msgpack (new).
+        Converts serialization format from JSON (old) to orjson (new).
         """
         # Get size of original mmap file
         mmap_size = old_index_path.stat().st_size
@@ -365,7 +365,7 @@ class TinyIndex(Generic[T]):
                                 end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
                                 page_data = old_mmap[start_offset:end_offset].rstrip(b'\x00')
 
-                                # Perform read test and convert JSON->msgpack for non-corrupted pages
+                                # Perform read test and convert JSON->orjson for non-corrupted pages
                                 is_corrupted = False
                                 converted_page_data = None
                                 
@@ -376,9 +376,9 @@ class TinyIndex(Generic[T]):
                                         # Try to parse as JSON (old format)
                                         json_data = json.loads(decompressed_data)
                                         
-                                        # Convert to new msgpack format
-                                        msgpack_data = msgpack.packb(json_data)
-                                        converted_page_data = conversion_compressor.compress(msgpack_data)
+                                        # Convert to new orjson format
+                                        orjson_data = orjson.dumps(json_data)
+                                        converted_page_data = conversion_compressor.compress(orjson_data)
                                         
                                     except (ZstdError) as e:
                                         logger.warning(f"Corrupted page {i} detected and skipped: on decompress: {e}")
