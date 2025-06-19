@@ -103,7 +103,6 @@ class TinyIndexMetadata:
 
     def to_bytes(self) -> bytes:
         metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode('utf8')
-        assert len(metadata_bytes) <= METADATA_SIZE
         return metadata_bytes
 
     @staticmethod
@@ -199,7 +198,6 @@ class TinyIndex(Generic[T]):
                 raise ValueError("No metadata found in index")
 
         # Remove padding before parsing metadata
-        metadata_bytes = metadata_bytes.rstrip(b"\x00")
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
             raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
@@ -250,7 +248,6 @@ class TinyIndex(Generic[T]):
             return []
 
         # Remove padding if present
-        page_data = page_data.rstrip(b'\x00')
         if not page_data:
             return []
 
@@ -290,13 +287,12 @@ class TinyIndex(Generic[T]):
             version=VERSION, page_size=page_size, num_pages=num_pages, item_factory=item_factory.__name__
         )
         metadata_bytes = metadata.to_bytes()
-        metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
         page_bytes = _get_page_data(page_size, [])
 
         with env.begin(write=True) as txn:
             # Store metadata
-            txn.put(b'metadata', metadata_padded)
+            txn.put(b'metadata', metadata_bytes)
             # Initialize empty pages
             for i in range(num_pages):
                 txn.put(str(i), page_bytes)
@@ -312,8 +308,7 @@ class TinyIndex(Generic[T]):
         # Read old format metadata and data
         with old_index_path.open('rb') as index_file:
             # Read and parse metadata
-            metadata_page = index_file.read(METADATA_SIZE)
-            metadata_bytes = metadata_page.rstrip(b'\x00')
+            metadata_bytes = index_file.read(METADATA_SIZE)
             metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
 
             # Verify item factory matches
@@ -330,12 +325,9 @@ class TinyIndex(Generic[T]):
                     # Create new LMDB index
                     temp_env = lmdb.open(str(temp_index_path), map_size=1024**4)
 
-                    # Prepare metadata for new format
-                    metadata_padded = _pad_to_page_size(metadata.to_bytes(), METADATA_SIZE)
-
                     with temp_env.begin(write=True) as txn:
                         # Store metadata
-                        txn.put(b"metadata", metadata_padded)
+                        txn.put(b"metadata", metadata.to_bytes())
 
                         # Convert each page
                         for i in range(metadata.num_pages):
