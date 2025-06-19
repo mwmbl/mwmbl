@@ -201,13 +201,19 @@ class TinyIndex(Generic[T]):
         else:
             raise ValueError(f"Expected directory for the LMDB index at location '{lmdb_path}'")
 
-        self.env = lmdb.open(str(lmdb_path), readonly=readonly, map_size=1024**4)  # map size set to 1TB, does not hurt performance according to the LMDB team
+        # Read metadata from LMDB to validate the index
+        env = lmdb.open(str(lmdb_path), readonly=readonly, map_size=1024**4)
+        try:
+            with env.begin() as txn:
+                metadata_bytes = txn.get(b'metadata')
+                if metadata_bytes is None:
+                    raise ValueError("No metadata found in index")
+        finally:
+            env.close()
 
-        # Read metadata from LMDB
-        with self.env.begin() as txn:
-            metadata_bytes = txn.get(b'metadata')
-            if metadata_bytes is None:
-                raise ValueError("No metadata found in index")
+        # Store path and readonly flag for opening fresh environments
+        self.lmdb_path = lmdb_path
+        self.readonly = readonly
 
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
@@ -230,7 +236,8 @@ class TinyIndex(Generic[T]):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.env.close()
+        # No persistent environment to close
+        pass
 
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
@@ -250,20 +257,25 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        with self.env.begin() as txn:
-            page_data = txn.get(str(i).encode())
-            if page_data is None:
-                return []
+        # Open fresh LMDB environment for each operation to avoid sharing issues
+        env = lmdb.open(str(self.lmdb_path), readonly=self.readonly, map_size=1024**4)
+        try:
+            with env.begin() as txn:
+                page_data = txn.get(str(i).encode())
+                if page_data is None:
+                    return []
 
-            if not page_data:
-                return []
+                if not page_data:
+                    return []
 
-            try:
-                decompressed_data = self.decompressor.decompress(page_data)
-            except ZstdError as e:
-                logger.exception(f"Error decompressing page {i}: {e}")
-                return []
-            return orjson.loads(decompressed_data)
+                try:
+                    decompressed_data = self.decompressor.decompress(page_data)
+                except ZstdError as e:
+                    logger.exception(f"Error decompressing page {i}: {e}")
+                    return []
+                return orjson.loads(decompressed_data)
+        finally:
+            env.close()
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [value.as_tuple() for value in values]
@@ -280,8 +292,13 @@ class TinyIndex(Generic[T]):
         page_data = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         
-        with self.env.begin(write=True) as txn:
-            txn.put(str(i).encode(), page_data)
+        # Open fresh LMDB environment for each write operation to avoid sharing issues
+        env = lmdb.open(str(self.lmdb_path), readonly=self.readonly, map_size=1024**4)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(str(i).encode(), page_data)
+        finally:
+            env.close()
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
