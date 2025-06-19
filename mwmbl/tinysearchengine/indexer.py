@@ -25,8 +25,10 @@ PAGE_SIZE = 4096
 
 # Default compression level for zstandard compression
 # Higher values = better compression but slower performance
-# Range: 1-22, where 3 is zstd default, 1 is fastest, 22 is best compression
-DEFAULT_COMPRESSION_LEVEL = 3
+# Range: 1-22, where 3 is zstd default, 1 is fastest, 22 is best compression.
+# According to mwmbl benchmark, using level 8 with orjson is as fast as using level 3 (=default) with json (the original implementation) so we get better compression for the same duration. Setting it to 3 with orjson is twice as fast as with json.
+# Benchmark here: https://github.com/mwmbl/mwmbl/issues/252#issuecomment-2987532698
+DEFAULT_COMPRESSION_LEVEL = 8
 
 
 logger = getLogger(__name__)
