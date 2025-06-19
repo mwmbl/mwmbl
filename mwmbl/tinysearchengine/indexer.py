@@ -287,7 +287,7 @@ class TinyIndex(Generic[T]):
         env = lmdb.open(str(index_path), map_size=1024**4)
 
         metadata = TinyIndexMetadata(
-            VERSION, page_size, num_pages, item_factory.__name__
+            version=VERSION, page_size=page_size, num_pages=num_pages, item_factory=item_factory.__name__
         )
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
