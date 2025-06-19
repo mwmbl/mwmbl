@@ -286,11 +286,15 @@ class TinyIndex(Generic[T]):
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
         "Create an empty LMDB index"
-        if os.path.exists(index_path):
-            raise FileExistsError(f"Index directory '{index_path}' already exists")
+        # Convert to Path and get the LMDB path that __init__ expects
+        index_path = Path(index_path)
+        lmdb_path = index_path.with_suffix(".lmdb")
+        
+        if lmdb_path.exists():
+            raise FileExistsError(f"Index directory '{lmdb_path}' already exists")
 
         # Create LMDB environment with 1TB map size
-        env = lmdb.open(str(index_path), map_size=1024**4)
+        env = lmdb.open(str(lmdb_path), map_size=1024**4)
 
         metadata = TinyIndexMetadata(
             version=VERSION, page_size=page_size, num_pages=num_pages, item_factory=item_factory.__name__
