@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
@@ -185,7 +186,7 @@ class TinyIndex(Generic[T]):
             logger.info(f"Using existing LMDB index at '{lmdb_path}'")
         elif index_path.is_file():
             # Old mmap format detected - check for converted LMDB directory
-            logger.info(f"Converting old mmap format index at '{index_path}' to LMDB format")
+            logger.warning(f"Converting old mmap format index at '{index_path}' to LMDB format")
             self._convert_mmap_to_lmdb(index_path, item_factory, lmdb_path)
         else:
             raise ValueError(f"Expected directory for the LMDB index at location '{lmdb_path}'")
@@ -337,6 +338,10 @@ class TinyIndex(Generic[T]):
 
                     # Process pages in batches to limit memory usage
                     batch_size = 1000  # Process 1000 pages at a time to limit transaction size
+                    
+                    # Show initial progress
+                    logger.info(f"Converting index: 0/{metadata.num_pages} pages (0.0%)")
+                    
                     for batch_start in range(0, metadata.num_pages, batch_size):
                         batch_end = min(batch_start + batch_size, metadata.num_pages)
                         
@@ -353,6 +358,10 @@ class TinyIndex(Generic[T]):
                                 # Clear reference to page_data to help garbage collection
                                 del page_data
 
+                        # Update progress
+                        progress_pct = (batch_end * 100.0) / metadata.num_pages
+                        logger.info(f"Converting index: {batch_end}/{metadata.num_pages} pages ({progress_pct:.1f}%)")
+                        
                         # Log progress for large conversions
                         if batch_end % 10000 == 0 or batch_end == metadata.num_pages:
                             logger.info(f"Converted {batch_end}/{metadata.num_pages} pages")
@@ -361,4 +370,8 @@ class TinyIndex(Generic[T]):
 
                     # Move new LMDB directory to target location (next to original file)
                     shutil.move(temp_index_path, lmdb_path)
+                    
+                    # Show completion
+                    logger.info(f"Converting index: {metadata.num_pages}/{metadata.num_pages} pages (100.0%) - Complete!")
+                    
                     logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'. Number of pages converted: {metadata.num_pages}.")
