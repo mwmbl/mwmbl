@@ -373,8 +373,8 @@ class TinyIndex(Generic[T]):
                                     try:
                                         # Try to decompress the page data (old format)
                                         decompressed_data = test_decompressor.decompress(page_data)
-                                        # Try to parse as JSON (old format)
-                                        json_data = json.loads(decompressed_data)
+                                        # Try to parse as JSON (old format) - decode UTF-8 first
+                                        json_data = json.loads(decompressed_data.decode('utf8'))
                                         
                                         # Convert to new orjson format and ensure it fits the page size
                                         converted_page_data = _get_page_data(conversion_compressor, metadata.page_size, json_data)
