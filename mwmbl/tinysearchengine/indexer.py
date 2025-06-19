@@ -409,3 +409,36 @@ class TinyIndex(Generic[T]):
                                f"Corrupted pages skipped: {corrupted_pages}. "
                                f"Original size: {format_size(mmap_size)}, "
                                f"LMDB size: {format_size(lmdb_size)}.")
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print("Usage: python indexer.py <index_path>")
+        sys.exit(1)
+    
+    index_path = sys.argv[1]
+    
+    try:
+        # Try to load the index using Document as the item factory
+        with TinyIndex(Document, index_path, mode='r') as index:
+            print(f"Successfully loaded index from: {index_path}")
+            print(f"Number of pages: {index.num_pages}")
+            print(f"Page size: {index.page_size} bytes")
+            print(f"Item factory: {index.item_factory.__name__}")
+
+            ans = input("Press enter to continue with testing")
+            # Try to load the pages to verify they're readable
+            print(f"\nTesting {index.num_pages} pages:")
+
+            for i in range(index.num_pages):
+                try:
+                    page_data = index.get_page(i)
+                    print(f"  Page {i}: {len(page_data)} items")
+                except Exception as e:
+                    print(f"  Page {i}: ERROR - {e}")
+
+            print("\nIndex appears to be working correctly!")
+
+    except Exception as e:
+        print(f"Error loading index from '{index_path}': {e}")
+        raise
