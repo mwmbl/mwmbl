@@ -309,6 +309,7 @@ class TinyIndex(Generic[T]):
     def _convert_mmap_to_lmdb(self, old_index_path: Path, item_factory: Callable[..., T], lmdb_path: Path):
         """
         Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
+        Process pages in batches to avoid excessive memory usage.
         """
         # Read old format metadata and data
         with old_index_path.open('rb') as index_file:
@@ -330,22 +331,34 @@ class TinyIndex(Generic[T]):
                     # Create new LMDB index
                     temp_env = lmdb.open(str(temp_index_path), map_size=1024**4)
 
+                    # Store metadata first
                     with temp_env.begin(write=True) as txn:
-                        # Store metadata
                         txn.put("metadata", metadata.to_bytes())
 
-                        # Convert each page
-                        for i in range(metadata.num_pages):
-                            # Read page from old format
-                            start_offset = i * metadata.page_size + METADATA_SIZE
-                            end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
-                            page_data = old_mmap[start_offset:end_offset]
+                    # Process pages in batches to limit memory usage
+                    batch_size = 1000  # Process 1000 pages at a time to limit transaction size
+                    for batch_start in range(0, metadata.num_pages, batch_size):
+                        batch_end = min(batch_start + batch_size, metadata.num_pages)
+                        
+                        with temp_env.begin(write=True) as txn:
+                            for i in range(batch_start, batch_end):
+                                # Read page from old format
+                                start_offset = i * metadata.page_size + METADATA_SIZE
+                                end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
+                                page_data = old_mmap[start_offset:end_offset]
 
-                            # Store page in new format with same compression/padding
-                            txn.put(str(i), page_data)
+                                # Store page in new format with same compression/padding
+                                txn.put(str(i), page_data)
+                                
+                                # Clear reference to page_data to help garbage collection
+                                del page_data
+
+                        # Log progress for large conversions
+                        if batch_end % 10000 == 0 or batch_end == metadata.num_pages:
+                            logger.info(f"Converted {batch_end}/{metadata.num_pages} pages")
 
                     temp_env.close()
 
                     # Move new LMDB directory to target location (next to original file)
                     shutil.move(temp_index_path, lmdb_path)
-                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'. Number of page converted: {metadata.num_pages}.")
+                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'. Number of pages converted: {metadata.num_pages}.")
