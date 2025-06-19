@@ -15,7 +15,7 @@ import lmdb
 import mmh3
 from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
 
-VERSION = 1
+VERSION = 2
 METADATA_CONSTANT = b'mwmbl-tiny-search'
 METADATA_SIZE = 4096
 
