@@ -2,12 +2,13 @@ import json
 import os
 import shutil
 import tempfile
+from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
 from mmap import mmap, PROT_READ
-from typing import TypeVar, Generic, Callable, List, Optional
+from typing import TypeVar, Generic, Callable, List, Optional, Union
 
 import lmdb
 import mmh3
@@ -168,25 +169,28 @@ def _pad_to_page_size(data: bytes, page_size: int):
 
 
 class TinyIndex(Generic[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path, mode='r'):
+    def __init__(self, item_factory: Callable[..., T], index_path: Union[str, Path], mode: str = 'r'):
         if mode not in {'r', 'w'}:
             raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
 
         # Initialize LMDB environment with 1TB map size
         readonly = mode == "r"
 
-        # Check if index_path points to a file (old mmap format) vs directory (LMDB format)
-        lmdb_path = str(index_path)
-        if os.path.isfile(str(index_path)):
-            # Old mmap format detected - check for converted LMDB directory
-            lmdb_path = str(index_path) + ".lmdb"
-            if not os.path.exists(lmdb_path):
-                logger.info(f"Converting old mmap format index at '{index_path}' to LMDB format")
-                self._convert_mmap_to_lmdb(str(index_path), item_factory, lmdb_path)
-            else:
-                logger.info(f"Using existing LMDB index at '{lmdb_path}'")
+        index_path = Path(index_path)
+        assert not index_path.name.endswith(".lmdb"), "Unexpected index_path ending with .lmdb, it should not be the case at this point in the code"
+        lmdb_path = index_path.with_suffix(".lmdb")
 
-        self.env = lmdb.open(lmdb_path, readonly=readonly, map_size=1024**4)
+        # Check if index_path points to a file (old mmap format) vs directory (LMDB format)
+        if lmdb_path.is_dir():
+            logger.info(f"Using existing LMDB index at '{lmdb_path}'")
+        elif index_path.is_file():
+            # Old mmap format detected - check for converted LMDB directory
+            logger.info(f"Converting old mmap format index at '{index_path}' to LMDB format")
+            self._convert_mmap_to_lmdb(index_path, item_factory, lmdb_path)
+        else:
+            raise ValueError(f"Expected directory for the LMDB index at location '{lmdb_path}'")
+
+        self.env = lmdb.open(lmdb_path, readonly=readonly, map_size=1024**4)  # map size set to 1TB, does not hurt performance according to the LMDB team
 
         # Read metadata from LMDB
         with self.env.begin() as txn:
@@ -304,12 +308,12 @@ class TinyIndex(Generic[T]):
         return TinyIndex(item_factory, index_path=index_path)
 
 
-    def _convert_mmap_to_lmdb(self, old_index_path: str, item_factory: Callable[..., T], lmdb_path: str):
+    def _convert_mmap_to_lmdb(self, old_index_path: Path, item_factory: Callable[..., T], lmdb_path: Path):
         """
         Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
         """
         # Read old format metadata and data
-        with open(old_index_path, 'rb') as index_file:
+        with old_index_path.open('rb') as index_file:
             # Read and parse metadata
             metadata_page = index_file.read(METADATA_SIZE)
             metadata_bytes = metadata_page.rstrip(b'\x00')
@@ -351,4 +355,4 @@ class TinyIndex(Generic[T]):
 
                     # Move new LMDB directory to target location (next to original file)
                     shutil.move(temp_index_path, lmdb_path)
-                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'")
+                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'. Number of page converted: {metadata.num_pages}.")
