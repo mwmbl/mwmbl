@@ -245,8 +245,7 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        page_key = f'page_{i}'.encode('utf-8')
-        page_data = self.txn.get(page_key)
+        page_data = self.txn.get(str(i))
         if page_data is None:
             return []
 
@@ -277,8 +276,7 @@ class TinyIndex(Generic[T]):
 
         page_data = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        page_key = f'page_{i}'.encode('utf-8')
-        self.txn.put(page_key, page_data)
+        self.txn.put(str(i), page_data)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
@@ -301,8 +299,7 @@ class TinyIndex(Generic[T]):
             txn.put(b'metadata', metadata_padded)
             # Initialize empty pages
             for i in range(num_pages):
-                page_key = f'page_{i}'.encode('utf-8')
-                txn.put(page_key, page_bytes)
+                txn.put(str(i), page_bytes)
 
         env.close()
         return TinyIndex(item_factory, index_path=index_path)
@@ -348,8 +345,7 @@ class TinyIndex(Generic[T]):
                             page_data = old_mmap[start_offset:end_offset]
 
                             # Store page in new format with same compression/padding
-                            page_key = f"page_{i}".encode("utf-8")
-                            txn.put(page_key, page_data)
+                            txn.put(str(i), page_data)
 
                     temp_env.close()
 
