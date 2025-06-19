@@ -211,23 +211,15 @@ class TinyIndex(Generic[T]):
         self.num_pages = metadata.num_pages
         self.page_size = metadata.page_size
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
-        self.txn = None
         
         # Reuse compressor/decompressor instances to avoid repeated creation overhead
         self.compressor = ZstdCompressor()
         self.decompressor = ZstdDecompressor()
 
     def __enter__(self):
-        # Begin transaction - readonly for read mode, write for write mode
-        self.txn = self.env.begin(write=(self.mode == 'w'))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.txn:
-            if exc_type is None and self.mode == 'w':
-                self.txn.commit()
-            else:
-                self.txn.abort()
         self.env.close()
 
     def retrieve(self, key: str) -> List[T]:
@@ -248,19 +240,20 @@ class TinyIndex(Generic[T]):
         return [self.item_factory(*item) for item in results]
 
     def _get_page_tuples(self, i):
-        page_data = self.txn.get(str(i))
-        if page_data is None:
-            return []
+        with self.env.begin() as txn:
+            page_data = txn.get(str(i))
+            if page_data is None:
+                return []
 
-        if not page_data:
-            return []
+            if not page_data:
+                return []
 
-        try:
-            decompressed_data = self.decompressor.decompress(page_data)
-        except ZstdError as e:
-            logger.exception(f"Error decompressing page {i}: {e}")
-            return []
-        return json.loads(decompressed_data.decode('utf8'))
+            try:
+                decompressed_data = self.decompressor.decompress(page_data)
+            except ZstdError as e:
+                logger.exception(f"Error decompressing page {i}: {e}")
+                return []
+            return json.loads(decompressed_data.decode('utf8'))
 
     def store_in_page(self, page_index: int, values: list[T]):
         value_tuples = [value.as_tuple() for value in values]
@@ -276,7 +269,9 @@ class TinyIndex(Generic[T]):
 
         page_data = _get_page_data(self.compressor, self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.txn.put(str(i), page_data)
+        
+        with self.env.begin(write=True) as txn:
+            txn.put(str(i), page_data)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
@@ -344,8 +339,8 @@ class TinyIndex(Generic[T]):
                     with temp_env.begin(write=True) as txn:
                         txn.put("metadata", metadata.to_bytes())
 
-                    # Process pages in batches to limit memory usage
-                    batch_size = 1000  # Process 1000 pages at a time to limit transaction size
+                    # Process pages in batches to limit memory usage and transaction duration
+                    batch_size = 100  # Process 100 pages at a time for shorter transactions
                     
                     # Show initial progress
                     logger.info(f"Converting index: 0/{metadata.num_pages} pages (0.0%)")
