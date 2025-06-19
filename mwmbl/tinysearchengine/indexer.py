@@ -318,7 +318,7 @@ class TinyIndex(Generic[T]):
         # Read old format metadata and data
         with old_index_path.open('rb') as index_file:
             # Read and parse metadata
-            metadata_bytes = index_file.read(METADATA_SIZE)
+            metadata_bytes = index_file.read(METADATA_SIZE).rstrip(b"\x00")
             metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
 
             # Verify item factory matches
