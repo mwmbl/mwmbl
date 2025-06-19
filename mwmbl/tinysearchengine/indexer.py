@@ -370,8 +370,16 @@ class TinyIndex(Generic[T]):
                                         decompressed_data = test_decompressor.decompress(page_data)
                                         # Try to parse as JSON
                                         json.loads(decompressed_data.decode('utf8'))
-                                    except (ZstdError, json.JSONDecodeError, UnicodeDecodeError) as e:
-                                        logger.warning(f"Corrupted page {i} detected and skipped: {e}")
+                                    except (ZstdError) as e:
+                                        logger.warning(f"Corrupted page {i} detected and skipped: on decompress: {e}")
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+                                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                                        logger.warning(f"Corrupted page {i} detected and skipped: on parsing: {e}")
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+                                    except Exception as e:
+                                        logger.warning(f"Corrupted page {i} detected and skipped: unknown: {e}\nData was: '{page_data}'")
                                         corrupted_pages += 1
                                         is_corrupted = True
 
