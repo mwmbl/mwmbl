@@ -193,11 +193,10 @@ class TinyIndex(Generic[T]):
 
         # Read metadata from LMDB
         with self.env.begin() as txn:
-            metadata_bytes = txn.get(b'metadata')
+            metadata_bytes = txn.get('metadata')
             if metadata_bytes is None:
                 raise ValueError("No metadata found in index")
 
-        # Remove padding before parsing metadata
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
             raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
@@ -247,7 +246,6 @@ class TinyIndex(Generic[T]):
         if page_data is None:
             return []
 
-        # Remove padding if present
         if not page_data:
             return []
 
@@ -292,7 +290,7 @@ class TinyIndex(Generic[T]):
 
         with env.begin(write=True) as txn:
             # Store metadata
-            txn.put(b'metadata', metadata_bytes)
+            txn.put('metadata', metadata_bytes)
             # Initialize empty pages
             for i in range(num_pages):
                 txn.put(str(i), page_bytes)
@@ -327,7 +325,7 @@ class TinyIndex(Generic[T]):
 
                     with temp_env.begin(write=True) as txn:
                         # Store metadata
-                        txn.put(b"metadata", metadata.to_bytes())
+                        txn.put("metadata", metadata.to_bytes())
 
                         # Convert each page
                         for i in range(metadata.num_pages):
