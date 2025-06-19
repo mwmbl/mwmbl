@@ -22,6 +22,11 @@ METADATA_SIZE = 4096
 
 PAGE_SIZE = 4096
 
+# Default compression level for zstandard compression
+# Higher values = better compression but slower performance
+# Range: 1-22, where 3 is zstd default, 1 is fastest, 22 is best compression
+DEFAULT_COMPRESSION_LEVEL = 3
+
 
 logger = getLogger(__name__)
 
@@ -214,7 +219,7 @@ class TinyIndex(Generic[T]):
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         
         # Reuse compressor/decompressor instances to avoid repeated creation overhead
-        self.compressor = ZstdCompressor()
+        self.compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
         self.decompressor = ZstdDecompressor()
 
     def __enter__(self):
@@ -289,7 +294,7 @@ class TinyIndex(Generic[T]):
         metadata_bytes = metadata.to_bytes()
 
         # Create temporary compressor for index creation 
-        temp_compressor = ZstdCompressor()
+        temp_compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
         page_bytes = _get_page_data(temp_compressor, page_size, [])
 
         with env.begin(write=True) as txn:
