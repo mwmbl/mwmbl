@@ -161,7 +161,8 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
 
-def _get_page_data(compressor: ZstdCompressor, page_size: int, items: list[T]):
+def _get_page_data(page_size: int, items: list[T]):
+    compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(orjson.dumps(items[:num_fitting]))
@@ -276,7 +277,7 @@ class TinyIndex(Generic[T]):
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.compressor, self.page_size, data)
+        page_data = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         
         with self.env.begin(write=True) as txn:
@@ -298,7 +299,7 @@ class TinyIndex(Generic[T]):
 
         # Create temporary compressor for index creation 
         temp_compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
-        page_bytes = _get_page_data(temp_compressor, page_size, [])
+        page_bytes = _get_page_data(page_size, [])
 
         with env.begin(write=True) as txn:
             # Store metadata
