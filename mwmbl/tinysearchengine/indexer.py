@@ -311,7 +311,15 @@ class TinyIndex(Generic[T]):
         """
         Convert an old mmap format index to LMDB format, creating a new directory next to the original file.
         Process pages in batches to avoid excessive memory usage.
+        Performs read tests on each page to detect corruption.
         """
+        # Get size of original mmap file
+        mmap_size = old_index_path.stat().st_size
+        
+        # Create decompressor for read testing pages
+        test_decompressor = ZstdDecompressor()
+        corrupted_pages = 0
+        
         # Read old format metadata and data
         with old_index_path.open('rb') as index_file:
             # Read and parse metadata
@@ -352,8 +360,22 @@ class TinyIndex(Generic[T]):
                                 end_offset = (i + 1) * metadata.page_size + METADATA_SIZE
                                 page_data = old_mmap[start_offset:end_offset]
 
-                                # Store page in new format with same compression/padding
-                                txn.put(str(i), page_data)
+                                # Perform read test to detect corruption
+                                is_corrupted = False
+                                if page_data and not page_data.startswith(b'\x00'):  # Skip empty pages
+                                    try:
+                                        # Try to decompress the page data
+                                        decompressed_data = test_decompressor.decompress(page_data)
+                                        # Try to parse as JSON
+                                        json.loads(decompressed_data.decode('utf8'))
+                                    except (ZstdError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                                        logger.warning(f"Corrupted page {i} detected and skipped: {e}")
+                                        corrupted_pages += 1
+                                        is_corrupted = True
+
+                                # Only store non-corrupted pages
+                                if not is_corrupted:
+                                    txn.put(str(i), page_data)
                                 
                                 # Clear reference to page_data to help garbage collection
                                 del page_data
@@ -374,4 +396,21 @@ class TinyIndex(Generic[T]):
                     # Show completion
                     logger.info(f"Converting index: {metadata.num_pages}/{metadata.num_pages} pages (100.0%) - Complete!")
                     
-                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. Original mmap file preserved at '{old_index_path}'. Number of pages converted: {metadata.num_pages}.")
+                    # Get size of new LMDB directory
+                    lmdb_size = sum(f.stat().st_size for f in lmdb_path.rglob('*') if f.is_file())
+                    
+                    # Format file sizes for display
+                    def format_size(size_bytes):
+                        """Format size in bytes to human readable format"""
+                        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                            if size_bytes < 1024.0:
+                                return f"{size_bytes:.1f} {unit}"
+                            size_bytes /= 1024.0
+                        return f"{size_bytes:.1f} PB"
+                    
+                    logger.info(f"Successfully converted index to LMDB format at '{lmdb_path}'. "
+                               f"Original mmap file preserved at '{old_index_path}'. "
+                               f"Pages converted: {metadata.num_pages - corrupted_pages}/{metadata.num_pages}. "
+                               f"Corrupted pages skipped: {corrupted_pages}. "
+                               f"Original size: {format_size(mmap_size)}, "
+                               f"LMDB size: {format_size(lmdb_size)}.")
