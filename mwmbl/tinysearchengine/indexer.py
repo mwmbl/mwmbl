@@ -126,57 +126,15 @@ class TinyIndexMetadata:
         return TinyIndexMetadata(**values)
 
 
-def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items:list[T], lo:int, hi:int):
+def _compress_data(items: list[T]) -> bytes:
     """
-    Find the optimal amount of data that fits onto a page
-    We do this by leveraging binary search to quickly find the index where:
-        - index+1 cannot fit onto a page
-        - <=index can fit on a page
+    Compress a list of items directly without page size constraints.
+    LMDB handles variable-length data efficiently, so no padding or trimming needed.
     """
-    # Base case: our binary search has gone too far
-    if lo > hi:
-        return -1, None
-    # Check the midpoint to see if it will fit onto a page
-    mid = (lo+hi)//2
-    compressed_data = compressor.compress(orjson.dumps(items[:mid]))
-    size = len(compressed_data)
-    if size > page_size:
-        # We cannot fit this much data into a page
-        # Reduce the hi boundary, and try again
-        return _binary_search_fitting_size(compressor, page_size, items, lo, mid-1)
-    else:
-        # We can fit this data into a page, but maybe we can fit more data
-        # Try to see if we have a better match
-        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid+1, hi)
-        if potential_target != -1:
-            # We found a larger index that can still fit onto a page, so use that
-            return potential_target, potential_data
-        else:
-            # No better match, use our index
-            return mid, compressed_data
-
-
-def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
-    "Find max number of items that fit on a page"
-    return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
-
-
-def _get_page_data(page_size: int, items: list[T]):
     compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
-    num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
-
-    compressed_data = compressor.compress(orjson.dumps(items[:num_fitting]))
-    assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
-    return _pad_to_page_size(compressed_data, page_size)
-
-
-def _pad_to_page_size(data: bytes, page_size: int):
-    page_length = len(data)
-    if page_length > page_size:
-        raise PageError(f"Data is too big ({page_length}) for page size ({page_size})")
-    padding = b'\x00' * (page_size - page_length)
-    page_data = data + padding
-    return page_data
+    # Convert items to tuples if they have as_tuple method, otherwise use them directly
+    serializable_items = [item.as_tuple() if hasattr(item, 'as_tuple') else item for item in items]
+    return compressor.compress(orjson.dumps(serializable_items))
 
 
 class TinyIndex(Generic[T]):
@@ -283,20 +241,20 @@ class TinyIndex(Generic[T]):
 
     def _write_page(self, data, i: int):
         """
-        Serialise the data using JSON, compress it and store it at index i.
-        If the data is too big, it will store the first items in the list and discard the rest.
+        Serialize the data using orjson, compress it and store it at index i.
+        LMDB handles variable-length data efficiently, so no trimming or padding needed.
         """
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.page_size, data)
-        logger.debug(f"Got page data of length {len(page_data)}")
+        compressed_data = _compress_data(data)
+        logger.debug(f"Got compressed data of length {len(compressed_data)}")
         
         # Open fresh LMDB environment for each write operation to avoid sharing issues
         env = lmdb.open(str(self.lmdb_path), readonly=self.readonly, map_size=1024**4)
         try:
             with env.begin(write=True) as txn:
-                txn.put(str(i).encode(), page_data)
+                txn.put(str(i).encode(), compressed_data)
         finally:
             env.close()
 
@@ -318,16 +276,16 @@ class TinyIndex(Generic[T]):
         )
         metadata_bytes = metadata.to_bytes()
 
-        # Create temporary compressor for index creation 
-        temp_compressor = ZstdCompressor(level=DEFAULT_COMPRESSION_LEVEL)
-        page_bytes = _get_page_data(page_size, [])
+        # Create compressed empty data for initializing pages
+        # LMDB handles variable-length data efficiently, so no padding needed
+        empty_compressed_data = _compress_data([])
 
         with env.begin(write=True) as txn:
             # Store metadata
             txn.put(b'metadata', metadata_bytes)
             # Initialize empty pages
             for i in range(num_pages):
-                txn.put(str(i).encode(), page_bytes)
+                txn.put(str(i).encode(), empty_compressed_data)
 
         env.close()
         return TinyIndex(item_factory, index_path=index_path)
@@ -400,7 +358,7 @@ class TinyIndex(Generic[T]):
                                         # Try to parse as JSON (old format) - decode UTF-8 first
                                         json_data = json.loads(decompressed_data.decode('utf8'))
                                         
-                                        # Convert to new orjson format without padding (LMDB handles variable length efficiently)
+                                        # Convert to new orjson format - LMDB handles variable length efficiently
                                         converted_page_data = conversion_compressor.compress(orjson.dumps(json_data))
                                         
                                     except (ZstdError) as e:
