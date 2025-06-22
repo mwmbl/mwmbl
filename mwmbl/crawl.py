@@ -36,6 +36,8 @@ FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 API_KEY = os.environ["MWMBL_API_KEY"]
+assert API_KEY, "An environment variable MWMBL_API_KEY must be set to run the crawler"
+
 BATCH_QUEUE_KEY = "batch-queue"
 
 
