@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
+
 BATCH_QUEUE_KEY = "batch-queue"
 
 

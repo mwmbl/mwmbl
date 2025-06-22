@@ -9,6 +9,7 @@ services:
     depends_on:
       - redis
     environment:
+
       # REQUIRED: API key
       - MWMBL_API_KEY=${MWMBL_API_KEY}
 
@@ -24,7 +25,6 @@ services:
       - REDIS_URL=redis://redis:6379
     volumes:
       - crawler_data:/root/.mwmbl
-
     deploy:
       restart_policy:
         condition: on-failure
@@ -40,6 +40,7 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+
 volumes:
   redis_data:
   crawler_data:
