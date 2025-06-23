@@ -10,12 +10,11 @@ from uuid import uuid4
 import boto3
 import requests
 from django.conf import settings
-from ninja import NinjaAPI, Schema, HTTPException
+from ninja import NinjaAPI, Schema
+from ninja.errors import HttpError
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
-from mwmbl.crawler.env_vars import REDIS_URL
-from mwmbl.crawl import CRAWLER_VERSION
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -37,7 +36,7 @@ from mwmbl.settings import (
     DATE_REGEX)
 from mwmbl.tinysearchengine.indexer import Document
 
-stats_manager = StatsManager(Redis.from_url(REDIS_URL, decode_responses=True))
+stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
 
 
 def get_bucket(name):
@@ -87,12 +86,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         # Using an approach from https://stackoverflow.com/a/30476450
         now = datetime.now(timezone.utc)
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
-        hashed_batch = HashedBatch(
-            user_id_hash=user_id_hash, 
-            timestamp=epoch_time, 
-            items=batch.items,
-            crawler_version=CRAWLER_VERSION
-        )
+        hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
 
         stats_manager.record_batch(hashed_batch)
 
@@ -209,7 +203,7 @@ def _get_user_id_hash(batch: Union[Batch, NewBatchRequest]):
 
 def check_public_user_id(public_user_id):
     if len(public_user_id) != PUBLIC_USER_ID_LENGTH:
-        raise HTTPException(400, f"Incorrect public user ID length, should be {PUBLIC_USER_ID_LENGTH}")
+        raise HttpError(400, f"Incorrect public user ID length, should be {PUBLIC_USER_ID_LENGTH}")
 
 
 def get_batch_url(batch_id, date_str, public_user_id):
@@ -242,7 +236,7 @@ def get_batches_for_prefix(prefix):
 
 def check_date_str(date_str):
     if not DATE_REGEX.match(date_str):
-        raise HTTPException(400, f"Incorrect date format, should be YYYY-MM-DD")
+        raise HttpError(400, f"Incorrect date format, should be YYYY-MM-DD")
 
 
 def get_subfolders(prefix):

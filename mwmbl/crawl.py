@@ -11,7 +11,7 @@ import requests
 from django.conf import settings
 from redis import Redis
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY, REDIS_URL
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -41,7 +41,7 @@ BATCH_QUEUE_KEY = "batch-queue"
 
 
 redis = Redis.from_url(
-    REDIS_URL,
+    settings.REDIS_URL,
     decode_responses=True,
     health_check_interval=30,
 )
@@ -157,7 +157,6 @@ def process_batch():
         "user_id_hash": user_id, 
         "timestamp": js_timestamp, 
         "items": results,
-        "crawler_version": CRAWLER_VERSION
     })
     record_urls_in_database([batch], url_queue)
 
@@ -226,7 +225,7 @@ def run_indexing():
             if new_high_score:
                 result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                        score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
-                results = Results(api_key=MWMBL_API_KEY, results=result_items)
+                results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
                 logger.info(f"Posting {len(result_items)} results")
                 response = requests.post(
                     "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
