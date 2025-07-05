@@ -212,7 +212,6 @@ def submit_domain(request):
 class DomainSubmissionListView(ListView):
     model = DomainSubmission
     template_name = "mwmbl/domain_submission_list.html"
-    paginate_by = 20
 
     def get_queryset(self):
         return DomainSubmission.objects.all().order_by("-submitted_on")
