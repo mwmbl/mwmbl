@@ -215,7 +215,7 @@ class DomainSubmissionListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return DomainSubmission.objects.all().order_by("-submitted_on")
+        return DomainSubmission.objects.all().order_by("-submitted_on").select_related("submitted_by")
 
 
 def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
