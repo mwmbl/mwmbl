@@ -19,12 +19,10 @@ services:
       - CRAWLER_WORKERS=2
       - CRAWLER_THREADS=20
       - CRAWL_DELAY_SECONDS=0.0
-
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
     volumes:
       - crawler_data:/root/.mwmbl
-
     deploy:
       restart_policy:
         condition: on-failure
@@ -40,6 +38,7 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+
 volumes:
   redis_data:
   crawler_data:
