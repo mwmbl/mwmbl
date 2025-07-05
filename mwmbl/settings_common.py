@@ -42,9 +42,11 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
     'ninja_extra',
+    'debug_toolbar',
 ]
 
 MIDDLEWARE = [
+    "debug_toolbar.middleware.DebugToolbarMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -223,3 +225,7 @@ USER_AUTHENTICATION_RULE = require_email_confirmation
 
 # Redis configuration
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+INTERNAL_IPS = [
+    "127.0.0.1",
+]

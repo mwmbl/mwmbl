@@ -16,9 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from debug_toolbar.toolbar import debug_toolbar_urls
 
 import mwmbl.crawler.app as crawler
-from mwmbl import platform
 from mwmbl.platform.api import api
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
@@ -62,4 +62,5 @@ urlpatterns = [
     path("debug/memory", memory_view, name="memory"),
 
     path('sentry-debug/', trigger_error),
-]
+] + debug_toolbar_urls()
+

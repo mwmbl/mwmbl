@@ -47,6 +47,7 @@ xgboost = "^2.1.0"
 pydistinct = "^0.6.4"
 django-ninja-jwt = "^5.3.3"
 sentry-sdk = "^2.13.0"
+django-debug-toolbar = "^5.2.0"
 
 [tool.poetry.extras]
 indexer = [
