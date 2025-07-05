@@ -12,9 +12,10 @@ from django.conf import settings
 from psycopg2.extras import execute_values
 from pybloomfilter import BloomFilter
 
-# Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 from mwmbl.utils import batch
 
+# URL database configuration constants
+# Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
 REASSIGN_MIN_HOURS = 5
 BATCH_SIZE = 100
 MAX_URLS_PER_TOP_DOMAIN = 100

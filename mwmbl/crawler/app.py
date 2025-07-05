@@ -11,6 +11,7 @@ import boto3
 import requests
 from django.conf import settings
 from ninja import NinjaAPI, Schema
+from ninja.errors import HttpError
 from redis import Redis
 
 from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
@@ -202,7 +203,7 @@ def _get_user_id_hash(batch: Union[Batch, NewBatchRequest]):
 
 def check_public_user_id(public_user_id):
     if len(public_user_id) != PUBLIC_USER_ID_LENGTH:
-        raise HTTPException(400, f"Incorrect public user ID length, should be {PUBLIC_USER_ID_LENGTH}")
+        raise HttpError(400, f"Incorrect public user ID length, should be {PUBLIC_USER_ID_LENGTH}")
 
 
 def get_batch_url(batch_id, date_str, public_user_id):
@@ -235,7 +236,7 @@ def get_batches_for_prefix(prefix):
 
 def check_date_str(date_str):
     if not DATE_REGEX.match(date_str):
-        raise HTTPException(400, f"Incorrect date format, should be YYYY-MM-DD")
+        raise HttpError(400, f"Incorrect date format, should be YYYY-MM-DD")
 
 
 def get_subfolders(prefix):

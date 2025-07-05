@@ -220,3 +220,6 @@ def strip_query_string(event):
 
 # Django ninja-jwt settings - custom auth rule
 USER_AUTHENTICATION_RULE = require_email_confirmation
+
+# Redis configuration
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")

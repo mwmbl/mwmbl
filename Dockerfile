@@ -5,7 +5,7 @@ WORKDIR /front-end
 RUN npm install && npm run build
 
 
-FROM python:3.10.2-bullseye as base
+FROM python:3.11.12-bullseye as base
 
 ENV PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \

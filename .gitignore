@@ -1,4 +1,5 @@
 /data
+*_data
 .idea
 *~
 
@@ -163,3 +164,6 @@ devdata/batches/
 devdata/cache/
 devdata/rankeval-2024-06/remote-datasets/
 front-end/node_modules/
+
+# for contributors that use aider
+.aider*

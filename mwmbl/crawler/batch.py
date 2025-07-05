@@ -72,6 +72,7 @@ class Result(Schema):
 class Results(Schema):
     api_key: str
     results: list[Result]
+    crawler_version: Optional[str] = None
 
 
 class PostResultsResponse(Schema):
