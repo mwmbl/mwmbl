@@ -127,7 +127,7 @@ def _get_results_and_activity(request):
         activity = None
     else:
         results = None
-        activity = Curation.objects.filter(flag_curation_set__isnull=True).order_by("-timestamp")[:8]
+        activity = Curation.objects.filter(flag_curation_set__isnull=True).order_by("-timestamp")[:8].select_related("user").prefetch_related("flag_curation_set")
     return activity, query, results
 
 
@@ -215,7 +215,7 @@ class DomainSubmissionListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return DomainSubmission.objects.all().order_by("-submitted_on")
+        return DomainSubmission.objects.all().order_by("-submitted_on").select_related("submitted_by")
 
 
 def switch_state(state: Optional[DocumentState]) -> Optional[DocumentState]:
@@ -434,7 +434,7 @@ class CurationsView(ListView):
     template_name = "mwmbl/curations.html"
 
     def get_queryset(self):
-        return Curation.objects.prefetch_related('flag_curation_set').all().order_by("-timestamp")
+        return Curation.objects.select_related("user").prefetch_related('flag_curation_set').all().order_by("-timestamp")
 
 
 class CurationDetailView(DetailView):
