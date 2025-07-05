@@ -8,4 +8,15 @@
     <li><a href="{% url "domain" object.name %}">{{ object.name }}</a> submitted by {{ object.submitted_by }} on {{ object.submitted_on }}, status {{ object.status }}</li>
   {% endfor %}
 </ul>
+    <div class="pagination">
+  All domain submissions, page:
+  {% for page in page_obj.paginator.page_range %}
+    {% if page == page_obj.number %}
+      <span class="page-current">{{ page }}</span>
+    {% else %}
+      <span class="page-other"><a href="?page={{ page }}">{{ page }}</a></span>
+    {% endif %}
+  {% endfor %}
+  </div>
+
 {% endblock %}
