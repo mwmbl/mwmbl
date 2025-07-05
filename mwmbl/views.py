@@ -434,7 +434,7 @@ class CurationsView(ListView):
     template_name = "mwmbl/curations.html"
 
     def get_queryset(self):
-        return Curation.objects.prefetch_related('flag_curation_set').all().order_by("-timestamp")
+        return Curation.objects.select_related("user").prefetch_related('flag_curation_set').all().order_by("-timestamp")
 
 
 class CurationDetailView(DetailView):
