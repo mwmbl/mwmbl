@@ -25,13 +25,14 @@ import {Chart} from "chart.js/auto";
     });
   }
 
+  const resultsIndexedDailyChart = createChart('results-indexed-daily', null, "Results indexed by day");
   const urlsCrawledDailyChart = createChart('urls-by-day', null, "URLs crawled by day");
-  const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour")
-  const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day")
-  const numUrlsInIndexDailyChart = createChart('num-index-urls-by-day', null, "Number of URLs in index by day")
-  const numResultsInIndexDailyChart = createChart('num-index-results-by-day', null, "Number of results in index by day")
+  const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour");
+  const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day");
+  const numUrlsInIndexDailyChart = createChart('num-index-urls-by-day', null, "Number of URLs in index by day");
+  const numResultsInIndexDailyChart = createChart('num-index-results-by-day', null, "Number of results in index by day");
 
-  const urlsByUserCanvas = document.getElementById('urls-by-user');
+  const urlsByUserCanvas = document.getElementById('top-user-results');
   const byUserChart = new Chart(urlsByUserCanvas, {
     type: 'bar',
     data: {
@@ -97,6 +98,10 @@ function numberWithCommas(x) {
         const numResultsInIndexSpan = document.getElementById("num-index-results");
         numResultsInIndexSpan.innerText = numberWithCommas(numResultsInIndex);
 
+        resultsIndexedDailyChart.data.labels = Object.keys(stats.results_indexed_daily);
+        resultsIndexedDailyChart.data.datasets[0].data = Object.values(stats.results_indexed_daily);
+        resultsIndexedDailyChart.update();
+
         usersCrawledDailyChart.data.labels = Object.keys(stats.users_crawled_daily);
         usersCrawledDailyChart.data.datasets[0].data = Object.values(stats.users_crawled_daily);
         usersCrawledDailyChart.update();
@@ -108,9 +113,9 @@ function numberWithCommas(x) {
         urlsCrawledDailyChart.data.datasets[0].data = Object.values(stats.urls_crawled_daily);
         urlsCrawledDailyChart.update();
 
-        console.log("Top users", stats.top_users);
-        byUserChart.data.labels = stats.top_users.map(u => u[0]);
-        byUserChart.data.datasets[0].data = stats.top_users.map(u => u[1]);
+        console.log("Top users", stats.top_user_results);
+        byUserChart.data.labels = stats.top_user_results.map(u => u[0]);
+        byUserChart.data.datasets[0].data = stats.top_user_results.map(u => u[1]);
         byUserChart.update();
 
         byDomainChart.data.labels = stats.top_domains.map(d => d[0]);

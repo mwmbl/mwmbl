@@ -13,7 +13,7 @@ services:
       - MWMBL_API_KEY=${MWMBL_API_KEY}
 
       # REQUIRED: Contact info for website administrators
-      - MWMBL_CONTACT_INFO=CHANGE_ME@example.com
+      - MWMBL_CONTACT_INFO=${MWMBL_CONTACT_INFO}
 
       # Set value of ./mwmbl/crawler/env_vars.py
       - CRAWLER_WORKERS=2
