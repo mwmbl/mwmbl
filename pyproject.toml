@@ -18,6 +18,7 @@ requests = "^2.27.1"
 psycopg2-binary = "^2.9.3"
 pytest = "^7.2.1"
 pytest-mock = "^3.10.0"
+lmdb = "^1.6.2"
 
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.

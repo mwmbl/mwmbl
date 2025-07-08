@@ -1,0 +1,49 @@
+services:
+  mwmbl-crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawler
+    # image: mwmbl/crawler
+    security_opt:
+      - no-new-privileges:true
+    container_name: mwmbl-crawler
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379
+      - CRAWLER_WORKERS=2
+      - CRAWL_THREADS=5
+      - CRAWL_DELAY_SECONDS=0.1
+      - MWMBL_API_KEY=6tmn-9F5lHHxO38mvslE5JDfuN7K95tySXlo19J_6tKlUKdC3Palp3WDm1Dg9yH9--dJV7z-5VvNZDryRSZasg
+      - MWMBL_CONTACT_INFO=test@truc.com
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: '5G'
+    labels: ["com.centurylinklabs.watchtower.scope=autoupdate"]
+    volumes:
+      - ./crawler_data:/root/.mwmbl
+
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - ./redis_data:/data
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.50'
+    #       memory: '3G'
