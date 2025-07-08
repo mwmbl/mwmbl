@@ -177,3 +177,7 @@ Like "mumble". I live in
 [Mumbles](https://en.wikipedia.org/wiki/Mumbles), which is spelt
 "Mwmbwls" in Welsh. But the intended meaning is "to mumble", as in
 "don't search, just mwmbl!"
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=mwmbl/mwmbl&type=Date)](https://www.star-history.com/#mwmbl/mwmbl&Date)
