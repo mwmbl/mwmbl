@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+from logging import getLogger
 import os
 from datetime import datetime, timezone, date
 from queue import Empty
@@ -14,7 +15,7 @@ from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
-from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error
+from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error, DatasetRequest, HashedDataset
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -38,6 +39,8 @@ from mwmbl.tinysearchengine.indexer import Document
 
 stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
 
+logger = getLogger(__name__)
+
 
 def get_bucket(name):
     s3 = boto3.resource('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
@@ -46,6 +49,7 @@ def get_bucket(name):
 
 
 def upload(data: bytes, name: str):
+    logger.info(f"Uploading {len(data)} bytes to {name}")
     bucket = get_bucket(name)
     result = bucket.put(Body=data)
     return result
@@ -194,10 +198,40 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
             'url': f'{PUBLIC_URL_PREFIX}{filename}',
         }
 
+    @router.post('/dataset')
+    def post_dataset(request, dataset: DatasetRequest):
+        """
+        Store a dataset of search results from Firefox extension.
+        """
+        
+        if len(dataset.user_id) != USER_ID_LENGTH:
+            return router.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
+
+        user_id_hash = _get_user_id_hash(dataset)
+
+        # Create a hashed dataset that doesn't contain the raw user_id
+        hashed_dataset = HashedDataset(
+            user_id_hash=user_id_hash,
+            date=dataset.date,
+            timestamp=dataset.timestamp,
+            extensionVersion=dataset.extensionVersion,
+            queryDataset=dataset.queryDataset,
+            searchResults=dataset.searchResults
+        )
+
+        now = datetime.now(timezone.utc)
+        filename = upload_object(hashed_dataset, now, user_id_hash, "dataset")
+
+        return {
+            'status': 'ok',
+            'public_user_id': user_id_hash,
+            'url': f'{PUBLIC_URL_PREFIX}{filename}',
+        }
+
     return router
 
 
-def _get_user_id_hash(batch: Union[Batch, NewBatchRequest]):
+def _get_user_id_hash(batch: Union[Batch, NewBatchRequest, DatasetRequest]):
     return hashlib.sha3_256(batch.user_id.encode('utf8')).hexdigest()
 
 
