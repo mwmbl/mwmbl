@@ -33,7 +33,7 @@ def run():
     elif mwmbl_app == "count_urls":
         count_urls_continuously()
     elif mwmbl_app == "server":
-        uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000, lifespan="off", log_level="warning")
+        uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=8000, lifespan="off", log_level="warning")
     else:
         raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
 
