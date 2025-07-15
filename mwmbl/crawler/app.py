@@ -15,7 +15,7 @@ from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
-from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error, DatasetRequest
+from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error, DatasetRequest, HashedDataset
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
@@ -209,8 +209,18 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
 
         user_id_hash = _get_user_id_hash(dataset)
 
+        # Create a hashed dataset that doesn't contain the raw user_id
+        hashed_dataset = HashedDataset(
+            user_id_hash=user_id_hash,
+            date=dataset.date,
+            timestamp=dataset.timestamp,
+            extensionVersion=dataset.extensionVersion,
+            queryDataset=dataset.queryDataset,
+            searchResults=dataset.searchResults
+        )
+
         now = datetime.now(timezone.utc)
-        filename = upload_object(dataset, now, user_id_hash, "dataset")
+        filename = upload_object(hashed_dataset, now, user_id_hash, "dataset")
 
         return {
             'status': 'ok',

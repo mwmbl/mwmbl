@@ -117,6 +117,15 @@ class DatasetRequest(Schema):
     searchResults: list[SearchResultSet]
 
 
+class HashedDataset(Schema):
+    user_id_hash: str
+    date: str
+    timestamp: int
+    extensionVersion: str
+    queryDataset: list[QueryDatasetEntry]
+    searchResults: list[SearchResultSet]
+
+
 """
 Data format for requests to dataset backend
 
