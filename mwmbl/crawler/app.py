@@ -222,6 +222,9 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
         now = datetime.now(timezone.utc)
         filename = upload_object(hashed_dataset, now, user_id_hash, "dataset")
 
+        # Record dataset statistics
+        stats_manager.record_dataset(hashed_dataset)
+
         return {
             'status': 'ok',
             'public_user_id': user_id_hash,
