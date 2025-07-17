@@ -29,6 +29,8 @@ HOST_COUNT_LINK_KEY = "host-count-link-{date}"
 HOST_COUNT_LINK_NEW_KEY = "host-count-link-new-{date}"
 RESULTS_COUNT_KEY = "results-count-{date}"
 USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
+DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
+DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
@@ -55,6 +57,8 @@ class MwmblStats(BaseModel):
     urls_in_index_daily: dict[str, int]
     domains_in_index_daily: dict[str, int]
     results_in_index_daily: dict[str, int]
+    dataset_queries_daily: dict[str, int]
+    dataset_results_daily: dict[str, int]
 
 
 # New stats we want per domain:
@@ -144,6 +148,8 @@ class StatsManager:
         urls_crawled_daily = {}
         users_crawled_daily = {}
         results_indexed_daily = {}
+        dataset_queries_daily = {}
+        dataset_results_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
             url_count_key = URL_DATE_COUNT_KEY.format(date=date_i)
@@ -161,6 +167,18 @@ class StatsManager:
             if result_count is None:
                 result_count = 0
             results_indexed_daily[str(date_i)] = result_count
+
+            dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=date_i)
+            dataset_queries_count = self.redis.get(dataset_queries_count_key)
+            if dataset_queries_count is None:
+                dataset_queries_count = 0
+            dataset_queries_daily[str(date_i)] = dataset_queries_count
+
+            dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=date_i)
+            dataset_results_count = self.redis.get(dataset_results_count_key)
+            if dataset_results_count is None:
+                dataset_results_count = 0
+            dataset_results_daily[str(date_i)] = dataset_results_count
 
         hour_counts = []
         for i in range(date_time.hour + 1):
@@ -192,6 +210,8 @@ class StatsManager:
             top_domains=host_counts,
             results_indexed_daily=results_indexed_daily,
             top_user_results=user_results_counts,
+            dataset_queries_daily=dataset_queries_daily,
+            dataset_results_daily=dataset_results_daily,
             **index_stats,
         )
 
@@ -242,6 +262,33 @@ class StatsManager:
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
+
+    def record_dataset(self, hashed_dataset) -> None:
+        """Record dataset statistics from a dataset submission."""
+        from datetime import datetime
+        
+        # Parse the date from the dataset
+        try:
+            dataset_date = datetime.strptime(hashed_dataset.date, '%Y-%m-%d').date()
+        except ValueError:
+            # If date parsing fails, use current date
+            dataset_date = datetime.utcnow().date()
+
+        # Count queries
+        num_queries = len(hashed_dataset.queryDataset)
+        dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=dataset_date)
+        self.redis.incrby(dataset_queries_count_key, num_queries)
+        self.redis.expire(dataset_queries_count_key, LONG_EXPIRE_SECONDS)
+
+        # Count successful search results (exclude unsuccessful attempts)
+        num_successful_results = 0
+        for search_result_set in hashed_dataset.searchResults:
+            if search_result_set.success:
+                num_successful_results += len(search_result_set.results)
+
+        dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=dataset_date)
+        self.redis.incrby(dataset_results_count_key, num_successful_results)
+        self.redis.expire(dataset_results_count_key, LONG_EXPIRE_SECONDS)
 
 
 def get_test_batches():
