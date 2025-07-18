@@ -31,6 +31,8 @@ import {Chart} from "chart.js/auto";
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day");
   const numUrlsInIndexDailyChart = createChart('num-index-urls-by-day', null, "Number of URLs in index by day");
   const numResultsInIndexDailyChart = createChart('num-index-results-by-day', null, "Number of results in index by day");
+  const datasetQueriesDailyChart = createChart('dataset-queries-by-day', null, "Dataset queries by day");
+  const datasetResultsDailyChart = createChart('dataset-results-by-day', null, "Dataset results by day");
 
   const urlsByUserCanvas = document.getElementById('top-user-results');
   const byUserChart = new Chart(urlsByUserCanvas, {
@@ -98,6 +100,14 @@ function numberWithCommas(x) {
         const numResultsInIndexSpan = document.getElementById("num-index-results");
         numResultsInIndexSpan.innerText = numberWithCommas(numResultsInIndex);
 
+        const numDatasetQueries = Object.values(stats.dataset_queries_daily)[Object.keys(stats.dataset_queries_daily).length - 1];
+        const numDatasetQueriesSpan = document.getElementById("num-dataset-queries");
+        numDatasetQueriesSpan.innerText = numberWithCommas(numDatasetQueries);
+
+        const numDatasetResults = Object.values(stats.dataset_results_daily)[Object.keys(stats.dataset_results_daily).length - 1];
+        const numDatasetResultsSpan = document.getElementById("num-dataset-results");
+        numDatasetResultsSpan.innerText = numberWithCommas(numDatasetResults);
+
         resultsIndexedDailyChart.data.labels = Object.keys(stats.results_indexed_daily);
         resultsIndexedDailyChart.data.datasets[0].data = Object.values(stats.results_indexed_daily);
         resultsIndexedDailyChart.update();
@@ -129,6 +139,14 @@ function numberWithCommas(x) {
         numResultsInIndexDailyChart.data.labels = Object.keys(stats.results_in_index_daily);
         numResultsInIndexDailyChart.data.datasets[0].data = Object.values(stats.results_in_index_daily);
         numResultsInIndexDailyChart.update();
+
+        datasetQueriesDailyChart.data.labels = Object.keys(stats.dataset_queries_daily);
+        datasetQueriesDailyChart.data.datasets[0].data = Object.values(stats.dataset_queries_daily);
+        datasetQueriesDailyChart.update();
+
+        datasetResultsDailyChart.data.labels = Object.keys(stats.dataset_results_daily);
+        datasetResultsDailyChart.data.datasets[0].data = Object.values(stats.dataset_results_daily);
+        datasetResultsDailyChart.update();
       })
     });
   }
