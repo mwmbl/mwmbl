@@ -347,7 +347,7 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         try:
             wiki_response = response.json()
         except json.JSONDecodeError:
-            logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}")
+            logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}, content: {response.content}")
             return []
 
     if 'query' not in wiki_response or 'search' not in wiki_response['query']:
