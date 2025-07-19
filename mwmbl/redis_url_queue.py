@@ -54,7 +54,7 @@ def get_domain_max_urls(domain: str, curated_domains: set[str]):
 class RedisURLQueue:
     def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]]) -> None:
         self.redis = redis
-        self.black_listed_domains = get_blacklist_domains()
+        self._blacklisted_domains = None
         self.get_curated_domains_function = get_curated_domains_function
 
     def queue_urls(self, found_urls: list[FoundURL]):
@@ -160,3 +160,9 @@ class RedisURLQueue:
 
     def get_domain_count(self, domain: str):
         return self.redis.zcard(DOMAIN_URLS_KEY.format(domain=domain))
+
+    @property
+    def blacklisted_domains(self):
+        if self._black_listed_domains is None:
+            self._black_listed_domains = get_blacklist_domains()
+        return self._black_listed_domains
