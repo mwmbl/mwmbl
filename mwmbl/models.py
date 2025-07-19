@@ -111,3 +111,21 @@ class ApiKey(models.Model):
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
     key = models.CharField(max_length=300, unique=True, default=random_api_key)
     created_on = models.DateTimeField()
+
+
+class WasmEvaluationJob(models.Model):
+    EVALUATION_STATUS = {
+        "PENDING": "The evaluation job is pending",
+        "VALIDATED": "The WASM file has been validated",
+        "RUNNING": "The evaluation is currently running",
+        "COMPLETED": "The evaluation has completed successfully",
+        "FAILED": "The evaluation has failed",
+    }
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    wasm_file = models.BinaryField()  # Store WASM bytes directly
+    status = models.CharField(max_length=20, choices=[(k, v) for k, v in EVALUATION_STATUS.items()], default="PENDING")
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    results = models.JSONField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)

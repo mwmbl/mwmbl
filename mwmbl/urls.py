@@ -20,6 +20,7 @@ from debug_toolbar.toolbar import debug_toolbar_urls
 
 import mwmbl.crawler.app as crawler
 from mwmbl.platform.api import api
+from mwmbl.evaluation.api import api as evaluation_api
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
@@ -58,9 +59,9 @@ urlpatterns = [
     path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
     path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
     path("api/v1/platform/", api.urls),
+    path("api/v1/evaluate/", evaluation_api.urls),
 
     path("debug/memory", memory_view, name="memory"),
 
     path('sentry-debug/', trigger_error),
 ] + debug_toolbar_urls()
-
