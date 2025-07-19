@@ -343,7 +343,12 @@ def clean_html(s: str):
 def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     escaped_query = urllib.parse.quote(s, safe='')
     with request_cache(timedelta(weeks=10)) as session:
-        wiki_response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query)).json()
+        response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query))
+        try:
+            wiki_response = response.json()
+        except json.JSONDecodeError:
+            logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}, content: {response.content}")
+            return []
 
     if 'query' not in wiki_response or 'search' not in wiki_response['query']:
         if 'error' in wiki_response:
