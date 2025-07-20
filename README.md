@@ -181,3 +181,8 @@ Like "mumble". I live in
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mwmbl/mwmbl&type=Date)](https://www.star-history.com/#mwmbl/mwmbl&Date)
+
+Acknowledgements
+================
+
+Many thanks to [Mohamed Alm](https://github.com/theonlyalm) for security consultations and recommendations.
