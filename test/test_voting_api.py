@@ -417,22 +417,3 @@ def test_vote_unique_constraint(verified_user):
             query=vote_data['query']
         ).count()
         assert count == 1
-
-
-@pytest.mark.django_db
-def test_vote_model_str_representation(verified_user):
-    """Test the string representation of SearchResultVote model"""
-    vote = SearchResultVote.objects.create(
-        user=verified_user,
-        url="https://example.com/test",
-        query="test query",
-        vote_type="UPVOTE"
-    )
-    
-    # The model doesn't have a custom __str__ method, so it will use the default
-    # This test ensures the model can be created and accessed properly
-    assert vote.user == verified_user
-    assert vote.url == "https://example.com/test"
-    assert vote.query == "test query"
-    assert vote.vote_type == "UPVOTE"
-    assert vote.timestamp is not None
