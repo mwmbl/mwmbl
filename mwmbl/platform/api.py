@@ -160,7 +160,7 @@ def vote_on_search_result(request, vote_request: VoteRequest):
     
     # Validate vote type
     if vote_request.vote_type not in SearchResultVote.VOTE_TYPES:
-        raise InvalidRequest("Invalid vote type. Must be 'UPVOTE' or 'DOWNVOTE'.", status=400)
+        raise InvalidRequest("Invalid vote type. Must be 'upvote' or 'downvote'.", status=400)
     
     # Create or update the vote
     vote, created = SearchResultVote.objects.update_or_create(
@@ -187,8 +187,8 @@ def get_vote_counts(request, query: str, urls: str):
     for url in url_list:
         # Get aggregated vote counts
         votes = SearchResultVote.objects.filter(url=url, query=query)
-        upvotes = votes.filter(vote_type='UPVOTE').count()
-        downvotes = votes.filter(vote_type='DOWNVOTE').count()
+        upvotes = votes.filter(vote_type='upvote').count()
+        downvotes = votes.filter(vote_type='downvote').count()
         
         # Get user's vote if any
         user_vote = None

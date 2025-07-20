@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from ninja import Schema, ModelSchema
 
 from mwmbl.models import DomainSubmission
@@ -32,7 +32,7 @@ class UpdateDomainSubmission(ModelSchema):
 class VoteRequest(Schema):
     url: str
     query: str
-    vote_type: str
+    vote_type: Literal["upvote", "downvote"]
 
 
 class VoteRemoveRequest(Schema):
@@ -43,7 +43,7 @@ class VoteRemoveRequest(Schema):
 class VoteStats(Schema):
     upvotes: int
     downvotes: int
-    user_vote: Optional[str] = None
+    user_vote: Optional[Literal["upvote", "downvote"]] = None
 
 
 class VoteResponse(Schema):
@@ -53,5 +53,5 @@ class VoteResponse(Schema):
 class UserVoteHistory(Schema):
     url: str
     query: str
-    vote_type: str
+    vote_type: Literal["upvote", "downvote"]
     timestamp: datetime
