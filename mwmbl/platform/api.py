@@ -154,7 +154,15 @@ def update_submission_status(request, submission_id: int, update_submission: Upd
     return {"status": "ok", "message": "Submission updated."}
 
 
-@api.post("/search-results/vote", auth=JWTAuth())
+@api.post(
+    "/search-results/vote", 
+    auth=JWTAuth(),
+    summary="Vote on a search result",
+    description="Cast an upvote or downvote on a search result for a specific query. "
+                "If the user has already voted on this result for this query, the vote will be updated. "
+                "Each user can only have one vote per URL per query.",
+    tags=["Search Result Voting"]
+)
 def vote_on_search_result(request, vote_request: VoteRequest):
     check_email_verified(request)
     
@@ -174,7 +182,16 @@ def vote_on_search_result(request, vote_request: VoteRequest):
     return {"status": "ok", "message": f"Vote {action} successfully."}
 
 
-@api.get("/search-results/votes", response=VoteResponse, auth=JWTAuth())
+@api.get(
+    "/search-results/votes", 
+    response=VoteResponse, 
+    auth=JWTAuth(),
+    summary="Get vote statistics for search results",
+    description="Retrieve vote counts (upvotes and downvotes) for one or more URLs in the context of a specific search query. "
+                "Also returns the current user's vote on each result if they have voted. "
+                "URLs should be provided as a comma-separated list.",
+    tags=["Search Result Voting"]
+)
 def get_vote_counts(request, query: str, urls: str):
     check_email_verified(request)
     
@@ -207,7 +224,14 @@ def get_vote_counts(request, query: str, urls: str):
     return VoteResponse(votes=vote_data)
 
 
-@api.delete("/search-results/vote", auth=JWTAuth())
+@api.delete(
+    "/search-results/vote", 
+    auth=JWTAuth(),
+    summary="Remove a vote from a search result",
+    description="Remove the current user's vote (upvote or downvote) from a specific search result for a given query. "
+                "If the user has not voted on this result for this query, a 404 error will be returned.",
+    tags=["Search Result Voting"]
+)
 def remove_vote(request, vote_request: VoteRemoveRequest):
     check_email_verified(request)
     
@@ -223,7 +247,15 @@ def remove_vote(request, vote_request: VoteRemoveRequest):
         raise InvalidRequest("No vote found to remove.", status=404)
 
 
-@api.get("/search-results/my-votes", response=list[UserVoteHistory], auth=JWTAuth())
+@api.get(
+    "/search-results/my-votes", 
+    response=list[UserVoteHistory], 
+    auth=JWTAuth(),
+    summary="Get user's voting history",
+    description="Retrieve the current user's complete voting history, showing all votes they have cast on search results. "
+                "Results are ordered by timestamp (most recent first) and paginated.",
+    tags=["Search Result Voting"]
+)
 @paginate
 def get_user_vote_history(request) -> list[SearchResultVote]:
     check_email_verified(request)
