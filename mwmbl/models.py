@@ -133,8 +133,8 @@ class WasmEvaluationJob(models.Model):
 
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
-        "UPVOTE": "User upvoted this result",
-        "DOWNVOTE": "User downvoted this result",
+        "upvote": "User upvoted this result",
+        "downvote": "User downvoted this result",
     }
     
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)

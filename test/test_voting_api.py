@@ -98,7 +98,7 @@ def sample_vote_data():
     return {
         "url": "https://example.com/test-page",
         "query": "test search query",
-        "vote_type": "UPVOTE"
+        "vote_type": "upvote"
     }
 
 
@@ -124,7 +124,7 @@ def test_vote_on_search_result_success(client, verified_user, access_token, samp
         url=sample_vote_data['url'],
         query=sample_vote_data['query']
     )
-    assert vote.vote_type == 'UPVOTE'
+    assert vote.vote_type == 'upvote'
 
 
 @pytest.mark.django_db
@@ -135,12 +135,12 @@ def test_vote_update_existing_vote(client, verified_user, access_token, sample_v
         user=verified_user,
         url=sample_vote_data['url'],
         query=sample_vote_data['query'],
-        vote_type='UPVOTE'
+        vote_type='upvote'
     )
     
     # Update to downvote
     updated_vote_data = sample_vote_data.copy()
-    updated_vote_data['vote_type'] = 'DOWNVOTE'
+    updated_vote_data['vote_type'] = 'downvote'
     
     response = client.post(
         '/api/v1/platform/search-results/vote',
@@ -161,7 +161,7 @@ def test_vote_update_existing_vote(client, verified_user, access_token, sample_v
         url=sample_vote_data['url'],
         query=sample_vote_data['query']
     )
-    assert vote.vote_type == 'DOWNVOTE'
+    assert vote.vote_type == 'downvote'
 
 
 @pytest.mark.django_db
@@ -177,11 +177,12 @@ def test_vote_invalid_vote_type(client, access_token, sample_vote_data):
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
-    assert response.status_code == 400
+    assert response.status_code == 422
     
     response_data = response.json()
-    assert response_data['status'] == 'error'
-    assert 'Invalid vote type' in response_data['message']
+    # Django Ninja validation errors have a different format
+    assert 'detail' in response_data
+    assert any('upvote' in str(error) and 'downvote' in str(error) for error in response_data['detail'])
 
 
 @pytest.mark.django_db
@@ -221,13 +222,13 @@ def test_get_vote_counts_single_url(client, verified_user, verified_user2, acces
         user=verified_user,
         url=sample_vote_data['url'],
         query=sample_vote_data['query'],
-        vote_type='UPVOTE'
+        vote_type='upvote'
     )
     SearchResultVote.objects.create(
         user=verified_user2,
         url=sample_vote_data['url'],
         query=sample_vote_data['query'],
-        vote_type='DOWNVOTE'
+        vote_type='downvote'
     )
     
     response = client.get(
@@ -244,7 +245,7 @@ def test_get_vote_counts_single_url(client, verified_user, verified_user2, acces
     vote_stats = response_data['votes'][sample_vote_data['url']]
     assert vote_stats['upvotes'] == 1
     assert vote_stats['downvotes'] == 1
-    assert vote_stats['user_vote'] == 'UPVOTE'  # Current user's vote
+    assert vote_stats['user_vote'] == 'upvote'  # Current user's vote
 
 
 @pytest.mark.django_db
@@ -259,13 +260,13 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
         user=verified_user,
         url=url1,
         query=query,
-        vote_type='UPVOTE'
+        vote_type='upvote'
     )
     SearchResultVote.objects.create(
         user=verified_user,
         url=url2,
         query=query,
-        vote_type='DOWNVOTE'
+        vote_type='downvote'
     )
     
     urls_param = f"{url1},{url2}"
@@ -281,8 +282,8 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
     assert url1 in response_data['votes']
     assert url2 in response_data['votes']
     
-    assert response_data['votes'][url1]['user_vote'] == 'UPVOTE'
-    assert response_data['votes'][url2]['user_vote'] == 'DOWNVOTE'
+    assert response_data['votes'][url1]['user_vote'] == 'upvote'
+    assert response_data['votes'][url2]['user_vote'] == 'downvote'
 
 
 @pytest.mark.django_db
@@ -308,7 +309,7 @@ def test_remove_vote_success(client, verified_user, access_token, sample_vote_da
         user=verified_user,
         url=sample_vote_data['url'],
         query=sample_vote_data['query'],
-        vote_type='UPVOTE'
+        vote_type='upvote'
     )
     
     response = client.delete(
@@ -360,9 +361,9 @@ def test_get_user_vote_history(client, verified_user, access_token):
     """Test getting user's voting history"""
     # Create multiple votes
     votes_data = [
-        {"url": "https://example.com/page1", "query": "query1", "vote_type": "UPVOTE"},
-        {"url": "https://example.com/page2", "query": "query2", "vote_type": "DOWNVOTE"},
-        {"url": "https://example.com/page3", "query": "query3", "vote_type": "UPVOTE"},
+        {"url": "https://example.com/page1", "query": "query1", "vote_type": "upvote"},
+        {"url": "https://example.com/page2", "query": "query2", "vote_type": "downvote"},
+        {"url": "https://example.com/page3", "query": "query3", "vote_type": "upvote"},
     ]
     
     for vote_data in votes_data:
@@ -398,7 +399,7 @@ def test_vote_unique_constraint(verified_user):
         "user": verified_user,
         "url": "https://example.com/test",
         "query": "test query",
-        "vote_type": "UPVOTE"
+        "vote_type": "upvote"
     }
     
     # Create first vote
