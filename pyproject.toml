@@ -18,6 +18,7 @@ requests = "^2.27.1"
 psycopg2-binary = "^2.9.3"
 pytest = "^7.2.1"
 pytest-mock = "^3.10.0"
+pytest-django = "^4.5.2"
 
 # Optional dependencies do not get installed by default. Look under tool.poetry.extras section
 # to see which extras to use.
@@ -48,6 +49,7 @@ pydistinct = "^0.6.4"
 django-ninja-jwt = "^5.3.3"
 sentry-sdk = "^2.13.0"
 django-debug-toolbar = "^5.2.0"
+wasmtime = "^24.0.0"
 
 [tool.poetry.extras]
 indexer = [
@@ -87,3 +89,6 @@ mwmbl-crawl = "mwmbl.crawl:run"
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "INFO"
+DJANGO_SETTINGS_MODULE = "mwmbl.settings_dev"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "--reuse-db"
