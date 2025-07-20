@@ -1,13 +1,17 @@
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
 from allauth.account.utils import setup_user_email, send_email_confirmation
+from django.db.models import Count, Q
 from ninja.pagination import paginate
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.controller import NinjaJWTDefaultController
 
-from mwmbl.models import MwmblUser, DomainSubmission
-from mwmbl.platform.schemas import Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission
+from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote
+from mwmbl.platform.schemas import (
+    Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
+    VoteRequest, VoteRemoveRequest, VoteResponse, VoteStats, UserVoteHistory
+)
 
 api = NinjaExtraAPI(urls_namespace="platform")
 api.register_controllers(NinjaJWTDefaultController)
@@ -148,3 +152,79 @@ def update_submission_status(request, submission_id: int, update_submission: Upd
     submission.rejection_detail = update_submission.rejection_detail
     submission.save()
     return {"status": "ok", "message": "Submission updated."}
+
+
+@api.post("/search-results/vote", auth=JWTAuth())
+def vote_on_search_result(request, vote_request: VoteRequest):
+    check_email_verified(request)
+    
+    # Validate vote type
+    if vote_request.vote_type not in SearchResultVote.VOTE_TYPES:
+        raise InvalidRequest("Invalid vote type. Must be 'UPVOTE' or 'DOWNVOTE'.", status=400)
+    
+    # Create or update the vote
+    vote, created = SearchResultVote.objects.update_or_create(
+        user=request.user,
+        url=vote_request.url,
+        query=vote_request.query,
+        defaults={'vote_type': vote_request.vote_type}
+    )
+    
+    action = "created" if created else "updated"
+    return {"status": "ok", "message": f"Vote {action} successfully."}
+
+
+@api.get("/search-results/votes", response=VoteResponse, auth=JWTAuth())
+def get_vote_counts(request, query: str, urls: str):
+    check_email_verified(request)
+    
+    url_list = [url.strip() for url in urls.split(',') if url.strip()]
+    if not url_list:
+        raise InvalidRequest("At least one URL must be provided.", status=400)
+    
+    # Get vote counts for each URL
+    vote_data = {}
+    for url in url_list:
+        # Get aggregated vote counts
+        votes = SearchResultVote.objects.filter(url=url, query=query)
+        upvotes = votes.filter(vote_type='UPVOTE').count()
+        downvotes = votes.filter(vote_type='DOWNVOTE').count()
+        
+        # Get user's vote if any
+        user_vote = None
+        try:
+            user_vote_obj = votes.get(user=request.user)
+            user_vote = user_vote_obj.vote_type
+        except SearchResultVote.DoesNotExist:
+            pass
+        
+        vote_data[url] = VoteStats(
+            upvotes=upvotes,
+            downvotes=downvotes,
+            user_vote=user_vote
+        )
+    
+    return VoteResponse(votes=vote_data)
+
+
+@api.delete("/search-results/vote", auth=JWTAuth())
+def remove_vote(request, vote_request: VoteRemoveRequest):
+    check_email_verified(request)
+    
+    try:
+        vote = SearchResultVote.objects.get(
+            user=request.user,
+            url=vote_request.url,
+            query=vote_request.query
+        )
+        vote.delete()
+        return {"status": "ok", "message": "Vote removed successfully."}
+    except SearchResultVote.DoesNotExist:
+        raise InvalidRequest("No vote found to remove.", status=404)
+
+
+@api.get("/search-results/my-votes", response=list[UserVoteHistory], auth=JWTAuth())
+@paginate
+def get_user_vote_history(request) -> list[SearchResultVote]:
+    check_email_verified(request)
+    return SearchResultVote.objects.filter(user=request.user).order_by('-timestamp')

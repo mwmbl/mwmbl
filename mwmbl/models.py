@@ -129,3 +129,23 @@ class WasmEvaluationJob(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     results = models.JSONField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
+
+
+class SearchResultVote(models.Model):
+    VOTE_TYPES = {
+        "UPVOTE": "User upvoted this result",
+        "DOWNVOTE": "User downvoted this result",
+    }
+    
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    url = models.URLField(max_length=500)  # The URL of the search result
+    query = models.CharField(max_length=300)  # The search query context
+    vote_type = models.CharField(max_length=10, choices=[(k, v) for k, v in VOTE_TYPES.items()])
+    timestamp = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ['user', 'url', 'query']  # One vote per user per result per query
+        indexes = [
+            models.Index(fields=['url', 'query']),
+            models.Index(fields=['timestamp']),
+        ]
