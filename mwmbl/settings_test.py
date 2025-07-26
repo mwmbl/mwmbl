@@ -13,7 +13,7 @@ DATABASES = {
 
 # Test-specific settings
 DATA_PATH = "/tmp/test_mwmbl_data"
-INDEX_NAME = "test-index.tinysearch"
+INDEX_NAME = "index-v2.tinysearch"
 NUM_PAGES = 10
 
 # Disable Redis URL requirement for testing

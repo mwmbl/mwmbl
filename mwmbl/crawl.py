@@ -40,21 +40,32 @@ logging.basicConfig(level=logging.INFO, format=FORMAT)
 BATCH_QUEUE_KEY = "batch-queue"
 
 
-redis = Redis.from_url(
-    settings.REDIS_URL,
-    decode_responses=True,
-    health_check_interval=30,
-)
+# Initialize Redis connection lazily
+redis = None
+url_queue = None
+
+def get_redis():
+    global redis
+    if redis is None:
+        redis = Redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            health_check_interval=30,
+        )
+    return redis
+
+def get_url_queue():
+    global url_queue
+    if url_queue is None:
+        url_queue = RedisURLQueue(get_redis(), lambda: set())
+    return url_queue
 
 def check_redis():
     try:
-        redis.ping()
+        get_redis().ping()
         logger.debug("Redis ping successful")
     except ConnectionError as e:
         raise SystemExit(f"Cannot reach Redis at {settings.REDIS_URL}. Make sure your Redis server is running.")
-check_redis()
-
-url_queue = RedisURLQueue(redis, lambda: set())
 
 
 def run():
@@ -138,7 +149,7 @@ def process_batch():
     Each batch is processed as a HashedBatch object containing metadata and crawl results.
     """
     user_id = "test"
-    urls = url_queue.get_batch(user_id)
+    urls = get_url_queue().get_batch(user_id)
     logger.info(f"Processing batch of {len(urls)} URLs")
 
     # Process URLs sequentially with rate limiting
@@ -158,11 +169,11 @@ def process_batch():
         "timestamp": js_timestamp, 
         "items": results,
     })
-    record_urls_in_database([batch], url_queue)
+    record_urls_in_database([batch], get_url_queue())
 
     # Push the batch into the Redis queue
     batch_json = batch.json()
-    redis.rpush(BATCH_QUEUE_KEY, batch_json)
+    get_redis().rpush(BATCH_QUEUE_KEY, batch_json)
 
 
 def run_indexing_continuously():
@@ -193,7 +204,7 @@ def run_indexing():
     preventing low-quality content from polluting the main index.
     """
     index_path = data_path / settings.INDEX_NAME
-    batch_jsons = redis.lpop(BATCH_QUEUE_KEY, 10)
+    batch_jsons = get_redis().lpop(BATCH_QUEUE_KEY, 10)
     if batch_jsons is None:
         logger.info("No more batches to index. Sleeping for 10 seconds.")
         time.sleep(10)

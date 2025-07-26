@@ -67,7 +67,7 @@ jobs:
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
-      - name: Create test directories
+      - name: Create test directories and files
         run: |
           mkdir -p /tmp/test_mwmbl_data
       - name: Run tests
