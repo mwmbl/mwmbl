@@ -63,7 +63,7 @@ indexer = [
     "Levenshtein",
 ]
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^7.0.1"
 fakeredis = "^2.30.1"
 
