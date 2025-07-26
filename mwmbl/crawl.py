@@ -51,7 +51,7 @@ def check_redis():
         redis.ping()
         logger.debug("Redis ping successful")
     except ConnectionError as e:
-        raise SystemExit(f"Cannot reach Redis at {REDIS_URL}. Make sure your Redis server is running.")
+        raise SystemExit(f"Cannot reach Redis at {settings.REDIS_URL}. Make sure your Redis server is running.")
 check_redis()
 
 url_queue = RedisURLQueue(redis, lambda: set())

@@ -70,5 +70,6 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         run: |
           poetry run pytest
