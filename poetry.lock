@@ -2554,4 +2554,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.12"
-content-hash = "7639f74ef9bb6b3487295136683588db88f2e1c145ccd8a27a15b1229f62805f"
+content-hash = "1cc4ee2bb156fde3a736ee280394fdcfa8a6c84170cfb6c4158ceb60deceb3cf"
