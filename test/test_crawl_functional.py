@@ -104,20 +104,21 @@ class TestCrawlFunctional:
 
     def test_redis_connection_and_health_check(self, fake_redis, mock_settings, mock_environment):
         """Test Redis connection and health check functionality"""
-        with patch('mwmbl.crawl.get_redis', return_value=fake_redis):
-            # Import after patching to ensure mocks are in place
-            from mwmbl.crawl import check_redis
-            
-            # Should not raise an exception
-            check_redis()
-            
-            # Test with broken Redis
-            broken_redis = MagicMock()
-            broken_redis.ping.side_effect = ConnectionError("Redis unavailable")
-            
-            with patch('mwmbl.crawl.get_redis', return_value=broken_redis):
-                with pytest.raises(SystemExit):
-                    check_redis()
+        from mwmbl.crawl import Crawler
+        
+        # Test with working Redis
+        crawler = Crawler()
+        crawler._redis = fake_redis  # Set the private attribute directly
+        # Should not raise an exception
+        crawler.check_redis()
+        
+        # Test with broken Redis
+        broken_redis = MagicMock()
+        broken_redis.ping.side_effect = ConnectionError("Redis unavailable")
+        
+        crawler._redis = broken_redis  # Set the private attribute directly
+        with pytest.raises(SystemExit):
+            crawler.check_redis()
 
     def test_url_queue_operations(self, fake_redis, sample_found_urls):
         """Test RedisURLQueue operations with fake Redis"""
@@ -136,34 +137,36 @@ class TestCrawlFunctional:
 
     def test_process_batch_workflow(self, fake_redis, mock_settings, mock_environment, mock_crawl_response):
         """Test the complete batch processing workflow"""
-        with patch('mwmbl.crawl.get_redis', return_value=fake_redis):
-            with patch('mwmbl.crawl.get_url_queue') as mock_get_url_queue:
-                with patch('mwmbl.crawl.crawl_url', return_value=mock_crawl_response):
-                    with patch('mwmbl.crawl.record_urls_in_database'):
-                        # Setup URL queue mock
-                        mock_url_queue = MagicMock()
-                        mock_url_queue.get_batch.return_value = ['https://example.com']
-                        mock_get_url_queue.return_value = mock_url_queue
-                        
-                        # Import and test process_batch
-                        from mwmbl.crawl import process_batch
-                        
-                        # Should complete without errors
-                        process_batch()
-                        
-                        # Verify batch was pushed to Redis
-                        batch_data = fake_redis.lpop("batch-queue")
-                        assert batch_data is not None
-                        
-                        # Verify batch structure
-                        batch = json.loads(batch_data)
-                        assert 'user_id_hash' in batch
-                        assert 'timestamp' in batch
-                        assert 'items' in batch
-                        assert len(batch['items']) == 1
+        from mwmbl.crawl import Crawler
+        
+        crawler = Crawler()
+        crawler._redis = fake_redis  # Set the private attribute directly
+        
+        # Mock the URL queue
+        mock_url_queue = MagicMock()
+        mock_url_queue.get_batch.return_value = ['https://example.com']
+        crawler._url_queue = mock_url_queue
+        
+        with patch('mwmbl.crawl.crawl_url', return_value=mock_crawl_response):
+            with patch('mwmbl.crawl.record_urls_in_database'):
+                # Should complete without errors
+                crawler.process_batch()
+                
+                # Verify batch was pushed to Redis
+                batch_data = fake_redis.lpop("batch-queue")
+                assert batch_data is not None
+                
+                # Verify batch structure
+                batch = json.loads(batch_data)
+                assert 'user_id_hash' in batch
+                assert 'timestamp' in batch
+                assert 'items' in batch
+                assert len(batch['items']) == 1
 
     def test_indexing_workflow(self, fake_redis, mock_settings, mock_environment, temp_data_path):
         """Test the indexing workflow with fake Redis"""
+        from mwmbl.crawl import Crawler
+        
         # Create a sample batch in Redis
         # Create a sample item that matches the Item schema
         from mwmbl.crawler.batch import Item, ItemContent
@@ -184,11 +187,13 @@ class TestCrawlFunctional:
         )
         fake_redis.rpush("batch-queue", sample_batch.json())
         
-        with patch('mwmbl.crawl.get_redis', return_value=fake_redis):
-            # Mock Counter object for index_batches return value
-            from collections import Counter
-            mock_counter = Counter({'example': 1})
-            with patch('mwmbl.crawl.index_batches', return_value=mock_counter):
+        crawler = Crawler()
+        crawler._redis = fake_redis  # Set the private attribute directly
+        
+        # Mock Counter object for index_batches return value
+        from collections import Counter
+        mock_counter = Counter({'example': 1})
+        with patch('mwmbl.crawl.index_batches', return_value=mock_counter):
                 with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
                     with patch('mwmbl.crawl.TinyIndex') as mock_tiny_index:
                         with patch('mwmbl.crawl.index_pages') as mock_index_pages:
@@ -207,11 +212,8 @@ class TestCrawlFunctional:
                                 mock_post.return_value.status_code = 200
                                 mock_post.return_value.text = "OK"
                                 
-                                # Import and test run_indexing
-                                from mwmbl.crawl import run_indexing
-                                
                                 # Should complete without errors
-                                run_indexing()
+                                crawler.run_indexing()
                                 
                                 # Verify batch was consumed from Redis
                                 remaining_batches = fake_redis.llen("batch-queue")
