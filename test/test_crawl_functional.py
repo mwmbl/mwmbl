@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
@@ -10,7 +11,8 @@ import fakeredis
 import pytest
 from django.test import override_settings
 
-from mwmbl.crawler.batch import HashedBatch, Result
+from mwmbl.crawl import Crawler, crawl_url, process_batch, run_indexing
+from mwmbl.crawler.batch import HashedBatch, Result, Item, ItemContent
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.redis_url_queue import RedisURLQueue
 
@@ -104,8 +106,6 @@ class TestCrawlFunctional:
 
     def test_redis_connection_and_health_check(self, fake_redis, mock_settings, mock_environment):
         """Test Redis connection and health check functionality"""
-        from mwmbl.crawl import Crawler
-        
         # Test with working Redis
         crawler = Crawler()
         crawler._redis = fake_redis  # Set the private attribute directly
@@ -137,8 +137,6 @@ class TestCrawlFunctional:
 
     def test_process_batch_workflow(self, fake_redis, mock_settings, mock_environment, mock_crawl_response):
         """Test the complete batch processing workflow"""
-        from mwmbl.crawl import Crawler
-        
         crawler = Crawler()
         crawler._redis = fake_redis  # Set the private attribute directly
         
@@ -165,11 +163,8 @@ class TestCrawlFunctional:
 
     def test_indexing_workflow(self, fake_redis, mock_settings, mock_environment, temp_data_path):
         """Test the indexing workflow with fake Redis"""
-        from mwmbl.crawl import Crawler
-        
         # Create a sample batch in Redis
         # Create a sample item that matches the Item schema
-        from mwmbl.crawler.batch import Item, ItemContent
         sample_item = Item(
             url="https://example.com",
             status=200,
@@ -191,7 +186,6 @@ class TestCrawlFunctional:
         crawler._redis = fake_redis  # Set the private attribute directly
         
         # Mock Counter object for index_batches return value
-        from collections import Counter
         mock_counter = Counter({'example': 1})
         with patch('mwmbl.crawl.index_batches', return_value=mock_counter):
                 with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
@@ -238,8 +232,6 @@ class TestCrawlFunctional:
             with patch('mwmbl.crawler.retrieve.robots_allowed', return_value=True):
                 mock_fetch.return_value = (200, mock_html_content)
                 
-                from mwmbl.crawl import crawl_url
-                
                 result = crawl_url('https://example.com')
                 
                 assert result['url'] == 'https://example.com'
@@ -257,8 +249,6 @@ class TestCrawlFunctional:
                 # Test connection error
                 mock_fetch.side_effect = ConnectionError("Connection failed")
                 
-                from mwmbl.crawl import crawl_url
-                
                 result = crawl_url('https://example.com')
                 
                 assert result['url'] == 'https://example.com'
@@ -270,8 +260,6 @@ class TestCrawlFunctional:
     def test_robots_denied_handling(self, mock_environment):
         """Test robots.txt denial handling"""
         with patch('mwmbl.crawler.retrieve.robots_allowed', return_value=False):
-            from mwmbl.crawl import crawl_url
-            
             result = crawl_url('https://example.com')
             
             assert result['url'] == 'https://example.com'
@@ -339,87 +327,83 @@ class TestCrawlFunctional:
     def test_integration_workflow(self, fake_redis, mock_settings, mock_environment, 
                                  sample_found_urls, mock_crawl_response, temp_data_path):
         """Test the complete integration workflow"""
-        with patch('mwmbl.crawl.redis', fake_redis):
-            with patch('redis.Redis.from_url', return_value=fake_redis):
-                # Setup URL queue
-                url_queue = RedisURLQueue(fake_redis, lambda: set())
-                url_queue.queue_urls(sample_found_urls)
-                
-                with patch('mwmbl.crawl.url_queue', url_queue):
-                    with patch('mwmbl.crawl.crawl_url', return_value=mock_crawl_response):
-                        with patch('mwmbl.crawl.record_urls_in_database'):
-                            # Mock Counter object for index_batches return value
-                            from collections import Counter
-                            mock_counter = Counter({'example': 1})
-                            with patch('mwmbl.crawl.index_batches', return_value=mock_counter):
-                                with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
-                                    with patch('mwmbl.crawl.TinyIndex') as mock_tiny_index:
-                                        with patch('mwmbl.crawl.index_pages') as mock_index_pages:
-                                            with patch('requests.post') as mock_post:
-                                                # Setup mocks for indexing
-                                                mock_remote_index_instance = MagicMock()
-                                                mock_remote_index.return_value = mock_remote_index_instance
-                                                mock_remote_index_instance.retrieve.return_value = []
-                                                
-                                                mock_tiny_index_instance = MagicMock()
-                                                mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
-                                                mock_tiny_index_instance.retrieve.return_value = []
-                                                mock_tiny_index_instance.get_key_page_index.return_value = 0
-                                                mock_tiny_index_instance.get_page.return_value = "test content"
-                                                
-                                                mock_post.return_value.status_code = 200
-                                                mock_post.return_value.text = "OK"
-                                                
-                                                # Import functions
-                                                from mwmbl.crawl import process_batch, run_indexing
-                                                
-                                                # Run complete workflow
-                                                process_batch()  # Should create batch in Redis
-                                                
-                                                # Verify batch was created
-                                                batch_count = fake_redis.llen("batch-queue")
-                                                assert batch_count == 1
-                                                
-                                                # Run indexing
-                                                run_indexing()  # Should process the batch
-                                                
-                                                # Verify batch was consumed
-                                                remaining_batches = fake_redis.llen("batch-queue")
-                                                assert remaining_batches == 0
+        # Setup URL queue
+        url_queue = RedisURLQueue(fake_redis, lambda: set())
+        url_queue.queue_urls(sample_found_urls)
+        
+        # Create crawler instance
+        crawler = Crawler()
+        crawler._redis = fake_redis
+        crawler._url_queue = url_queue
+        
+        with patch('mwmbl.crawl.crawl_url', return_value=mock_crawl_response):
+            with patch('mwmbl.crawl.record_urls_in_database'):
+                # Mock Counter object for index_batches return value
+                mock_counter = Counter({'example': 1})
+                with patch('mwmbl.crawl.index_batches', return_value=mock_counter):
+                    with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
+                        with patch('mwmbl.crawl.TinyIndex') as mock_tiny_index:
+                            with patch('mwmbl.crawl.index_pages') as mock_index_pages:
+                                with patch('requests.post') as mock_post:
+                                    # Setup mocks for indexing
+                                    mock_remote_index_instance = MagicMock()
+                                    mock_remote_index.return_value = mock_remote_index_instance
+                                    mock_remote_index_instance.retrieve.return_value = []
+                                    
+                                    mock_tiny_index_instance = MagicMock()
+                                    mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
+                                    mock_tiny_index_instance.retrieve.return_value = []
+                                    mock_tiny_index_instance.get_key_page_index.return_value = 0
+                                    mock_tiny_index_instance.get_page.return_value = "test content"
+                                    
+                                    mock_post.return_value.status_code = 200
+                                    mock_post.return_value.text = "OK"
+                                    
+                                    # Run complete workflow
+                                    crawler.process_batch()  # Should create batch in Redis
+                                    
+                                    # Verify batch was created
+                                    batch_count = fake_redis.llen("batch-queue")
+                                    assert batch_count == 1
+                                    
+                                    # Run indexing
+                                    crawler.run_indexing()  # Should process the batch
+                                    
+                                    # Verify batch was consumed
+                                    remaining_batches = fake_redis.llen("batch-queue")
+                                    assert remaining_batches == 0
 
     def test_error_recovery_and_resilience(self, fake_redis, mock_settings, mock_environment):
         """Test error recovery and system resilience"""
-        with patch('mwmbl.crawl.redis', fake_redis):
-            with patch('redis.Redis.from_url', return_value=fake_redis):
-                with patch('mwmbl.crawl.url_queue') as mock_url_queue:
-                    with patch('mwmbl.crawl.record_urls_in_database'):
-                        # Test with empty batch
-                        mock_url_queue.get_batch.return_value = []
-                        
-                        from mwmbl.crawl import process_batch
-                        
-                        # Should handle empty batch gracefully
-                        process_batch()
-                        
-                        # Test indexing with no batches - mock sleep to avoid waiting
-                        with patch('time.sleep'):
-                            with patch('mwmbl.crawl.index_batches') as mock_index_batches:
-                                with patch('mwmbl.crawl.TinyIndex') as mock_tiny_index:
-                                    with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
-                                        # Mock the index_batches function to avoid file system access
-                                        from collections import Counter
-                                        mock_index_batches.return_value = Counter()
-                                        
-                                        # Setup TinyIndex mock
-                                        mock_tiny_index_instance = MagicMock()
-                                        mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
-                                        
-                                        # Setup RemoteIndex mock
-                                        mock_remote_index_instance = MagicMock()
-                                        mock_remote_index.return_value = mock_remote_index_instance
-                                        mock_remote_index_instance.retrieve.return_value = []
-                                        
-                                        from mwmbl.crawl import run_indexing
-                                        
-                                        # Should handle no batches gracefully (will sleep and return)
-                                        run_indexing()
+        # Create crawler instance
+        crawler = Crawler()
+        crawler._redis = fake_redis
+        
+        # Mock the URL queue for empty batch test
+        mock_url_queue = MagicMock()
+        mock_url_queue.get_batch.return_value = []
+        crawler._url_queue = mock_url_queue
+        
+        with patch('mwmbl.crawl.record_urls_in_database'):
+            # Should handle empty batch gracefully
+            crawler.process_batch()
+            
+            # Test indexing with no batches - mock sleep to avoid waiting
+            with patch('time.sleep'):
+                with patch('mwmbl.crawl.index_batches') as mock_index_batches:
+                    with patch('mwmbl.crawl.TinyIndex') as mock_tiny_index:
+                        with patch('mwmbl.crawl.RemoteIndex') as mock_remote_index:
+                            # Mock the index_batches function to avoid file system access
+                            mock_index_batches.return_value = Counter()
+                            
+                            # Setup TinyIndex mock
+                            mock_tiny_index_instance = MagicMock()
+                            mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
+                            
+                            # Setup RemoteIndex mock
+                            mock_remote_index_instance = MagicMock()
+                            mock_remote_index.return_value = mock_remote_index_instance
+                            mock_remote_index_instance.retrieve.return_value = []
+                            
+                            # Should handle no batches gracefully (will sleep and return)
+                            crawler.run_indexing()

@@ -11,7 +11,7 @@ import requests
 from django.conf import settings
 from redis import Redis
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
@@ -38,6 +38,20 @@ FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
+
+
+# Validate environment variables when actually needed
+def validate_environment():
+    """Validate required environment variables for crawler operation."""
+    if not MWMBL_API_KEY.strip():
+        raise ValueError("An environment variable MWMBL_API_KEY must be set to run the crawler")
+    
+    if MWMBL_CONTACT_INFO == "CHANGE_ME@example.com":
+        raise ValueError(
+            "MWMBL_CONTACT_INFO must be set to your email or website URL. "
+            "This allows website administrators to contact you if needed. "
+            "Example: contact@yourdomain.com or https://your-mwmbl-instance.com"
+        )
 
 
 class Crawler:
@@ -228,6 +242,7 @@ class Crawler:
         Starts multiple worker processes for batch processing and one indexing process.
         Monitors processes and restarts them if they crash.
         """
+        validate_environment()  # Validate environment variables before starting
         self.check_redis()
         workers: int = CRAWLER_WORKERS
         assert workers > 0, f"Invalid value for CRAWLER_WORKERS: {workers}"
