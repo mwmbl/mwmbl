@@ -38,6 +38,7 @@ FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
+REMOTE_SERVER = "https://api.mwmbl.org"
 
 
 # Validate environment variables when actually needed
@@ -197,7 +198,7 @@ class Crawler:
                     results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
                     logger.info(f"Posting {len(result_items)} results")
                     response = requests.post(
-                        "https://mwmbl.org/api/v1/crawler/results", json=results.dict()
+                        "https://api.mwmbl.org/api/v1/crawler/results", json=results.dict()
                     )
                     logger.info(f"Response: {response.text}")
                     response.raise_for_status()
