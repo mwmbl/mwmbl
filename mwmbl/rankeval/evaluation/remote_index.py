@@ -14,7 +14,9 @@ logger = getLogger(__name__)
 
 
 class RemoteIndex:
-    url = "https://beta.mwmbl.org/api/v1/search/raw?s="
+    def __init__(self, remote_server: str = "https://api.mwmbl.org"):
+        self.remote_server = remote_server
+        self.url = f"{remote_server}/api/v1/search/raw?s="
 
     def retrieve(self, query: str, refresh: bool = False):
         url = self.url + query
