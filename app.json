@@ -3,5 +3,17 @@
     "dokku": {
       "predeploy": "rm -rf /app/static/* && cp -r /front-end-build/* /app/static/"
     }
+  },
+  "healthchecks": {
+    "web": [
+      {
+        "type": "http",
+        "path": "/api/v1/search/?s=rydnik",
+        "attempts": 1,
+        "interval": 600,
+        "grace": 0,
+        "timeout": 10
+      }
+    ]
   }
 }
