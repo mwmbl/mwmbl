@@ -189,13 +189,15 @@ def vote_on_search_result(request, vote_request: VoteRequest):
     summary="Get vote statistics for search results",
     description="Retrieve vote counts (upvotes and downvotes) for one or more URLs in the context of a specific search query. "
                 "Also returns the current user's vote on each result if they have voted. "
-                "URLs should be provided as a comma-separated list.",
+                "URLs should be provided as repeated 'url' query parameters (e.g., ?url=https://example.com&url=https://other.com).",
     tags=["Search Result Voting"]
 )
-def get_vote_counts(request, query: str, urls: str):
+def get_vote_counts(request, query: str):
     check_email_verified(request)
     
-    url_list = [url.strip() for url in urls.split(',') if url.strip()]
+    # Get URLs from repeated query parameters
+    url_list = request.GET.getlist('url')
+    url_list = [u.strip() for u in url_list if u.strip()]
     if not url_list:
         raise InvalidRequest("At least one URL must be provided.", status=400)
     
