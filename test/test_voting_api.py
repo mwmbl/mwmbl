@@ -232,7 +232,7 @@ def test_get_vote_counts_single_url(client, verified_user, verified_user2, acces
     )
     
     response = client.get(
-        f'/api/v1/platform/search-results/votes?query={sample_vote_data["query"]}&urls={sample_vote_data["url"]}',
+        f'/api/v1/platform/search-results/votes?query={sample_vote_data["query"]}&url={sample_vote_data["url"]}',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
@@ -269,9 +269,8 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
         vote_type='downvote'
     )
     
-    urls_param = f"{url1},{url2}"
     response = client.get(
-        f'/api/v1/platform/search-results/votes?query={query}&urls={urls_param}',
+        f'/api/v1/platform/search-results/votes?query={query}&url={url1}&url={url2}',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
@@ -290,7 +289,7 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
 def test_get_vote_counts_no_urls(client, access_token):
     """Test getting vote counts without providing URLs"""
     response = client.get(
-        '/api/v1/platform/search-results/votes?query=test&urls=',
+        '/api/v1/platform/search-results/votes?query=test',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
