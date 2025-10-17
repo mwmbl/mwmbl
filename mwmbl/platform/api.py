@@ -10,7 +10,7 @@ from ninja_jwt.controller import NinjaJWTDefaultController
 from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
-    VoteRequest, VoteRemoveRequest, VoteResponse, VoteStats, UserVoteHistory
+    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory
 )
 
 api = NinjaExtraAPI(urls_namespace="platform")
@@ -182,28 +182,27 @@ def vote_on_search_result(request, vote_request: VoteRequest):
     return {"status": "ok", "message": f"Vote {action} successfully."}
 
 
-@api.get(
+@api.post(
     "/search-results/votes", 
     response=VoteResponse, 
     auth=JWTAuth(),
     summary="Get vote statistics for search results",
-    description="Retrieve vote counts (upvotes and downvotes) for one or more URLs in the context of a specific search query. "
+    description="Retrieve vote counts (upvotes and downvotes) for multiple URLs in the context of a specific search query. "
                 "Also returns the current user's vote on each result if they have voted. "
-                "URLs should be provided as a comma-separated list.",
+                "This endpoint uses POST to handle large numbers of URLs that would exceed URL length limits.",
     tags=["Search Result Voting"]
 )
-def get_vote_counts(request, query: str, urls: str):
+def get_vote_counts(request, vote_stats_request: VoteStatsRequest):
     check_email_verified(request)
     
-    url_list = [url.strip() for url in urls.split(',') if url.strip()]
-    if not url_list:
+    if not vote_stats_request.urls:
         raise InvalidRequest("At least one URL must be provided.", status=400)
     
     # Get vote counts for each URL
     vote_data = {}
-    for url in url_list:
+    for url in vote_stats_request.urls:
         # Get aggregated vote counts
-        votes = SearchResultVote.objects.filter(url=url, query=query)
+        votes = SearchResultVote.objects.filter(url=url, query=vote_stats_request.query)
         upvotes = votes.filter(vote_type='upvote').count()
         downvotes = votes.filter(vote_type='downvote').count()
         

@@ -77,6 +77,19 @@ class VoteStats(Schema):
     )
 
 
+class VoteStatsRequest(Schema):
+    """Request schema for getting vote statistics for multiple URLs."""
+    
+    query: str = Field(
+        description="The search query that returned these results",
+        example="python tutorial"
+    )
+    urls: list[str] = Field(
+        description="List of URLs to get vote statistics for",
+        example=["https://example.com/article", "https://another-site.com/page"]
+    )
+
+
 class VoteResponse(Schema):
     """Response schema containing vote statistics for multiple URLs."""
     

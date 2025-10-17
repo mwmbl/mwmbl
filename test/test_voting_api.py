@@ -231,8 +231,15 @@ def test_get_vote_counts_single_url(client, verified_user, verified_user2, acces
         vote_type='downvote'
     )
     
-    response = client.get(
-        f'/api/v1/platform/search-results/votes?query={sample_vote_data["query"]}&urls={sample_vote_data["url"]}',
+    vote_stats_request = {
+        "query": sample_vote_data["query"],
+        "urls": [sample_vote_data["url"]]
+    }
+    
+    response = client.post(
+        '/api/v1/platform/search-results/votes',
+        data=json.dumps(vote_stats_request),
+        content_type='application/json',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
@@ -269,9 +276,15 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
         vote_type='downvote'
     )
     
-    urls_param = f"{url1},{url2}"
-    response = client.get(
-        f'/api/v1/platform/search-results/votes?query={query}&urls={urls_param}',
+    vote_stats_request = {
+        "query": query,
+        "urls": [url1, url2]
+    }
+    
+    response = client.post(
+        '/api/v1/platform/search-results/votes',
+        data=json.dumps(vote_stats_request),
+        content_type='application/json',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
@@ -289,8 +302,15 @@ def test_get_vote_counts_multiple_urls(client, verified_user, access_token):
 @pytest.mark.django_db
 def test_get_vote_counts_no_urls(client, access_token):
     """Test getting vote counts without providing URLs"""
-    response = client.get(
-        '/api/v1/platform/search-results/votes?query=test&urls=',
+    vote_stats_request = {
+        "query": "test",
+        "urls": []
+    }
+    
+    response = client.post(
+        '/api/v1/platform/search-results/votes',
+        data=json.dumps(vote_stats_request),
+        content_type='application/json',
         HTTP_AUTHORIZATION=f'Bearer {access_token}'
     )
     
