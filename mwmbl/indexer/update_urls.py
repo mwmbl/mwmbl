@@ -15,7 +15,7 @@ from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import URLDatabase, URLStatus, FoundURL
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
+from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.redis_url_queue import RedisURLQueue, get_domain_max_urls
@@ -41,10 +41,10 @@ def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
     start = datetime.utcnow()
-    blacklist_domains = get_blacklist_domains()
+    blacklist_provider = get_default_blacklist_provider()
     blacklist_retrieval_time = datetime.utcnow() - start
-    logger.info(f"Recording URLs in database for {len(batches)} batches, with {len(blacklist_domains)} blacklist "
-                f"domains, retrieved in {blacklist_retrieval_time.total_seconds()} seconds")
+    logger.info(f"Recording URLs in database for {len(batches)} batches, blacklist provider ready "
+                f"in {blacklist_retrieval_time.total_seconds()} seconds")
 
     url_users = {}
     url_timestamps = {}
@@ -66,7 +66,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
                     continue
                 for link in item.content.all_links:
                     process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
-                                 blacklist_domains, domain_links)
+                                 blacklist_provider, domain_links)
 
     found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
                   for url in url_statuses.keys() | url_users.keys()]
@@ -107,7 +107,7 @@ def add_hn_links(new_item_queue: RedisURLQueue):
 
 
 def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timestamp: datetime,
-                 url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_domains: set[str],
+                 url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_provider,
                  domain_links: dict[str, set[str]]):
     try:
         parsed_link = parse_url(link.url)
@@ -119,7 +119,7 @@ def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timest
         logger.debug(f"Couldn't find netloc: {link.url}")
         return
 
-    if is_domain_blacklisted(parsed_link.netloc, blacklist_domains):
+    if blacklist_provider.is_domain_blacklisted(parsed_link.netloc):
         logger.debug(f"Excluding link for blacklisted domain: {parsed_link}")
         return
 

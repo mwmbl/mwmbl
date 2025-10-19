@@ -44,5 +44,3 @@ CORE_DOMAINS = {
     'www.python.org',
     'news.ycombinator.com',
 }
-
-BLACKLIST_DOMAINS_URL = "https://get.domainsblacklists.com/blacklist.txt"

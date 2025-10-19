@@ -11,7 +11,7 @@ from redis import Redis
 from mwmbl.crawler.domains import DomainLinkDatabase, TOP_DOMAINS
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
-from mwmbl.indexer.blacklist import get_blacklist_domains, is_domain_blacklisted
+from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.settings import CORE_DOMAINS
 from mwmbl.utils import parse_url
 
@@ -52,10 +52,10 @@ def get_domain_max_urls(domain: str, curated_domains: set[str]):
 
 
 class RedisURLQueue:
-    def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]]) -> None:
+    def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]], blacklist_provider=None) -> None:
         self.redis = redis
-        self._black_listed_domains = None
         self.get_curated_domains_function = get_curated_domains_function
+        self.blacklist_provider = blacklist_provider or get_default_blacklist_provider()
 
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()
@@ -115,7 +115,7 @@ class RedisURLQueue:
         else:
             domains += list(top_other_domains)
 
-        domains = [domain for domain in domains if not is_domain_blacklisted(domain, self.black_listed_domains)]
+        domains = [domain for domain in domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
         logger.info(f"Getting batch from domains {domains}")
 
         # Add a random url as the root domain of one of DOMAINS
@@ -160,9 +160,3 @@ class RedisURLQueue:
 
     def get_domain_count(self, domain: str):
         return self.redis.zcard(DOMAIN_URLS_KEY.format(domain=domain))
-
-    @property
-    def black_listed_domains(self):
-        if self._black_listed_domains is None:
-            self._black_listed_domains = get_blacklist_domains()
-        return self._black_listed_domains
