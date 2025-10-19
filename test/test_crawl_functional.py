@@ -15,6 +15,8 @@ from mwmbl.crawl import Crawler, crawl_url, process_batch, run_indexing
 from mwmbl.crawler.batch import HashedBatch, Result, Item, ItemContent
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.redis_url_queue import RedisURLQueue
+from mwmbl.indexer.blacklist import set_blacklist_provider
+from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 
 
 @pytest.fixture
@@ -98,6 +100,22 @@ def sample_found_urls():
             last_crawled=None
         )
     ]
+
+
+@pytest.fixture(autouse=True)
+def setup_test_blacklist_provider():
+    """Configure a static blacklist provider for tests to avoid network calls."""
+    # Use a static blacklist provider with known test domains to avoid network calls
+    test_blacklist_domains = {
+        'spam.com',
+        'malware.example', 
+        'badsite.net'
+    }
+    test_provider = StaticBlacklistProvider(test_blacklist_domains)
+    set_blacklist_provider(test_provider)
+    yield
+    # Reset to None so subsequent tests use default
+    set_blacklist_provider(None)
 
 
 @pytest.mark.django_db

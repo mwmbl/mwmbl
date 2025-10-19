@@ -2,13 +2,39 @@ from datetime import timedelta
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.settings import BLACKLIST_DOMAINS_URL, EXCLUDED_DOMAINS, DOMAIN_BLACKLIST_REGEX
-from mwmbl.utils import request_cache
+from mwmbl.indexer.blacklist_providers import BlacklistProvider, URLBlacklistProvider, HaGeZiBlacklistProvider, CombinedBlacklistProvider
+
+# Global provider instance that can be configured
+_blacklist_provider: BlacklistProvider = None
+
+
+def get_default_blacklist_provider() -> BlacklistProvider:
+    """Get the default blacklist provider configuration."""
+    # Use HaGeZi as primary with fallback to old URL for compatibility
+    return CombinedBlacklistProvider([
+        HaGeZiBlacklistProvider('light'),
+        URLBlacklistProvider(BLACKLIST_DOMAINS_URL)
+    ])
+
+
+def set_blacklist_provider(provider: BlacklistProvider) -> None:
+    """Set the global blacklist provider (useful for testing)."""
+    global _blacklist_provider
+    _blacklist_provider = provider
+
+
+def get_blacklist_provider() -> BlacklistProvider:
+    """Get the current blacklist provider."""
+    global _blacklist_provider
+    if _blacklist_provider is None:
+        _blacklist_provider = get_default_blacklist_provider()
+    return _blacklist_provider
 
 
 def get_blacklist_domains() -> set[str]:
-    with request_cache(expire_after=timedelta(days=1)) as session:
-        response = session.get(BLACKLIST_DOMAINS_URL)
-        return set(response.text.split())
+    """Get blacklisted domains using the configured provider."""
+    provider = get_blacklist_provider()
+    return provider.get_blacklisted_domains()
 
 
 def is_domain_blacklisted(domain: str, blacklist_domains: set[str]):
