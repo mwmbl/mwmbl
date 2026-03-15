@@ -15,6 +15,7 @@ from mwmbl.crawl import Crawler, crawl_url, process_batch, run_indexing
 from mwmbl.crawler.batch import HashedBatch, Result, Item, ItemContent
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.redis_url_queue import RedisURLQueue
+from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 
 
 @pytest.fixture
@@ -100,6 +101,17 @@ def sample_found_urls():
     ]
 
 
+@pytest.fixture
+def test_blacklist_provider():
+    """Create a static blacklist provider for tests to avoid network calls."""
+    test_blacklist_domains = {
+        'spam.com',
+        'malware.example', 
+        'badsite.net'
+    }
+    return StaticBlacklistProvider(test_blacklist_domains)
+
+
 @pytest.mark.django_db
 class TestCrawlFunctional:
     """Functional tests for the crawl.py module"""
@@ -120,9 +132,9 @@ class TestCrawlFunctional:
         with pytest.raises(SystemExit):
             crawler.check_redis()
 
-    def test_url_queue_operations(self, fake_redis, sample_found_urls):
+    def test_url_queue_operations(self, fake_redis, sample_found_urls, test_blacklist_provider):
         """Test RedisURLQueue operations with fake Redis"""
-        url_queue = RedisURLQueue(fake_redis, lambda: set())
+        url_queue = RedisURLQueue(fake_redis, lambda: set(), test_blacklist_provider)
         
         # Test queuing URLs
         url_queue.queue_urls(sample_found_urls)
@@ -287,9 +299,9 @@ class TestCrawlFunctional:
         retrieved_batch = json.loads(batch_data)
         assert retrieved_batch['user_id_hash'] == 'test_user'
 
-    def test_domain_scoring_and_url_management(self, fake_redis, sample_found_urls):
+    def test_domain_scoring_and_url_management(self, fake_redis, sample_found_urls, test_blacklist_provider):
         """Test domain scoring and URL management in Redis"""
-        url_queue = RedisURLQueue(fake_redis, lambda: set())
+        url_queue = RedisURLQueue(fake_redis, lambda: set(), test_blacklist_provider)
         
         # Queue URLs
         url_queue.queue_urls(sample_found_urls)
@@ -305,9 +317,9 @@ class TestCrawlFunctional:
         assert example_count >= 0
         assert test_count >= 0
 
-    def test_user_url_assignment(self, fake_redis, sample_found_urls):
+    def test_user_url_assignment(self, fake_redis, sample_found_urls, test_blacklist_provider):
         """Test user URL assignment and tracking"""
-        url_queue = RedisURLQueue(fake_redis, lambda: set())
+        url_queue = RedisURLQueue(fake_redis, lambda: set(), test_blacklist_provider)
         
         # Queue URLs and get batch
         url_queue.queue_urls(sample_found_urls)
@@ -325,10 +337,10 @@ class TestCrawlFunctional:
         assert len(uncrawled) == 0  # All URLs should be assigned to this user
 
     def test_integration_workflow(self, fake_redis, mock_settings, mock_environment, 
-                                 sample_found_urls, mock_crawl_response, temp_data_path):
+                                 sample_found_urls, mock_crawl_response, temp_data_path, test_blacklist_provider):
         """Test the complete integration workflow"""
         # Setup URL queue
-        url_queue = RedisURLQueue(fake_redis, lambda: set())
+        url_queue = RedisURLQueue(fake_redis, lambda: set(), test_blacklist_provider)
         url_queue.queue_urls(sample_found_urls)
         
         # Create crawler instance

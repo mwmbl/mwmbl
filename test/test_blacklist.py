@@ -1,21 +1,27 @@
-from mwmbl.indexer.blacklist import is_domain_blacklisted
+from mwmbl.indexer.blacklist_providers import BuiltInRulesBlacklistProvider
 
 
 def test_blacklist_excludes_bad_pattern():
+    """Test that built-in rules blacklist bad patterns."""
+    provider = BuiltInRulesBlacklistProvider()
     bad_domains = [
         "brofqpxj.uelinc.com",
-        "gzsmjc.fba01.com",
+        "gzsmjc.fba01.com", 
         "59648.etnomurcia.com",
         "something.hzqwyou.cn",
     ]
 
     for domain in bad_domains:
-        assert is_domain_blacklisted(domain, set())
+        assert provider.is_domain_blacklisted(domain)
 
 
 def test_blacklist_allows_top_domains():
-    assert not is_domain_blacklisted("teamblog.supportbee.com", set())
+    """Test that built-in rules allow legitimate domains."""
+    provider = BuiltInRulesBlacklistProvider()
+    assert not provider.is_domain_blacklisted("teamblog.supportbee.com")
 
 
 def test_blacklist_allows_other_domains():
-    assert not is_domain_blacklisted("something.com", set())
+    """Test that built-in rules allow other legitimate domains."""
+    provider = BuiltInRulesBlacklistProvider()
+    assert not provider.is_domain_blacklisted("something.com")

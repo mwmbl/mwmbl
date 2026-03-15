@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from mwmbl.crawler.batch import Link
 from mwmbl.indexer.update_urls import process_link
+from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 
 
 def test_process_link_normal():
@@ -9,6 +10,7 @@ def test_process_link_normal():
     url_timestamps = {}
     url_users = {}
     domain_links = defaultdict(set)
+    blacklist_provider = StaticBlacklistProvider(set())
 
     process_link(
         user_id_hash="abc123",
@@ -17,7 +19,7 @@ def test_process_link_normal():
         timestamp=1234,
         url_timestamps=url_timestamps,
         url_users=url_users,
-        blacklist_domains=[],
+        blacklist_provider=blacklist_provider,
         domain_links=domain_links,
     )
 
@@ -29,6 +31,8 @@ def test_process_link_excludes_porn():
     url_timestamps = {}
     url_users = {}
     domain_links = {}
+    # Create a blacklist provider that blocks porn sites
+    blacklist_provider = StaticBlacklistProvider({"somepornsite.com"})
 
     process_link(
         user_id_hash="abc123",
@@ -37,7 +41,7 @@ def test_process_link_excludes_porn():
         timestamp=1234,
         url_timestamps=url_timestamps,
         url_users=url_users,
-        blacklist_domains=[],
+        blacklist_provider=blacklist_provider,
         domain_links=domain_links,
     )
 

@@ -66,9 +66,9 @@ def test_openapi_spec_generation():
     assert 'post' in vote_endpoint
     assert 'delete' in vote_endpoint
     
-    # Check that GET endpoint for vote counts exists
+    # Check that POST endpoint for vote counts exists (uses POST to handle large URL lists)
     votes_endpoint = paths['/api/v1/platform/search-results/votes']
-    assert 'get' in votes_endpoint
+    assert 'post' in votes_endpoint
     
     # Check that GET endpoint for user vote history exists
     my_votes_endpoint = paths['/api/v1/platform/search-results/my-votes']
@@ -144,12 +144,12 @@ def test_voting_endpoint_documentation():
     assert 'tags' in vote_post
     assert 'Search Result Voting' in vote_post['tags']
     
-    # Check GET /search-results/votes endpoint documentation
-    votes_get = paths['/api/v1/platform/search-results/votes']['get']
-    assert 'summary' in votes_get
-    assert 'description' in votes_get
-    assert 'tags' in votes_get
-    assert 'Search Result Voting' in votes_get['tags']
+    # Check POST /search-results/votes endpoint documentation
+    votes_post = paths['/api/v1/platform/search-results/votes']['post']
+    assert 'summary' in votes_post
+    assert 'description' in votes_post
+    assert 'tags' in votes_post
+    assert 'Search Result Voting' in votes_post['tags']
     
     # Check DELETE /search-results/vote endpoint documentation
     vote_delete = paths['/api/v1/platform/search-results/vote']['delete']
