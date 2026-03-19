@@ -342,8 +342,11 @@ def clean_html(s: str):
 
 def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     escaped_query = urllib.parse.quote(s, safe='')
+    headers = {
+        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
+    }
     with request_cache(timedelta(weeks=10)) as session:
-        response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query))
+        response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers)
         try:
             wiki_response = response.json()
         except json.JSONDecodeError:
