@@ -213,7 +213,19 @@ class TinyIndex(Generic[T]):
         Get the page at index i, decompress and deserialise it using JSON
         """
         results = self._get_page_tuples(i)
-        return [self.item_factory(*item) for item in results]
+        items = []
+        for item in results:
+            try:
+                items.append(self.item_factory(*item))
+            except ValueError as e:
+                logger.error(f"Invalid item in index page {i}, fixing state to None: {e}. Item: {item}")
+                # The state value is the last element if present; strip it and retry with state=None
+                fixed_item = item[:-1] if len(item) > 3 else item
+                try:
+                    items.append(self.item_factory(*fixed_item))
+                except Exception as e2:
+                    logger.error(f"Could not recover item in index page {i}, skipping: {e2}. Item: {item}")
+        return items
 
     def _get_page_tuples(self, i):
         page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
