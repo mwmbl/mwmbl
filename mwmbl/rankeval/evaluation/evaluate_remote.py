@@ -12,7 +12,7 @@ from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.rankeval.paths import MODEL_PATH
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import Ranker, HeuristicRanker, HeuristicAndWikiRanker
+from mwmbl.tinysearchengine.rank import DomainLimitingRanker, Ranker, HeuristicRanker, HeuristicAndWikiRanker
 
 from mwmbl.rankeval.evaluation.evaluate import RankingModel, evaluate
 
@@ -30,7 +30,7 @@ def run():
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
 
     model = pickle.load(open(MODEL_PATH, 'rb'))
-    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3)
+    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
     model = MwmblRankingModel(ranker)
@@ -39,7 +39,7 @@ def run():
 
 def single_query(query: str):
     model = pickle.load(open(MODEL_PATH, 'rb'))
-    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3)
+    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
     results = ranker.search(query, [])
     for result in results:
