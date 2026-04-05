@@ -28,7 +28,7 @@ def fetch_results(url: str, query: str):
 
 def run():
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
-
+ 
     model = pickle.load(open(MODEL_PATH, 'rb'))
     ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
@@ -47,5 +47,5 @@ def single_query(query: str):
 
 
 if __name__ == '__main__':
-    # run()
-    single_query("how to implement raft consensus in rust")
+    run()
+    # single_query("oxyphenbutazone")

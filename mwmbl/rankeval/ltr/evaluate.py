@@ -31,6 +31,34 @@ PREDICTORS = {
 }
 
 
+def print_feature_importances(predictor_name: str, model):
+    """Print top feature importances for XGBoost models."""
+    xgb_model = None
+    if hasattr(model, 'steps'):
+        last_step = model.steps[-1][1]
+        if isinstance(last_step, ThresholdPredictor):
+            xgb_model = last_step.classifier
+        elif hasattr(last_step, 'feature_importances_'):
+            xgb_model = last_step
+    elif isinstance(model, RankingPredictor):
+        inner = model.model
+        if isinstance(inner, ThresholdPredictor):
+            xgb_model = inner.classifier
+        elif hasattr(inner, 'feature_importances_'):
+            xgb_model = inner
+
+    if xgb_model is None or not hasattr(xgb_model, 'feature_importances_'):
+        return
+
+    importances = xgb_model.feature_importances_
+    feature_names = xgb_model.get_booster().feature_names or [f"f{i}" for i in range(len(importances))]
+
+    ranked = sorted(zip(feature_names, importances), key=lambda x: x[1], reverse=True)
+    print(f"\nTop features for predictor '{predictor_name}':")
+    for name, importance in ranked:
+        print(f"  {name}: {importance:.4f}")
+
+
 def get_discount(rank: float):
     if np.isnan(rank):
         return 0.0
@@ -104,6 +132,8 @@ def run():
 
     with open(MODEL_PATH, 'wb') as output_file:
         pickle.dump(final_model, output_file)
+
+    print_feature_importances(args.predictor, final_model)
 
 
 if __name__ == '__main__':
