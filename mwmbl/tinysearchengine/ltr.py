@@ -36,8 +36,19 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: DataFrame, y=None):
-        features = X.apply(get_features_as_series, axis=1)
-        return features
+        records = X.to_dict('records')
+        all_features = []
+        
+        for item in records:
+            terms = item['query'].lower().split()
+            
+            features = get_features(
+                terms, item['title'], item['url'], 
+                item['extract'], item['score'], True
+            )
+            all_features.append(features)
+        
+        return DataFrame(all_features).values.astype('float32')
 
 
 class RankingPredictor(BaseEstimator, RegressorMixin):

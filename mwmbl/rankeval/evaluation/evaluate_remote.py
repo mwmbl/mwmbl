@@ -47,5 +47,7 @@ def single_query(query: str):
 
 
 if __name__ == '__main__':
-    run()
+    # run()
+    import cProfile
+    cProfile.run("run()", sort="cumtime")
     # single_query("oxyphenbutazone")
