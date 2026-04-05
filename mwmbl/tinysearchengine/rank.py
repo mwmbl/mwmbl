@@ -316,13 +316,18 @@ class HeuristicRanker(Ranker):
         if len(results) == 0:
             return []
 
-        wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
-        wiki_urls = {result.url for result in wiki_results}
-        other_results = [result for result in results if result.url not in wiki_urls]
-        results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
+        # wiki_results = [result for result in results if result.state == DocumentState.FROM_WIKI]
+        # wiki_urls = {result.url for result in wiki_results}
+        # other_results = [result for result in results if result.url not in wiki_urls]
+        # results_and_scores = [(score_result(terms, result, is_complete), result) for result in other_results]
+        # ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
+        # filtered_results = [result for score, result in ordered_results if score > self.score_threshold]
+        # return wiki_results + filtered_results
+
+        results_and_scores = [(score_result(terms, result, is_complete), result) for result in results]
         ordered_results = sorted(results_and_scores, key=itemgetter(0), reverse=True)
         filtered_results = [result for score, result in ordered_results if score > self.score_threshold]
-        return wiki_results + filtered_results
+        return filtered_results
 
 
 WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
@@ -349,6 +354,7 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers)
         try:
             wiki_response = response.json()
+            print("Wiki response", json.dumps(wiki_response, indent=2))
         except json.JSONDecodeError:
             logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}, content: {response.content}")
             return []
@@ -381,13 +387,11 @@ class HeuristicAndWikiRanker(HeuristicRanker):
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         s_shortened = s[:MAX_QUERY_CHARS]
 
-        results = super().search(s_shortened, additional_results)
+        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results)
+        results = super().search(s_shortened, additional_results=wiki_results)
 
         if len(results) == 0 and self.return_none_if_no_mwmbl_results:
             return []
 
-        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results)
-
-        return wiki_results + results
-
+        return results
 

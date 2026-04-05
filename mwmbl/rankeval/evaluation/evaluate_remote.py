@@ -30,19 +30,22 @@ def run():
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
 
     model = pickle.load(open(MODEL_PATH, 'rb'))
-    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 5)
+    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3)
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
+    # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
     model = MwmblRankingModel(ranker)
-    evaluate(model, fraction=0.01, use_test=False)
+    evaluate(model, fraction=0.1, use_test=False)
 
 
 def single_query(query: str):
-    ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
+    model = pickle.load(open(MODEL_PATH, 'rb'))
+    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3)
+    # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
     results = ranker.search(query, [])
     for result in results:
         print(result)
 
 
 if __name__ == '__main__':
-    run()
-    # single_query("beethoven - wikipedia")
+    # run()
+    single_query("how to implement raft consensus in rust")

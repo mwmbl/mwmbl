@@ -2,6 +2,7 @@
 Perform an evaluation using NDCG against a gold standard set of results.
 """
 from abc import ABC, abstractmethod
+import time
 
 import numpy as np
 import pandas as pd
@@ -32,11 +33,12 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     # TODO:
     #  - output feature importances from XGBoost
     #  - experiment with more features
-
     if use_test:
-        dataset = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
+        path = RANKINGS_DATASET_TEST_PATH
     else:
-        dataset = pd.read_csv(RANKINGS_DATASET_TRAIN_PATH)
+        path = RANKINGS_DATASET_TRAIN_PATH
+    print("Evaluating against dataset", path)
+    dataset = pd.read_csv(path)
 
     ndcg_scores = []
     proportions = []
@@ -49,6 +51,8 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     else:
         random_queries = set(queries)
 
+    wiki_counts = []
+    durations = []
     for query, rankings in dataset.groupby('query'):
         if query not in random_queries:
             continue
@@ -58,7 +62,10 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
         scores = top_ranked.set_index('url')['score'].to_dict()
         print(f"Query: '{query}'", scores)
 
+        start_time = time.perf_counter()
         predicted_urls = ranking_model.predict(query)
+        end_time = time.perf_counter()
+
         print("Predicted", predicted_urls)
         top_urls = predicted_urls[:NUM_RESULTS_FOR_EVAL]
         y_true = [scores.get(url, 0.0) for url in top_urls] + [0.0] * (10 - len(top_urls))
@@ -73,12 +80,23 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
         score = ndcg_score([y_true], [y_predicted])
         ndcg_scores.append(score)
 
+        wiki_count = sum(1 for url in top_urls if "en.wikipedia.org" in url)
+        wiki_counts.append(wiki_count)
+        durations.append(end_time - start_time)
+
     print("ndcg_score_mean: ", np.mean(ndcg_scores))
     print("ndcg_score_sem:", sem(ndcg_scores))
     print()
     print("proportion_score_mean:", np.mean(proportions))
     print("proportion_score_sem:", sem(proportions))
+    print()
+    print("wiki_count_mean:", np.mean(wiki_counts))
+    print("wiki_count_sem:", sem(wiki_counts))
+    print()
+    print("predict_time_mean:", np.mean(durations))
+    print("predict_time_sem:", sem(durations))
 
-    print("Dataset\tFraction\tNDCG\tSEM\tProportion\tSEM")
+    print("Dataset\tFraction\tNDCG\tSEM\tProportion\tSEM\tWiki Count\tSEM\tPredict time\tSEM")
     print(f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
-          f"{np.mean(proportions)}\t{sem(proportions)}")
+          f"{np.mean(proportions)}\t{sem(proportions)}\t{np.mean(wiki_counts)}\t{sem(wiki_counts)}"
+          f"\t{np.mean(durations)}\t{sem(durations)}")

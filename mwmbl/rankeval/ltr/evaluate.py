@@ -27,7 +27,7 @@ PREDICTORS = {
     'xgb': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
     'xgb_limit_terms': RankingPredictor(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
     'xgb_regressor': make_pipeline(FeatureExtractor(), XGBRegressor(objective="reg:pseudohubererror")),
-    'xgb_ranker': make_pipeline(FeatureExtractor(), XGBRanker(objective="rank:map", reg_lambda=2)),
+    'xgb_ranker': make_pipeline(FeatureExtractor(), XGBRanker(objective="rank:ndcg", reg_lambda=2)),
 }
 
 
