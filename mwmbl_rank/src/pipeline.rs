@@ -141,9 +141,12 @@ impl XGBPipeline {
             .map_err(|e| format!("Failed to build learning params: {}", e))?;
 
         // Build tree parameters: lambda (reg_lambda) is f32 in xgb 3.0.5
+        // Explicitly set tree_method=exact to match XGBoost 2.x behaviour
+        // (XGBoost 3.0 changed the default from exact→hist for small datasets).
         let tree_params = parameters::tree::TreeBoosterParametersBuilder::default()
             .lambda(self.reg_lambda)
             .scale_pos_weight(self.scale_pos_weight)
+            .tree_method(parameters::tree::TreeMethod::Exact)
             .build()
             .map_err(|e| format!("Failed to build tree params: {}", e))?;
 
