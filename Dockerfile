@@ -5,7 +5,7 @@ WORKDIR /front-end
 RUN npm install && npm run build
 
 
-FROM python:3.11.12-bullseye as base
+FROM python:3.11.12-bookworm as base
 
 ENV PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \
@@ -21,8 +21,9 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
 
 # Install Rust toolchain (required by maturin to compile the mwmbl_rank extension)
 # Install clang/libclang-dev for bindgen (used by xgboost_lib-sys)
+# Install patchelf so maturin can bundle libxgboost.so into the wheel RPATH
 RUN apt-get update && \
-    apt-get install -y clang libclang-dev && \
+    apt-get install -y clang libclang-dev patchelf && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -45,6 +46,12 @@ COPY mwmbl_rank /app/mwmbl_rank
 # extension. PEP 517/518 allows pip to use maturin as the build backend.
 RUN /venv/bin/pip install pip wheel --upgrade && \
     /venv/bin/pip install .
+
+# Copy libxgboost.so (prebuilt by the xgb crate) into the mwmbl_rank package
+# directory and patch the extension's RPATH so it finds the library at runtime.
+RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
+    cp /app/mwmbl_rank/target/release/deps/libxgboost.so "$SODIR/" && \
+    patchelf --set-rpath '$ORIGIN' "$SODIR/mwmbl_rank.cpython-311-x86_64-linux-gnu.so"
 
 FROM base as final
 

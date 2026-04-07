@@ -73,6 +73,17 @@ fakeredis = "^2.30.1"
 requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
+# PEP 621 project metadata required by maturin to install entry point scripts.
+# [tool.poetry.scripts] is Poetry-specific and ignored by maturin.
+[project]
+name = "mwmbl"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+
+[project.scripts]
+mwmbl-tinysearchengine = "mwmbl.main:run"
+mwmbl-crawl = "mwmbl.crawl:run"
+
 [tool.maturin]
 python-source = "."
 module-name = "mwmbl_rank"
