@@ -45,13 +45,11 @@ class LTRRanker(Ranker):
         tiny_index: TinyIndex,
         completer: Completer,
         model,
-        top_n: int,
         include_wiki: bool = True,
         num_wiki_results: int = 5,
     ):
         super().__init__(tiny_index, completer)
         self.model = model
-        self.top_n = top_n
         self.include_wiki = include_wiki
         self.num_wiki_results = num_wiki_results
 
@@ -60,7 +58,6 @@ class LTRRanker(Ranker):
             return []
 
         query = ' '.join(terms)
-        top_pages = results[:self.top_n]
 
         data = [{
             'query': query,
@@ -68,12 +65,12 @@ class LTRRanker(Ranker):
             'title': page.title if page.title is not None else "",
             'extract': page.extract if page.extract is not None else "",
             'score': page.score if page.score is not None else 0.0,
-        }  for page in top_pages]
+        }  for page in results]
 
         predictions = self.model.predict(data)
         mask = predictions > 0.0
         filtered_predictions = predictions[mask]
-        filtered_pages = np.array(top_pages)[mask]
+        filtered_pages = np.array(results)[mask]
 
         # Vectorized sorting
         indices = np.argsort(filtered_predictions)[::-1]

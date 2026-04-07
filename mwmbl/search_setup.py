@@ -11,7 +11,7 @@ from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import HeuristicAndWikiRanker
+from mwmbl.tinysearchengine.rank import DomainLimitingRanker, HeuristicAndWikiRanker
 
 CURATED_DOMAINS_CACHE_KEY = "curated-domains"
 CURATED_DOMAINS_CACHE_TIMEOUT = 300
@@ -41,6 +41,7 @@ if _ltr_model_path and Path(_ltr_model_path).exists():
     try:
         from mwmbl.tinysearchengine.ltr import RustXGBPipeline
         _model = RustXGBPipeline.from_model_path(_ltr_model_path)
+        ranker = DomainLimitingRanker(LTRRanker(tiny_index, completer, _model, include_wiki=True, num_wiki_results=3))
         ranker = LTRRanker(tiny_index, completer, _model, top_n=1000, include_wiki=True, num_wiki_results=5)
     except ImportError:
         import logging

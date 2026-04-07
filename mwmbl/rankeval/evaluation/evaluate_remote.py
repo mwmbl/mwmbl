@@ -32,7 +32,7 @@ def run():
  
     # model = pickle.load(open(MODEL_PATH, 'rb'))
     model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
-    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
+    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3))
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
     model = MwmblRankingModel(ranker)
@@ -41,7 +41,7 @@ def run():
 
 def single_query(query: str):
     model = pickle.load(open(MODEL_PATH, 'rb'))
-    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
+    ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3))
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
     results = ranker.search(query, [])
     for result in results:
