@@ -46,9 +46,9 @@ fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
 ///
 /// Each record dict must have keys: query, url, title, extract, score.
 ///
-/// Note: marked `unsendable` because the underlying XGBoost Booster handle
-/// is a raw C pointer that does not implement Send.
-#[pyclass(name = "RustXGBPipeline", unsendable)]
+/// XGBPipeline implements Send (see pipeline.rs), so this class is safe to use
+/// from multiple Python threads (e.g. Django worker threads).
+#[pyclass(name = "RustXGBPipeline")]
 pub struct PyXGBPipeline {
     inner: XGBPipeline,
 }

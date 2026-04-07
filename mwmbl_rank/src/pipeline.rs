@@ -66,6 +66,12 @@ pub fn extract_features_batch(records: &[DocumentRecord]) -> Vec<f32> {
 
 /// The Rust XGBoost pipeline.
 /// Holds the trained booster and hyperparameters.
+///
+/// # Safety
+/// `xgb::Booster` wraps a raw C pointer (`BoosterHandle`) which is `!Send` by default.
+/// XGBoost's C API is documented to be safe for concurrent read-only access (prediction),
+/// and we only mutate the booster during `fit()` / `load_model()`, which are called
+/// single-threadedly before the object is shared.  We therefore assert `Send` manually.
 pub struct XGBPipeline {
     pub threshold: f32,
     pub scale_pos_weight: f32,
@@ -77,6 +83,9 @@ pub struct XGBPipeline {
     pub subsample: Option<f32>,
     booster: Option<Booster>,
 }
+
+// SAFETY: see doc-comment on XGBPipeline above.
+unsafe impl Send for XGBPipeline {}
 
 impl XGBPipeline {
     pub fn new(threshold: f32, scale_pos_weight: f32, reg_lambda: f32, num_rounds: u32) -> Self {
