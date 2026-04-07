@@ -1,5 +1,4 @@
 import os
-import pickle
 from pathlib import Path
 
 from django.conf import settings
@@ -33,9 +32,24 @@ index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-# model_path = Path(__file__).parent / "resources" / "model.pickle"
-# model = pickle.load(open(model_path, 'rb'))
-# ranker = LTRRanker(tiny_index, completer, model, 1000, True, 5)
-ranker = HeuristicAndWikiRanker(tiny_index, completer)
+# To use the Rust XGBoost model, set MWMBL_LTR_MODEL_PATH to the path of a trained model file.
+# The model must have been trained with RustXGBPipeline.save_model().
+# If the env var is not set, fall back to the heuristic ranker.
+_ltr_model_path = os.environ.get("MWMBL_LTR_MODEL_PATH")
+
+if _ltr_model_path and Path(_ltr_model_path).exists():
+    try:
+        from mwmbl.tinysearchengine.ltr import RustXGBPipeline
+        _model = RustXGBPipeline.from_model_path(_ltr_model_path)
+        ranker = LTRRanker(tiny_index, completer, _model, top_n=1000, include_wiki=True, num_wiki_results=5)
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "mwmbl_rank Rust extension not available; falling back to heuristic ranker. "
+            "Run 'maturin develop' to build the Rust extension."
+        )
+        ranker = HeuristicAndWikiRanker(tiny_index, completer)
+else:
+    ranker = HeuristicAndWikiRanker(tiny_index, completer)
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)

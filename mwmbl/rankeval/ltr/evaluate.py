@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 import numpy as np
 import pandas as pd
-from mwmbl.tinysearchengine.ltr import ThresholdPredictor, FeatureExtractor, RankingPredictor
+from mwmbl.tinysearchengine.ltr import ThresholdPredictor, FeatureExtractor, RankingPredictor, RustXGBPipeline
 from scipy.stats import sem
 from sklearn.base import clone
 from sklearn.dummy import DummyRegressor
@@ -18,13 +18,14 @@ from xgboost import XGBClassifier, XGBRegressor, XGBRanker
 
 from mwmbl.rankeval.evaluation.evaluate import CLICK_PROPORTIONS
 from mwmbl.rankeval.ltr.baseline import RandomRegressor
-from mwmbl.rankeval.paths import LEARNING_TO_RANK_DATASET_PATH, MODEL_PATH
+from mwmbl.rankeval.paths import LEARNING_TO_RANK_DATASET_PATH, MODEL_PATH, RUST_MODEL_PATH
 
 PREDICTORS = {
     'random': RandomRegressor(),
     'constant': DummyRegressor(),
     'decision_tree': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, DecisionTreeClassifier())),
     'xgb': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
+    'xgb_rust': RustXGBPipeline(threshold=0.0, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100),
     'xgb_limit_terms': RankingPredictor(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(scale_pos_weight=0.1, reg_lambda=2))),
     'xgb_regressor': make_pipeline(FeatureExtractor(), XGBRegressor(objective="reg:pseudohubererror")),
     'xgb_ranker': make_pipeline(FeatureExtractor(), XGBRanker(objective="rank:ndcg", reg_lambda=2)),
@@ -97,14 +98,17 @@ def run():
     splits = cross_validator.split(X, y, groups)
 
     scores = []
-    for train, test in splits:
+    for fold_idx, (train, test) in enumerate(splits):
+        print(f"Fold {fold_idx + 1}: training on {len(train)} rows, testing on {len(test)} rows...")
         model = clone(predictor)
         if args.predictor == 'xgb_ranker':
             model.fit(X.iloc[train], y.iloc[train], xgbranker__qid=query_id[train])
         else:
             model.fit(X.iloc[train], y.iloc[train])
+        print(f"Fold {fold_idx + 1}: fit complete, predicting...")
 
         predictions = model.predict(X.iloc[test])
+        print(f"Fold {fold_idx + 1}: predictions complete, computing NDCG...")
 
         test_dataset = dataset.iloc[test].copy()
         test_dataset['prediction'] = predictions
@@ -114,10 +118,9 @@ def run():
 
             rankings_gold_discount = rankings['gold_discount'].tolist()
             rankings_prediction = rankings['prediction'].tolist()
-            print("Rankings gold discount", rankings_gold_discount)
-            print("Rankings prediction", rankings_prediction)
             score = ndcg_score([rankings_gold_discount], [rankings_prediction])
             scores.append(score)
+        print(f"Fold {fold_idx + 1}: NDCG computed, mean so far = {np.mean(scores):.4f}")
 
     print("scores:", scores)
     print("mean_score:", np.mean(scores))
@@ -130,8 +133,13 @@ def run():
     else:
         final_model.fit(X, y)
 
-    with open(MODEL_PATH, 'wb') as output_file:
-        pickle.dump(final_model, output_file)
+    if args.predictor == 'xgb_rust':
+        # RustXGBPipeline cannot be pickled; use its native save_model() instead.
+        print(f"Saving Rust XGBoost model to {RUST_MODEL_PATH}")
+        final_model.save_model(str(RUST_MODEL_PATH))
+    else:
+        with open(MODEL_PATH, 'wb') as output_file:
+            pickle.dump(final_model, output_file)
 
     print_feature_importances(args.predictor, final_model)
 

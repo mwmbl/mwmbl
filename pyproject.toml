@@ -51,6 +51,7 @@ sentry-sdk = "^2.13.0"
 django-debug-toolbar = "^5.2.0"
 wasmtime = "^24.0.0"
 dotenv = "^0.9.9"
+py-spy = "^0.4.1"
 
 [tool.poetry.extras]
 indexer = [
@@ -69,8 +70,15 @@ pytest = "^7.0.1"
 fakeredis = "^2.30.1"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "."
+module-name = "mwmbl_rank"
+manifest-path = "mwmbl_rank/Cargo.toml"
+# Include the generated domains JSON in the sdist
+include = ["mwmbl_rank/data/hn_top_domains_filtered.json"]
 
 [tool.poetry.scripts]
 mwmbl-tinysearchengine = "mwmbl.main:run"

@@ -9,8 +9,9 @@ from joblib import Memory
 
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
-from mwmbl.rankeval.paths import MODEL_PATH
+from mwmbl.rankeval.paths import MODEL_PATH, RUST_MODEL_PATH
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 from mwmbl.tinysearchengine.rank import DomainLimitingRanker, Ranker, HeuristicRanker, HeuristicAndWikiRanker
 
@@ -29,7 +30,8 @@ def fetch_results(url: str, query: str):
 def run():
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
  
-    model = pickle.load(open(MODEL_PATH, 'rb'))
+    # model = pickle.load(open(MODEL_PATH, 'rb'))
+    model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
     ranker = DomainLimitingRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, 1000, True, 3))
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
@@ -47,7 +49,7 @@ def single_query(query: str):
 
 
 if __name__ == '__main__':
-    # run()
-    import cProfile
-    cProfile.run("run()", sort="cumtime")
+    run()
+    # import cProfile
+    # cProfile.run("run()", sort="cumtime")
     # single_query("oxyphenbutazone")
