@@ -62,16 +62,15 @@ class LTRRanker(Ranker):
         query = ' '.join(terms)
         top_pages = results[:self.top_n]
 
-        data = {
-            'query': [query] * len(top_pages),
-            'url': [page.url for page in top_pages],
-            'title': [page.title for page in top_pages],
-            'extract': [page.extract for page in top_pages],
-            'score': [page.score if page.score is not None else 0.0 for page in top_pages],
-        }
+        data = [{
+            'query': query,
+            'url': page.url,
+            'title': page.title if page.title is not None else "",
+            'extract': page.extract if page.extract is not None else "",
+            'score': page.score if page.score is not None else 0.0,
+        }  for page in top_pages]
 
-        dataframe = DataFrame(data)
-        predictions = self.model.predict(dataframe)
+        predictions = self.model.predict(data)
         indexes = np.argsort(predictions)[::-1]
         return [top_pages[i] for i in indexes if predictions[i] > 0.0]
 

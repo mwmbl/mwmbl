@@ -9,6 +9,7 @@ Contains:
   providing a sklearn-compatible interface (fit / predict / save_model / load_model).
 """
 from pathlib import Path
+from typing import Any
 
 import mwmbl_rank
 import numpy as np
@@ -150,7 +151,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         print(f"[RustXGBPipeline.fit] Rust fit() completed in {time.time() - t3:.2f}s (total: {time.time() - t0:.2f}s).", flush=True)
         return self
 
-    def predict(self, X: DataFrame) -> np.ndarray:
+    def predict(self, X: DataFrame | list[dict[str, Any]]) -> np.ndarray:
         """
         Predict class-1 probabilities.
 
@@ -162,7 +163,10 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         -------
         np.ndarray of float32 probabilities in [0, 1], shape (n_samples,)
         """
-        records = self._df_to_records(X)
+        if isinstance(X, DataFrame):
+            records = self._df_to_records(X)
+        else:
+            records = X
         return np.array(self._inner.predict(records), dtype=np.float32)
 
     def save_model(self, path: str) -> None:
