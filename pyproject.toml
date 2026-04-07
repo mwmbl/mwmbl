@@ -88,7 +88,8 @@ mwmbl-crawl = "mwmbl.crawl:run"
 python-source = "."
 module-name = "mwmbl_rank"
 manifest-path = "mwmbl_rank/Cargo.toml"
-# Include the generated domains JSON in the sdist
+# Include the mwmbl Python package and the generated domains JSON
+python-packages = ["mwmbl"]
 include = ["mwmbl_rank/data/hn_top_domains_filtered.json"]
 
 [tool.poetry.scripts]
