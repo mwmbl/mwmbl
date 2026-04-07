@@ -71,8 +71,13 @@ class LTRRanker(Ranker):
         }  for page in top_pages]
 
         predictions = self.model.predict(data)
-        indexes = np.argsort(predictions)[::-1]
-        return [top_pages[i] for i in indexes if predictions[i] > 0.0]
+        mask = predictions > 0.0
+        filtered_predictions = predictions[mask]
+        filtered_pages = np.array(top_pages)[mask]
+
+        # Vectorized sorting
+        indices = np.argsort(filtered_predictions)[::-1]
+        return filtered_pages[indices].tolist()
 
     def external_search(self, query: str) -> list[Document]:
         if self.include_wiki:

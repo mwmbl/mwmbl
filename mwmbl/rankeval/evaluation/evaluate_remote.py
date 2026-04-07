@@ -36,7 +36,7 @@ def run():
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
     model = MwmblRankingModel(ranker)
-    evaluate(model, fraction=0.1, use_test=False)
+    evaluate(model, use_test=True)
 
 
 def single_query(query: str):

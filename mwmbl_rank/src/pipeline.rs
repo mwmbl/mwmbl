@@ -71,6 +71,10 @@ pub struct XGBPipeline {
     pub scale_pos_weight: f32,
     pub reg_lambda: f32,
     pub num_rounds: u32,
+    pub max_depth: Option<u32>,
+    pub min_child_weight: Option<f32>,
+    pub gamma: Option<f32>,
+    pub subsample: Option<f32>,
     booster: Option<Booster>,
 }
 
@@ -81,6 +85,33 @@ impl XGBPipeline {
             scale_pos_weight,
             reg_lambda,
             num_rounds,
+            max_depth: None,
+            min_child_weight: None,
+            gamma: None,
+            subsample: None,
+            booster: None,
+        }
+    }
+
+    pub fn with_params(
+        threshold: f32,
+        scale_pos_weight: f32,
+        reg_lambda: f32,
+        num_rounds: u32,
+        max_depth: Option<u32>,
+        min_child_weight: Option<f32>,
+        gamma: Option<f32>,
+        subsample: Option<f32>,
+    ) -> Self {
+        XGBPipeline {
+            threshold,
+            scale_pos_weight,
+            reg_lambda,
+            num_rounds,
+            max_depth,
+            min_child_weight,
+            gamma,
+            subsample,
             booster: None,
         }
     }
@@ -143,10 +174,24 @@ impl XGBPipeline {
         // Build tree parameters: lambda (reg_lambda) is f32 in xgb 3.0.5
         // Explicitly set tree_method=exact to match XGBoost 2.x behaviour
         // (XGBoost 3.0 changed the default from exact→hist for small datasets).
-        let tree_params = parameters::tree::TreeBoosterParametersBuilder::default()
+        let mut tree_builder = parameters::tree::TreeBoosterParametersBuilder::default();
+        tree_builder
             .lambda(self.reg_lambda)
             .scale_pos_weight(self.scale_pos_weight)
-            .tree_method(parameters::tree::TreeMethod::Exact)
+            .tree_method(parameters::tree::TreeMethod::Exact);
+        if let Some(v) = self.max_depth {
+            tree_builder.max_depth(v);
+        }
+        if let Some(v) = self.min_child_weight {
+            tree_builder.min_child_weight(v);
+        }
+        if let Some(v) = self.gamma {
+            tree_builder.gamma(v);
+        }
+        if let Some(v) = self.subsample {
+            tree_builder.subsample(v);
+        }
+        let tree_params = tree_builder
             .build()
             .map_err(|e| format!("Failed to build tree params: {}", e))?;
 
@@ -227,8 +272,15 @@ impl XGBPipeline {
         scale_pos_weight: f32,
         reg_lambda: f32,
         num_rounds: u32,
+        max_depth: Option<u32>,
+        min_child_weight: Option<f32>,
+        gamma: Option<f32>,
+        subsample: Option<f32>,
     ) -> Result<Self, String> {
-        let mut pipeline = XGBPipeline::new(threshold, scale_pos_weight, reg_lambda, num_rounds);
+        let mut pipeline = XGBPipeline::with_params(
+            threshold, scale_pos_weight, reg_lambda, num_rounds,
+            max_depth, min_child_weight, gamma, subsample,
+        );
         pipeline.load_model(path)?;
         Ok(pipeline)
     }

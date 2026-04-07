@@ -97,6 +97,14 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         XGBoost reg_lambda hyperparameter (default 2.0).
     num_rounds : int
         Number of XGBoost boosting rounds (default 100).
+    max_depth : int or None
+        XGBoost max_depth hyperparameter (default None, uses XGBoost default of 6).
+    min_child_weight : float or None
+        XGBoost min_child_weight hyperparameter (default None, uses XGBoost default of 1.0).
+    gamma : float or None
+        XGBoost gamma (min_split_loss) hyperparameter (default None, uses XGBoost default of 0.0).
+    subsample : float or None
+        XGBoost subsample hyperparameter (default None, uses XGBoost default of 1.0).
     """
 
     def __init__(
@@ -105,16 +113,28 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         scale_pos_weight: float = 0.1,
         reg_lambda: float = 2.0,
         num_rounds: int = 100,
+        max_depth: int | None = None,
+        min_child_weight: float | None = None,
+        gamma: float | None = None,
+        subsample: float | None = None,
     ):
         self.threshold = threshold
         self.scale_pos_weight = scale_pos_weight
         self.reg_lambda = reg_lambda
         self.num_rounds = num_rounds
+        self.max_depth = max_depth
+        self.min_child_weight = min_child_weight
+        self.gamma = gamma
+        self.subsample = subsample
         self._inner = mwmbl_rank.RustXGBPipeline(
             threshold=self.threshold,
             scale_pos_weight=self.scale_pos_weight,
             reg_lambda=self.reg_lambda,
             num_rounds=self.num_rounds,
+            max_depth=self.max_depth,
+            min_child_weight=self.min_child_weight,
+            gamma=self.gamma,
+            subsample=self.subsample,
         )
 
     @staticmethod
@@ -186,6 +206,10 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         scale_pos_weight: float = 0.1,
         reg_lambda: float = 2.0,
         num_rounds: int = 100,
+        max_depth: int | None = None,
+        min_child_weight: float | None = None,
+        gamma: float | None = None,
+        subsample: float | None = None,
     ) -> 'RustXGBPipeline':
         """Load a pre-trained model from disk and return a ready-to-predict pipeline."""
         pipeline = cls(
@@ -193,6 +217,10 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
             scale_pos_weight=scale_pos_weight,
             reg_lambda=reg_lambda,
             num_rounds=num_rounds,
+            max_depth=max_depth,
+            min_child_weight=min_child_weight,
+            gamma=gamma,
+            subsample=subsample,
         )
         pipeline.load_model(path)
         return pipeline
@@ -202,5 +230,9 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
             f"RustXGBPipeline(threshold={self.threshold}, "
             f"scale_pos_weight={self.scale_pos_weight}, "
             f"reg_lambda={self.reg_lambda}, "
-            f"num_rounds={self.num_rounds})"
+            f"num_rounds={self.num_rounds}, "
+            f"max_depth={self.max_depth}, "
+            f"min_child_weight={self.min_child_weight}, "
+            f"gamma={self.gamma}, "
+            f"subsample={self.subsample})"
         )

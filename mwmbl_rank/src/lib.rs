@@ -62,11 +62,27 @@ impl PyXGBPipeline {
     ///     scale_pos_weight: XGBoost scale_pos_weight (default 0.1)
     ///     reg_lambda: XGBoost reg_lambda (default 2.0)
     ///     num_rounds: number of boosting rounds (default 100)
+    ///     max_depth: XGBoost max_depth (default None → XGBoost default of 6)
+    ///     min_child_weight: XGBoost min_child_weight (default None → XGBoost default of 1.0)
+    ///     gamma: XGBoost gamma / min_split_loss (default None → XGBoost default of 0.0)
+    ///     subsample: XGBoost subsample (default None → XGBoost default of 1.0)
     #[new]
-    #[pyo3(signature = (threshold=0.0, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100))]
-    fn new(threshold: f32, scale_pos_weight: f32, reg_lambda: f32, num_rounds: u32) -> Self {
+    #[pyo3(signature = (threshold=0.0, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100, max_depth=None, min_child_weight=None, gamma=None, subsample=None))]
+    fn new(
+        threshold: f32,
+        scale_pos_weight: f32,
+        reg_lambda: f32,
+        num_rounds: u32,
+        max_depth: Option<u32>,
+        min_child_weight: Option<f32>,
+        gamma: Option<f32>,
+        subsample: Option<f32>,
+    ) -> Self {
         PyXGBPipeline {
-            inner: XGBPipeline::new(threshold, scale_pos_weight, reg_lambda, num_rounds),
+            inner: XGBPipeline::with_params(
+                threshold, scale_pos_weight, reg_lambda, num_rounds,
+                max_depth, min_child_weight, gamma, subsample,
+            ),
         }
     }
 
@@ -128,11 +144,15 @@ impl PyXGBPipeline {
 
     fn __repr__(&self) -> String {
         format!(
-            "RustXGBPipeline(threshold={}, scale_pos_weight={}, reg_lambda={}, num_rounds={})",
+            "RustXGBPipeline(threshold={}, scale_pos_weight={}, reg_lambda={}, num_rounds={}, max_depth={:?}, min_child_weight={:?}, gamma={:?}, subsample={:?})",
             self.inner.threshold,
             self.inner.scale_pos_weight,
             self.inner.reg_lambda,
             self.inner.num_rounds,
+            self.inner.max_depth,
+            self.inner.min_child_weight,
+            self.inner.gamma,
+            self.inner.subsample,
         )
     }
 }

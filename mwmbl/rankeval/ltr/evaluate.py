@@ -73,10 +73,56 @@ def run():
     parser.add_argument('--predictor', required=True, choices=sorted(PREDICTORS))
     parser.add_argument("--binary-labels", required=False, action="store_true")
     parser.add_argument('--note', required=True)
+    parser.add_argument('--max-depth', type=int, default=None, help='XGB max_depth parameter')
+    parser.add_argument('--scale-pos-weight', type=float, default=None, help='XGB scale_pos_weight parameter')
+    parser.add_argument('--n-estimators', type=int, default=None, help='XGB n_estimators parameter')
+    parser.add_argument('--min-child-weight', type=float, default=None, help='XGB min_child_weight parameter')
+    parser.add_argument('--gamma', type=float, default=None, help='XGB gamma (min_split_loss) parameter')
+    parser.add_argument('--reg-gamma', type=float, default=None, help='XGB reg_gamma parameter')
+    parser.add_argument('--reg-lambda', type=float, default=None, help='XGB reg_lambda parameter')
+    parser.add_argument('--subsample', type=float, default=None, help='XGB subsample parameter')
 
     args = parser.parse_args()
 
-    predictor = PREDICTORS[args.predictor]
+    # Build a dict of only the XGB params that were explicitly provided,
+    # so they override the hardcoded defaults in each predictor constructor.
+    xgb_params = {k: v for k, v in {
+        'max_depth': args.max_depth,
+        'scale_pos_weight': args.scale_pos_weight,
+        'n_estimators': args.n_estimators,
+        'min_child_weight': args.min_child_weight,
+        'gamma': args.gamma,
+        'reg_gamma': args.reg_gamma,
+        'subsample': args.subsample,
+    }.items() if v is not None}
+
+    rust_params = {k: v for k, v in {
+        'scale_pos_weight': args.scale_pos_weight,
+        'num_rounds': args.n_estimators,
+        'max_depth': args.max_depth,
+        'min_child_weight': args.min_child_weight,
+        'gamma': args.gamma,
+        'reg_lambda': args.reg_lambda,
+        'subsample': args.subsample,
+    }.items() if v is not None}
+
+    # Merge hardcoded defaults with any CLI overrides (CLI wins).
+    xgb_classifier_params = {'scale_pos_weight': 0.1, 'reg_lambda': 2, **xgb_params}
+    xgb_ranker_params = {'reg_lambda': 2, **xgb_params}
+    rust_pipeline_params = {'scale_pos_weight': 0.1, 'reg_lambda': 2.0, 'num_rounds': 100, **rust_params}
+
+    predictors = {
+        'random': RandomRegressor(),
+        'constant': DummyRegressor(),
+        'decision_tree': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, DecisionTreeClassifier())),
+        'xgb': make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(**xgb_classifier_params))),
+        'xgb_rust': RustXGBPipeline(threshold=0.0, **rust_pipeline_params),
+        'xgb_limit_terms': RankingPredictor(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(**xgb_classifier_params))),
+        'xgb_regressor': make_pipeline(FeatureExtractor(), XGBRegressor(objective="reg:pseudohubererror", **xgb_params)),
+        'xgb_ranker': make_pipeline(FeatureExtractor(), XGBRanker(objective="rank:ndcg", **xgb_ranker_params)),
+    }
+
+    predictor = predictors[args.predictor]
 
     dataset = pd.read_csv(LEARNING_TO_RANK_DATASET_PATH, lineterminator='\n')
     if args.binary_labels:
