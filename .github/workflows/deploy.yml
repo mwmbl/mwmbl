@@ -43,12 +43,13 @@ jobs:
           git remote add dokku-mwmbl-count-urls dokku@mwmbl.org:mwmbl-count-urls
           git push dokku-mwmbl-count-urls main --force
 
-      - name: Deploy mwmbl-update-batches
-        run: |
-          git remote add dokku-mwmbl-update-batches dokku@mwmbl.org:mwmbl-update-batches
-          git push dokku-mwmbl-update-batches main --force
+      # Disabled: we have switched to the new crawler now
+      # - name: Deploy mwmbl-update-batches
+      #   run: |
+      #     git remote add dokku-mwmbl-update-batches dokku@mwmbl.org:mwmbl-update-batches
+      #     git push dokku-mwmbl-update-batches main --force
 
-      - name: Deploy mwmbl-update-urls
-        run: |
-          git remote add dokku-mwmbl-update-urls dokku@mwmbl.org:mwmbl-update-urls
-          git push dokku-mwmbl-update-urls main --force
+      # - name: Deploy mwmbl-update-urls
+      #   run: |
+      #     git remote add dokku-mwmbl-update-urls dokku@mwmbl.org:mwmbl-update-urls
+      #     git push dokku-mwmbl-update-urls main --force

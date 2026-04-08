@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Sequence, Optional
 
+from functools import wraps
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from redis import Redis
@@ -97,3 +99,16 @@ def float_or_none(s: str) -> Optional[float]:
         return float(s)
     except ValueError:
         return None
+
+
+def cache_control(max_age):
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped_view(request, *args, **kwargs):
+            response = view_func(request, *args, **kwargs)
+            # Ninja handles the conversion to response objects 
+            # so we can just modify the header here
+            response["Cache-Control"] = f"public, max-age={max_age}"
+            return response
+        return _wrapped_view
+    return decorator

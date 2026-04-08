@@ -1,3 +1,6 @@
+# Define the cache storage on disk
+proxy_cache_path /var/lib/nginx/cache levels=1:2 keys_zone=SEARCH_CACHE:10m max_size=1g inactive=60m use_temp_path=off;
+
 {{ range $port_map := .PROXY_PORT_MAP | split " " }}
 {{ $port_map_list := $port_map | split ":" }}
 {{ $scheme := index $port_map_list 0 }}
@@ -76,6 +79,26 @@ server {
     gzip_types    text/css text/javascript text/xml text/plain text/x-component application/javascript application/x-javascript application/json application/xml  application/rss+xml font/truetype application/x-font-ttf font/opentype application/vnd.ms-fontobject image/svg+xml;
     gzip_vary on;
     gzip_comp_level  6;
+
+    # --- START CACHE LOGIC ---
+    proxy_cache SEARCH_CACHE;
+    
+    # Respect the Cache-Control headers from Django Ninja
+    proxy_cache_revalidate on;
+    proxy_cache_min_uses 1;
+    
+    # Ignore the Set-Cookie header so public search results actually cache
+    proxy_ignore_headers Set-Cookie;
+    proxy_hide_header Set-Cookie;
+
+    # Serve stale content if Django is down or updating
+    proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+    proxy_cache_background_update on;
+    proxy_cache_lock on;
+
+    # Debugging header to see if you're hitting the cache (HIT/MISS/BYPASS)
+    add_header X-Cache-Status $upstream_cache_status;
+    # --- END CACHE LOGIC ---
 
     proxy_pass  http://{{ $.APP }}-{{ $upstream_port }};
     {{ if eq $.HTTP2_PUSH_SUPPORTED "true" }}http2_push_preload on; {{ end }}
