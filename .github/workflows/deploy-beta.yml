@@ -1,0 +1,22 @@
+name: Deploy Beta
+on:
+  workflow_dispatch: # Manual button trigger
+    inputs:
+      tag:
+        description: 'Image tag to deploy (e.g., beta, pr-42, or a commit SHA)'
+        required: true
+        default: 'beta'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remote SSH Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: mwmbl.org
+          username: root # or your dokku user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Pull whatever tag you specified in the button click
+            dokku git:from-image beta.mwmbl.org ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
