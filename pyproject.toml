@@ -34,7 +34,7 @@ django = "^4.2.4"
 django-ninja = "==1.3.0"
 requests-cache = "^1.1.0"
 redis = {extras = ["hiredis"], version = "^5.0.1"}
-django-allauth = "^0.57.0"
+django-allauth = "==0.57.2"
 dj-database-url = "^2.1.0"
 django-htmx = "^1.17.0"
 django-vite = "^2.1.3"
@@ -94,7 +94,7 @@ dependencies = [
     "django-ninja==1.3.0",
     "requests-cache>=1.1.0",
     "redis[hiredis]>=5.0.1",
-    "django-allauth>=0.57.0",
+    "django-allauth==0.57.2",
     "dj-database-url>=2.1.0",
     "django-htmx>=1.17.0",
     "django-vite>=2.1.3",
