@@ -60,11 +60,6 @@ RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/ap
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
-# Copy devdata so the installed package can resolve RUST_MODEL_PATH correctly
-# (settings_common.py resolves RUST_MODEL_PATH relative to the installed package location,
-# which points to /venv/lib/python3.11/site-packages/devdata/...)
-COPY devdata /venv/lib/python3.11/site-packages/devdata
-
 # Copy the front end build
 COPY --from=front-end /front-end/dist /front-end-build
 

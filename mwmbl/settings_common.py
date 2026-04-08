@@ -230,4 +230,4 @@ INTERNAL_IPS = [
     "127.0.0.1",
 ]
 
-RUST_MODEL_PATH = Path(__file__).parent.parent / 'devdata' / 'rankeval-2026-04' / "model.xgb"
+RUST_MODEL_PATH = Path(__file__).parent / 'resources' / "model.xgb"
