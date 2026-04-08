@@ -19,7 +19,7 @@ jobs:
       - name: Add Host to Known Hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H your-server-ip-or-domain >> ~/.ssh/known_hosts
+          ssh-keyscan -H mwmbl.org >> ~/.ssh/known_hosts
 
       - name: Deploy Beta via SSH
         run: |
