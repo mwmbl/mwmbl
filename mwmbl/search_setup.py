@@ -1,5 +1,4 @@
 import os
-import pickle
 from pathlib import Path
 
 from django.conf import settings
@@ -11,8 +10,9 @@ from mwmbl.models import DomainSubmission
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import HeuristicAndWikiRanker
+from mwmbl.tinysearchengine.rank import DomainLimitingRanker, HeuristicAndWikiRanker
 
 CURATED_DOMAINS_CACHE_KEY = "curated-domains"
 CURATED_DOMAINS_CACHE_TIMEOUT = 300
@@ -33,9 +33,7 @@ index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-# model_path = Path(__file__).parent / "resources" / "model.pickle"
-# model = pickle.load(open(model_path, 'rb'))
-# ranker = LTRRanker(tiny_index, completer, model, 1000, True, 5)
-ranker = HeuristicAndWikiRanker(tiny_index, completer)
+_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
+ranker = DomainLimitingRanker(LTRRanker(tiny_index, completer, _model, include_wiki=True, num_wiki_results=3))
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)

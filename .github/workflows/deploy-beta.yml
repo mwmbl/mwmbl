@@ -11,12 +11,18 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Remote SSH Deploy
-        uses: appleboy/ssh-action@master
+      - name: Set up SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: mwmbl.org
-          username: root # or your dokku user
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # Pull whatever tag you specified in the button click
-            dokku git:from-image beta.mwmbl.org ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Host to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H mwmbl.org >> ~/.ssh/known_hosts
+
+      - name: Deploy Beta via SSH
+        run: |
+          # Use the standard ssh command. 
+          # The agent will automatically provide the key.
+          ssh dokku@mwmbl.org "git:from-image beta.mwmbl.org ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}"
