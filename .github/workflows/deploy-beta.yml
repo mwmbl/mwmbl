@@ -25,4 +25,4 @@ jobs:
         run: |
           # Use the standard ssh command. 
           # The agent will automatically provide the key.
-          ssh dokku@mwmbl.org "git:from-image --force beta.mwmbl.org ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}"
+          ssh dokku@mwmbl.org "git:from-image beta.mwmbl.org ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}"
