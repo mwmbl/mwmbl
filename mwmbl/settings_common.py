@@ -229,3 +229,5 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 INTERNAL_IPS = [
     "127.0.0.1",
 ]
+
+RUST_MODEL_PATH = Path(__file__).parent / 'resources' / "model.xgb"
