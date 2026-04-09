@@ -103,6 +103,7 @@ def get_tf_idf_features(match_counts: dict[str, int]) -> dict[str, float]:
 
 
 def get_features(terms, title, url, extract, score, is_complete):
+    assert len(terms) > 0
     assert url is not None
     assert title is not None
     assert extract is not None
