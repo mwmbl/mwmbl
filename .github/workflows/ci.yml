@@ -45,6 +45,12 @@ jobs:
           installer-parallel: true
 
       #----------------------------------------------
+      #       install Rust toolchain (required by maturin)
+      #----------------------------------------------
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      #----------------------------------------------
       #       load cached venv if cache exists
       #----------------------------------------------
       - name: Load cached venv
@@ -60,10 +66,11 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --no-interaction --no-root
       #----------------------------------------------
-      # install your root project, if required
+      # build and install the project with maturin
+      # (compiles the Rust extension and installs the package)
       #----------------------------------------------
-      - name: Install project
-        run: poetry install --no-interaction
+      - name: Install project with maturin
+        run: poetry run maturin develop
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
