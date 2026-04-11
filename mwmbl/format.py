@@ -15,6 +15,24 @@ DOCUMENT_SOURCES = {
 }
 
 
+HIGHLIGHT_STOPWORDS = {
+    # Articles & Determiners
+    "a", "an", "the", "this", "that", "these", "those", "each", "every", "some", "any",
+    # Prepositions
+    "to", "in", "on", "at", "by", "for", "with", "about", "against", "between",
+    "into", "through", "during", "before", "after", "above", "below", "from",
+    "up", "down", "of", "off", "over", "under",
+    # Conjunctions
+    "and", "but", "or", "nor", "for", "yet", "so", "although", "because", "since", "unless",
+    # Common Verbs & Pronouns
+    "is", "am", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "i", "me", "my", "you", "your", "he", "him", "his",
+    "she", "her", "it", "its", "we", "us", "our", "they", "them", "their",
+    # Interrogatives (usually noise in technical queries)
+    "how", "what", "which", "who", "whom", "where", "when", "why"
+}
+
+
 def get_document_source(state: DocumentState):
     return DOCUMENT_SOURCES.get(state, 'mwmbl')
 
@@ -30,18 +48,19 @@ def format_result_with_pattern(pattern, result):
             is_bold = i % 2 == 1
             start = all_spans[i]
             end = all_spans[i + 1]
-            content_result.append({'value': content[start:end], 'is_bold': is_bold})
+            if end - start > 0:
+                content_result.append({'value': content[start:end], 'is_bold': is_bold})
         formatted_result[content_type] = content_result
     formatted_result['url'] = result.url
     formatted_result['source'] = get_document_source(result.state)
     return formatted_result
 
 
-def get_query_regex(terms, is_complete, is_url):
+def get_query_regex(terms, is_complete: bool, use_word_boundaries: bool):
     if not terms:
         return ''
 
-    word_sep = r'\b' if is_url else ''
+    word_sep = r'\b' if use_word_boundaries else ''
     if is_complete:
         term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms]
     else:
@@ -53,6 +72,7 @@ def get_query_regex(terms, is_complete, is_url):
 
 def format_result(result, query):
     tokens = tokenize(query)
-    pattern = get_query_regex(tokens, True, False)
+    filtered_tokens = [t for t in tokens if t not in HIGHLIGHT_STOPWORDS]
+    pattern = get_query_regex(filtered_tokens, True, True)
     return format_result_with_pattern(pattern, result)
 
