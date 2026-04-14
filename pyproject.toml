@@ -52,6 +52,7 @@ django-debug-toolbar = "^5.2.0"
 wasmtime = "^24.0.0"
 dotenv = "^0.9.9"
 py-spy = "^0.4.1"
+scalar-ninja = "^0.3.0"
 
 [tool.poetry.extras]
 indexer = [

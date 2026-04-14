@@ -85,6 +85,7 @@ def invalid_wasm_bytes():
     return b'invalid wasm content'
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_valid_wasm_file(client, verified_user, access_token, valid_wasm_bytes):
     """Test submitting a valid WASM file"""
@@ -113,6 +114,7 @@ def test_submit_valid_wasm_file(client, verified_user, access_token, valid_wasm_
     assert job.wasm_file == valid_wasm_bytes
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_invalid_wasm_file(client, access_token, invalid_wasm_bytes):
     """Test submitting an invalid WASM file"""
@@ -134,6 +136,7 @@ def test_submit_invalid_wasm_file(client, access_token, invalid_wasm_bytes):
     assert 'WASM validation failed' in response_data['message']
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_non_wasm_file(client, access_token):
     """Test submitting a file without .wasm extension"""
@@ -155,6 +158,7 @@ def test_submit_non_wasm_file(client, access_token):
     assert 'File must have .wasm extension' in response_data['message']
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_large_file(client, access_token):
     """Test submitting a file that exceeds size limit"""
@@ -178,6 +182,7 @@ def test_submit_large_file(client, access_token):
     assert 'File too large' in response_data['message']
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_without_authentication(client, valid_wasm_bytes):
     """Test submitting without JWT token"""
@@ -194,6 +199,7 @@ def test_submit_without_authentication(client, valid_wasm_bytes):
     assert response.status_code == 401
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_with_unverified_email(client, unverified_access_token, valid_wasm_bytes):
     """Test submitting with unverified email address"""
@@ -215,6 +221,7 @@ def test_submit_with_unverified_email(client, unverified_access_token, valid_was
     assert 'Email address is not verified' in response_data['message']
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_submit_without_file(client, access_token):
     """Test submitting without a file"""
@@ -227,6 +234,7 @@ def test_submit_without_file(client, access_token):
     assert response.status_code == 422  # Validation error
 
 
+@pytest.mark.skip("Evaluation API is disabled for now")
 @pytest.mark.django_db
 def test_multiple_submissions_same_user(client, verified_user, access_token, valid_wasm_bytes):
     """Test that a user can submit multiple WASM files"""

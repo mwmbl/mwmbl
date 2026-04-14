@@ -16,16 +16,20 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.views.generic import RedirectView
 from debug_toolbar.toolbar import debug_toolbar_urls
 
 import mwmbl.crawler.app as crawler
-from mwmbl.platform.api import api
-from mwmbl.evaluation.api import api as evaluation_api
+from mwmbl.api import api as v1_api, register_routers
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
     flag_curation, CurationFlagListView, flag_curation_update, domains_view, domain_view, CurationsView, submit_domain, \
     DomainSubmissionListView, memory_view
+
+# Initialise the unified v1 API by registering all sub-routers with their runtime dependencies.
+# This must be called before urlpatterns is evaluated.
+register_routers(ranker=ranker, batch_cache=batch_cache, queued_batches=queued_batches)
 
 
 def trigger_error(request):
@@ -51,15 +55,18 @@ urlpatterns = [
     path('app/domains/', domains_view, name="domains"),
     path('app/domains/<str:domain>/', domain_view, name="domain"),
 
-    # TODO: this is the old API, deprecated and to be removed once all clients have moved over
+    # TODO: these are the old APIs, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),
     path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
 
-    # New API
-    path("api/v1/search/", search.create_router(ranker, "1.0.0").urls),
-    path("api/v1/crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="1.0.0").urls),
-    path("api/v1/platform/", api.urls),
-    path("api/v1/evaluate/", evaluation_api.urls),
+    # New unified API — all v1 endpoints, single docs page at /api/v1/docs
+    path("api/v1/", v1_api.urls),
+
+    # Redirects from old per-router docs URLs to the unified docs page
+    path("api/v1/search/docs", RedirectView.as_view(url="/api/v1/docs", permanent=True)),
+    path("api/v1/crawler/docs", RedirectView.as_view(url="/api/v1/docs", permanent=True)),
+    path("api/v1/platform/docs", RedirectView.as_view(url="/api/v1/docs", permanent=True)),
+    path("api/v1/evaluate/docs", RedirectView.as_view(url="/api/v1/docs", permanent=True)),
 
     path("debug/memory", memory_view, name="memory"),
 

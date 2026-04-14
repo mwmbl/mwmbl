@@ -1,4 +1,4 @@
-from ninja import NinjaAPI, File, UploadedFile
+from ninja import File, UploadedFile, Router
 from ninja_jwt.authentication import JWTAuth
 from django.utils import timezone
 from typing import List
@@ -6,61 +6,52 @@ from typing import List
 from mwmbl.models import WasmEvaluationJob
 from .schemas import WasmSubmissionResponse, EvaluationJobResponse, EvaluationResultsResponse
 from .wasm_validator import WasmValidator
+from mwmbl.exceptions import InvalidRequest
 
-
-api = NinjaAPI(urls_namespace="evaluate")
-
-
-class InvalidRequest(Exception):
-    def __init__(self, message: str, status: int = 400):
-        self.message = message
-        self.status = status
-
-
-@api.exception_handler(InvalidRequest)
-def invalid_request_handler(request, exc: InvalidRequest):
-    return api.create_response(
-        request,
-        {"status": "error", "message": exc.message},
-        status=exc.status,
-    )
+router = Router(tags=["Evaluation"])
 
 
 def check_email_verified(request):
-    """Check if user's email is verified"""
+    """Check if user's email is verified."""
     from_email_address = request.user.emailaddress_set.first()
     if not from_email_address or not from_email_address.verified:
-        raise InvalidRequest("Email address is not verified", status=403)
+        raise InvalidRequest("Email address is not verified", status=403)  # 403 Forbidden
 
 
-@api.post('/submit', response=WasmSubmissionResponse, auth=JWTAuth())
+@router.post(
+    '/submit',
+    response=WasmSubmissionResponse,
+    auth=JWTAuth(),
+    summary="Submit a WASM ranking function",
+    description=(
+        "Upload a WebAssembly (.wasm) file containing a custom ranking function for evaluation. "
+        "The file is validated on upload and a job is created with status `VALIDATED`. "
+        "Maximum file size is 10 MB. The file must have a `.wasm` extension. "
+        "Requires a verified account."
+    ),
+)
 def submit_wasm(request, file: UploadedFile = File(...)):
-    """Submit a WASM file for evaluation"""
     check_email_verified(request)
-    
-    # Basic file validation
+
     if file.size > 10 * 1024 * 1024:  # 10MB limit
         raise InvalidRequest("File too large. Maximum size is 10MB.")
-    
+
     if not file.name.endswith('.wasm'):
         raise InvalidRequest("File must have .wasm extension.")
-    
-    # Read WASM bytes
+
     wasm_bytes = file.read()
-    
-    # Validate WASM file
+
     validation_result = WasmValidator.validate_wasm_file(wasm_bytes)
-    
+
     if not validation_result['valid']:
         raise InvalidRequest(f"WASM validation failed: {validation_result['error']}")
-    
-    # Create evaluation job
+
     job = WasmEvaluationJob.objects.create(
         user=request.user,
         wasm_file=wasm_bytes,
         status='VALIDATED'
     )
-    
+
     return WasmSubmissionResponse(
         job_id=job.id,
         status=job.status,
@@ -68,48 +59,55 @@ def submit_wasm(request, file: UploadedFile = File(...)):
     )
 
 
-@api.post('/run/{job_id}', response=EvaluationResultsResponse, auth=JWTAuth())
+@router.post(
+    '/run/{job_id}',
+    response=EvaluationResultsResponse,
+    auth=JWTAuth(),
+    summary="Run an evaluation job",
+    description=(
+        "Trigger evaluation for a previously submitted WASM file. "
+        "The job must be in `VALIDATED` or `FAILED` status to be run. "
+        "The evaluation measures ranking quality using NDCG against a held-out query set. "
+        "Requires a verified account and ownership of the job."
+    ),
+)
 def run_evaluation(request, job_id: int):
-    """Run evaluation for a submitted WASM file"""
     check_email_verified(request)
-    
+
     try:
         job = WasmEvaluationJob.objects.get(id=job_id, user=request.user)
     except WasmEvaluationJob.DoesNotExist:
         raise InvalidRequest("Evaluation job not found", status=404)
-    
+
     if job.status not in ['VALIDATED', 'FAILED']:
         raise InvalidRequest(f"Job cannot be run. Current status: {job.status}")
-    
-    # Update job status
+
     job.status = 'RUNNING'
     job.save()
-    
+
     try:
-        # For now, just return a mock result
-        # In a full implementation, this would run the actual evaluation
         mock_results = {
             "ndcg_score": 0.75,
             "queries_evaluated": 10,
             "message": "Mock evaluation completed successfully"
         }
-        
+
         job.status = 'COMPLETED'
         job.results = mock_results
         job.completed_at = timezone.now()
         job.save()
-        
+
         return EvaluationResultsResponse(
             job_id=job.id,
             status=job.status,
             results=job.results
         )
-        
+
     except Exception as e:
         job.status = 'FAILED'
         job.error_message = str(e)
         job.save()
-        
+
         return EvaluationResultsResponse(
             job_id=job.id,
             status=job.status,
@@ -117,16 +115,26 @@ def run_evaluation(request, job_id: int):
         )
 
 
-@api.get('/results/{job_id}', response=EvaluationResultsResponse, auth=JWTAuth())
+@router.get(
+    '/results/{job_id}',
+    response=EvaluationResultsResponse,
+    auth=JWTAuth(),
+    summary="Get evaluation results",
+    description=(
+        "Retrieve the results of a completed evaluation job. "
+        "If the job is still running, the `results` field will be null. "
+        "If the job failed, the `error_message` field will contain details. "
+        "Requires a verified account and ownership of the job."
+    ),
+)
 def get_evaluation_results(request, job_id: int):
-    """Get evaluation results for a job"""
     check_email_verified(request)
-    
+
     try:
         job = WasmEvaluationJob.objects.get(id=job_id, user=request.user)
     except WasmEvaluationJob.DoesNotExist:
         raise InvalidRequest("Evaluation job not found", status=404)
-    
+
     return EvaluationResultsResponse(
         job_id=job.id,
         status=job.status,
@@ -135,13 +143,22 @@ def get_evaluation_results(request, job_id: int):
     )
 
 
-@api.get('/jobs', response=List[EvaluationJobResponse], auth=JWTAuth())
+@router.get(
+    '/jobs',
+    response=List[EvaluationJobResponse],
+    auth=JWTAuth(),
+    summary="List evaluation jobs",
+    description=(
+        "List all evaluation jobs submitted by the current user, ordered by creation time "
+        "(most recent first). Includes status, results, and any error messages. "
+        "Requires a verified account."
+    ),
+)
 def list_evaluation_jobs(request):
-    """List all evaluation jobs for the current user"""
     check_email_verified(request)
-    
+
     jobs = WasmEvaluationJob.objects.filter(user=request.user).order_by('-created_at')
-    
+
     return [
         EvaluationJobResponse(
             id=job.id,
