@@ -27,8 +27,7 @@ api = NinjaExtraAPI(
     description=(
         "The Mwmbl open-source search engine API. "
         "Provides endpoints for searching the index, submitting crawl data, "
-        "managing user accounts and domain submissions, and evaluating custom "
-        "WASM ranking functions.\n\n"
+        "and managing user accounts and domain submissions.\n\n"
         "## Authentication\n\n"
         "Most write endpoints require a JWT bearer token. "
         "Obtain a token pair by posting your credentials to `/api/v1/token/pair`. "
@@ -74,4 +73,6 @@ def register_routers(ranker, batch_cache, queued_batches):
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])
     api.add_router("/platform/", platform_router, tags=["Platform"])
-    api.add_router("/evaluate/", evaluation_router, tags=["Evaluation"])
+
+    # This API is a work in progress, disabled for now
+    # api.add_router("/evaluate/", evaluation_router, tags=["Evaluation"])
