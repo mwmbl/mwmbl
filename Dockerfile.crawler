@@ -8,21 +8,20 @@ WORKDIR /app
 
 FROM base AS builder
 
-# Install uv for fast Python package management
-RUN pip install uv
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
 RUN uv venv /venv
 
 # Copy only the necessary files to build/install the python package
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml uv.lock /app/
 COPY mwmbl /app/mwmbl
 
 # Working directory is /app
 # Use uv to install the mwmbl python package
-# uv is a fast Python package installer and resolver, compatible with pip
-RUN uv pip install . --python /venv/bin/python
+RUN uv pip install --python /venv/bin/python .
 
 FROM base AS final
 
