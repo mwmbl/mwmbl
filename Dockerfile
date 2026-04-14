@@ -15,9 +15,8 @@ WORKDIR /app
 
 FROM base as builder
 
-ENV PIP_DEFAULT_TIMEOUT=100 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Install Rust toolchain (required by maturin to compile the mwmbl_rank extension)
 # Install clang/libclang-dev for bindgen (used by xgboost_lib-sys)
@@ -32,20 +31,19 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Create a /venv directory & environment.
 # This directory will be copied into the final stage of docker build.
-RUN python -m venv /venv
+RUN uv venv /venv
 
 # Copy only the necessary files to build/install the python package.
 # mwmbl/resources is needed because idf.rs and wiki.rs embed JSON files at
 # compile time via include_str!("../../mwmbl/resources/...").
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml uv.lock /app/
 COPY mwmbl /app/mwmbl
 COPY mwmbl_rank /app/mwmbl_rank
 
 # Working directory is /app
-# Use pip to install the mwmbl python package including the mwmbl_rank Rust
-# extension. PEP 517/518 allows pip to use maturin as the build backend.
-RUN /venv/bin/pip install pip wheel --upgrade && \
-    /venv/bin/pip install .
+# Use uv to install the mwmbl python package including the mwmbl_rank Rust
+# extension. PEP 517/518 allows uv to use maturin as the build backend.
+RUN uv pip install --python /venv/bin/python .
 
 # Copy libxgboost.so (prebuilt by the xgb crate) into the mwmbl_rank package
 # directory and patch the extension's RPATH so it finds the library at runtime.

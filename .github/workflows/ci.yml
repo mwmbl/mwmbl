@@ -35,15 +35,13 @@ jobs:
         with:
           python-version: '3.11.12'
       #----------------------------------------------
-      #  -----  install & configure poetry  -----
+      #  -----  install & configure uv  -----
       #----------------------------------------------
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.3.3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          version: 1.8.2
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       #----------------------------------------------
       #       install Rust toolchain (required by maturin)
@@ -52,26 +50,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       #----------------------------------------------
-      #       load cached venv if cache exists
-      #----------------------------------------------
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-      #----------------------------------------------
-      # install dependencies if cache does not exist
+      # install dependencies
       #----------------------------------------------
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
+        run: uv sync --group dev
       #----------------------------------------------
       # build and install the project with maturin
       # (compiles the Rust extension and installs the package)
       #----------------------------------------------
       - name: Install project with maturin
-        run: poetry run maturin develop
+        run: uv run maturin develop
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
@@ -83,4 +71,4 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         run: |
-          poetry run pytest
+          uv run pytest
