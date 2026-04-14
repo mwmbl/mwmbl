@@ -1,4 +1,4 @@
-name: Build and Push Docker image
+name: Build and Push Docker image for the crawler
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push Crawler Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
