@@ -21,6 +21,8 @@ from mwmbl.exceptions import InvalidRequest
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
+# Patch the JWT controller tag to use a capitalised name before registering
+NinjaJWTDefaultController.get_api_controller().tags = ["Authentication"]
 
 api = NinjaExtraAPI(
     title="Mwmbl API",
@@ -37,6 +39,14 @@ api = NinjaExtraAPI(
     ),
     urls_namespace="api-v1",
     docs=ScalarViewer(openapi_url="/api/v1/openapi.json", agent=AgentConfig(disabled=True)),
+    openapi_extra={
+        "tags": [
+            {"name": "Search"},
+            {"name": "Crawler"},
+            {"name": "Authentication"},
+            {"name": "Platform"},
+        ]
+    },
 )
 
 # Register JWT token endpoints (/token/pair, /token/refresh, /token/verify)
