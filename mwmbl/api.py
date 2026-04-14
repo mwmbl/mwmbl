@@ -18,6 +18,8 @@ from ninja_extra import NinjaExtraAPI
 from ninja_jwt.controller import NinjaJWTDefaultController
 
 from mwmbl.exceptions import InvalidRequest
+from scalar_ninja import ScalarViewer
+
 
 api = NinjaExtraAPI(
     title="Mwmbl API",
@@ -34,6 +36,7 @@ api = NinjaExtraAPI(
         "Some crawler endpoints use a separate API key passed in the request body."
     ),
     urls_namespace="api-v1",
+    docs=ScalarViewer(openapi_url="/api/v1/openapi.json"),
 )
 
 # Register JWT token endpoints (/token/pair, /token/refresh, /token/verify)

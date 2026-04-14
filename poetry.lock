@@ -2164,6 +2164,17 @@ botocore = ">=1.33.2,<2.0a.0"
 crt = ["botocore[crt] (>=1.33.2,<2.0a.0)"]
 
 [[package]]
+name = "scalar-ninja"
+version = "0.3.0"
+description = "This plugin provides an easy way to render a beautiful API reference based on a OpenAPI/Swagger file with Django Ninja."
+optional = false
+python-versions = "*"
+files = [
+    {file = "scalar_ninja-0.3.0-py3-none-any.whl", hash = "sha256:8fb4aeecef527d8dfc81cd1ff00bffa66076a3201607f1bf4f2fb1c8206cadb2"},
+    {file = "scalar_ninja-0.3.0.tar.gz", hash = "sha256:fe657fa3356cf80bfa30b3297690a1e42ce7b0daa73738042b175463eab3a65e"},
+]
+
+[[package]]
 name = "scikit-learn"
 version = "1.7.2"
 description = "A set of python modules for machine learning and data mining"
@@ -2712,4 +2723,4 @@ indexer = ["Levenshtein", "beautifulsoup4", "idna", "langdetect", "pyarrow", "py
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.12"
-content-hash = "ecf8a0708a7d4cf01077ba8e92a43fef4302bf28be80bdc381f58e78618a5d6b"
+content-hash = "08f3ef79486bf5ac32fe28ab5a411fb220b5eb37d579641eefa0a0648fe7a341"
