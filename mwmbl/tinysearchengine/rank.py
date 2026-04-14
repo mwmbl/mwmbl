@@ -355,7 +355,6 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers)
         try:
             wiki_response = response.json()
-            print("Wiki response", json.dumps(wiki_response, indent=2))
         except json.JSONDecodeError:
             logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}, content: {response.content}")
             return []
@@ -413,3 +412,9 @@ class DomainLimitingRanker:
             filtered_results.append(result)
             seen_domains.add(domain)
         return filtered_results
+
+    def complete(self, q: str):
+        return self.ranker.complete(q)
+
+    def get_raw_results(self, query: str):
+        return self.ranker.get_raw_results(query)

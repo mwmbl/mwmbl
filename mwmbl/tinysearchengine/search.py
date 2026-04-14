@@ -112,6 +112,58 @@ class RawSearchResponse(Schema):
         }
 
 
+# The complete endpoint returns a two-element list: [query_string, list[str]].
+# Ninja cannot express this as a typed Schema, so we describe it via openapi_extra.
+_COMPLETE_RESPONSE_SCHEMA = {
+    "type": "array",
+    "minItems": 2,
+    "maxItems": 2,
+    "prefixItems": [
+        {
+            "type": "string",
+            "description": "The original partial query string, echoed back.",
+            "example": "pyth",
+        },
+        {
+            "type": "array",
+            "description": (
+                "List of suggestion strings. Each entry is one of:\n"
+                "- A completed query term, e.g. `\"python tutorial\"`.\n"
+                "- A direct-navigation URL prefixed with `\"go: \"`, "
+                "e.g. `\"go: docs.python.org/3/tutorial\"`.\n"
+                "- A Google fallback prefixed with `\"search: google.com \"` "
+                "when no index results exist."
+            ),
+            "items": {"type": "string"},
+            "example": [
+                "go: docs.python.org/3/tutorial",
+                "python",
+                "python tutorial",
+                "python documentation",
+            ],
+        },
+    ],
+    "examples": [
+        [
+            "pyth",
+            [
+                "go: docs.python.org/3/tutorial",
+                "python",
+                "python tutorial",
+                "python documentation",
+            ],
+        ],
+        [
+            "xyzzy lang",
+            [
+                "search: google.com xyzzy lang",
+                "search: google.com xyzzy language",
+            ],
+        ],
+    ],
+}
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -143,49 +195,9 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                     "name": "s",
                     "in": "query",
                     "required": True,
-                    "description": "The search query string.",
                     "schema": {"type": "string", "example": "python tutorial"},
                 }
-            ],
-            "responses": {
-                "200": {
-                    "description": "A list of formatted search results.",
-                    "content": {
-                        "application/json": {
-                            "example": [
-                                {
-                                    "url": "https://docs.python.org/3/tutorial/",
-                                    "title": [
-                                        {"value": "The ", "is_bold": False},
-                                        {"value": "Python", "is_bold": True},
-                                        {"value": " Tutorial — Python 3 documentation", "is_bold": False},
-                                    ],
-                                    "extract": [
-                                        {"value": "Python", "is_bold": True},
-                                        {"value": " is an easy to learn, powerful programming language.", "is_bold": False},
-                                    ],
-                                    "source": "mwmbl",
-                                },
-                                {
-                                    "url": "https://wiki.python.org/moin/BeginnersGuide/Programmers",
-                                    "title": [
-                                        {"value": "Python", "is_bold": True},
-                                        {"value": " for Programmers — ", "is_bold": False},
-                                        {"value": "Python", "is_bold": True},
-                                        {"value": " Wiki", "is_bold": False},
-                                    ],
-                                    "extract": [
-                                        {"value": "A list of ", "is_bold": False},
-                                        {"value": "Python", "is_bold": True},
-                                        {"value": " resources for experienced programmers.", "is_bold": False},
-                                    ],
-                                    "source": "mwmbl",
-                                },
-                            ]
-                        }
-                    },
-                }
-            },
+            ]
         },
     )
     def search(request, s: str):
@@ -214,17 +226,17 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                     "name": "q",
                     "in": "query",
                     "required": True,
-                    "description": "The partial query string to complete.",
                     "schema": {"type": "string", "example": "pyth"},
                 }
             ],
             "responses": {
                 "200": {
                     "description": (
-                        "A two-element list: the original query string and a list of suggestions."
+                        "A two-element list: the echoed query string and a list of suggestions."
                     ),
                     "content": {
                         "application/json": {
+                            "schema": _COMPLETE_RESPONSE_SCHEMA,
                             "examples": {
                                 "with_index_results": {
                                     "summary": "Suggestions when index results exist",
@@ -248,11 +260,11 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                                         ],
                                     ],
                                 },
-                            }
+                            },
                         }
                     },
                 }
-            },
+            }
         },
     )
     def complete(request, q: str):
@@ -284,40 +296,9 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                     "name": "s",
                     "in": "query",
                     "required": True,
-                    "description": "The search query string.",
                     "schema": {"type": "string", "example": "python tutorial"},
                 }
-            ],
-            "responses": {
-                "200": {
-                    "description": "The raw query and unranked index results.",
-                    "content": {
-                        "application/json": {
-                            "example": {
-                                "query": "python tutorial",
-                                "results": [
-                                    {
-                                        "title": "The Python Tutorial",
-                                        "url": "https://docs.python.org/3/tutorial/",
-                                        "extract": "Python is an easy to learn, powerful programming language.",
-                                        "score": 0.92,
-                                        "term": "python tutorial",
-                                        "state": None,
-                                    },
-                                    {
-                                        "title": "Python for Beginners",
-                                        "url": "https://www.python.org/about/gettingstarted/",
-                                        "extract": "Are you new to programming? Python is great for beginners.",
-                                        "score": 0.74,
-                                        "term": "python",
-                                        "state": None,
-                                    },
-                                ],
-                            }
-                        }
-                    },
-                }
-            },
+            ]
         },
     )
     def raw(request, s: str):
