@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+import dj_database_url
 import sentry_sdk
 
 from mwmbl.auth import require_email_confirmation
@@ -35,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    'django.contrib.postgres',
     'mwmbl',
     'django_htmx',
     'django_vite',
@@ -43,6 +45,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
     'ninja_extra',
     'debug_toolbar',
+    'background_task',
 ]
 
 MIDDLEWARE = [
@@ -223,8 +226,28 @@ def strip_query_string(event):
 # Django ninja-jwt settings - custom auth rule
 USER_AUTHENTICATION_RULE = require_email_confirmation
 
+# Database configuration (shared across all environments via DATABASE_URL env var)
+# Apply PostgreSQL's default: if no database name is given in the URL, fall back to
+# the username (matching libpq's behaviour so that postgres://user@ works).
+_db = dj_database_url.config()
+if _db and not _db.get('NAME'):
+    _db['NAME'] = _db.get('USER', '')
+DATABASES = {'default': _db}
+
 # Redis configuration
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+# Cache configuration (Redis-backed via django-redis)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "TIMEOUT": None,  # individual keys manage their own TTL
+    }
+}
 
 INTERNAL_IPS = [
     "127.0.0.1",

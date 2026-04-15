@@ -1,5 +1,9 @@
 """
 Script that updates data in a background process.
+
+Also contains Django Background Tasks for periodic quota maintenance:
+  - flush_search_counts: syncs Redis monthly counters → DB every 10 minutes
+  - reset_monthly_quotas: resets counters on the 1st of each month (runs daily)
 """
 import logging
 import sys
@@ -8,6 +12,7 @@ from logging import getLogger, basicConfig
 from pathlib import Path
 from time import sleep
 
+from background_task import background
 from django.conf import settings
 
 from mwmbl.indexer import index_batches, historical
@@ -76,3 +81,53 @@ def copy_indexes_continuously():
 
         if num_updated == 0:
             sleep(10)
+
+
+# ---------------------------------------------------------------------------
+# Periodic quota maintenance tasks (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+@background(schedule=0)
+def flush_search_counts():
+    """
+    Sync live Redis monthly search counters to MwmblUser.monthly_search_count
+    in the database.  Scheduled to run every 10 minutes (600 seconds) via
+    AppConfig.ready().
+    """
+    from django.core.cache import cache
+    from mwmbl.models import MwmblUser
+    from mwmbl.quota import get_all_monthly_keys
+
+    for key in get_all_monthly_keys():
+        # key format: search:monthly:{user_id}:{year}:{month}
+        try:
+            parts = key.split(":")
+            user_id = int(parts[2])
+            count = cache.get(key, default=0)
+            MwmblUser.objects.filter(pk=user_id).update(monthly_search_count=count)
+        except Exception:
+            logger.exception("Error flushing search count for key %s", key)
+
+
+@background(schedule=0)
+def reset_monthly_quotas():
+    """
+    Reset all monthly search quotas on the first day of each month.
+    Runs daily (86400 seconds) but is a no-op on any day other than the 1st.
+    """
+    from django.core.cache import cache
+    from mwmbl.models import MwmblUser
+    from mwmbl.quota import delete_all_monthly_keys
+
+    now = datetime.utcnow()
+    if now.day != 1:
+        return  # Only act on the first day of the month
+
+    logger.info("Resetting monthly search quotas for %s-%02d", now.year, now.month)
+    try:
+        delete_all_monthly_keys()
+    except Exception:
+        logger.exception("Error deleting monthly cache keys during quota reset")
+
+    MwmblUser.objects.all().update(monthly_search_count=0)
+    logger.info("Monthly search quotas reset complete")

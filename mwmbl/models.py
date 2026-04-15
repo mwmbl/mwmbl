@@ -1,5 +1,6 @@
 import secrets
 
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
@@ -8,7 +9,23 @@ from ninja.orm import create_schema
 
 
 class MwmblUser(AbstractUser):
-    pass
+    class Tier(models.TextChoices):
+        FREE    = "free",    "Free"
+        STARTER = "starter", "Starter"
+        PRO     = "pro",     "Pro"
+
+    TIER_MONTHLY_LIMITS = {
+        Tier.FREE:    1_000,
+        Tier.STARTER: 10_000,
+        Tier.PRO:     50_000,
+    }
+
+    tier = models.CharField(
+        max_length=20,
+        choices=Tier.choices,
+        default=Tier.FREE,
+    )
+    monthly_search_count = models.IntegerField(default=0)
 
 
 class UserCuration(models.Model):
@@ -108,9 +125,18 @@ def random_api_key():
 
 
 class ApiKey(models.Model):
-    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
-    key = models.CharField(max_length=300, unique=True, default=random_api_key)
-    created_on = models.DateTimeField()
+    class Scope(models.TextChoices):
+        CRAWL  = "crawl",  "Crawl"
+        SEARCH = "search", "Search"
+
+    user       = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    key        = models.CharField(max_length=300, unique=True, default=random_api_key)
+    created_on = models.DateTimeField(auto_now_add=True)
+    name       = models.CharField(max_length=100, blank=True, default="")
+    scopes     = ArrayField(
+        models.CharField(max_length=20, choices=Scope.choices),
+        default=list,
+    )
 
 
 class WasmEvaluationJob(models.Model):

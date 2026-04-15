@@ -5,6 +5,43 @@ from ninja import Schema, ModelSchema, Field
 from mwmbl.models import DomainSubmission
 
 
+# ---------------------------------------------------------------------------
+# API key management schemas
+# ---------------------------------------------------------------------------
+
+class CreateApiKeyRequest(Schema):
+    """Request body for creating a new search-scoped API key."""
+    name: str = Field(
+        default="",
+        max_length=100,
+        description="Optional human-readable label for this key.",
+        example="My search app",
+    )
+
+
+class ApiKeyCreatedResponse(Schema):
+    """
+    Response returned when a new API key is created.
+    The raw `key` value is only returned once — store it securely.
+    """
+    id: int = Field(description="Unique ID of the API key.")
+    key: str = Field(description="The raw API key token. Shown only on creation.")
+    name: str = Field(description="Human-readable label for this key.")
+    created_on: datetime = Field(description="When the key was created.")
+    scopes: list[str] = Field(description="Scopes granted to this key.")
+
+
+class ApiKeyListItem(Schema):
+    """
+    A single API key entry returned by the list endpoint.
+    The raw key value is intentionally omitted.
+    """
+    id: int = Field(description="Unique ID of the API key.")
+    name: str = Field(description="Human-readable label for this key.")
+    created_on: datetime = Field(description="When the key was created.")
+    scopes: list[str] = Field(description="Scopes granted to this key.")
+
+
 class Registration(Schema):
     email: str
     username: str

@@ -6,10 +6,11 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 
 from mwmbl.exceptions import InvalidRequest
-from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote
+from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
-    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory
+    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
+    CreateApiKeyRequest, ApiKeyCreatedResponse, ApiKeyListItem,
 )
 
 router = Router(tags=["Platform"])
@@ -319,3 +320,90 @@ def remove_vote(request, vote_request: VoteRemoveRequest):
 def get_user_vote_history(request) -> list[SearchResultVote]:
     check_email_verified(request)
     return SearchResultVote.objects.filter(user=request.user).order_by('-timestamp')
+
+
+# ---------------------------------------------------------------------------
+# API key management
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/api-keys/",
+    auth=JWTAuth(),
+    response=ApiKeyCreatedResponse,
+    summary="Create a search API key",
+    description=(
+        "Create a new search-scoped API key for the authenticated user. "
+        "The raw key value is returned **only once** in this response — store it securely. "
+        "Use the key in the `X-API-Key` header when calling `GET /api/v1/search/`. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def create_api_key(request, body: CreateApiKeyRequest):
+    check_email_verified(request)
+    api_key = ApiKey.objects.create(
+        user=request.user,
+        name=body.name,
+        scopes=[ApiKey.Scope.SEARCH],
+    )
+    return ApiKeyCreatedResponse(
+        id=api_key.id,
+        key=api_key.key,
+        name=api_key.name,
+        created_on=api_key.created_on,
+        scopes=api_key.scopes,
+    )
+
+
+@router.get(
+    "/api-keys/",
+    auth=JWTAuth(),
+    response=list[ApiKeyListItem],
+    summary="List search API keys",
+    description=(
+        "List all search-scoped API keys belonging to the authenticated user. "
+        "The raw key value is **not** included in this response. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def list_api_keys(request) -> list[ApiKeyListItem]:
+    check_email_verified(request)
+    keys = ApiKey.objects.filter(
+        user=request.user,
+        scopes__contains=[ApiKey.Scope.SEARCH],
+    ).order_by("-created_on")
+    return [
+        ApiKeyListItem(
+            id=k.id,
+            name=k.name,
+            created_on=k.created_on,
+            scopes=k.scopes,
+        )
+        for k in keys
+    ]
+
+
+@router.delete(
+    "/api-keys/{key_id}",
+    auth=JWTAuth(),
+    summary="Revoke a search API key",
+    description=(
+        "Permanently revoke (delete) a search-scoped API key owned by the authenticated user. "
+        "Any subsequent requests using the revoked key will receive a 401 response. "
+        "Returns 404 if the key does not exist or does not belong to the current user. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def delete_api_key(request, key_id: int):
+    check_email_verified(request)
+    api_key = ApiKey.objects.filter(
+        id=key_id,
+        user=request.user,
+        scopes__contains=[ApiKey.Scope.SEARCH],
+    ).first()
+    if api_key is None:
+        raise InvalidRequest("API key not found.", status=404)
+    api_key.delete()
+    return {"status": "ok", "message": "API key revoked."}

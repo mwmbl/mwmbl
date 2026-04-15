@@ -189,11 +189,13 @@ class Result(Schema):
 class Results(Schema):
     """A set of search results submitted for indexing via the results API."""
 
-    api_key: str = Field(
+    api_key: Optional[str] = Field(
+        default=None,
         description=(
-            "Your Mwmbl API key. To request an API key for crawling please contact an administrator on Matrix or email info@mwmbl.org."
+            "**Deprecated.** Pass your API key in the `X-API-Key` request header instead. "
+            "Body-based key is still accepted for backward compatibility but will be removed in a future version."
         ),
-        example="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        example=None,
     )
     results: list[Result] = Field(
         description="List of search results to index.",

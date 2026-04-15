@@ -245,16 +245,24 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         summary="Submit indexed results",
         description=(
             "Submit a set of pre-indexed search results directly into the Mwmbl index. "
-            "Requires a valid API key (obtain one from your account settings at mwmbl.org). "
+            "Requires a valid crawl-scoped API key passed in the `X-API-Key` request header "
+            "(preferred) or in the request body `api_key` field (deprecated). "
             "Results are indexed immediately and also stored in object storage. "
             "This endpoint is intended for trusted crawlers."
         ),
     )
     def post_results(request, results: Results):
-        # Check the API key
-        api_key = ApiKey.objects.filter(key=results.api_key).first()
+        # Prefer X-API-Key header; fall back to deprecated body field
+        raw_key = request.headers.get("X-API-Key") or results.api_key
+        if not raw_key:
+            return 401, {"message": "API key required. Pass it in the X-API-Key header."}
+
+        api_key = ApiKey.objects.filter(
+            key=raw_key,
+            scopes__contains=[ApiKey.Scope.CRAWL],
+        ).select_related("user").first()
         if api_key is None:
-            return 401, {"message": "Invalid API key"}
+            return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
 
         documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
