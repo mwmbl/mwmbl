@@ -25,7 +25,6 @@ class MwmblUser(AbstractUser):
         choices=Tier.choices,
         default=Tier.FREE,
     )
-    monthly_search_count = models.IntegerField(default=0)
 
 
 class UserCuration(models.Model):
@@ -155,6 +154,17 @@ class WasmEvaluationJob(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     results = models.JSONField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
+
+
+class UsageBucket(models.Model):
+    """Records a user's API usage for a specific calendar month."""
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [('user', 'year', 'month')]
 
 
 class SearchResultVote(models.Model):

@@ -88,12 +88,12 @@ def copy_indexes_continuously():
 @background(schedule=0)
 def flush_search_counts():
     """
-    Sync live Redis monthly search counters to MwmblUser.monthly_search_count
-    in the database.  Scheduled to run every 10 minutes (600 seconds) via
+    Sync live Redis monthly search counters to UsageBucket records in the
+    database.  Scheduled to run every 10 minutes (600 seconds) via
     AppConfig.ready().
     """
     from django.core.cache import cache
-    from mwmbl.models import MwmblUser
+    from mwmbl.models import UsageBucket
     from mwmbl.quota import get_all_monthly_keys
 
     for key in get_all_monthly_keys():
@@ -101,8 +101,13 @@ def flush_search_counts():
         try:
             parts = key.split(":")
             user_id = int(parts[2])
+            year = int(parts[3])
+            month = int(parts[4])
             count = cache.get(key, default=0)
-            MwmblUser.objects.filter(pk=user_id).update(monthly_search_count=count)
+            UsageBucket.objects.update_or_create(
+                user_id=user_id, year=year, month=month,
+                defaults={"count": count},
+            )
         except Exception:
             logger.exception("Error flushing search count for key %s", key)
 
