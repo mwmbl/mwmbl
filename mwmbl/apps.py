@@ -52,13 +52,13 @@ class MwmblConfig(AppConfig):
         """
         try:
             from background_task.models import Task
-            from mwmbl.background import flush_search_counts
+            from mwmbl.background import sync_search_counts
 
-            FLUSH_TASK = "mwmbl.background.flush_search_counts"
+            SYNC_TASK = "mwmbl.background.sync_search_counts"
 
-            # Flush search counts every 10 minutes (600 seconds)
-            if not Task.objects.filter(task_name=FLUSH_TASK).exists():
-                flush_search_counts(repeat=600, repeat_until=None)
+            # Sync search counts once per hour (3600 seconds)
+            if not Task.objects.filter(task_name=SYNC_TASK).exists():
+                sync_search_counts(repeat=3600, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

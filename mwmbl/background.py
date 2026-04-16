@@ -86,16 +86,39 @@ def copy_indexes_continuously():
 # ---------------------------------------------------------------------------
 
 @background(schedule=0)
-def flush_search_counts():
+def sync_search_counts():
     """
-    Sync live Redis monthly search counters to UsageBucket records in the
-    database.  Scheduled to run every 10 minutes (600 seconds) via
-    AppConfig.ready().
-    """
-    from django.core.cache import cache
-    from mwmbl.models import UsageBucket
-    from mwmbl.quota import get_all_monthly_keys
+    Bidirectional sync between Redis and UsageBucket, run once per hour.
 
+    Step 1 (Postgres → Redis): seed any missing Redis keys from UsageBucket.
+    This restores counters after a Redis restart without persistence.
+
+    Step 2 (Redis → Postgres): update UsageBucket with the live Redis counts
+    so Postgres stays current as a durable backup.
+    """
+    from datetime import datetime
+
+    from django.core.cache import cache
+
+    from mwmbl.models import UsageBucket
+    from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
+
+    now = datetime.utcnow()
+
+    # Step 1: seed Redis from Postgres, taking the max of the two values.
+    # Postgres may lag behind (up to one sync interval), so if Redis already has
+    # a higher count we keep it. If Redis was cleared (restart), the Postgres
+    # value restores the baseline; any requests made since the restart are
+    # already counted in Redis and will be included via max().
+    for bucket in UsageBucket.objects.filter(year=now.year, month=now.month):
+        key = _monthly_key(bucket.user_id, year=now.year, month=now.month)
+        if not cache.add(key, bucket.count, timeout=MONTHLY_TTL):
+            # Key already exists — only update if the Postgres value is higher
+            current = cache.get(key, default=0)
+            if bucket.count > current:
+                cache.set(key, bucket.count, timeout=MONTHLY_TTL)
+
+    # Step 2: sync live Redis counters back to Postgres
     for key in get_all_monthly_keys():
         # key format: search:monthly:{user_id}:{year}:{month}
         try:
@@ -109,6 +132,6 @@ def flush_search_counts():
                 defaults={"count": count},
             )
         except Exception:
-            logger.exception("Error flushing search count for key %s", key)
+            logger.exception("Error syncing search count for key %s", key)
 
 
