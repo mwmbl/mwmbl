@@ -52,18 +52,13 @@ class MwmblConfig(AppConfig):
         """
         try:
             from background_task.models import Task
-            from mwmbl.background import flush_search_counts, reset_monthly_quotas
+            from mwmbl.background import flush_search_counts
 
             FLUSH_TASK = "mwmbl.background.flush_search_counts"
-            RESET_TASK = "mwmbl.background.reset_monthly_quotas"
 
             # Flush search counts every 10 minutes (600 seconds)
             if not Task.objects.filter(task_name=FLUSH_TASK).exists():
                 flush_search_counts(repeat=600, repeat_until=None)
-
-            # Reset monthly quotas daily (86400 seconds); only acts on day 1
-            if not Task.objects.filter(task_name=RESET_TASK).exists():
-                reset_monthly_quotas(repeat=86400, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
