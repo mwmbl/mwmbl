@@ -11,7 +11,7 @@ Sub-routers:
   /api/v1/evaluate/  — WASM ranking function evaluation
 
 JWT token endpoints (from NinjaJWTDefaultController) are also registered here,
-typically at /api/v1/token/pair, /api/v1/token/refresh, etc.
+typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
 from ninja_extra import NinjaExtraAPI
@@ -21,7 +21,8 @@ from mwmbl.exceptions import InvalidRequest
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
-# Patch the JWT controller tag to use a capitalised name before registering
+# Patch the JWT controller to restore its original path and use a capitalised tag
+NinjaJWTDefaultController.get_api_controller().prefix = "/platform/token"
 NinjaJWTDefaultController.get_api_controller().tags = ["Authentication"]
 
 api = NinjaExtraAPI(
@@ -33,7 +34,7 @@ api = NinjaExtraAPI(
         "and managing user accounts and domain submissions.\n\n"
         "## Authentication\n\n"
         "Most write endpoints require a JWT bearer token. "
-        "Obtain a token pair by posting your credentials to `/api/v1/token/pair`. "
+        "Obtain a token pair by posting your credentials to `/api/v1/platform/token/pair`. "
         "Include the access token in the `Authorization: Bearer <token>` header.\n\n"
         "Some crawler endpoints use a separate API key passed in the request body."
     ),
@@ -49,7 +50,7 @@ api = NinjaExtraAPI(
     },
 )
 
-# Register JWT token endpoints (/token/pair, /token/refresh, /token/verify)
+# Register JWT token endpoints (/platform/token/pair, /platform/token/refresh, /platform/token/verify)
 api.register_controllers(NinjaJWTDefaultController)
 
 
