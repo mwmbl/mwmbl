@@ -128,10 +128,13 @@ DJANGO_VITE_DEV_MODE = False
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTHENTICATION_BACKENDS = [
-    # Needed to login by username in Django admin, regardless of `allauth`
+    # Accepts username or email in the username field — used by the JWT token endpoint
+    'mwmbl.auth.UsernameOrEmailBackend',
+
+    # Needed for Django's permission system (has_perm, has_module_perms) used by the admin
     'django.contrib.auth.backends.ModelBackend',
 
-    # `allauth` specific authentication methods, such as login by email
+    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
@@ -141,6 +144,8 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 

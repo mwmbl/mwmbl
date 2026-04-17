@@ -77,15 +77,24 @@ class ApiKeyListItem(Schema):
 
 
 class Registration(Schema):
-    email: str
-    username: str
-    password: str
+    email: str = Field(description="Email address for the new account. Must be unique.")
+    password: str = Field(description="Password for the new account.")
+    username: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional username. If omitted, one is generated automatically in the form "
+            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided."
+        ),
+    )
 
 
 class ConfirmEmail(Schema):
-    username: str
-    email: str
-    key: str
+    email: str = Field(description="Email address to confirm.")
+    key: str = Field(description="Confirmation key from the verification email.")
+    username: Optional[str] = Field(
+        default=None,
+        description="Deprecated — ignored. Accepted for backwards compatibility only.",
+    )
 
 
 class DomainSubmissionSchema(ModelSchema):

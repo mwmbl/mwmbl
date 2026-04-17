@@ -10,7 +10,7 @@ from polar_sdk import Polar
 from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
-from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling
+from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
     VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
@@ -32,16 +32,23 @@ def check_email_verified(request):
     '/register',
     summary="Register a new user",
     description=(
-        "Create a new Mwmbl user account. A confirmation email will be sent to the provided "
-        "address. The account cannot be used until the email is confirmed via the "
-        "`/platform/confirm-email` endpoint."
+        "Create a new Mwmbl user account. Only `email` and `password` are required. "
+        "`username` is optional — if omitted, a unique name is generated automatically in the "
+        "form `adjective_noun_NNN` (e.g. `swift_falcon_379`). "
+        "A confirmation email will be sent to the provided address; the account cannot be used "
+        "until the email is confirmed via the `/platform/confirm-email` endpoint. "
+        "The assigned username is returned in the response."
     ),
 )
 def register(request, registration: Registration):
-    if MwmblUser.objects.filter(username=registration.username).exists():
+    if MwmblUser.objects.filter(email=registration.email).exists():
+        raise InvalidRequest("Email already registered")
+
+    username = registration.username or generate_username()
+    if registration.username and MwmblUser.objects.filter(username=registration.username).exists():
         raise InvalidRequest("Username already exists")
 
-    user = MwmblUser(username=registration.username, email=registration.email)
+    user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)
     user.save()
 
@@ -50,7 +57,7 @@ def register(request, registration: Registration):
 
     return {
         "status": "ok",
-        "username": registration.username,
+        "username": username,
         "message": "User registered successfully. Check your email for confirmation."
     }
 
@@ -60,7 +67,9 @@ def register(request, registration: Registration):
     summary="Confirm email address",
     description=(
         "Confirm a user's email address using the key sent in the confirmation email. "
-        "The `key`, `email`, and `username` must all match the values from the confirmation email."
+        "Only `email` and `key` are required. The `username` field is accepted for backwards "
+        "compatibility but is ignored. "
+        "The confirmed account's username is returned in the response."
     ),
 )
 def confirm_email(request, confirm: ConfirmEmail):
@@ -69,18 +78,14 @@ def confirm_email(request, confirm: ConfirmEmail):
         raise InvalidRequest("Invalid confirmation key")
 
     if confirmation.email_address.email != confirm.email:
-        raise InvalidRequest("Invalid username or email")
-
-    user = MwmblUser.objects.get(username=confirm.username)
-    if user.email != confirm.email:
-        raise InvalidRequest("Invalid username or email")
+        raise InvalidRequest("Invalid email or key")
 
     adapter = get_adapter()
     adapter.confirm_email(request, confirmation.email_address)
 
     return {
         "status": "ok",
-        "username": confirm.username,
+        "username": confirmation.email_address.user.username,
         "message": "Email confirmed successfully."
     }
 
