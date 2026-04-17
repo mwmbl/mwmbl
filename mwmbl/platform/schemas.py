@@ -2,6 +2,40 @@ from datetime import datetime
 from typing import Optional, Literal
 from ninja import Schema, ModelSchema, Field
 
+
+class UserProfileResponse(Schema):
+    username: str
+    email: str
+    plan: str
+    email_confirmed: bool
+
+
+class SubscriptionResponse(Schema):
+    plan: str
+    status: str
+    monthly_limit: int
+    monthly_usage: int
+    current_period_end: Optional[datetime]
+    polar_customer_id: Optional[str]
+
+
+class CheckoutRequest(Schema):
+    plan: Literal["starter", "pro"]
+
+
+class CheckoutResponse(Schema):
+    checkout_url: str
+
+
+class ForgotPasswordRequest(Schema):
+    email: str
+
+
+class ResetPasswordRequest(Schema):
+    email: str
+    key: str
+    new_password: str
+
 from mwmbl.models import DomainSubmission
 
 

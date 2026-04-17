@@ -167,6 +167,13 @@ class UsageBucket(models.Model):
         unique_together = [('user', 'year', 'month')]
 
 
+class UserBilling(models.Model):
+    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="billing")
+    polar_customer_id = models.CharField(max_length=100, blank=True, default="")
+    polar_subscription_id = models.CharField(max_length=100, blank=True, default="")
+    current_period_end = models.DateTimeField(null=True, blank=True)
+
+
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
         "upvote": "User upvoted this result",

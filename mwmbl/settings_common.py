@@ -254,3 +254,8 @@ INTERNAL_IPS = [
 ]
 
 RUST_MODEL_PATH = Path(__file__).parent / 'resources' / "model.xgb"
+
+POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
+POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")
+POLAR_PRODUCT_ID_STARTER = os.environ.get("POLAR_PRODUCT_ID_STARTER", "")
+POLAR_PRODUCT_ID_PRO = os.environ.get("POLAR_PRODUCT_ID_PRO", "")

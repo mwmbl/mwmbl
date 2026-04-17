@@ -44,6 +44,7 @@ dependencies = [
     "scalar-ninja>=0.3.0",
     "django-background-tasks>=1.2.8",
     "django-redis>=5.4.0",
+    "polar-sdk>=0.10.0",
 ]
 
 [project.optional-dependencies]
