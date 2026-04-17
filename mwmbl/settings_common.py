@@ -228,8 +228,10 @@ def strip_query_string(event):
             del event["request"]["query_string"]
     return event
 
-# Django ninja-jwt settings - custom auth rule
-USER_AUTHENTICATION_RULE = require_email_confirmation
+# Django ninja-jwt settings
+NINJA_JWT = {
+    "USER_AUTHENTICATION_RULE": require_email_confirmation,
+}
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
 # Apply PostgreSQL's default: if no database name is given in the URL, fall back to
