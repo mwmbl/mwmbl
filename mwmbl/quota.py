@@ -6,7 +6,7 @@ backend can be swapped without changing this code.  The only Redis-specific
 call is get_all_monthly_keys(), which uses SCAN via django-redis and is only
 called by the background flush/reset jobs.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from django.core.cache import cache
 
@@ -19,7 +19,7 @@ MONTHLY_TTL = 60 * 60 * 24 * 35   # 35 days in seconds
 # ---------------------------------------------------------------------------
 
 def _monthly_key(user_id: int, year: int | None = None, month: int | None = None) -> str:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     y = year if year is not None else now.year
     m = month if month is not None else now.month
     return f"search:monthly:{user_id}:{y}:{m:02d}"
@@ -39,14 +39,10 @@ def check_rate_limit(user_id: int) -> bool:
     Returns True if the request is allowed, False if the limit is exceeded.
     """
     key = _rate_key(user_id)
-    # add() sets the key only if it doesn't exist (atomic in Redis)
-    added = cache.add(key, 0, timeout=1)
-    if added:
-        # Key was just created; this is the first request in this window
-        cache.incr(key)
+    # add() is atomic: sets key=1 with TTL only if absent (first request this second)
+    if cache.add(key, 1, timeout=1):
         return True
-    count = cache.incr(key)
-    return count <= RATE_LIMIT
+    return cache.incr(key) <= RATE_LIMIT
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +76,7 @@ def get_all_monthly_keys() -> list[str]:
     Uses the underlying Redis SCAN command via django-redis.
     Only call this from background tasks, not from request handlers.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     pattern = f"search:monthly:*:{now.year}:{now.month:02d}"
     from django_redis import get_redis_connection
     conn = get_redis_connection("default")

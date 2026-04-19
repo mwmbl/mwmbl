@@ -2,7 +2,7 @@
 Script that updates data in a background process.
 
 Also contains Django Background Tasks for periodic quota maintenance:
-  - flush_search_counts: syncs Redis monthly counters → DB every 10 minutes
+  - sync_search_counts: syncs Redis monthly counters → DB once per hour
 """
 import logging
 import sys
@@ -96,14 +96,14 @@ def sync_search_counts():
     Step 2 (Redis → Postgres): update UsageBucket with the live Redis counts
     so Postgres stays current as a durable backup.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     from django.core.cache import cache
 
     from mwmbl.models import UsageBucket
     from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Step 1: seed Redis from Postgres, taking the max of the two values.
     # Postgres may lag behind (up to one sync interval), so if Redis already has

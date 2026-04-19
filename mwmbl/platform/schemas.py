@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Optional, Literal
 from ninja import Schema, ModelSchema, Field
 
+from mwmbl.models import DomainSubmission
+
 
 class UserProfileResponse(Schema):
     username: str
@@ -35,8 +37,6 @@ class ResetPasswordRequest(Schema):
     email: str
     key: str
     new_password: str
-
-from mwmbl.models import DomainSubmission
 
 
 # ---------------------------------------------------------------------------

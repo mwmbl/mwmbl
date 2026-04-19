@@ -256,7 +256,10 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                 "Rate limit exceeded: maximum 5 requests per second. Please slow down.",
             )
 
-        # Monthly quota pre-check (avoid incrementing if already over limit)
+        # Monthly quota pre-check (avoid incrementing if already over limit).
+        # Concurrent requests near the limit may both pass and slightly over-count —
+        # this is intentional; hard enforcement via atomic DB transactions isn't worth
+        # the complexity for occasional edge-case overage of a few requests.
         current_count = get_monthly_count(user.id)
         if current_count >= monthly_limit:
             upgrade_msg = _upgrade_message(user.tier)

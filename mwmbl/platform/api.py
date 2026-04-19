@@ -489,6 +489,8 @@ def create_checkout(request, body: CheckoutRequest):
         "pro": settings.POLAR_PRODUCT_ID_PRO,
     }
     product_id = product_map[body.plan]
+    if not product_id:
+        raise InvalidRequest(f"Plan '{body.plan}' is not configured. Contact support.", status=503)
     billing = getattr(request.user, "billing", None)
     checkout_params = {
         "products": [product_id],
@@ -533,7 +535,7 @@ def polar_webhook(request):
             billing.polar_customer_id = event.data.customer_id or billing.polar_customer_id
             billing.polar_subscription_id = event.data.id or billing.polar_subscription_id
             billing.save()
-    elif event.type == "subscription.revoked":
+    elif event.type in ("subscription.revoked", "subscription.canceled"):
         user_id = event.data.metadata.get("user_id")
         user = MwmblUser.objects.filter(id=user_id).first()
         if user:
