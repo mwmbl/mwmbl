@@ -1,3 +1,6 @@
+limit_req_zone $binary_remote_addr zone=mwmbl_login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=mwmbl_register:10m rate=3r/m;
+
 {{ range $port_map := .PROXY_PORT_MAP | split " " }}
 {{ $port_map_list := $port_map | split ":" }}
 {{ $scheme := index $port_map_list 0 }}
@@ -35,6 +38,75 @@ server {
 
   keepalive_timeout   70;
   {{ if and (eq $.SPDY_SUPPORTED "true") (ne $.HTTP2_SUPPORTED "true") }}add_header          Alternate-Protocol  {{ $.PROXY_SSL_PORT }}:npn-spdy/2;{{ end }}
+
+  location = /api/v1/platform/token/pair {
+    limit_req zone=mwmbl_login burst=5 nodelay;
+    limit_req_status 429;
+
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' '*';
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key';
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Type' 'text/plain; charset=utf-8';
+        add_header 'Content-Length' 0;
+        return 204;
+    }
+    add_header 'Access-Control-Allow-Origin' '*' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+    add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key' always;
+    add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+
+    proxy_pass  http://{{ $.APP }}-{{ $upstream_port }};
+    proxy_http_version 1.1;
+    proxy_read_timeout {{ $.PROXY_READ_TIMEOUT }};
+    proxy_buffer_size {{ $.PROXY_BUFFER_SIZE }};
+    proxy_buffering {{ $.PROXY_BUFFERING }};
+    proxy_buffers {{ $.PROXY_BUFFERS }};
+    proxy_busy_buffers_size {{ $.PROXY_BUSY_BUFFERS_SIZE }};
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $http_connection;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For {{ $.PROXY_X_FORWARDED_FOR }};
+    proxy_set_header X-Forwarded-Port {{ $.PROXY_X_FORWARDED_PORT }};
+    proxy_set_header X-Forwarded-Proto {{ $.PROXY_X_FORWARDED_PROTO }};
+    proxy_set_header X-Request-Start $msec;
+    {{ if $.PROXY_X_FORWARDED_SSL }}proxy_set_header X-Forwarded-Ssl {{ $.PROXY_X_FORWARDED_SSL }};{{ end }}
+  }
+
+  location = /api/v1/platform/register {
+    limit_req zone=mwmbl_register burst=2 nodelay;
+    limit_req_status 429;
+
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' '*';
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key';
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Type' 'text/plain; charset=utf-8';
+        add_header 'Content-Length' 0;
+        return 204;
+    }
+    add_header 'Access-Control-Allow-Origin' '*' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+    add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key' always;
+    add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+
+    proxy_pass  http://{{ $.APP }}-{{ $upstream_port }};
+    proxy_http_version 1.1;
+    proxy_read_timeout {{ $.PROXY_READ_TIMEOUT }};
+    proxy_buffer_size {{ $.PROXY_BUFFER_SIZE }};
+    proxy_buffering {{ $.PROXY_BUFFERING }};
+    proxy_busy_buffers_size {{ $.PROXY_BUSY_BUFFERS_SIZE }};
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $http_connection;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For {{ $.PROXY_X_FORWARDED_FOR }};
+    proxy_set_header X-Forwarded-Port {{ $.PROXY_X_FORWARDED_PORT }};
+    proxy_set_header X-Forwarded-Proto {{ $.PROXY_X_FORWARDED_PROTO }};
+    proxy_set_header X-Request-Start $msec;
+    {{ if $.PROXY_X_FORWARDED_SSL }}proxy_set_header X-Forwarded-Ssl {{ $.PROXY_X_FORWARDED_SSL }};{{ end }}
+  }
 
   location    / {
 

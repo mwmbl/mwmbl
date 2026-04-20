@@ -121,8 +121,11 @@ class DomainSubmission(models.Model):
     rejection_detail = models.CharField(max_length=300, blank=True)
 
 
-def random_api_key():
-    return secrets.token_urlsafe(64)
+def generate_api_key() -> tuple[str, str]:
+    """Return (raw_key, key_hash). Store only the hash; return raw_key to the user once."""
+    import hashlib
+    raw = secrets.token_urlsafe(64)
+    return raw, hashlib.sha256(raw.encode()).hexdigest()
 
 
 class ApiKey(models.Model):
@@ -131,7 +134,7 @@ class ApiKey(models.Model):
         SEARCH = "search", "Search"
 
     user       = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
-    key        = models.CharField(max_length=300, unique=True, default=random_api_key)
+    key        = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
     created_on = models.DateTimeField(auto_now_add=True)
     name       = models.CharField(max_length=100, blank=True, default="")
     scopes     = ArrayField(

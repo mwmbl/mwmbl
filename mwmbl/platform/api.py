@@ -352,14 +352,17 @@ def get_user_vote_history(request) -> list[SearchResultVote]:
 )
 def create_api_key(request, body: CreateApiKeyRequest):
     check_email_verified(request)
+    from mwmbl.models import generate_api_key
+    raw_key, key_hash = generate_api_key()
     api_key = ApiKey.objects.create(
         user=request.user,
         name=body.name,
         scopes=[ApiKey.Scope.SEARCH],
+        key=key_hash,
     )
     return ApiKeyCreatedResponse(
         id=api_key.id,
-        key=api_key.key,
+        key=raw_key,
         name=api_key.name,
         created_on=api_key.created_on,
         scopes=api_key.scopes,

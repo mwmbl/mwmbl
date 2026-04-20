@@ -1,27 +1,21 @@
 """
 Authentication for the search API using the X-API-Key header.
 """
+import hashlib
+
 from ninja.security import APIKeyHeader
 
 from mwmbl.models import ApiKey
 
 
 class SearchApiKeyAuth(APIKeyHeader):
-    """
-    Ninja authentication class that reads the X-API-Key request header and
-    validates it against ApiKey rows that have the 'search' scope.
-
-    On success, request.auth is set to the ApiKey instance (giving access to
-    request.auth.user and request.auth.user.tier).
-    On failure, returns None which causes Ninja to respond with 401.
-    """
-
     param_name = "X-API-Key"
 
     def authenticate(self, request, key: str):
+        key_hash = hashlib.sha256(key.encode()).hexdigest()
         try:
             return ApiKey.objects.select_related("user").get(
-                key=key,
+                key=key_hash,
                 scopes__contains=[ApiKey.Scope.SEARCH],
             )
         except ApiKey.DoesNotExist:

@@ -26,13 +26,19 @@ class UsernameOrEmailBackend:
         if not username or not password:
             return None
 
+        user = None
         try:
             user = UserModel.objects.get(username=username)
         except UserModel.DoesNotExist:
             try:
                 user = UserModel.objects.get(email=username)
             except UserModel.DoesNotExist:
-                return None
+                pass
+
+        if user is None:
+            # Run a dummy check to mitigate user-enumeration via timing
+            UserModel().check_password(password)
+            return None
 
         if user.check_password(password):
             return user
