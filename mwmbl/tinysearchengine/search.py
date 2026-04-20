@@ -68,8 +68,8 @@ class SearchResult(Schema):
 class SearchResponse(Schema):
     """Response from the authenticated search endpoint, including usage metadata."""
     results: list[SearchResult]
-    monthly_usage: int
-    monthly_limit: int
+    monthly_usage: int | None = None
+    monthly_limit: int | None = None
 
     class Config:
         json_schema_extra = {
@@ -207,13 +207,12 @@ def _upgrade_message(tier: str) -> str:
 def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register search routes on the given router or API instance."""
 
-    from mwmbl.search_auth import SearchApiKeyAuth
     from mwmbl.models import MwmblUser
 
     @r.get(
         "",
         response=SearchResponse,
-        auth=SearchApiKeyAuth(),
+        auth=None,
         summary="Search",
         description=(
             "Search the Mwmbl index and return formatted results.\n\n"
@@ -245,37 +244,45 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         },
     )
     def search(request, s: str):
-        api_key = request.auth          # SearchApiKeyAuth returns the ApiKey instance
-        user: MwmblUser = api_key.user
-        monthly_limit = MwmblUser.TIER_MONTHLY_LIMITS[user.tier]
+        from mwmbl.search_auth import SearchApiKeyAuth
+        from mwmbl.models import ApiKey
 
-        # Rate limit check (5 req/s, all tiers)
-        if not check_rate_limit(user.id):
-            raise HttpError(
-                429,
-                "Rate limit exceeded: maximum 5 requests per second. Please slow down.",
-            )
+        api_key: ApiKey | None = None
+        raw_key = request.headers.get("X-API-Key")
+        if raw_key:
+            api_key = SearchApiKeyAuth().authenticate(request, raw_key)
 
-        # Monthly quota pre-check (avoid incrementing if already over limit).
-        # Concurrent requests near the limit may both pass and slightly over-count —
-        # this is intentional; hard enforcement via atomic DB transactions isn't worth
-        # the complexity for occasional edge-case overage of a few requests.
-        current_count = get_monthly_count(user.id)
-        if current_count >= monthly_limit:
-            upgrade_msg = _upgrade_message(user.tier)
-            msg = (
-                f"Monthly quota exceeded: your {user.get_tier_display()} plan allows "
-                f"{monthly_limit:,} requests per month and you have used {current_count:,}."
-            )
-            if upgrade_msg:
-                msg += f" {upgrade_msg}"
-            raise HttpError(429, msg)
+        if api_key is not None:
+            user: MwmblUser = api_key.user
+            monthly_limit = MwmblUser.TIER_MONTHLY_LIMITS[user.tier]
 
-        new_count = increment_monthly(user.id)
+            if not check_rate_limit(user.id):
+                raise HttpError(
+                    429,
+                    "Rate limit exceeded: maximum 5 requests per second. Please slow down.",
+                )
+
+            current_count = get_monthly_count(user.id)
+            if current_count >= monthly_limit:
+                upgrade_msg = _upgrade_message(user.tier)
+                msg = (
+                    f"Monthly quota exceeded: your {user.get_tier_display()} plan allows "
+                    f"{monthly_limit:,} requests per month and you have used {current_count:,}."
+                )
+                if upgrade_msg:
+                    msg += f" {upgrade_msg}"
+                raise HttpError(429, msg)
+
+            new_count = increment_monthly(user.id)
+            monthly_usage = new_count
+        else:
+            monthly_limit = None
+            monthly_usage = None
+
         results = ranker.search(s, [])
         return SearchResponse(
             results=[format_result(result, s) for result in results],
-            monthly_usage=new_count,
+            monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
 
