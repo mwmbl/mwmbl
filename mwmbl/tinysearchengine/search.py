@@ -3,8 +3,10 @@ from logging import getLogger
 from typing import Optional
 
 from ninja import NinjaAPI, Router, Schema
+from ninja.errors import HttpError
 
 from mwmbl.format import format_result
+from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
@@ -58,6 +60,24 @@ class SearchResult(Schema):
                         {"value": " is an easy to learn, powerful programming language.", "is_bold": False},
                     ],
                     "source": "mwmbl",
+                }
+            ]
+        }
+
+
+class SearchResponse(Schema):
+    """Response from the authenticated search endpoint, including usage metadata."""
+    results: list[SearchResult]
+    monthly_usage: int | None = None
+    monthly_limit: int | None = None
+
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "results": [],
+                    "monthly_usage": 42,
+                    "monthly_limit": 1000,
                 }
             ]
         }
@@ -165,18 +185,39 @@ _COMPLETE_RESPONSE_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
+# Upgrade message helper
+# ---------------------------------------------------------------------------
+
+def _upgrade_message(tier: str) -> str:
+    from mwmbl.models import MwmblUser
+    if tier == MwmblUser.Tier.FREE:
+        return (
+            "Upgrade to Starter (10,000 requests/month) or Pro (50,000 requests/month) "
+            "at https://mwmbl.org/pricing."
+        )
+    if tier == MwmblUser.Tier.STARTER:
+        return "Upgrade to Pro (50,000 requests/month) at https://mwmbl.org/pricing."
+    return ""  # Pro — no upgrade available
+
+
+# ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
 
 def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register search routes on the given router or API instance."""
 
+    from mwmbl.models import MwmblUser
+
     @r.get(
         "",
-        response=list[SearchResult],
+        response=SearchResponse,
+        auth=None,
         summary="Search",
         description=(
             "Search the Mwmbl index and return formatted results.\n\n"
+            "Requires a valid search-scoped API key passed in the `X-API-Key` header. "
+            "Obtain a key via `POST /api/v1/platform/api-keys/`.\n\n"
             "Results are ranked using a heuristic ranker that considers title, extract, "
             "domain authority, and query-term match quality. "
             "Each result's `title` and `extract` are returned as a list of text segments "
@@ -187,6 +228,8 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n\n"
+            "The response includes `monthly_usage` (requests used this month) and "
+            "`monthly_limit` (your plan's monthly cap).\n\n"
             "**Query parameter:** `s` — the search query string (required)."
         ),
         openapi_extra={
@@ -201,8 +244,47 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         },
     )
     def search(request, s: str):
+        from mwmbl.search_auth import SearchApiKeyAuth
+        from mwmbl.models import ApiKey
+
+        api_key: ApiKey | None = None
+        raw_key = request.headers.get("X-API-Key")
+        if raw_key:
+            api_key = SearchApiKeyAuth().authenticate(request, raw_key)
+
+        if api_key is not None:
+            user: MwmblUser = api_key.user
+            monthly_limit = MwmblUser.TIER_MONTHLY_LIMITS[user.tier]
+
+            if not check_rate_limit(user.id):
+                raise HttpError(
+                    429,
+                    "Rate limit exceeded: maximum 5 requests per second. Please slow down.",
+                )
+
+            current_count = get_monthly_count(user.id)
+            if current_count >= monthly_limit:
+                upgrade_msg = _upgrade_message(user.tier)
+                msg = (
+                    f"Monthly quota exceeded: your {user.get_tier_display()} plan allows "
+                    f"{monthly_limit:,} requests per month and you have used {current_count:,}."
+                )
+                if upgrade_msg:
+                    msg += f" {upgrade_msg}"
+                raise HttpError(429, msg)
+
+            new_count = increment_monthly(user.id)
+            monthly_usage = new_count
+        else:
+            monthly_limit = None
+            monthly_usage = None
+
         results = ranker.search(s, [])
-        return [format_result(result, s) for result in results]
+        return SearchResponse(
+            results=[format_result(result, s) for result in results],
+            monthly_usage=monthly_usage,
+            monthly_limit=monthly_limit,
+        )
 
     @r.get(
         "/complete",

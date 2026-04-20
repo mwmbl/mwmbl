@@ -42,3 +42,27 @@ class MwmblConfig(AppConfig):
         create_index()
         if settings.SETUP_DATABASE:
             create_index_db()
+        self._schedule_background_tasks()
+
+    @staticmethod
+    def _schedule_background_tasks():
+        """
+        Schedule periodic background tasks if they are not already queued.
+        Uses django-background-tasks; requires `manage.py process_tasks` to be running.
+        """
+        try:
+            from background_task.models import Task
+            from mwmbl.background import sync_search_counts
+
+            SYNC_TASK = "mwmbl.background.sync_search_counts"
+
+            # Sync search counts once per hour (3600 seconds)
+            if not Task.objects.filter(task_name=SYNC_TASK).exists():
+                sync_search_counts(repeat=3600, repeat_until=None)
+
+        except Exception:
+            # Don't prevent startup if background task scheduling fails
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to schedule background tasks"
+            )

@@ -1,14 +1,32 @@
 import secrets
 
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from ninja import ModelSchema
 from ninja.orm import create_schema
 
+from mwmbl.usernames import generate_username
+
 
 class MwmblUser(AbstractUser):
-    pass
+    class Tier(models.TextChoices):
+        FREE    = "free",    "Free"
+        STARTER = "starter", "Starter"
+        PRO     = "pro",     "Pro"
+
+    TIER_MONTHLY_LIMITS = {
+        Tier.FREE:    1_000,
+        Tier.STARTER: 10_000,
+        Tier.PRO:     50_000,
+    }
+
+    tier = models.CharField(
+        max_length=20,
+        choices=Tier.choices,
+        default=Tier.FREE,
+    )
 
 
 class UserCuration(models.Model):
@@ -104,13 +122,30 @@ class DomainSubmission(models.Model):
 
 
 def random_api_key():
+    """Kept for migration compatibility (0010_apikey references this by name)."""
     return secrets.token_urlsafe(64)
 
 
+def generate_api_key() -> tuple[str, str]:
+    """Return (raw_key, key_hash). Store only the hash; return raw_key to the user once."""
+    import hashlib
+    raw = secrets.token_urlsafe(64)
+    return raw, hashlib.sha256(raw.encode()).hexdigest()
+
+
 class ApiKey(models.Model):
-    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
-    key = models.CharField(max_length=300, unique=True, default=random_api_key)
-    created_on = models.DateTimeField()
+    class Scope(models.TextChoices):
+        CRAWL  = "crawl",  "Crawl"
+        SEARCH = "search", "Search"
+
+    user       = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    key        = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
+    created_on = models.DateTimeField(auto_now_add=True)
+    name       = models.CharField(max_length=100, blank=True, default="")
+    scopes     = ArrayField(
+        models.CharField(max_length=20, choices=Scope.choices),
+        default=list,
+    )
 
 
 class WasmEvaluationJob(models.Model):
@@ -129,6 +164,27 @@ class WasmEvaluationJob(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     results = models.JSONField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
+
+
+class UsageBucket(models.Model):
+    """Records a user's API usage for a specific calendar month."""
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [('user', 'year', 'month')]
+        indexes = [
+            models.Index(fields=['year', 'month']),
+        ]
+
+
+class UserBilling(models.Model):
+    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="billing")
+    polar_customer_id = models.CharField(max_length=100, blank=True, default="")
+    polar_subscription_id = models.CharField(max_length=100, blank=True, default="")
+    current_period_end = models.DateTimeField(null=True, blank=True)
 
 
 class SearchResultVote(models.Model):

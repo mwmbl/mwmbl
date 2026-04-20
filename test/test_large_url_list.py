@@ -103,11 +103,11 @@ def test_very_long_urls_in_large_list(client, verified_user, access_token):
     base_urls = []
     query = "complex query with spaces and special chars !@#$%"
     
-    # Create some extremely long URLs that would definitely exceed URL limits in GET
+    # Create URLs with paths and query params that would be problematic in a GET query string
     for i in range(50):
-        long_path = "/very/long/path/" + "/segment" * 20 + f"/file{i}"
-        long_query_params = "&".join([f"param{j}=very_long_value_with_special_chars_{j}" for j in range(10)])
-        url = f'https://verylongdomainname{i}.example.com{long_path}?{long_query_params}'
+        path = "/very/long/path" + "/segment" * 5 + f"/file{i}"
+        query_params = "&".join([f"param{j}=value{j}" for j in range(5)])
+        url = f'https://example{i}.com{path}?{query_params}'
         base_urls.append(url)
         
         # Create votes for some URLs

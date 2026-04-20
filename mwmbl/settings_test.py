@@ -1,23 +1,24 @@
 from mwmbl.settings_dev import *
 
-# Disable database setup for testing
+# Disable the legacy psycopg2 index-DB setup for testing
 SETUP_DATABASE = False
 
-# Use in-memory SQLite for Django ORM tests
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
-    }
-}
+# PostgreSQL is required for ArrayField.
+# Set DATABASE_URL in the environment before running tests, e.g.:
+#   DATABASE_URL="postgres://user@/mwmbl_test" uv run pytest
+# DATABASES is inherited from settings_common (via settings_dev) and reads DATABASE_URL.
 
 # Test-specific settings
 DATA_PATH = "/tmp/test_mwmbl_data"
 INDEX_NAME = "index-v2.tinysearch"
 NUM_PAGES = 10
 
-# Disable Redis URL requirement for testing
-REDIS_URL = "redis://localhost:6379"
+# Use fakeredis for cache so tests don't need a real Redis server
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}
 
 # Test bloom filter paths
 URLS_BLOOM_FILTER_PATH = "/tmp/test_urls-{year}-{month}.bloom"
