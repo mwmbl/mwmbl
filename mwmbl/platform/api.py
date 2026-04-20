@@ -10,6 +10,7 @@ from polar_sdk import Polar
 from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
+from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
@@ -121,6 +122,7 @@ def delete_user(request, username: str):
     if user != request.user:
         raise InvalidRequest("You can only delete your own account.")
 
+    invalidate_user_api_key_cache(user.id)
     user.delete()
     return {"status": "ok", "message": "User deleted."}
 
@@ -419,6 +421,7 @@ def delete_api_key(request, key_id: int):
     ).first()
     if api_key is None:
         raise InvalidRequest("API key not found.", status=404)
+    invalidate_api_key_cache(api_key.key)
     api_key.delete()
     return {"status": "ok", "message": "API key revoked."}
 
@@ -534,6 +537,7 @@ def polar_webhook(request):
             tier = product_tier.get(event.data.product_id, MwmblUser.Tier.FREE)
             user.tier = tier
             user.save()
+            invalidate_user_api_key_cache(user.id)
             billing, _ = UserBilling.objects.get_or_create(user=user)
             billing.polar_customer_id = event.data.customer_id or billing.polar_customer_id
             billing.polar_subscription_id = event.data.id or billing.polar_subscription_id
@@ -544,6 +548,7 @@ def polar_webhook(request):
         if user:
             user.tier = MwmblUser.Tier.FREE
             user.save()
+            invalidate_user_api_key_cache(user.id)
 
     return {"status": "ok"}
 
