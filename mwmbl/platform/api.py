@@ -431,7 +431,7 @@ def delete_api_key(request, key_id: int):
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/users/me",
+    "/user",
     auth=JWTAuth(),
     response=UserProfileResponse,
     summary="Get current user profile",
