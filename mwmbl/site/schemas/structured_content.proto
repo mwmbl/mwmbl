@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package mwmbl.site;
+
+// Page content - one message per index page
+message PageContent {
+  repeated IndexEntry entries = 1;
+}
+
+// Wrapper for all index entries
+message IndexEntry {
+  oneof entry_type {
+    LegacyDocument legacy = 1;
+    StructuredContent structured = 2;
+  }
+}
+
+// Regular document (equivalent to current JSON format)
+message LegacyDocument {
+  string title = 1;
+  string url = 2;
+  string extract = 3;
+  optional double score = 4;
+  optional string term = 5;
+  optional int32 state = 6;
+}
+
+// Structured content with site-specific variants
+message StructuredContent {
+  string url = 1;
+  optional string term = 2;  // For indexing
+  
+  oneof content_type {
+    DocsPythonOrgContent docs_python = 3;
+    GitHubContent github = 4;
+  }
+}
+
+// Python documentation structured content
+message DocsPythonOrgContent {
+  string definition = 1;
+  string description = 2;
+  string version = 3;
+  optional string added_in_version = 4;
+  repeated VersionChange changed_in_version = 5;
+  optional string deprecated_in_version = 6;
+}
+
+message VersionChange {
+  string version = 1;
+  string description = 2;
+}
+
+// GitHub repository structured content
+message GitHubContent {
+  int32 stars = 1;
+  int32 forks = 2;
+  int32 watchers = 3;
+  string license = 4;
+  string title = 5;
+  string extract = 6;
+  string language = 7;
+  string last_updated = 8;
+  string description = 9;
+}
+
+// API request for submitting structured results
+message StructuredResultsRequest {
+  string api_key = 1;
+  repeated StructuredContent results = 2;
+  optional string crawler_version = 3;
+}
+
+// API response
+message StructuredResultsResponse {
+  string status = 1;
+  string url = 2;
+  int32 results_count = 3;
+}
