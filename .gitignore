@@ -163,7 +163,31 @@ cython_debug/
 devdata/batches/
 devdata/cache/
 devdata/rankeval-2024-06/remote-datasets/
+devdata/*.bloom
+devdata/*.sqlite
+devdata/request_cache/
+devdata/rankeval-*/
 front-end/node_modules/
 
 # for contributors that use aider
 .aider*
+
+# Profiling artefacts
+*.profile
+profile.json.gz
+profile.svg
+
+# rankeval evaluation data
+mwmbl/rankeval/evaluation/devdata/
+
+# Test environments
+test_env/
+
+# Script download cache
+scripts/downloads/
+
+# AI planning documents
+plans/
+
+# Claude Code configuration
+.claude/
