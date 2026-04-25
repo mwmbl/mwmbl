@@ -14,7 +14,7 @@ from django.contrib.auth import get_user_model
 from allauth.account.models import EmailAddress
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.models import ApiKey, MwmblUser, UsageBucket
+from mwmbl.models import ApiKey, MwmblUser, UsageBucket, generate_api_key
 
 User = get_user_model()
 
@@ -69,22 +69,30 @@ def other_access_token(other_user):
 
 @pytest.fixture
 def search_api_key(verified_user):
-    """A search-scoped ApiKey for verified_user."""
-    return ApiKey.objects.create(
+    """A search-scoped ApiKey for verified_user. Has a .raw_key attribute for use in headers."""
+    raw_key, key_hash = generate_api_key()
+    obj = ApiKey.objects.create(
         user=verified_user,
+        key=key_hash,
         name="Test search key",
         scopes=[ApiKey.Scope.SEARCH],
     )
+    obj.raw_key = raw_key
+    return obj
 
 
 @pytest.fixture
 def crawl_api_key(verified_user):
-    """A crawl-scoped ApiKey for verified_user."""
-    return ApiKey.objects.create(
+    """A crawl-scoped ApiKey for verified_user. Has a .raw_key attribute for use in headers."""
+    raw_key, key_hash = generate_api_key()
+    obj = ApiKey.objects.create(
         user=verified_user,
+        key=key_hash,
         name="Test crawl key",
         scopes=[ApiKey.Scope.CRAWL],
     )
+    obj.raw_key = raw_key
+    return obj
 
 
 @pytest.fixture
@@ -233,9 +241,13 @@ def test_delete_nonexistent_key_returns_404(api_client, access_token):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_search_missing_key(api_client):
+def test_search_missing_key_returns_results_with_null_usage(api_client):
+    """Unauthenticated requests are allowed; usage fields are null."""
     response = api_client.get("/api/v1/search/?s=python")
-    assert response.status_code == 401
+    assert response.status_code == 200
+    data = response.json()
+    assert data["monthly_usage"] is None
+    assert data["monthly_limit"] is None
 
 
 @pytest.mark.django_db
@@ -249,7 +261,7 @@ def test_search_crawl_scoped_key_rejected(api_client, crawl_api_key):
     """A crawl-scoped key must not grant access to the search endpoint."""
     response = api_client.get(
         "/api/v1/search/?s=python",
-        **api_key_header(crawl_api_key.key),
+        **api_key_header(crawl_api_key.raw_key),
     )
     assert response.status_code == 401
 
@@ -268,7 +280,7 @@ def test_search_with_valid_key(api_client, search_api_key):
             # Use the actual endpoint via the test client
             response = api_client.get(
                 "/api/v1/search/?s=python",
-                **api_key_header(search_api_key.key),
+                **api_key_header(search_api_key.raw_key),
             )
     # The response may be 200 or 500 depending on ranker availability in test env;
     # the key point is it is NOT 401 (auth passed)
@@ -284,13 +296,13 @@ def test_search_response_includes_usage_fields(api_client, search_api_key):
          patch("mwmbl.tinysearchengine.rank.HeuristicRanker.search", return_value=[]):
         response = api_client.get(
             "/api/v1/search/?s=python",
-            **api_key_header(search_api_key.key),
+            **api_key_header(search_api_key.raw_key),
         )
-    if response.status_code == 200:
-        data = response.json()
-        assert "monthly_usage" in data
-        assert "monthly_limit" in data
-        assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
+    assert response.status_code == 200
+    data = response.json()
+    assert "monthly_usage" in data
+    assert "monthly_limit" in data
+    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +314,7 @@ def test_search_rate_limit_exceeded(api_client, search_api_key):
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=False):
         response = api_client.get(
             "/api/v1/search/?s=python",
-            **api_key_header(search_api_key.key),
+            **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
     assert "rate limit" in response.json()["detail"].lower()
@@ -315,7 +327,7 @@ def test_search_monthly_quota_exceeded(api_client, search_api_key):
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
         response = api_client.get(
             "/api/v1/search/?s=python",
-            **api_key_header(search_api_key.key),
+            **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
     detail = response.json()["detail"]
@@ -334,7 +346,7 @@ def test_search_monthly_quota_exceeded_pro_no_upgrade_message(api_client, search
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
         response = api_client.get(
             "/api/v1/search/?s=python",
-            **api_key_header(search_api_key.key),
+            **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
     detail = response.json()["detail"]
@@ -364,7 +376,7 @@ def test_post_results_header_key_accepted(api_client, crawl_api_key):
             "/api/v1/crawler/results",
             content_type="application/json",
             data={"results": []},
-            **api_key_header(crawl_api_key.key),
+            **api_key_header(crawl_api_key.raw_key),
         )
     assert response.status_code == 200
 
@@ -378,7 +390,7 @@ def test_post_results_body_key_deprecated_still_works(api_client, crawl_api_key)
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
-            data={"api_key": crawl_api_key.key, "results": []},
+            data={"api_key": crawl_api_key.raw_key, "results": []},
         )
     assert response.status_code == 200
 
@@ -390,7 +402,7 @@ def test_post_results_search_scoped_key_rejected(api_client, search_api_key):
         "/api/v1/crawler/results",
         content_type="application/json",
         data={"results": []},
-        **api_key_header(search_api_key.key),
+        **api_key_header(search_api_key.raw_key),
     )
     assert response.status_code == 401
 
@@ -405,8 +417,8 @@ def test_post_results_header_takes_precedence_over_body(api_client, crawl_api_ke
             "/api/v1/crawler/results",
             content_type="application/json",
             # Header has valid crawl key; body has search key (wrong scope)
-            data={"api_key": search_api_key.key, "results": []},
-            **api_key_header(crawl_api_key.key),
+            data={"api_key": search_api_key.raw_key, "results": []},
+            **api_key_header(crawl_api_key.raw_key),
         )
     assert response.status_code == 200
 
@@ -504,6 +516,101 @@ def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
     assert get_monthly_count(verified_user.id) == 85
 
     cache.delete(key)
+
+
+# ---------------------------------------------------------------------------
+# Subscription endpoint — GET /api/v1/platform/billing/subscription
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_subscription_unauthenticated(api_client):
+    response = api_client.get("/api/v1/platform/billing/subscription")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_subscription_free_user_no_usage(api_client, access_token, verified_user):
+    response = api_client.get(
+        "/api/v1/platform/billing/subscription",
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["plan"] == MwmblUser.Tier.FREE
+    assert data["status"] == "free"
+    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
+    assert data["monthly_usage"] == 0
+    assert data["current_period_end"] is None
+    assert data["polar_customer_id"] is None
+
+
+@pytest.mark.django_db
+def test_subscription_reflects_usage_bucket(api_client, access_token, verified_user):
+    from django.utils import timezone
+    now = timezone.now()
+    UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=42)
+
+    response = api_client.get(
+        "/api/v1/platform/billing/subscription",
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    assert response.json()["monthly_usage"] == 42
+
+
+@pytest.mark.django_db
+def test_subscription_usage_matches_search_response(api_client, access_token, verified_user):
+    """Usage reported by the subscription endpoint should match what the search endpoint returned."""
+    from django.utils import timezone
+    from mwmbl.models import generate_api_key
+
+    now = timezone.now()
+    raw_key, key_hash = generate_api_key()
+    ApiKey.objects.create(
+        user=verified_user,
+        key=key_hash,
+        name="Test key",
+        scopes=[ApiKey.Scope.SEARCH],
+    )
+    UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=7)
+
+    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
+         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=7), \
+         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=8):
+        search_resp = api_client.get(
+            "/api/v1/search/?s=python",
+            **api_key_header(raw_key),
+        )
+
+    assert search_resp.status_code == 200
+    search_usage = search_resp.json()["monthly_usage"]  # 8 (post-increment)
+    assert search_usage == 8
+
+    # Sync the incremented value into UsageBucket so the subscription endpoint sees it
+    UsageBucket.objects.filter(user=verified_user, year=now.year, month=now.month).update(count=search_usage)
+
+    sub_resp = api_client.get(
+        "/api/v1/platform/billing/subscription",
+        **auth_headers(access_token),
+    )
+    assert sub_resp.status_code == 200
+    assert sub_resp.json()["monthly_usage"] == search_usage
+
+
+@pytest.mark.django_db
+def test_subscription_correct_limit_for_starter_tier(api_client, access_token, verified_user):
+    verified_user.tier = MwmblUser.Tier.STARTER
+    verified_user.save()
+
+    response = api_client.get(
+        "/api/v1/platform/billing/subscription",
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["plan"] == MwmblUser.Tier.STARTER
+    assert data["status"] == "active"
+    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.STARTER]
 
 
 # ---------------------------------------------------------------------------

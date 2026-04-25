@@ -216,7 +216,10 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         summary="Search",
         description=(
             "Search the Mwmbl index and return formatted results.\n\n"
-            "Requires a valid search-scoped API key passed in the `X-API-Key` header. "
+            "Search the Mwmbl index and return formatted results.\n\n"
+            "Unauthenticated requests are accepted but return `monthly_usage` and "
+            "`monthly_limit` as `null`. To track usage against a quota, pass a valid "
+            "search-scoped API key in the `X-API-Key` header. "
             "Obtain a key via `POST /api/v1/platform/api-keys/`.\n\n"
             "Results are ranked using a heuristic ranker that considers title, extract, "
             "domain authority, and query-term match quality. "
@@ -229,7 +232,8 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n\n"
             "The response includes `monthly_usage` (requests used this month) and "
-            "`monthly_limit` (your plan's monthly cap).\n\n"
+            "`monthly_limit` (your plan's monthly cap); both are `null` for "
+            "unauthenticated requests.\n\n"
             "**Query parameter:** `s` — the search query string (required)."
         ),
         openapi_extra={
@@ -247,10 +251,12 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         from mwmbl.search_auth import SearchApiKeyAuth
         from mwmbl.models import ApiKey
 
-        api_key: ApiKey | None = None
         raw_key = request.headers.get("X-API-Key")
+        api_key = None
         if raw_key:
             api_key = SearchApiKeyAuth().authenticate(request, raw_key)
+            if api_key is None:
+                raise HttpError(401, "Invalid API key.")
 
         if api_key is not None:
             user: MwmblUser = api_key.user
@@ -273,8 +279,7 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                     msg += f" {upgrade_msg}"
                 raise HttpError(429, msg)
 
-            new_count = increment_monthly(user.id)
-            monthly_usage = new_count
+            monthly_usage = increment_monthly(user.id)
         else:
             monthly_limit = None
             monthly_usage = None
