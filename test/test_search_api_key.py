@@ -8,13 +8,21 @@ Covers:
 - POST /api/v1/crawler/results with header vs body key and scope checks
 - flush_search_counts background task
 """
-import pytest
+
+from datetime import datetime
 from unittest.mock import patch
-from django.contrib.auth import get_user_model
+
+import pytest
 from allauth.account.models import EmailAddress
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.test import Client
+from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
 
+from mwmbl.background import sync_search_counts
 from mwmbl.models import ApiKey, MwmblUser, UsageBucket, generate_api_key
+from mwmbl.quota import RATE_LIMIT, _monthly_key, check_rate_limit, get_monthly_count, increment_monthly
 
 User = get_user_model()
 
@@ -97,7 +105,6 @@ def crawl_api_key(verified_user):
 
 @pytest.fixture
 def client(db):
-    from django.test import Client
     return Client()
 
 
@@ -116,7 +123,6 @@ def api_key_header(key):
 @pytest.fixture
 def api_client():
     """Return a Django test client pointed at the v1 API."""
-    from django.test import Client
     return Client()
 
 
@@ -430,10 +436,6 @@ def test_post_results_header_takes_precedence_over_body(api_client, crawl_api_ke
 @pytest.mark.django_db
 def test_sync_search_counts_redis_to_postgres(verified_user):
     """sync_search_counts should write live Redis counts into UsageBucket."""
-    from mwmbl.background import sync_search_counts
-    from mwmbl.quota import _monthly_key
-    from django.core.cache import cache
-    from datetime import datetime
 
     now = datetime.utcnow()
     key = _monthly_key(verified_user.id)
@@ -451,10 +453,6 @@ def test_sync_search_counts_redis_to_postgres(verified_user):
 @pytest.mark.django_db
 def test_sync_search_counts_seeds_redis_from_postgres(verified_user):
     """sync_search_counts should restore missing Redis keys from UsageBucket (Redis restart recovery)."""
-    from mwmbl.background import sync_search_counts
-    from mwmbl.quota import _monthly_key, get_monthly_count
-    from django.core.cache import cache
-    from datetime import datetime
 
     now = datetime.utcnow()
     key = _monthly_key(verified_user.id)
@@ -475,10 +473,6 @@ def test_sync_search_counts_seeds_redis_from_postgres(verified_user):
 def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
     """After a Redis restart, requests may have incremented from zero before the sync runs.
     The sync should take the max so the Postgres baseline is not lost."""
-    from mwmbl.background import sync_search_counts
-    from mwmbl.quota import _monthly_key, get_monthly_count
-    from django.core.cache import cache
-    from datetime import datetime
 
     now = datetime.utcnow()
     key = _monthly_key(verified_user.id)
@@ -498,10 +492,6 @@ def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
 @pytest.mark.django_db
 def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
     """If Redis is ahead of Postgres (normal operation), the Redis value is kept."""
-    from mwmbl.background import sync_search_counts
-    from mwmbl.quota import _monthly_key, get_monthly_count
-    from django.core.cache import cache
-    from datetime import datetime
 
     now = datetime.utcnow()
     key = _monthly_key(verified_user.id)
@@ -545,10 +535,10 @@ def test_subscription_free_user_no_usage(api_client, access_token, verified_user
 
 
 @pytest.mark.django_db
-def test_subscription_reflects_usage_bucket(api_client, access_token, verified_user):
-    from django.utils import timezone
-    now = timezone.now()
-    UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=42)
+def test_subscription_reflects_live_redis_count(api_client, access_token, verified_user):
+    """Subscription usage comes from Redis (live count), not the periodic Postgres sync."""
+    key = _monthly_key(verified_user.id)
+    cache.set(key, 42, timeout=3600)
 
     response = api_client.get(
         "/api/v1/platform/billing/subscription",
@@ -557,14 +547,13 @@ def test_subscription_reflects_usage_bucket(api_client, access_token, verified_u
     assert response.status_code == 200
     assert response.json()["monthly_usage"] == 42
 
+    cache.delete(key)
+
 
 @pytest.mark.django_db
 def test_subscription_usage_matches_search_response(api_client, access_token, verified_user):
-    """Usage reported by the subscription endpoint should match what the search endpoint returned."""
-    from django.utils import timezone
-    from mwmbl.models import generate_api_key
+    """Subscription usage equals the live Redis count incremented by each search request."""
 
-    now = timezone.now()
     raw_key, key_hash = generate_api_key()
     ApiKey.objects.create(
         user=verified_user,
@@ -572,22 +561,12 @@ def test_subscription_usage_matches_search_response(api_client, access_token, ve
         name="Test key",
         scopes=[ApiKey.Scope.SEARCH],
     )
-    UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=7)
+    cache.delete(_monthly_key(verified_user.id))
 
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=7), \
-         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=8):
-        search_resp = api_client.get(
-            "/api/v1/search/?s=python",
-            **api_key_header(raw_key),
-        )
-
+    search_resp = api_client.get("/api/v1/search/?s=python", **api_key_header(raw_key))
     assert search_resp.status_code == 200
-    search_usage = search_resp.json()["monthly_usage"]  # 8 (post-increment)
-    assert search_usage == 8
-
-    # Sync the incremented value into UsageBucket so the subscription endpoint sees it
-    UsageBucket.objects.filter(user=verified_user, year=now.year, month=now.month).update(count=search_usage)
+    search_usage = search_resp.json()["monthly_usage"]
+    assert search_usage == 1
 
     sub_resp = api_client.get(
         "/api/v1/platform/billing/subscription",
@@ -595,6 +574,8 @@ def test_subscription_usage_matches_search_response(api_client, access_token, ve
     )
     assert sub_resp.status_code == 200
     assert sub_resp.json()["monthly_usage"] == search_usage
+
+    cache.delete(_monthly_key(verified_user.id))
 
 
 @pytest.mark.django_db
@@ -618,8 +599,6 @@ def test_subscription_correct_limit_for_starter_tier(api_client, access_token, v
 # ---------------------------------------------------------------------------
 
 def test_rate_limit_allows_up_to_limit():
-    from mwmbl.quota import check_rate_limit, RATE_LIMIT
-    from django.core.cache import cache
 
     user_id = 99999
     rate_key = f"search:rate:{user_id}"
@@ -635,8 +614,6 @@ def test_rate_limit_allows_up_to_limit():
 
 
 def test_increment_monthly_returns_increasing_counts():
-    from mwmbl.quota import increment_monthly, _monthly_key
-    from django.core.cache import cache
 
     user_id = 88888
     key = _monthly_key(user_id)

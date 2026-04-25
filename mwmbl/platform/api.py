@@ -463,12 +463,11 @@ def get_current_user(request):
     tags=["Billing"],
 )
 def get_subscription(request):
+    from mwmbl.quota import get_monthly_count
     check_email_verified(request)
     user = request.user
     billing = getattr(user, "billing", None)
-    now = timezone.now()
-    bucket = UsageBucket.objects.filter(user=user, year=now.year, month=now.month).first()
-    usage = bucket.count if bucket else 0
+    usage = get_monthly_count(user.id)
     status = "free" if user.tier == MwmblUser.Tier.FREE else "active"
     return SubscriptionResponse(
         plan=user.tier,
