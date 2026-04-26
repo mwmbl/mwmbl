@@ -6,7 +6,9 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
 from mwmbl.format import format_result
+from mwmbl.models import ApiKey, MwmblUser
 from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
+from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
@@ -189,7 +191,6 @@ _COMPLETE_RESPONSE_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def _upgrade_message(tier: str) -> str:
-    from mwmbl.models import MwmblUser
     if tier == MwmblUser.Tier.FREE:
         return (
             "Upgrade to Starter (10,000 requests/month) or Pro (50,000 requests/month) "
@@ -207,15 +208,12 @@ def _upgrade_message(tier: str) -> str:
 def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register search routes on the given router or API instance."""
 
-    from mwmbl.models import MwmblUser
-
     @r.get(
         "",
         response=SearchResponse,
         auth=None,
         summary="Search",
         description=(
-            "Search the Mwmbl index and return formatted results.\n\n"
             "Search the Mwmbl index and return formatted results.\n\n"
             "Unauthenticated requests are accepted but return `monthly_usage` and "
             "`monthly_limit` as `null`. To track usage against a quota, pass a valid "
@@ -248,9 +246,6 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         },
     )
     def search(request, s: str):
-        from mwmbl.search_auth import SearchApiKeyAuth
-        from mwmbl.models import ApiKey
-
         raw_key = request.headers.get("X-API-Key")
         api_key = None
         if raw_key:

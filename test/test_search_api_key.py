@@ -281,16 +281,11 @@ def test_search_with_valid_key(api_client, search_api_key):
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=0), \
          patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=1):
-        # Mock the ranker so we don't need a real index
-        with patch("mwmbl.tinysearchengine.search.router") as mock_router:
-            # Use the actual endpoint via the test client
-            response = api_client.get(
-                "/api/v1/search/?s=python",
-                **api_key_header(search_api_key.raw_key),
-            )
-    # The response may be 200 or 500 depending on ranker availability in test env;
-    # the key point is it is NOT 401 (auth passed)
-    assert response.status_code != 401
+        response = api_client.get(
+            "/api/v1/search/?s=python",
+            **api_key_header(search_api_key.raw_key),
+        )
+    assert response.status_code == 200
 
 
 @pytest.mark.django_db
@@ -441,7 +436,7 @@ def test_sync_search_counts_redis_to_postgres(verified_user):
     key = _monthly_key(verified_user.id)
     cache.set(key, 42, timeout=3600)
 
-    with patch("mwmbl.quota.get_all_monthly_keys", return_value=[key]):
+    with patch("mwmbl.background.get_all_monthly_keys", return_value=[key]):
         sync_search_counts.now()
 
     bucket = UsageBucket.objects.get(user=verified_user, year=now.year, month=now.month)
@@ -461,7 +456,7 @@ def test_sync_search_counts_seeds_redis_from_postgres(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=99)
     cache.delete(key)
 
-    with patch("mwmbl.quota.get_all_monthly_keys", return_value=[]):
+    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 99
@@ -481,7 +476,7 @@ def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=70)
     cache.set(key, 5, timeout=3600)
 
-    with patch("mwmbl.quota.get_all_monthly_keys", return_value=[]):
+    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 70
@@ -500,7 +495,7 @@ def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=70)
     cache.set(key, 85, timeout=3600)
 
-    with patch("mwmbl.quota.get_all_monthly_keys", return_value=[]):
+    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 85

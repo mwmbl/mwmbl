@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 
 from django.contrib.postgres.fields import ArrayField
@@ -128,7 +129,6 @@ def random_api_key():
 
 def generate_api_key() -> tuple[str, str]:
     """Return (raw_key, key_hash). Store only the hash; return raw_key to the user once."""
-    import hashlib
     raw = secrets.token_urlsafe(64)
     return raw, hashlib.sha256(raw.encode()).hexdigest()
 

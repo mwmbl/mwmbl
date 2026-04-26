@@ -257,7 +257,6 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         if not raw_key:
             return 401, {"message": "API key required. Pass it in the X-API-Key header."}
 
-        import hashlib
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         api_key = ApiKey.objects.filter(
             key=key_hash,

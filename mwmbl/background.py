@@ -6,16 +6,19 @@ Also contains Django Background Tasks for periodic quota maintenance:
 """
 import logging
 import sys
+from datetime import datetime, timezone
 from logging import getLogger, basicConfig
 from pathlib import Path
 from time import sleep
 
 from background_task import background
 from django.conf import settings
+from django.core.cache import cache
 
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.models import OldIndex
+from mwmbl.models import OldIndex, UsageBucket
+from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 from mwmbl.tinysearchengine.copy_index import copy_pages
 
 NUM_PAGES_TO_COPY = 1024
@@ -96,13 +99,6 @@ def sync_search_counts():
     Step 2 (Redis → Postgres): update UsageBucket with the live Redis counts
     so Postgres stays current as a durable backup.
     """
-    from datetime import datetime, timezone
-
-    from django.core.cache import cache
-
-    from mwmbl.models import UsageBucket
-    from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
-
     now = datetime.now(timezone.utc)
 
     # Step 1: seed Redis from Postgres, taking the max of the two values.
