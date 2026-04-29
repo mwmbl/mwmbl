@@ -1,5 +1,5 @@
-limit_req_zone $binary_remote_addr zone=mwmbl_login:10m rate=10r/m;
-limit_req_zone $binary_remote_addr zone=mwmbl_register:10m rate=3r/m;
+limit_req_zone $binary_remote_addr zone={{ $.APP }}_login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone={{ $.APP }}_register:10m rate=3r/m;
 
 {{ range $port_map := .PROXY_PORT_MAP | split " " }}
 {{ $port_map_list := $port_map | split ":" }}
@@ -40,7 +40,7 @@ server {
   {{ if and (eq $.SPDY_SUPPORTED "true") (ne $.HTTP2_SUPPORTED "true") }}add_header          Alternate-Protocol  {{ $.PROXY_SSL_PORT }}:npn-spdy/2;{{ end }}
 
   location = /api/v1/platform/token/pair {
-    limit_req zone=mwmbl_login burst=5 nodelay;
+    limit_req zone={{ $.APP }}_login burst=5 nodelay;
     limit_req_status 429;
 
     if ($request_method = 'OPTIONS') {
@@ -75,7 +75,7 @@ server {
   }
 
   location = /api/v1/platform/register {
-    limit_req zone=mwmbl_register burst=2 nodelay;
+    limit_req zone={{ $.APP }}_register burst=2 nodelay;
     limit_req_status 429;
 
     if ($request_method = 'OPTIONS') {
