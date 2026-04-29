@@ -20,7 +20,7 @@ from django.views.generic import RedirectView
 from debug_toolbar.toolbar import debug_toolbar_urls
 
 import mwmbl.crawler.app as crawler
-from mwmbl.api import api as v1_api, register_routers
+from mwmbl.api import api as v1_api, v2_api, register_routers
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
 from mwmbl.views import home_fragment, add_url, index, approve, revert_current_curation, CurationDetailView, \
@@ -59,8 +59,11 @@ urlpatterns = [
     path("search/", search.create_router(ranker, "0.1").urls),
     path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
 
-    # New unified API — all v1 endpoints, single docs page at /api/v1/docs
+    # Unified v1 API — search returns plain list; single docs page at /api/v1/docs
     path("api/v1/", v1_api.urls),
+
+    # v2 API — search returns object with quota metadata; docs at /api/v2/docs
+    path("api/v2/", v2_api.urls),
 
     # Redirects from old per-router docs URLs to the unified docs page
     path("api/v1/search/docs", RedirectView.as_view(url="/api/v1/docs", permanent=True)),
