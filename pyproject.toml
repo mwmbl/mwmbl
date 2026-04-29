@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
+requires = ["maturin>=1.5,<2.0", "patchelf"]
 build-backend = "maturin"
 
 # PEP 621 project metadata
@@ -15,6 +15,7 @@ dependencies = [
     "zstandard>=0.16.0",
     "mmh3>=3.0.0",
     "uvicorn>=0.16.0",
+    "gunicorn>=21.0.0",
     "pyyaml==6.0",
     "boto3==1.35.99",
     "requests>=2.27.1",
@@ -42,6 +43,9 @@ dependencies = [
     "dotenv>=0.9.9",
     "py-spy>=0.4.1",
     "scalar-ninja>=0.3.0",
+    "django-background-tasks>=1.2.8",
+    "django-redis>=5.4.0",
+    "polar-sdk>=0.10.0",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +71,7 @@ dev = [
     "pytest-django>=4.5.2",
     "fakeredis>=2.30.1",
     "maturin>=1.5,<2.0",
+    "patchelf>=0.17.2.4",
 ]
 
 [tool.maturin]
@@ -80,6 +85,6 @@ include = ["mwmbl_rank/data/hn_top_domains_filtered.json"]
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "INFO"
-DJANGO_SETTINGS_MODULE = "mwmbl.settings_dev"
+DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "--reuse-db"

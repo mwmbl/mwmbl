@@ -14,16 +14,48 @@ JWT token endpoints (from NinjaJWTDefaultController) are also registered here,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
-from ninja_extra import NinjaExtraAPI
-from ninja_jwt.controller import NinjaJWTDefaultController
+from ninja import Field
+from ninja_extra import NinjaExtraAPI, api_controller, http_post
+from ninja_extra.permissions import AllowAny
+from ninja_jwt.controller import TokenVerificationController, TokenObtainPairController
+from ninja_jwt.schema import TokenObtainPairInputSchema
+from ninja_jwt.schema_control import SchemaControl
+from ninja_jwt.settings import api_settings
 
 from mwmbl.exceptions import InvalidRequest
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
-# Patch the JWT controller to restore its original path and use a capitalised tag
-NinjaJWTDefaultController.get_api_controller().prefix = "/platform/token"
-NinjaJWTDefaultController.get_api_controller().tags = ["Authentication"]
+_schema = SchemaControl(api_settings)
+
+
+class MwmblTokenObtainSchema(TokenObtainPairInputSchema):
+    username: str = Field(description="Your username or email address.")
+    password: str = Field(description="Your password.")
+
+
+@api_controller("/platform/token", permissions=[AllowAny], tags=["Authentication"], auth=None)
+class MwmblTokenController(TokenVerificationController, TokenObtainPairController):
+    """JWT token endpoints for authentication."""
+
+    auto_import = False
+
+    @http_post(
+        "/pair",
+        response=MwmblTokenObtainSchema.get_response_schema(),
+        url_name="token_obtain_pair",
+        operation_id="token_obtain_pair",
+        summary="Obtain JWT token pair",
+        description=(
+            "Exchange credentials for a JWT access/refresh token pair. "
+            "The `username` field accepts either a **username** or an **email address**. "
+            "Include the returned `access` token in the `Authorization: Bearer <token>` "
+            "header on subsequent requests."
+        ),
+    )
+    def obtain_token(self, user_token: MwmblTokenObtainSchema):
+        user_token.check_user_authentication_rule()
+        return user_token.to_response_schema()
 
 api = NinjaExtraAPI(
     title="Mwmbl API",
@@ -35,6 +67,7 @@ api = NinjaExtraAPI(
         "## Authentication\n\n"
         "Most write endpoints require a JWT bearer token. "
         "Obtain a token pair by posting your credentials to `/api/v1/platform/token/pair`. "
+        "You can log in with either your **username** or your **email address**. "
         "Include the access token in the `Authorization: Bearer <token>` header.\n\n"
         "Some crawler endpoints use a separate API key passed in the request body."
     ),
@@ -51,7 +84,7 @@ api = NinjaExtraAPI(
 )
 
 # Register JWT token endpoints (/platform/token/pair, /platform/token/refresh, /platform/token/verify)
-api.register_controllers(NinjaJWTDefaultController)
+api.register_controllers(MwmblTokenController)
 
 
 # Register the shared InvalidRequest exception handler

@@ -1,8 +1,9 @@
+import multiprocessing
 import os
 
 import django
-import uvicorn
 from django.core.management import call_command
+from gunicorn.app.base import BaseApplication
 from redis import Redis
 
 
@@ -33,7 +34,21 @@ def run():
     elif mwmbl_app == "count_urls":
         count_urls_continuously()
     elif mwmbl_app == "server":
-        uvicorn.run("mwmbl.asgi:application", host="0.0.0.0", port=5000, lifespan="off", log_level="warning")
+        workers = multiprocessing.cpu_count() * 2 + 1
+
+        class GunicornApp(BaseApplication):
+            def load_config(self):
+                self.cfg.set("bind", "0.0.0.0:5000")
+                self.cfg.set("workers", workers)
+                self.cfg.set("worker_class", "uvicorn.workers.UvicornWorker")
+                self.cfg.set("loglevel", "warning")
+                self.cfg.set("timeout", 120)
+
+            def load(self):
+                from mwmbl.asgi import application
+                return application
+
+        GunicornApp().run()
     else:
         raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
 

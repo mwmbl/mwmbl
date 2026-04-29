@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+import dj_database_url
 import sentry_sdk
 
 from mwmbl.auth import require_email_confirmation
@@ -35,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    'django.contrib.postgres',
     'mwmbl',
     'django_htmx',
     'django_vite',
@@ -43,6 +45,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
     'ninja_extra',
     'debug_toolbar',
+    'background_task',
 ]
 
 MIDDLEWARE = [
@@ -125,10 +128,13 @@ DJANGO_VITE_DEV_MODE = False
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTHENTICATION_BACKENDS = [
-    # Needed to login by username in Django admin, regardless of `allauth`
+    # Accepts username or email in the username field — used by the JWT token endpoint
+    'mwmbl.auth.UsernameOrEmailBackend',
+
+    # Needed for Django's permission system (has_perm, has_module_perms) used by the admin
     'django.contrib.auth.backends.ModelBackend',
 
-    # `allauth` specific authentication methods, such as login by email
+    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
@@ -138,6 +144,8 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 
@@ -220,14 +228,43 @@ def strip_query_string(event):
             del event["request"]["query_string"]
     return event
 
-# Django ninja-jwt settings - custom auth rule
-USER_AUTHENTICATION_RULE = require_email_confirmation
+# Django ninja-jwt settings
+NINJA_JWT = {
+    "USER_AUTHENTICATION_RULE": require_email_confirmation,
+}
+
+# Database configuration (shared across all environments via DATABASE_URL env var)
+# Apply PostgreSQL's default: if no database name is given in the URL, fall back to
+# the username (matching libpq's behaviour so that postgres://user@ works).
+_db = dj_database_url.config()
+if _db and not _db.get('NAME'):
+    _db['NAME'] = _db.get('USER', '')
+DATABASES = {'default': _db}
 
 # Redis configuration
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+# Cache configuration (Redis-backed via django-redis)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+        },
+        "TIMEOUT": None,  # individual keys manage their own TTL
+    }
+}
 
 INTERNAL_IPS = [
     "127.0.0.1",
 ]
 
 RUST_MODEL_PATH = Path(__file__).parent / 'resources' / "model.xgb"
+
+POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
+POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")
+POLAR_PRODUCT_ID_STARTER = os.environ.get("POLAR_PRODUCT_ID_STARTER", "")
+POLAR_PRODUCT_ID_PRO = os.environ.get("POLAR_PRODUCT_ID_PRO", "")

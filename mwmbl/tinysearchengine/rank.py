@@ -351,13 +351,13 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     headers = {
         'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
     }
-    with request_cache(timedelta(weeks=10)) as session:
-        response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers)
-        try:
+    try:
+        with request_cache(timedelta(weeks=10)) as session:
+            response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
-        except json.JSONDecodeError:
-            logger.exception(f"Failed to decode JSON response from Wikipedia API for query {s}, status: {response.status_code}, content: {response.content}")
-            return []
+    except Exception:
+        logger.exception("Failed to fetch Wikipedia results for query %s", s)
+        return []
 
     if 'query' not in wiki_response or 'search' not in wiki_response['query']:
         if 'error' in wiki_response:

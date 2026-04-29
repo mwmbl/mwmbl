@@ -5,16 +5,96 @@ from ninja import Schema, ModelSchema, Field
 from mwmbl.models import DomainSubmission
 
 
-class Registration(Schema):
-    email: str
+class UserProfileResponse(Schema):
     username: str
-    password: str
+    email: str
+    plan: str
+    email_confirmed: bool
+
+
+class SubscriptionResponse(Schema):
+    plan: str
+    status: str
+    monthly_limit: int
+    monthly_usage: int
+    current_period_end: Optional[datetime]
+    polar_customer_id: Optional[str]
+
+
+class CheckoutRequest(Schema):
+    plan: Literal["starter", "pro"]
+
+
+class CheckoutResponse(Schema):
+    checkout_url: str
+
+
+class ForgotPasswordRequest(Schema):
+    email: str
+
+
+class ResetPasswordRequest(Schema):
+    email: str
+    key: str
+    new_password: str
+
+
+# ---------------------------------------------------------------------------
+# API key management schemas
+# ---------------------------------------------------------------------------
+
+class CreateApiKeyRequest(Schema):
+    """Request body for creating a new search-scoped API key."""
+    name: str = Field(
+        default="",
+        max_length=100,
+        description="Optional human-readable label for this key.",
+        example="My search app",
+    )
+
+
+class ApiKeyCreatedResponse(Schema):
+    """
+    Response returned when a new API key is created.
+    The raw `key` value is only returned once — store it securely.
+    """
+    id: int = Field(description="Unique ID of the API key.")
+    key: str = Field(description="The raw API key token. Shown only on creation.")
+    name: str = Field(description="Human-readable label for this key.")
+    created_on: datetime = Field(description="When the key was created.")
+    scopes: list[str] = Field(description="Scopes granted to this key.")
+
+
+class ApiKeyListItem(Schema):
+    """
+    A single API key entry returned by the list endpoint.
+    The raw key value is intentionally omitted.
+    """
+    id: int = Field(description="Unique ID of the API key.")
+    name: str = Field(description="Human-readable label for this key.")
+    created_on: datetime = Field(description="When the key was created.")
+    scopes: list[str] = Field(description="Scopes granted to this key.")
+
+
+class Registration(Schema):
+    email: str = Field(description="Email address for the new account. Must be unique.")
+    password: str = Field(description="Password for the new account.")
+    username: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional username. If omitted, one is generated automatically in the form "
+            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided."
+        ),
+    )
 
 
 class ConfirmEmail(Schema):
-    username: str
-    email: str
-    key: str
+    email: str = Field(description="Email address to confirm.")
+    key: str = Field(description="Confirmation key from the verification email.")
+    username: Optional[str] = Field(
+        default=None,
+        description="Deprecated — ignored. Accepted for backwards compatibility only.",
+    )
 
 
 class DomainSubmissionSchema(ModelSchema):

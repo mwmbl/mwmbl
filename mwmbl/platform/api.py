@@ -1,15 +1,23 @@
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
 from allauth.account.utils import setup_user_email, send_email_confirmation
+from django.conf import settings
+from django.utils import timezone
 from ninja import Router
 from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
+from polar_sdk import Polar
+from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
-from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote
+from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
+from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
-    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory
+    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
+    CreateApiKeyRequest, ApiKeyCreatedResponse, ApiKeyListItem,
+    UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse,
+    ForgotPasswordRequest, ResetPasswordRequest,
 )
 
 router = Router(tags=["Platform"])
@@ -25,16 +33,23 @@ def check_email_verified(request):
     '/register',
     summary="Register a new user",
     description=(
-        "Create a new Mwmbl user account. A confirmation email will be sent to the provided "
-        "address. The account cannot be used until the email is confirmed via the "
-        "`/platform/confirm-email` endpoint."
+        "Create a new Mwmbl user account. Only `email` and `password` are required. "
+        "`username` is optional — if omitted, a unique name is generated automatically in the "
+        "form `adjective_noun_NNN` (e.g. `swift_falcon_379`). "
+        "A confirmation email will be sent to the provided address; the account cannot be used "
+        "until the email is confirmed via the `/platform/confirm-email` endpoint. "
+        "The assigned username is returned in the response."
     ),
 )
 def register(request, registration: Registration):
-    if MwmblUser.objects.filter(username=registration.username).exists():
+    if MwmblUser.objects.filter(email=registration.email).exists():
+        raise InvalidRequest("Email already registered")
+
+    username = registration.username or generate_username()
+    if registration.username and MwmblUser.objects.filter(username=registration.username).exists():
         raise InvalidRequest("Username already exists")
 
-    user = MwmblUser(username=registration.username, email=registration.email)
+    user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)
     user.save()
 
@@ -43,7 +58,7 @@ def register(request, registration: Registration):
 
     return {
         "status": "ok",
-        "username": registration.username,
+        "username": username,
         "message": "User registered successfully. Check your email for confirmation."
     }
 
@@ -53,7 +68,9 @@ def register(request, registration: Registration):
     summary="Confirm email address",
     description=(
         "Confirm a user's email address using the key sent in the confirmation email. "
-        "The `key`, `email`, and `username` must all match the values from the confirmation email."
+        "Only `email` and `key` are required. The `username` field is accepted for backwards "
+        "compatibility but is ignored. "
+        "The confirmed account's username is returned in the response."
     ),
 )
 def confirm_email(request, confirm: ConfirmEmail):
@@ -62,18 +79,14 @@ def confirm_email(request, confirm: ConfirmEmail):
         raise InvalidRequest("Invalid confirmation key")
 
     if confirmation.email_address.email != confirm.email:
-        raise InvalidRequest("Invalid username or email")
-
-    user = MwmblUser.objects.get(username=confirm.username)
-    if user.email != confirm.email:
-        raise InvalidRequest("Invalid username or email")
+        raise InvalidRequest("Invalid email or key")
 
     adapter = get_adapter()
     adapter.confirm_email(request, confirmation.email_address)
 
     return {
         "status": "ok",
-        "username": confirm.username,
+        "username": confirmation.email_address.user.username,
         "message": "Email confirmed successfully."
     }
 
@@ -109,6 +122,7 @@ def delete_user(request, username: str):
     if user != request.user:
         raise InvalidRequest("You can only delete your own account.")
 
+    invalidate_user_api_key_cache(user.id)
     user.delete()
     return {"status": "ok", "message": "User deleted."}
 
@@ -319,3 +333,257 @@ def remove_vote(request, vote_request: VoteRemoveRequest):
 def get_user_vote_history(request) -> list[SearchResultVote]:
     check_email_verified(request)
     return SearchResultVote.objects.filter(user=request.user).order_by('-timestamp')
+
+
+# ---------------------------------------------------------------------------
+# API key management
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/api-keys/",
+    auth=JWTAuth(),
+    response=ApiKeyCreatedResponse,
+    summary="Create a search API key",
+    description=(
+        "Create a new search-scoped API key for the authenticated user. "
+        "The raw key value is returned **only once** in this response — store it securely. "
+        "Use the key in the `X-API-Key` header when calling `GET /api/v1/search/`. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def create_api_key(request, body: CreateApiKeyRequest):
+    check_email_verified(request)
+    from mwmbl.models import generate_api_key
+    raw_key, key_hash = generate_api_key()
+    api_key = ApiKey.objects.create(
+        user=request.user,
+        name=body.name,
+        scopes=[ApiKey.Scope.SEARCH],
+        key=key_hash,
+    )
+    return ApiKeyCreatedResponse(
+        id=api_key.id,
+        key=raw_key,
+        name=api_key.name,
+        created_on=api_key.created_on,
+        scopes=api_key.scopes,
+    )
+
+
+@router.get(
+    "/api-keys/",
+    auth=JWTAuth(),
+    response=list[ApiKeyListItem],
+    summary="List search API keys",
+    description=(
+        "List all search-scoped API keys belonging to the authenticated user. "
+        "The raw key value is **not** included in this response. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def list_api_keys(request) -> list[ApiKeyListItem]:
+    check_email_verified(request)
+    keys = ApiKey.objects.filter(
+        user=request.user,
+        scopes__contains=[ApiKey.Scope.SEARCH],
+    ).order_by("-created_on")
+    return [
+        ApiKeyListItem(
+            id=k.id,
+            name=k.name,
+            created_on=k.created_on,
+            scopes=k.scopes,
+        )
+        for k in keys
+    ]
+
+
+@router.delete(
+    "/api-keys/{key_id}",
+    auth=JWTAuth(),
+    summary="Revoke a search API key",
+    description=(
+        "Permanently revoke (delete) a search-scoped API key owned by the authenticated user. "
+        "Any subsequent requests using the revoked key will receive a 401 response. "
+        "Returns 404 if the key does not exist or does not belong to the current user. "
+        "Requires a verified account."
+    ),
+    tags=["API Keys"],
+)
+def delete_api_key(request, key_id: int):
+    check_email_verified(request)
+    api_key = ApiKey.objects.filter(
+        id=key_id,
+        user=request.user,
+        scopes__contains=[ApiKey.Scope.SEARCH],
+    ).first()
+    if api_key is None:
+        raise InvalidRequest("API key not found.", status=404)
+    invalidate_api_key_cache(api_key.key)
+    api_key.delete()
+    return {"status": "ok", "message": "API key revoked."}
+
+
+# ---------------------------------------------------------------------------
+# User profile
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/user",
+    auth=JWTAuth(),
+    response=UserProfileResponse,
+    summary="Get current user profile",
+    description="Returns the authenticated user's username, email, plan tier, and email confirmation status.",
+    tags=["Users"],
+)
+def get_current_user(request):
+    check_email_verified(request)
+    user = request.user
+    email_address = user.emailaddress_set.first()
+    return UserProfileResponse(
+        username=user.username,
+        email=user.email,
+        plan=user.tier,
+        email_confirmed=email_address.verified if email_address else False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Billing
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/billing/subscription",
+    auth=JWTAuth(),
+    response=SubscriptionResponse,
+    summary="Get current subscription",
+    description="Returns the user's active plan, quota, and current-period usage.",
+    tags=["Billing"],
+)
+def get_subscription(request):
+    from mwmbl.quota import get_monthly_count
+    check_email_verified(request)
+    user = request.user
+    billing = getattr(user, "billing", None)
+    usage = get_monthly_count(user.id)
+    status = "free" if user.tier == MwmblUser.Tier.FREE else "active"
+    return SubscriptionResponse(
+        plan=user.tier,
+        status=status,
+        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[user.tier],
+        monthly_usage=usage,
+        current_period_end=billing.current_period_end if billing else None,
+        polar_customer_id=billing.polar_customer_id if billing else None,
+    )
+
+
+@router.post(
+    "/billing/checkout",
+    auth=JWTAuth(),
+    response=CheckoutResponse,
+    summary="Create Polar checkout session",
+    description="Creates a Polar hosted-checkout session and returns a redirect URL.",
+    tags=["Billing"],
+)
+def create_checkout(request, body: CheckoutRequest):
+    check_email_verified(request)
+    product_map = {
+        "starter": settings.POLAR_PRODUCT_ID_STARTER,
+        "pro": settings.POLAR_PRODUCT_ID_PRO,
+    }
+    product_id = product_map[body.plan]
+    if not product_id:
+        raise InvalidRequest(f"Plan '{body.plan}' is not configured. Contact support.", status=503)
+    billing = getattr(request.user, "billing", None)
+    checkout_params = {
+        "products": [product_id],
+        "metadata": {"user_id": str(request.user.id)},
+    }
+    if billing and billing.polar_customer_id:
+        checkout_params["external_customer_id"] = billing.polar_customer_id
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN) as polar:
+        result = polar.checkouts.create(request=checkout_params)
+    return CheckoutResponse(checkout_url=result.url)
+
+
+@router.post(
+    "/billing/webhook",
+    summary="Polar webhook receiver",
+    description="Receives signed webhook events from Polar and updates the user's plan.",
+    tags=["Billing"],
+)
+def polar_webhook(request):
+    try:
+        event = validate_event(
+            payload=request.body,
+            headers=request.headers,
+            secret=settings.POLAR_WEBHOOK_SECRET,
+        )
+    except WebhookVerificationError:
+        raise InvalidRequest("Invalid signature", status=400)
+
+    product_tier = {
+        settings.POLAR_PRODUCT_ID_STARTER: MwmblUser.Tier.STARTER,
+        settings.POLAR_PRODUCT_ID_PRO: MwmblUser.Tier.PRO,
+    }
+
+    if event.type in ("subscription.active", "subscription.updated"):
+        user_id = event.data.metadata.get("user_id")
+        user = MwmblUser.objects.filter(id=user_id).first()
+        if user:
+            tier = product_tier.get(event.data.product_id, MwmblUser.Tier.FREE)
+            user.tier = tier
+            user.save()
+            invalidate_user_api_key_cache(user.id)
+            billing, _ = UserBilling.objects.get_or_create(user=user)
+            billing.polar_customer_id = event.data.customer_id or billing.polar_customer_id
+            billing.polar_subscription_id = event.data.id or billing.polar_subscription_id
+            billing.save()
+    elif event.type in ("subscription.revoked", "subscription.canceled"):
+        user_id = event.data.metadata.get("user_id")
+        user = MwmblUser.objects.filter(id=user_id).first()
+        if user:
+            user.tier = MwmblUser.Tier.FREE
+            user.save()
+            invalidate_user_api_key_cache(user.id)
+
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/forgot-password",
+    summary="Request password reset",
+    description="Sends a password-reset email. Always returns 200 to prevent user enumeration.",
+    tags=["Auth"],
+)
+def forgot_password(request, body: ForgotPasswordRequest):
+    from django.contrib.auth.forms import PasswordResetForm
+    form = PasswordResetForm({"email": body.email})
+    if form.is_valid():
+        form.save(request=request, use_https=request.is_secure())
+    return {}
+
+
+@router.post(
+    "/reset-password",
+    summary="Confirm password reset",
+    description="Validates the reset token and sets a new password.",
+    tags=["Auth"],
+)
+def reset_password(request, body: ResetPasswordRequest):
+    from django.contrib.auth.tokens import default_token_generator
+    try:
+        user = MwmblUser.objects.get(email=body.email)
+    except MwmblUser.DoesNotExist:
+        raise InvalidRequest("Invalid or expired reset token.", status=400)
+    if not default_token_generator.check_token(user, body.key):
+        raise InvalidRequest("Invalid or expired reset token.", status=400)
+    user.set_password(body.new_password)
+    user.save()
+    return {}

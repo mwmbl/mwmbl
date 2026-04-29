@@ -5,14 +5,6 @@ from mwmbl.settings_common import *
 SECRET_KEY = 'django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm'
 
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-
-
 STATIC_ROOT = ""
 DJANGO_VITE_ASSETS_PATH = Path(__file__).parent.parent / "front-end" / "dist"
 DJANGO_VITE_MANIFEST_PATH = DJANGO_VITE_ASSETS_PATH / "manifest.json"
