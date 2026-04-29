@@ -17,8 +17,9 @@ logger = getLogger(__name__)
 
 SCORE_THRESHOLD = 0.25
 
-# Module-level router used by the unified v1 API
-router = Router(tags=["Search"])
+# Module-level routers
+router = Router(tags=["Search"])    # v1
+v2_router = Router(tags=["Search"]) # v2
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +203,49 @@ def _upgrade_message(tier: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Route registration
+# Route registration helpers
 # ---------------------------------------------------------------------------
 
-def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
-    """Register search routes on the given router or API instance."""
+def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the v1 search endpoint: returns a plain list of SearchResult."""
+
+    @r.get(
+        "",
+        response=list[SearchResult],
+        auth=None,
+        summary="Search",
+        description=(
+            "Search the Mwmbl index and return formatted results.\n\n"
+            "Results are ranked using a heuristic ranker that considers title, extract, "
+            "domain authority, and query-term match quality. "
+            "Each result's `title` and `extract` are returned as a list of text segments "
+            "where matching query terms are flagged with `is_bold: true` for easy "
+            "client-side highlighting.\n\n"
+            "The `source` field indicates where the result originated:\n"
+            "- `mwmbl` — organically crawled by the Mwmbl crawler\n"
+            "- `wikipedia` — sourced from Wikipedia\n"
+            "- `google` — originally suggested via Google\n"
+            "- `user` — submitted directly by a user\n\n"
+            "**Query parameter:** `s` — the search query string (required)."
+        ),
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "s",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string", "example": "python tutorial"},
+                }
+            ]
+        },
+    )
+    def search(request, s: str):
+        results = ranker.search(s, [])
+        return [format_result(result, s) for result in results]
+
+
+def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the v2 search endpoint: returns SearchResponse with optional quota info."""
 
     @r.get(
         "",
@@ -285,6 +324,10 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
+
+
+def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the /complete and /raw endpoints (shared between v1 and v2)."""
 
     @r.get(
         "/complete",
@@ -391,10 +434,18 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
 def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"search-{version}")
-    _register_routes(api, ranker)
+    _register_search_v1(api, ranker)
+    _register_common_routes(api, ranker)
     return api
 
 
 def init_router(ranker: HeuristicRanker):
-    """Initialise the module-level router with the given ranker (called from urls.py)."""
-    _register_routes(router, ranker)
+    """Initialise the v1 module-level router (called from urls.py)."""
+    _register_search_v1(router, ranker)
+    _register_common_routes(router, ranker)
+
+
+def init_v2_router(ranker: HeuristicRanker):
+    """Initialise the v2 module-level router (called from urls.py)."""
+    _register_search_v2(v2_router, ranker)
+    _register_common_routes(v2_router, ranker)

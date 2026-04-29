@@ -1,16 +1,18 @@
 """
-Unified Mwmbl API (v1).
+Unified Mwmbl API (v1 and v2).
 
-All v1 endpoints are mounted here under a single NinjaExtraAPI instance so that
-a single Swagger/OpenAPI docs page is available at /api/v1/docs.
+v1 endpoints are mounted under /api/v1/ — search returns a plain list of results.
+v2 endpoints are mounted under /api/v2/ — search returns an object with quota metadata.
 
-Sub-routers:
-  /api/v1/search/    — full-text search and autocomplete
+Sub-routers (v1):
+  /api/v1/search/    — full-text search and autocomplete (returns list)
   /api/v1/crawler/   — crawler batch submission and retrieval
   /api/v1/platform/  — user accounts, domain submissions, voting
-  /api/v1/evaluate/  — WASM ranking function evaluation
 
-JWT token endpoints (from NinjaJWTDefaultController) are also registered here,
+Sub-routers (v2):
+  /api/v2/search/    — full-text search with optional API-key auth and quota info
+
+JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
@@ -97,11 +99,39 @@ def invalid_request_handler(request, exc: InvalidRequest):
     )
 
 
-# Routers are imported after the api instance is created to avoid circular imports,
+v2_api = NinjaExtraAPI(
+    title="Mwmbl API v2",
+    version="2.0.0",
+    description=(
+        "Mwmbl search API v2. "
+        "The search endpoint returns an object with `results`, `monthly_usage`, and "
+        "`monthly_limit` fields. Pass a search-scoped API key in the `X-API-Key` header "
+        "to enable quota tracking. Obtain a key via `POST /api/v1/platform/api-keys/`."
+    ),
+    urls_namespace="api-v2",
+    docs=ScalarViewer(openapi_url="/api/v2/openapi.json", agent=AgentConfig(disabled=True)),
+    openapi_extra={
+        "tags": [
+            {"name": "Search"},
+        ]
+    },
+)
+
+
+@v2_api.exception_handler(InvalidRequest)
+def v2_invalid_request_handler(request, exc: InvalidRequest):
+    return v2_api.create_response(
+        request,
+        {"status": "error", "message": exc.message},
+        status=exc.status,
+    )
+
+
+# Routers are imported after the api instances are created to avoid circular imports,
 # and after init functions have been called from urls.py.
 def register_routers(ranker, batch_cache, queued_batches):
     """
-    Initialise and register all sub-routers on the unified API.
+    Initialise and register all sub-routers on the v1 and v2 APIs.
 
     This is called from urls.py after Django app setup is complete, so that
     dependencies (ranker, batch_cache, queued_batches) are available.
@@ -109,15 +139,14 @@ def register_routers(ranker, batch_cache, queued_batches):
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.crawler.app as crawler_module
     from mwmbl.platform.api import router as platform_router
-    from mwmbl.evaluation.api import router as evaluation_router
 
     # Initialise routers that depend on runtime objects
     search_module.init_router(ranker)
+    search_module.init_v2_router(ranker)
     crawler_module.init_router(batch_cache, queued_batches)
 
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])
     api.add_router("/platform/", platform_router, tags=["Platform"])
 
-    # This API is a work in progress, disabled for now
-    # api.add_router("/evaluate/", evaluation_router, tags=["Evaluation"])
+    v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
