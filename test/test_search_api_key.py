@@ -20,8 +20,10 @@ from django.test import Client
 from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
 
+from django.conf import settings
+
 from mwmbl.background import sync_search_counts
-from mwmbl.models import ApiKey, MwmblUser, UsageBucket, generate_api_key
+from mwmbl.models import ApiKey, AgreementType, MwmblUser, UsageBucket, UserAgreement, generate_api_key
 from mwmbl.quota import RATE_LIMIT, _monthly_key, check_rate_limit, get_monthly_count, increment_monthly
 
 User = get_user_model()
@@ -43,6 +45,12 @@ def verified_user(db):
         email="search@example.com",
         verified=True,
         primary=True,
+    )
+    version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(AgreementType.TERMS_OF_SERVICE_API)
+    UserAgreement.objects.create(
+        user=user,
+        agreement_type=AgreementType.TERMS_OF_SERVICE_API,
+        version_id=version_id,
     )
     return user
 

@@ -187,6 +187,26 @@ class UserBilling(models.Model):
     current_period_end = models.DateTimeField(null=True, blank=True)
 
 
+class AgreementType(models.TextChoices):
+    TERMS_OF_SERVICE_GUI = "TERMS_OF_SERVICE_GUI", "Terms of Service (GUI)"
+    TERMS_OF_SERVICE_API = "TERMS_OF_SERVICE_API", "Terms of Service (API)"
+
+
+class UserAgreement(models.Model):
+    # SET_NULL rather than CASCADE so the audit record survives account deletion.
+    user = models.ForeignKey(
+        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="agreements"
+    )
+    agreement_type = models.CharField(max_length=50, choices=AgreementType.choices)
+    version_id = models.CharField(max_length=100)
+    accepted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "agreement_type", "-accepted_at"]),
+        ]
+
+
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
         "upvote": "User upvoted this result",
