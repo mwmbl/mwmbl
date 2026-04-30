@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Literal
 from ninja import Schema, ModelSchema, Field
 
-from mwmbl.models import DomainSubmission
+from mwmbl.models import AgreementType, DomainSubmission
 
 
 class UserProfileResponse(Schema):
@@ -76,6 +76,20 @@ class ApiKeyListItem(Schema):
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
+# ---------------------------------------------------------------------------
+# Agreements
+# ---------------------------------------------------------------------------
+
+class AgreementAcceptRequest(Schema):
+    agreement_type: AgreementType = Field(description="The type of agreement being accepted.")
+
+
+class AgreementResponse(Schema):
+    agreement_type: str = Field(description="The type of agreement.")
+    version_id: str = Field(description="The version of the agreement that was accepted.")
+    accepted_at: datetime = Field(description="When the agreement was accepted.")
+
+
 class Registration(Schema):
     email: str = Field(description="Email address for the new account. Must be unique.")
     password: str = Field(description="Password for the new account.")
@@ -84,6 +98,14 @@ class Registration(Schema):
         description=(
             "Optional username. If omitted, one is generated automatically in the form "
             "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided."
+        ),
+    )
+    agreements: list[AgreementType] = Field(
+        default=[],
+        description=(
+            "Optional list of agreement types accepted at signup. "
+            "The server stamps the current version and timestamp. "
+            "Accepted values: `TERMS_OF_SERVICE_GUI`, `TERMS_OF_SERVICE_API`."
         ),
     )
 

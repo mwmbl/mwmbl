@@ -11,13 +11,14 @@ from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
-from mwmbl.models import MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, generate_username
+from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
     VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
     CreateApiKeyRequest, ApiKeyCreatedResponse, ApiKeyListItem,
     UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse,
     ForgotPasswordRequest, ResetPasswordRequest,
+    AgreementAcceptRequest, AgreementResponse,
 )
 
 router = Router(tags=["Platform"])
@@ -52,6 +53,9 @@ def register(request, registration: Registration):
     user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)
     user.save()
+
+    if registration.agreements:
+        _record_agreements(user, registration.agreements)
 
     setup_user_email(request, user, [])
     send_email_confirmation(request, user, signup=True)
@@ -336,6 +340,117 @@ def get_user_vote_history(request) -> list[SearchResultVote]:
 
 
 # ---------------------------------------------------------------------------
+# Agreements helpers
+# ---------------------------------------------------------------------------
+
+def _record_agreements(user: MwmblUser, agreement_types: list) -> None:
+    for agreement_type in agreement_types:
+        version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(agreement_type)
+        if version_id:
+            UserAgreement.objects.create(
+                user=user,
+                agreement_type=agreement_type,
+                version_id=version_id,
+            )
+
+
+def _require_current_agreement(user: MwmblUser, agreement_type: AgreementType) -> None:
+    current_version = settings.CURRENT_AGREEMENT_VERSIONS.get(agreement_type)
+    accepted = UserAgreement.objects.filter(
+        user=user,
+        agreement_type=agreement_type,
+        version_id=current_version,
+    ).exists()
+    if not accepted:
+        raise InvalidRequest(
+            f"You must accept the current {agreement_type} (version {current_version}) before using this feature.",
+            status=403,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Agreement endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/agreements/",
+    auth=JWTAuth(),
+    response=AgreementResponse,
+    summary="Accept a terms agreement",
+    description=(
+        "Record acceptance of a terms agreement for the authenticated user. "
+        "The server stamps the current version and timestamp — the client only supplies the agreement type. "
+        "Calling this again after a version update creates a new acceptance record for the new version. "
+        "Requires a verified account."
+    ),
+    tags=["Agreements"],
+)
+def accept_agreement(request, body: AgreementAcceptRequest):
+    check_email_verified(request)
+    version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(body.agreement_type)
+    if not version_id:
+        raise InvalidRequest("Unknown agreement type.", status=400)
+    agreement = UserAgreement.objects.create(
+        user=request.user,
+        agreement_type=body.agreement_type,
+        version_id=version_id,
+    )
+    return AgreementResponse(
+        agreement_type=agreement.agreement_type,
+        version_id=agreement.version_id,
+        accepted_at=agreement.accepted_at,
+    )
+
+
+@router.get(
+    "/agreements/",
+    auth=JWTAuth(),
+    response=list[AgreementResponse],
+    summary="Get current agreements",
+    description=(
+        "Returns the most recently accepted version of each agreement type for the authenticated user. "
+        "Only types the user has accepted appear in the response. "
+        "Requires a verified account."
+    ),
+    tags=["Agreements"],
+)
+def get_agreements(request) -> list[AgreementResponse]:
+    check_email_verified(request)
+    result = []
+    for agreement_type in AgreementType:
+        latest = (
+            UserAgreement.objects.filter(user=request.user, agreement_type=agreement_type)
+            .order_by("-accepted_at")
+            .first()
+        )
+        if latest:
+            result.append(AgreementResponse(
+                agreement_type=latest.agreement_type,
+                version_id=latest.version_id,
+                accepted_at=latest.accepted_at,
+            ))
+    return result
+
+
+@router.get(
+    "/agreements/history/",
+    auth=JWTAuth(),
+    response=list[AgreementResponse],
+    summary="Get agreement acceptance history",
+    description=(
+        "Returns the full history of all agreement acceptances for the authenticated user, "
+        "ordered most-recent first. Useful for compliance audits. "
+        "Requires a verified account."
+    ),
+    tags=["Agreements"],
+)
+@paginate
+def get_agreement_history(request) -> list[AgreementResponse]:
+    check_email_verified(request)
+    return UserAgreement.objects.filter(user=request.user).order_by("-accepted_at")
+
+
+# ---------------------------------------------------------------------------
 # API key management
 # ---------------------------------------------------------------------------
 
@@ -354,6 +469,7 @@ def get_user_vote_history(request) -> list[SearchResultVote]:
 )
 def create_api_key(request, body: CreateApiKeyRequest):
     check_email_verified(request)
+    _require_current_agreement(request.user, AgreementType.TERMS_OF_SERVICE_API)
     from mwmbl.models import generate_api_key
     raw_key, key_hash = generate_api_key()
     api_key = ApiKey.objects.create(
