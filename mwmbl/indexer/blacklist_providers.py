@@ -79,10 +79,10 @@ class HaGeZiBlacklistProvider(BlacklistProvider):
     
     # HaGeZi provides several lists, this is their main threat intelligence feeds
     HAGEZI_URLS = {
-        'light': 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@release/domains/light.txt',
-        'normal': 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@release/domains/normal.txt', 
-        'pro': 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@release/domains/pro.txt',
-        'ultimate': 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@release/domains/ultimate.txt'
+        'light': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt',
+        'normal': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/normal.txt',
+        'pro': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt',
+        'ultimate': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/ultimate.txt',
     }
     
     def __init__(self, list_type: str = 'light', cache_expire_days: int = 1):
