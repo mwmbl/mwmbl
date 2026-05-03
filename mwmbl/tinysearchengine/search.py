@@ -271,12 +271,12 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "The response includes `monthly_usage` (requests used this month) and "
             "`monthly_limit` (your plan's monthly cap); both are `null` for "
             "unauthenticated requests.\n\n"
-            "**Query parameter:** `s` — the search query string (required)."
+            "**Query parameter:** `q` — the search query string (required)."
         ),
         openapi_extra={
             "parameters": [
                 {
-                    "name": "s",
+                    "name": "q",
                     "in": "query",
                     "required": True,
                     "schema": {"type": "string", "example": "python tutorial"},
@@ -284,7 +284,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             ]
         },
     )
-    def search(request, s: str):
+    def search(request, q: str):
         raw_key = request.headers.get("X-API-Key")
         api_key = None
         if raw_key:
@@ -318,9 +318,9 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_limit = None
             monthly_usage = None
 
-        results = ranker.search(s, [])
+        results = ranker.search(q, [])
         return SearchResponse(
-            results=[format_result(result, s) for result in results],
+            results=[format_result(result, q) for result in results],
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
