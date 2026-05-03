@@ -47,4 +47,8 @@ FROM base AS final
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
 
+RUN useradd --uid 1000 --create-home mwmbl
+USER mwmbl
+WORKDIR /home/mwmbl
+
 CMD ["/venv/bin/mwmbl-crawl"]
