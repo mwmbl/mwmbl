@@ -194,6 +194,8 @@ def crawl_url(url):
             }
         }
 
+    content = re.sub(rb'[\x00-\x08\x0b\x0c\x0e-\x1f]', b'', content)
+
     try:
         dom = html_to_dom(content, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
     except Exception as e:
@@ -222,7 +224,8 @@ def crawl_url(url):
     try:
         paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
     except Exception as e:
-        logger.exception("Error parsing paragraphs")
+        bad_bytes = sorted({b for b in content if b < 0x20 and b not in (0x09, 0x0A, 0x0D)})
+        logger.exception("Error parsing paragraphs - offending control bytes: %s", bad_bytes)
         return {
             'url': url,
             'status': status_code,

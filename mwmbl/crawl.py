@@ -18,6 +18,10 @@ from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.tokenizer import tokenize
 
+FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
+logging.basicConfig(level=logging.INFO, format=FORMAT)
+logger = logging.getLogger(__name__)
+
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
@@ -32,10 +36,6 @@ from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
-
-logger = logging.getLogger(__name__)
-FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
-logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 BATCH_QUEUE_KEY = "batch-queue"
 REMOTE_SERVER = "https://api.mwmbl.org"

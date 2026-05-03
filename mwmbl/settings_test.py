@@ -1,7 +1,6 @@
 from mwmbl.settings_dev import *
 
-# Disable the legacy psycopg2 index-DB setup for testing
-SETUP_DATABASE = False
+HAS_DATABASE = False
 
 # PostgreSQL is required for ArrayField.
 # Set DATABASE_URL in the environment before running tests, e.g.:
