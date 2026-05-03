@@ -196,7 +196,8 @@ BATCH_DIR_NAME = 'batches'
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
 
-SETUP_DATABASE = True
+# Gates database initialisation and background task scheduling; False for the crawler and tests.
+HAS_DATABASE = True
 
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")

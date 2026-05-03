@@ -40,9 +40,9 @@ class MwmblConfig(AppConfig):
 
     def ready(self):
         create_index()
-        if settings.SETUP_DATABASE:
+        if settings.HAS_DATABASE:
             create_index_db()
-        self._schedule_background_tasks()
+            self._schedule_background_tasks()
 
     @staticmethod
     def _schedule_background_tasks():

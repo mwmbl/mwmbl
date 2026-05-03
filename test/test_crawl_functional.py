@@ -37,7 +37,7 @@ def mock_settings(temp_data_path):
     with override_settings(
         DATA_PATH=str(temp_data_path),
         REDIS_URL="redis://localhost:6379",
-        SETUP_DATABASE=False,  # Disable database setup for testing
+        HAS_DATABASE=False,
         NUM_PAGES=10  # Small number for testing
     ):
         yield
