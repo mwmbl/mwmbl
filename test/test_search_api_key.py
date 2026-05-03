@@ -257,7 +257,7 @@ def test_delete_nonexistent_key_returns_404(api_client, access_token):
 @pytest.mark.django_db
 def test_search_missing_key_returns_results_with_null_usage(api_client):
     """Unauthenticated requests are allowed; usage fields are null."""
-    response = api_client.get("/api/v2/search/?s=python")
+    response = api_client.get("/api/v2/search/?q=python")
     assert response.status_code == 200
     data = response.json()
     assert data["monthly_usage"] is None
@@ -266,7 +266,7 @@ def test_search_missing_key_returns_results_with_null_usage(api_client):
 
 @pytest.mark.django_db
 def test_search_invalid_key(api_client):
-    response = api_client.get("/api/v2/search/?s=python", **api_key_header("invalid-key"))
+    response = api_client.get("/api/v2/search/?q=python", **api_key_header("invalid-key"))
     assert response.status_code == 401
 
 
@@ -274,7 +274,7 @@ def test_search_invalid_key(api_client):
 def test_search_crawl_scoped_key_rejected(api_client, crawl_api_key):
     """A crawl-scoped key must not grant access to the search endpoint."""
     response = api_client.get(
-        "/api/v2/search/?s=python",
+        "/api/v2/search/?q=python",
         **api_key_header(crawl_api_key.raw_key),
     )
     assert response.status_code == 401
@@ -290,7 +290,7 @@ def test_search_with_valid_key(api_client, search_api_key):
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=0), \
          patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=1):
         response = api_client.get(
-            "/api/v2/search/?s=python",
+            "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 200
@@ -304,7 +304,7 @@ def test_search_response_includes_usage_fields(api_client, search_api_key):
          patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=6), \
          patch("mwmbl.tinysearchengine.rank.HeuristicRanker.search", return_value=[]):
         response = api_client.get(
-            "/api/v2/search/?s=python",
+            "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 200
@@ -322,7 +322,7 @@ def test_search_response_includes_usage_fields(api_client, search_api_key):
 def test_search_rate_limit_exceeded(api_client, search_api_key):
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=False):
         response = api_client.get(
-            "/api/v2/search/?s=python",
+            "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
@@ -335,7 +335,7 @@ def test_search_monthly_quota_exceeded(api_client, search_api_key):
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
         response = api_client.get(
-            "/api/v2/search/?s=python",
+            "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
@@ -354,7 +354,7 @@ def test_search_monthly_quota_exceeded_pro_no_upgrade_message(api_client, search
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
         response = api_client.get(
-            "/api/v2/search/?s=python",
+            "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
@@ -566,7 +566,7 @@ def test_subscription_usage_matches_search_response(api_client, access_token, ve
     )
     cache.delete(_monthly_key(verified_user.id))
 
-    search_resp = api_client.get("/api/v2/search/?s=python", **api_key_header(raw_key))
+    search_resp = api_client.get("/api/v2/search/?q=python", **api_key_header(raw_key))
     assert search_resp.status_code == 200
     search_usage = search_resp.json()["monthly_usage"]
     assert search_usage == 1
