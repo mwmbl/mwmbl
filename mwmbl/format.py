@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlparse
 
 from mwmbl.tinysearchengine.indexer import DocumentState
 from mwmbl.tokenizer import tokenize, clean_unicode
@@ -75,4 +76,32 @@ def format_result(result, query):
     filtered_tokens = [t for t in tokens if t not in HIGHLIGHT_STOPWORDS]
     pattern = get_query_regex(filtered_tokens, True, True)
     return format_result_with_pattern(pattern, result)
+
+
+def format_result_v2(result, position: int) -> dict:
+    parsed = urlparse(result.url)
+    source = get_document_source(result.state)
+    return {
+        'url': result.url,
+        'title': clean_unicode(result.title) if result.title else '',
+        'content': clean_unicode(result.extract) if result.extract else '',
+        'engine': source,
+        'template': 'default.html',
+        'parsed_url': [
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ],
+        'img_src': '',
+        'thumbnail': '',
+        'priority': '',
+        'engines': [source],
+        'positions': [position],
+        'score': 1.0 / position,
+        'category': 'general',
+        'publishedDate': None,
+    }
 

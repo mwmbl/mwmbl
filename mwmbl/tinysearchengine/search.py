@@ -5,7 +5,7 @@ from typing import Optional
 from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
-from mwmbl.format import format_result
+from mwmbl.format import format_result, format_result_v2
 from mwmbl.models import ApiKey, MwmblUser
 from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
 from mwmbl.search_auth import SearchApiKeyAuth
@@ -68,22 +68,36 @@ class SearchResult(Schema):
         }
 
 
+class SearxResult(Schema):
+    """A single search result in SearXNG-compatible format."""
+    url: str
+    title: str
+    content: str
+    engine: str
+    template: str
+    parsed_url: list[str]
+    img_src: str
+    thumbnail: str
+    priority: str
+    engines: list[str]
+    positions: list[int]
+    score: float
+    category: str
+    publishedDate: Optional[str] = None
+
+
 class SearchResponse(Schema):
-    """Response from the authenticated search endpoint, including usage metadata."""
-    results: list[SearchResult]
+    """SearXNG-compatible search response with optional Mwmbl usage metadata."""
+    query: str
+    number_of_results: int
+    results: list[SearxResult]
+    answers: list[str] = []
+    corrections: list[str] = []
+    infoboxes: list = []
+    suggestions: list[str] = []
+    unresponsive_engines: list = []
     monthly_usage: int | None = None
     monthly_limit: int | None = None
-
-    class Config:
-        json_schema_extra = {
-            "examples": [
-                {
-                    "results": [],
-                    "monthly_usage": 42,
-                    "monthly_limit": 1000,
-                }
-            ]
-        }
 
 
 class RawDocument(Schema):
@@ -253,17 +267,17 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
         auth=None,
         summary="Search",
         description=(
-            "Search the Mwmbl index and return formatted results.\n\n"
+            "Search the Mwmbl index and return results in SearXNG-compatible format.\n\n"
             "Unauthenticated requests are accepted but return `monthly_usage` and "
             "`monthly_limit` as `null`. To track usage against a quota, pass a valid "
             "search-scoped API key in the `X-API-Key` header. "
             "Obtain a key via `POST /api/v1/platform/api-keys/`.\n\n"
-            "Results are ranked using a heuristic ranker that considers title, extract, "
+            "Results are ranked using a heuristic ranker that considers title, content, "
             "domain authority, and query-term match quality. "
-            "Each result's `title` and `extract` are returned as a list of text segments "
-            "where matching query terms are flagged with `is_bold: true` for easy "
-            "client-side highlighting.\n\n"
-            "The `source` field indicates where the result originated:\n"
+            "The response follows the SearXNG JSON format: each result has a plain-text "
+            "`title` and `content`, an `engine` field indicating the result source, "
+            "a `score` (1/position), and SearXNG standard fields.\n\n"
+            "The `engine` field indicates where the result originated:\n"
             "- `mwmbl` — organically crawled by the Mwmbl crawler\n"
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
@@ -318,9 +332,12 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_limit = None
             monthly_usage = None
 
-        results = ranker.search(q, [])
+        raw_results = ranker.search(q, [])
+        formatted = [format_result_v2(r, i + 1) for i, r in enumerate(raw_results)]
         return SearchResponse(
-            results=[format_result(result, q) for result in results],
+            query=q,
+            number_of_results=len(formatted),
+            results=formatted,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
