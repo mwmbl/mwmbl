@@ -76,3 +76,40 @@ def format_result(result, query):
     pattern = get_query_regex(filtered_tokens, True, True)
     return format_result_with_pattern(pattern, result)
 
+
+def _extract_highlights(segments: list[dict]) -> list[str]:
+    """Merge consecutive bold segments (with whitespace-only gaps) into phrases."""
+    phrases = []
+    current: list[str] = []
+    for seg in segments:
+        if seg['is_bold']:
+            current.append(seg['value'])
+        elif current and not seg['value'].strip():
+            current.append(seg['value'])
+        else:
+            if current:
+                phrases.append(''.join(current).strip())
+                current = []
+    if current:
+        phrases.append(''.join(current).strip())
+
+    unique = set(phrases)
+    return sorted(unique, key=len, reverse=True)
+
+
+def format_result_v2(result, position: int, query: str) -> dict:
+    tokens = tokenize(query)
+    filtered_tokens = [t for t in tokens if t not in HIGHLIGHT_STOPWORDS]
+    pattern = get_query_regex(filtered_tokens, True, True)
+    v1 = format_result_with_pattern(pattern, result)
+    title = ''.join(seg['value'] for seg in v1['title'])
+    content = ''.join(seg['value'] for seg in v1['extract'])
+    return {
+        'url': result.url,
+        'title': title,
+        'title_highlights': _extract_highlights(v1['title']),
+        'content': content,
+        'content_highlights': _extract_highlights(v1['extract']),
+        'engine': get_document_source(result.state),
+        'score': 1.0 / position,
+    }
