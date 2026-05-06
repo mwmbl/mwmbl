@@ -111,6 +111,5 @@ def format_result_v2(result, position: int, query: str) -> dict:
         'content': content,
         'content_highlights': _extract_highlights(v1['extract']),
         'engine': get_document_source(result.state),
-        'positions': [position],
         'score': 1.0 / position,
     }

@@ -72,12 +72,11 @@ class SearxResult(Schema):
     """A single search result in SearXNG-compatible format."""
     url: str
     title: str
-    content: str
-    engine: str
-    positions: list[int]
-    score: float
     title_highlights: list[str]
+    content: str
     content_highlights: list[str]
+    engine: str
+    score: float
 
 
 class SearchResponse(Schema):
