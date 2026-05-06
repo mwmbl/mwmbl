@@ -74,16 +74,10 @@ class SearxResult(Schema):
     title: str
     content: str
     engine: str
-    template: str
-    parsed_url: list[str]
-    img_src: str
-    thumbnail: str
-    priority: str
-    engines: list[str]
     positions: list[int]
     score: float
-    category: str
-    publishedDate: Optional[str] = None
+    title_highlights: list[str]
+    content_highlights: list[str]
 
 
 class SearchResponse(Schema):
@@ -91,11 +85,6 @@ class SearchResponse(Schema):
     query: str
     number_of_results: int
     results: list[SearxResult]
-    answers: list[str] = []
-    corrections: list[str] = []
-    infoboxes: list = []
-    suggestions: list[str] = []
-    unresponsive_engines: list = []
     monthly_usage: int | None = None
     monthly_limit: int | None = None
 
@@ -333,7 +322,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_usage = None
 
         raw_results = ranker.search(q, [])
-        formatted = [format_result_v2(r, i + 1) for i, r in enumerate(raw_results)]
+        formatted = [format_result_v2(r, i + 1, q) for i, r in enumerate(raw_results)]
         return SearchResponse(
             query=q,
             number_of_results=len(formatted),

@@ -1,5 +1,4 @@
 import re
-from urllib.parse import urlparse
 
 from mwmbl.tinysearchengine.indexer import DocumentState
 from mwmbl.tokenizer import tokenize, clean_unicode
@@ -78,30 +77,40 @@ def format_result(result, query):
     return format_result_with_pattern(pattern, result)
 
 
-def format_result_v2(result, position: int) -> dict:
-    parsed = urlparse(result.url)
-    source = get_document_source(result.state)
+def _extract_highlights(segments: list[dict]) -> list[str]:
+    """Merge consecutive bold segments (with whitespace-only gaps) into phrases."""
+    phrases = []
+    current: list[str] = []
+    for seg in segments:
+        if seg['is_bold']:
+            current.append(seg['value'])
+        elif current and not seg['value'].strip():
+            current.append(seg['value'])
+        else:
+            if current:
+                phrases.append(''.join(current).strip())
+                current = []
+    if current:
+        phrases.append(''.join(current).strip())
+
+    unique = set(phrases)
+    return sorted(unique, key=len, reverse=True)
+
+
+def format_result_v2(result, position: int, query: str) -> dict:
+    tokens = tokenize(query)
+    filtered_tokens = [t for t in tokens if t not in HIGHLIGHT_STOPWORDS]
+    pattern = get_query_regex(filtered_tokens, True, True)
+    v1 = format_result_with_pattern(pattern, result)
+    title = ''.join(seg['value'] for seg in v1['title'])
+    content = ''.join(seg['value'] for seg in v1['extract'])
     return {
         'url': result.url,
-        'title': clean_unicode(result.title) if result.title else '',
-        'content': clean_unicode(result.extract) if result.extract else '',
-        'engine': source,
-        'template': 'default.html',
-        'parsed_url': [
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            parsed.query,
-            parsed.fragment,
-        ],
-        'img_src': '',
-        'thumbnail': '',
-        'priority': '',
-        'engines': [source],
+        'title': title,
+        'title_highlights': _extract_highlights(v1['title']),
+        'content': content,
+        'content_highlights': _extract_highlights(v1['extract']),
+        'engine': get_document_source(result.state),
         'positions': [position],
         'score': 1.0 / position,
-        'category': 'general',
-        'publishedDate': None,
     }
-
