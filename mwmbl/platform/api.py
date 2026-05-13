@@ -640,6 +640,41 @@ def create_checkout(request, body: CheckoutRequest):
 
 
 @router.post(
+    "/billing/uncancel",
+    auth=JWTAuth(),
+    response=SubscriptionResponse,
+    summary="Uncancel a pending subscription cancellation",
+    description="Removes a scheduled cancellation, keeping the subscription active beyond the current period end.",
+    tags=["Billing"],
+)
+def uncancel_subscription(request):
+    from mwmbl.quota import get_monthly_count
+    check_email_verified(request)
+    billing = getattr(request.user, "billing", None)
+    if not billing or not billing.polar_subscription_id:
+        raise InvalidRequest("No active subscription found.", status=404)
+    if not billing.cancel_at_period_end:
+        raise InvalidRequest("Subscription is not scheduled to cancel.", status=409)
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        result = polar.subscriptions.update(
+            id=billing.polar_subscription_id,
+            subscription_update=SubscriptionCancel(cancel_at_period_end=False),
+        )
+    billing.current_period_end = result.current_period_end
+    billing.cancel_at_period_end = False
+    billing.save()
+    usage = get_monthly_count(request.user.id)
+    return SubscriptionResponse(
+        plan=request.user.tier,
+        status="active",
+        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[request.user.tier],
+        monthly_usage=usage,
+        current_period_end=billing.current_period_end,
+        polar_customer_id=billing.polar_customer_id,
+    )
+
+
+@router.post(
     "/billing/cancel",
     auth=JWTAuth(),
     response=SubscriptionResponse,
