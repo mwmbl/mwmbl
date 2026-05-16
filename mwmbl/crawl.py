@@ -195,10 +195,12 @@ class Crawler:
                 if new_high_score:
                     result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
                                            score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
-                    results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
+                    results = Results(results=result_items, crawler_version=CRAWLER_VERSION)
                     logger.info(f"Posting {len(result_items)} results")
                     response = requests.post(
-                        "https://api.mwmbl.org/api/v1/crawler/results", json=results.dict()
+                        "https://api.mwmbl.org/api/v1/crawler/results",
+                        json=results.dict(),
+                        headers={"X-API-Key": MWMBL_API_KEY},
                     )
                     logger.info(f"Response: {response.text}")
                     response.raise_for_status()
