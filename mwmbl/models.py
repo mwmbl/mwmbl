@@ -185,6 +185,7 @@ class UserBilling(models.Model):
     polar_customer_id = models.CharField(max_length=100, blank=True, default="")
     polar_subscription_id = models.CharField(max_length=100, blank=True, default="")
     current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
 
 
 class AgreementType(models.TextChoices):

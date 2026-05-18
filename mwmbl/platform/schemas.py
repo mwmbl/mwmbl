@@ -27,6 +27,10 @@ class CheckoutRequest(Schema):
     embed_origin: Optional[str] = None
 
 
+class ChangePlanRequest(Schema):
+    plan: Literal["starter", "pro"]
+
+
 class CheckoutResponse(Schema):
     checkout_url: str
 
