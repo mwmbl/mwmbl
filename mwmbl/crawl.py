@@ -194,7 +194,8 @@ class Crawler:
 
                 if new_high_score:
                     result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
-                                           score=doc.score, term=doc.term, state=doc.state) for doc in new_items]
+                                           score=doc.score, term=doc.term, state=doc.state,
+                                           last_crawled=doc.last_crawled) for doc in new_items]
                     results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
                     logger.info(f"Posting {len(result_items)} results")
                     response = requests.post(

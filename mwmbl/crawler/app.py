@@ -241,7 +241,7 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
 
     @r.post(
         '/results',
-        response={200: PostResultsResponse, 401: Error},
+        response={200: PostResultsResponse, 400: Error, 401: Error},
         summary="Submit indexed results",
         description=(
             "Submit a set of pre-indexed search results directly into the Mwmbl index. "
@@ -266,14 +266,19 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
             return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
 
         now = datetime.now(timezone.utc)
-        documents = [
-            Document(
+        now_ts = int(now.timestamp())
+
+        documents = []
+        for result in results.results:
+            if result.last_crawled is not None and result.last_crawled > now_ts:
+                return 400, {"message": f"last_crawled timestamp is in the future for URL: {result.url}"}
+            last_crawled = result.last_crawled if result.last_crawled is not None else now_ts
+            documents.append(Document(
                 url=result.url, title=result.title, extract=result.extract,
                 user_ids=[api_key.user.id],
-                last_crawled=int(now.timestamp()),
-            )
-            for result in results.results
-        ]
+                last_crawled=last_crawled,
+            ))
+
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
         filename = upload_object(results, now, api_key.user.username, "results")

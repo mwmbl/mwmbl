@@ -184,6 +184,11 @@ class Result(Schema):
         description="Internal state flag (optional).",
         example=1,
     )
+    last_crawled: Optional[int] = Field(
+        default=None,
+        description="Unix timestamp (seconds since epoch) when the page was crawled.",
+        example=1704672000,
+    )
 
 
 class Results(Schema):
