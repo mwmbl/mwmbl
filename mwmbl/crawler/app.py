@@ -265,11 +265,17 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         if api_key is None:
             return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
 
-        documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
+        now = datetime.now(timezone.utc)
+        documents = [
+            Document(
+                url=result.url, title=result.title, extract=result.extract,
+                user_ids=[api_key.user.id],
+                last_crawled=int(now.timestamp()),
+            )
+            for result in results.results
+        ]
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
-
-        now = datetime.now(timezone.utc)
         filename = upload_object(results, now, api_key.user.username, "results")
 
         # Update stats for the user
