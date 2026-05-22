@@ -40,7 +40,7 @@ RUN uv pip install --python /venv/bin/python .
 # directory and patch the extension's RPATH so it finds the library at runtime.
 RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
     cp /app/mwmbl_rank/target/release/deps/libxgboost.so "$SODIR/" && \
-    patchelf --set-rpath '$ORIGIN' "$SODIR/mwmbl_rank.cpython-311-x86_64-linux-gnu.so"
+    patchelf --set-rpath '$ORIGIN' "$SODIR"/mwmbl_rank.cpython-311-*.so
 
 FROM base AS final
 
