@@ -9,7 +9,7 @@ Covers:
 - flush_search_counts background task
 """
 
-from datetime import datetime
+from datetime import datetime, timezone as stdlib_timezone
 from unittest.mock import patch
 
 import pytest
@@ -430,6 +430,53 @@ def test_post_results_header_takes_precedence_over_body(api_client, crawl_api_ke
             **api_key_header(crawl_api_key.raw_key),
         )
     assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_post_results_future_last_crawled_rejected(api_client, crawl_api_key):
+    future_ts = int(datetime.now(stdlib_timezone.utc).timestamp()) + 3600
+    response = api_client.post(
+        "/api/v1/crawler/results",
+        content_type="application/json",
+        data={"results": [{"url": "https://example.com", "title": "t", "extract": "e", "last_crawled": future_ts}]},
+        **api_key_header(crawl_api_key.raw_key),
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
+    past_ts = int(datetime.now(stdlib_timezone.utc).timestamp()) - 60
+    captured = []
+
+    with patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)), \
+         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
+         patch("mwmbl.crawler.app.stats_manager"):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [{"url": "https://example.com", "title": "t", "extract": "e", "last_crawled": past_ts}]},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+    assert response.status_code == 200
+    assert captured[0].last_crawled == past_ts
+
+
+@pytest.mark.django_db
+def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
+    captured = []
+
+    with patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)), \
+         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
+         patch("mwmbl.crawler.app.stats_manager"):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [{"url": "https://example.com", "title": "t", "extract": "e"}]},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+    assert response.status_code == 200
+    assert captured[0].user_ids == [verified_user.id]
 
 
 # ---------------------------------------------------------------------------

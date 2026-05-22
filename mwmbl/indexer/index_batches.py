@@ -6,7 +6,7 @@ from collections import defaultdict, Counter
 from datetime import datetime
 from functools import reduce
 from logging import getLogger
-from typing import Collection, Iterable
+from typing import Collection, Iterable, Optional
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
@@ -20,12 +20,28 @@ from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
 
+MAX_USER_IDS = 2
 
-def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[tuple[str, str, str]]:
+
+def _merge_user_ids(
+    existing: Optional[list[int]], incoming: Optional[list[int]]
+) -> Optional[list[int]]:
+    combined = list(existing or [])
+    for uid in (incoming or []):
+        if uid in combined:
+            combined.remove(uid)
+        combined.append(uid)
+    return combined[-MAX_USER_IDS:] or None
+
+
+def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[Document]:
     for batch in batches:
         for item in batch.items:
             if item.content is not None and not item.content.links_only:
-                yield item.content.title, item.url, item.content.extract
+                yield Document(
+                    item.content.title, item.url, item.content.extract,
+                    last_crawled=int(item.timestamp),
+                )
 
 
 def run(batch_cache: BatchCache, index_path: str):
@@ -44,8 +60,7 @@ def get_url_score(url):
 
 def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
     start_time = datetime.utcnow()
-    document_tuples = list(get_documents_from_batches(batch_data))
-    documents = [Document(title, url, extract) for title, url, extract in document_tuples]
+    documents = list(get_documents_from_batches(batch_data))
     end_time, new_page_doc_counts = index_documents(documents, index_path)
     logger.info(f"Indexing took {end_time - start_time}")
     return new_page_doc_counts
@@ -75,6 +90,14 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
 
 def combine_documents(existing_documents, documents, mark_synced, ranker):
     sorted_documents = sort_documents(documents, existing_documents, ranker)
+
+    url_user_ids = {}
+    url_last_crawled = {}
+    for doc in sorted_documents:
+        url_user_ids[doc.url] = _merge_user_ids(url_user_ids.get(doc.url), doc.user_ids)
+        if doc.last_crawled is not None:
+            url_last_crawled[doc.url] = max(url_last_crawled.get(doc.url, 0), doc.last_crawled)
+
     seen_urls = set()
     seen_titles = set()
     combined_documents = []
@@ -83,6 +106,8 @@ def combine_documents(existing_documents, documents, mark_synced, ranker):
             continue
         if mark_synced:
             document.state = DocumentState.SYNCED_WITH_MAIN_INDEX
+        document.user_ids = url_user_ids.get(document.url)
+        document.last_crawled = url_last_crawled.get(document.url)
         combined_documents.append(document)
         seen_urls.add(document.url)
         seen_titles.add(document.title)
@@ -127,7 +152,12 @@ def preprocess_documents(documents, index_path):
             tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
             for token in tokenized.tokens:
                 page = indexer.get_key_page_index(token)
-                term_document = Document(document.title, document.url, document.extract, term=token)
+                term_document = Document(
+                    document.title, document.url, document.extract,
+                    term=token,
+                    user_ids=document.user_ids,
+                    last_crawled=document.last_crawled,
+                )
                 page_documents[page].append(term_document)
     print(f"Preprocessed for {len(page_documents)} pages")
     return page_documents

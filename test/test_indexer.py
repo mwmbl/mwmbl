@@ -124,3 +124,32 @@ def test_constructing_document_removes_none():
     document = Document(title=None,url='url',extract=None,score=1.0)
     assert document.title == ''
     assert document.extract == ''
+
+
+def test_as_tuple_with_new_fields():
+    doc = Document(title='t', url='u', extract='e', user_ids=[1, 2], last_crawled=1700000000)
+    assert doc.as_tuple() == ('t', 'u', 'e', None, None, None, [1, 2], 1700000000)
+
+
+def test_as_tuple_strips_trailing_nones():
+    doc = Document(title='t', url='u', extract='e')
+    assert doc.as_tuple() == ('t', 'u', 'e')
+
+
+def test_as_tuple_only_last_crawled_none_strips_it():
+    doc = Document(title='t', url='u', extract='e', user_ids=[1])
+    assert doc.as_tuple() == ('t', 'u', 'e', None, None, None, [1])
+
+
+def test_document_round_trip_with_new_fields():
+    doc = Document(title='t', url='u', extract='e', term='q', user_ids=[42], last_crawled=1700000000)
+    restored = Document(*doc.as_tuple())
+    assert restored.user_ids == [42]
+    assert restored.last_crawled == 1700000000
+
+
+def test_document_backward_compat_old_six_element_tuple():
+    old_tuple = ('title', 'https://example.com', 'extract', None, 'term', None)
+    doc = Document(*old_tuple)
+    assert doc.user_ids is None
+    assert doc.last_crawled is None

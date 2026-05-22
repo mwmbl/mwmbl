@@ -95,6 +95,8 @@ class RawDocument(Schema):
     score: Optional[float] = None
     term: Optional[str] = None
     state: Optional[int] = None
+    user_ids: Optional[list[int]] = None
+    last_crawled: Optional[int] = None
 
     class Config:
         json_schema_extra = {

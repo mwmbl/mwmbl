@@ -46,6 +46,8 @@ class Document:
     score: Optional[float] = None
     term: Optional[str] = None
     state: Optional[int] = None
+    user_ids: Optional[List[int]] = None
+    last_crawled: Optional[int] = None
 
     def __init__(
             self,
@@ -54,7 +56,9 @@ class Document:
             extract: str,
             score: Optional[float] = None,
             term: Optional[str] = None,
-            state: Optional[int | DocumentState] = None
+            state: Optional[int | DocumentState] = None,
+            user_ids: Optional[List[int]] = None,
+            last_crawled: Optional[int] = None,
     ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
@@ -64,15 +68,23 @@ class Document:
         self.score = score
         self.term = term
         self.state = None if state is None else DocumentState(state)
+        self.user_ids = user_ids
+        self.last_crawled = last_crawled
 
     def as_tuple(self):
         """
         Convert a type to a tuple - values at the end that are None can be truncated.
         """
-        values = list(self.__dict__.values())
-        if values[-1] is not None:
-            values[-1] = values[-1].value
-
+        values = [
+            self.title,
+            self.url,
+            self.extract,
+            self.score,
+            self.term,
+            None if self.state is None else self.state.value,
+            self.user_ids,
+            self.last_crawled,
+        ]
         while values[-1] is None:
             values = values[:-1]
         return tuple(values)
