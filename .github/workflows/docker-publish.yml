@@ -29,3 +29,4 @@ jobs:
           file: ./Dockerfile.crawler
           push: true
           tags: mwmbl/crawler:latest
+          platforms: linux/amd64,linux/arm64
