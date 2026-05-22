@@ -46,12 +46,13 @@ def verified_user(db):
         verified=True,
         primary=True,
     )
-    version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(AgreementType.TERMS_OF_SERVICE_API)
-    UserAgreement.objects.create(
-        user=user,
-        agreement_type=AgreementType.TERMS_OF_SERVICE_API,
-        version_id=version_id,
-    )
+    for agreement_type in (AgreementType.TERMS_OF_SERVICE_API, AgreementType.TERMS_OF_SERVICE_GUI):
+        version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(agreement_type)
+        UserAgreement.objects.create(
+            user=user,
+            agreement_type=agreement_type,
+            version_id=version_id,
+        )
     return user
 
 
@@ -177,6 +178,54 @@ def test_create_api_key_default_name(api_client, access_token):
     assert response.json()["name"] == ""
 
 
+@pytest.mark.django_db
+def test_create_search_api_key_explicit_scope(api_client, access_token):
+    response = api_client.post(
+        "/api/v1/platform/api-keys/",
+        content_type="application/json",
+        data={"scope": "search"},
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    assert response.json()["scopes"] == ["search"]
+
+
+@pytest.mark.django_db
+def test_create_crawl_api_key(api_client, access_token):
+    response = api_client.post(
+        "/api/v1/platform/api-keys/",
+        content_type="application/json",
+        data={"name": "My crawler", "scope": "crawl"},
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scopes"] == ["crawl"]
+    assert data["name"] == "My crawler"
+    assert "key" in data
+
+
+@pytest.mark.django_db
+def test_create_crawl_api_key_without_gui_tos_returns_403(api_client, db):
+    """A user who has only accepted the API TOS cannot create a crawl key."""
+    user = User.objects.create_user(
+        username="apionly", email="apionly@example.com", password="testpass123"
+    )
+    EmailAddress.objects.create(user=user, email="apionly@example.com", verified=True, primary=True)
+    version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(AgreementType.TERMS_OF_SERVICE_API)
+    UserAgreement.objects.create(
+        user=user, agreement_type=AgreementType.TERMS_OF_SERVICE_API, version_id=version_id
+    )
+    token = str(RefreshToken.for_user(user).access_token)
+    response = api_client.post(
+        "/api/v1/platform/api-keys/",
+        content_type="application/json",
+        data={"scope": "crawl"},
+        **auth_headers(token),
+    )
+    assert response.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # API key management — GET /api/v1/platform/api-keys/
 # ---------------------------------------------------------------------------
@@ -199,7 +248,7 @@ def test_list_api_keys_hides_raw_key(api_client, access_token, search_api_key):
 
 
 @pytest.mark.django_db
-def test_list_api_keys_only_shows_search_scoped(api_client, access_token, search_api_key, crawl_api_key):
+def test_list_api_keys_shows_all_scopes(api_client, access_token, search_api_key, crawl_api_key):
     response = api_client.get(
         "/api/v1/platform/api-keys/",
         **auth_headers(access_token),
@@ -207,7 +256,7 @@ def test_list_api_keys_only_shows_search_scoped(api_client, access_token, search
     assert response.status_code == 200
     ids = [item["id"] for item in response.json()]
     assert search_api_key.id in ids
-    assert crawl_api_key.id not in ids
+    assert crawl_api_key.id in ids
 
 
 @pytest.mark.django_db
@@ -248,6 +297,17 @@ def test_delete_nonexistent_key_returns_404(api_client, access_token):
         **auth_headers(access_token),
     )
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_delete_crawl_api_key(api_client, access_token, crawl_api_key):
+    key_id = crawl_api_key.id
+    response = api_client.delete(
+        f"/api/v1/platform/api-keys/{key_id}",
+        **auth_headers(access_token),
+    )
+    assert response.status_code == 200
+    assert not ApiKey.objects.filter(id=key_id).exists()
 
 
 # ---------------------------------------------------------------------------
