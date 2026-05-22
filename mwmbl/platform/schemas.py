@@ -50,12 +50,16 @@ class ResetPasswordRequest(Schema):
 # ---------------------------------------------------------------------------
 
 class CreateApiKeyRequest(Schema):
-    """Request body for creating a new search-scoped API key."""
+    """Request body for creating a new API key."""
     name: str = Field(
         default="",
         max_length=100,
         description="Optional human-readable label for this key.",
         example="My search app",
+    )
+    scope: Literal["search", "crawl"] = Field(
+        default="search",
+        description="Scope for this key. Use 'crawl' for the crawler endpoint, 'search' for the search endpoint.",
     )
 
 
