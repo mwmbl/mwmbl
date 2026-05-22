@@ -40,7 +40,7 @@ def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[Doc
             if item.content is not None and not item.content.links_only:
                 yield Document(
                     item.content.title, item.url, item.content.extract,
-                    last_crawled=int(item.timestamp),
+                    last_crawled=int(item.timestamp / 1000),
                 )
 
 

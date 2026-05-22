@@ -16,8 +16,8 @@ services:
       - MWMBL_CONTACT_INFO=${MWMBL_CONTACT_INFO}
 
       # Set value of ./mwmbl/crawler/env_vars.py
-      - CRAWLER_WORKERS=2
-      - CRAWLER_THREADS=20
+      - CRAWLER_WORKERS=4
+      - CRAWLER_THREADS=30
       - CRAWL_DELAY_SECONDS=0.0
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
@@ -28,6 +28,11 @@ services:
         condition: on-failure
         delay: 30s
         max_attempts: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     # CPU restrictions if needed:
     #     resources:
     #       limits:
@@ -36,6 +41,7 @@ services:
   redis:
     image: redis:alpine
     restart: unless-stopped
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
 
