@@ -77,6 +77,7 @@ import {Chart} from "chart.js/auto";
 
 function numberWithCommas(x) {
   // From https://stackoverflow.com/a/2901298/660902
+  if (x == null) return "0";
   return x.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
 }
 
