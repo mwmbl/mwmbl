@@ -151,6 +151,25 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
     return new_links, extra_links
 
 
+def extract_from_html_text(html_text: str) -> str:
+    """Extract a clean plain-text snippet from an HTML fragment using the justext pipeline."""
+    html_bytes = f"<html><body>{html_text}</body></html>".encode(DEFAULT_ENCODING)
+    try:
+        dom = html_to_dom(html_bytes, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
+        paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
+    except Exception:
+        return ""
+    extract = ""
+    for paragraph in paragraphs:
+        if paragraph.class_type != "good":
+            continue
+        extract += " " + paragraph.text.strip()
+        if len(extract) > NUM_EXTRACT_CHARS:
+            extract = extract[:NUM_EXTRACT_CHARS - 1] + "…"
+            break
+    return extract.strip()
+
+
 def crawl_url(url):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
