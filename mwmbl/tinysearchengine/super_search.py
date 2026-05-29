@@ -34,7 +34,9 @@ from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.search_setup import ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
+from mwmbl.tinysearchengine.rank import get_features
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
+from mwmbl.tokenizer import tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,25 @@ def _result_payload(doc: Document, score: float, source: str, origin: str) -> di
     }
 
 
+def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
+    """Return True if more than half the query terms match somewhere in the document.
+
+    Mirrors the filter in rank.py (score_result) to avoid surfacing results with
+    no meaningful term overlap before the LTR model sees them.
+    """
+    if not terms:
+        return True
+    features = get_features(
+        terms,
+        doc.title or "",
+        doc.url or "",
+        doc.extract or "",
+        doc.score or 0.0,
+        True,
+    )
+    return features["match_terms"] > len(terms) / 2
+
+
 def _title_from_url(url: str) -> str:
     """Cheap human-readable proxy used to score outbound links with the LTR model."""
     try:
@@ -79,6 +100,7 @@ def _title_from_url(url: str) -> str:
     last = unquote(segments[-1])
     last = _URL_EXT_RE.sub("", last)
     return _URL_TOKEN_RE.sub(" ", last).strip() or parsed.netloc
+
 
 
 async def _authenticate(request) -> MwmblUser:
@@ -183,6 +205,7 @@ async def _follow_links(
 async def _run_pipeline(query: str, emit) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
+    terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     timeout = httpx.Timeout(settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT)
@@ -254,6 +277,9 @@ async def _run_pipeline(query: str, emit) -> None:
         if doc.url and doc.title and doc.extract and doc.url not in seen:
             seen.add(doc.url)
             unique.append(doc)
+
+    if terms:
+        unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
 
     if unique:
         final_scores = await asyncio.to_thread(score_documents, ltr_model, query, unique)
