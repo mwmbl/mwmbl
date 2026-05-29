@@ -88,6 +88,17 @@ def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
     return features["match_terms"] > len(terms) / 2
 
 
+def _url_term_score(url: str, terms: list[str]) -> int:
+    """Count how many query terms appear anywhere in the URL (case-insensitive).
+
+    Used to rank outbound links before crawling them — the LTR model does poorly
+    with proxy docs that have only URL-derived titles, while simple term overlap
+    directly captures relevance signal available in the URL itself.
+    """
+    url_lower = url.lower()
+    return sum(1 for t in terms if t in url_lower)
+
+
 def _title_from_url(url: str) -> str:
     """Cheap human-readable proxy used to score outbound links with the LTR model."""
     try:
@@ -174,8 +185,9 @@ async def _follow_links(
     if not raw_links:
         return
 
+    terms = tokenize(query)
     proxy_docs = [Document(title=_title_from_url(u), url=u, extract="") for u in raw_links]
-    proxy_scores = await asyncio.to_thread(score_documents, ltr_model, query, proxy_docs)
+    proxy_scores = [_url_term_score(d.url, terms) for d in proxy_docs]
 
     ranked = sorted(zip(proxy_docs, proxy_scores), key=lambda x: -x[1])[:max_links]
     if not ranked:
