@@ -193,6 +193,22 @@ def extract_from_html_text(html_text: str) -> str:
     return extract.strip()
 
 
+def get_og_meta(dom) -> tuple[str, str]:
+    """Return (og:title, og:description) from Open Graph meta tags, or empty strings."""
+    og_title = ""
+    og_desc = ""
+    for meta in dom.xpath("//meta[@property and @content]"):
+        prop = (meta.get("property") or "").strip().lower()
+        value = (meta.get("content") or "").strip()
+        if prop == "og:title" and not og_title:
+            og_title = value
+        elif prop == "og:description" and not og_desc:
+            og_desc = value
+        if og_title and og_desc:
+            break
+    return og_title, og_desc
+
+
 def crawl_url(url):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
@@ -298,6 +314,15 @@ def crawl_url(url):
         if len(extract) > NUM_EXTRACT_CHARS:
             extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
             break
+
+    # For JS-first pages (e.g. Discord, SPAs) justext finds no body content.
+    # Fall back to Open Graph meta tags so these pages are still indexable.
+    if not title or not extract:
+        og_title, og_desc = get_og_meta(dom)
+        if not title and og_title:
+            title = og_title[:NUM_TITLE_CHARS - 1] + '…' if len(og_title) > NUM_TITLE_CHARS else og_title
+        if not extract and og_desc:
+            extract = og_desc[:NUM_EXTRACT_CHARS - 1] + '…' if len(og_desc) > NUM_EXTRACT_CHARS else og_desc
 
     return {
       'url': url,
