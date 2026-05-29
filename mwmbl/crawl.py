@@ -57,7 +57,8 @@ def _fetch_curated_domains() -> set[str]:
             headers={"User-Agent": USER_AGENT},
         )
         response.raise_for_status()
-        _curated_domains_cache = set(response.json())
+        data = response.json()
+        _curated_domains_cache = {d["name"] for d in data["domains"]}
         _curated_domains_fetched_at = now
     except Exception:
         logger.exception("Failed to fetch curated domains, using cached value")
