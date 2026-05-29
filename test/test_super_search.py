@@ -1,0 +1,262 @@
+"""Integration tests for the Super Search streaming endpoint.
+
+These tests:
+- Mock external sources and `crawl_url` so no network is touched.
+- Stub the LTR scoring helper so promotion is deterministic.
+- Verify quota, auth, event ordering, and forbidden-symbol presence in
+  the orchestrator (architecture guard).
+"""
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from allauth.account.models import EmailAddress
+from asgiref.sync import async_to_sync
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.test import Client, override_settings
+from ninja_jwt.tokens import RefreshToken
+
+from mwmbl.models import ApiKey, generate_api_key
+from mwmbl.quota import _super_search_monthly_key
+from mwmbl.tinysearchengine.indexer import Document
+
+User = get_user_model()
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def user(db):
+    u = User.objects.create_user(username="ssuser", email="ss@example.com", password="x")
+    EmailAddress.objects.create(user=u, email="ss@example.com", verified=True, primary=True)
+    return u
+
+
+@pytest.fixture
+def access_token(user):
+    return str(RefreshToken.for_user(user).access_token)
+
+
+@pytest.fixture
+def api_key(user):
+    raw, h = generate_api_key()
+    obj = ApiKey.objects.create(user=user, key=h, name="ss", scopes=[ApiKey.Scope.SEARCH])
+    obj.raw_key = raw
+    return obj
+
+
+@pytest.fixture
+def client(db):
+    return Client()
+
+
+def _parse_sse(body: bytes) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    for chunk in body.split(b"\n\n"):
+        chunk = chunk.strip()
+        if not chunk or chunk.startswith(b":"):
+            continue
+        event_type = None
+        data = None
+        for line in chunk.split(b"\n"):
+            if line.startswith(b"event: "):
+                event_type = line[len(b"event: "):].decode()
+            elif line.startswith(b"data: "):
+                data = json.loads(line[len(b"data: "):].decode())
+        if event_type is not None:
+            events.append((event_type, data))
+    return events
+
+
+def _read_stream(response) -> bytes:
+    content = response.streaming_content
+    if hasattr(content, "__aiter__"):
+        async def _collect():
+            return b"".join([chunk async for chunk in content])
+        return async_to_sync(_collect)()
+    return b"".join(content)
+
+
+def _stub_sources(monkeypatch, by_source: dict[str, list[Document]]):
+    """Replace the live source adapters with deterministic stubs."""
+    import mwmbl.tinysearchengine.super_search as ss
+
+    new_sources = {}
+    for name, docs in by_source.items():
+        async def fake_search(client, query, limit, _docs=docs):
+            return _docs
+        new_sources[name] = fake_search
+    monkeypatch.setattr(ss, "SOURCES", new_sources)
+
+
+def _stub_scoring(monkeypatch, scores: list[float]):
+    """Make score_documents return the supplied list (one score per doc)."""
+    import mwmbl.tinysearchengine.super_search as ss
+
+    iterator = iter(scores)
+
+    def fake_score(model, query, docs):
+        return [next(iterator, 0.0) for _ in docs]
+
+    monkeypatch.setattr(ss, "score_documents", fake_score)
+
+
+# ---------------------------------------------------------------------------
+# Auth & quota
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_super_search_requires_auth(client):
+    response = client.get("/api/v2/super-search/?q=python")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_super_search_with_api_key(client, api_key, monkeypatch):
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {"hn": []})
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    assert any(t == "done" for t, _ in events)
+
+
+@pytest.mark.django_db
+def test_super_search_with_jwt(client, access_token, user, monkeypatch):
+    cache.delete(_super_search_monthly_key(user.id))
+    _stub_sources(monkeypatch, {"hn": []})
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    assert response.status_code == 200
+    _read_stream(response)
+
+
+@pytest.mark.django_db
+def test_super_search_quota_enforced(client, api_key, monkeypatch):
+    cache.set(_super_search_monthly_key(api_key.user.id), 10, timeout=3600)
+    _stub_sources(monkeypatch, {"hn": []})
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 429
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+
+
+# ---------------------------------------------------------------------------
+# Event-stream behaviour
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_promoted_results_use_top_k(client, api_key, monkeypatch):
+    """Exactly top-K docs are promoted for crawling; surplus docs are excluded."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Best",   url="https://best.example/",   extract="x"),
+            Document(title="Second", url="https://second.example/", extract="x"),
+            Document(title="Third",  url="https://third.example/",  extract="x"),
+        ],
+    })
+    # Scores in descending order — only the top-2 should be promoted.
+    _stub_scoring(monkeypatch, [0.9, 0.5, 0.1] + [0.0] * 20)
+
+    def fake_crawl(url):
+        return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    event_types = [t for t, _ in events]
+
+    assert "source_started" in event_types
+    assert "source_returned" in event_types
+    promoted = [d for t, d in events if t == "result_promoted"]
+    promoted_urls = {p["url"] for p in promoted}
+    assert len(promoted) == 2
+    assert "https://best.example/" in promoted_urls
+    assert "https://second.example/" in promoted_urls
+    assert "https://third.example/" not in promoted_urls
+    assert event_types[-1] == "done"
+
+
+@pytest.mark.django_db
+def test_final_results_event_emitted(client, api_key, monkeypatch):
+    """A 'results' event with the full ranked list is emitted before 'done'."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
+    })
+    _stub_scoring(monkeypatch, [0.5] + [0.0] * 20)
+
+    def fake_crawl(url):
+        return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    event_types = [t for t, _ in events]
+
+    assert "results" in event_types
+    results_events = [d for t, d in events if t == "results"]
+    assert len(results_events) == 1
+    results = results_events[0]["results"]
+    assert len(results) >= 1
+    assert results[0]["url"] == "https://py.example/"
+    # 'results' must appear before 'done'
+    assert event_types.index("results") < event_types.index("done")
+
+
+@pytest.mark.django_db
+def test_source_failure_emits_source_failed(client, api_key, monkeypatch):
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+
+    import mwmbl.tinysearchengine.super_search as ss
+
+    async def bad_source(client, query, limit):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ss, "SOURCES", {"hn": bad_source})
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    events = _parse_sse(_read_stream(response))
+    types = [t for t, _ in events]
+    assert "source_failed" in types
+    assert types[-1] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Architecture guard: no forbidden sync symbols in the orchestrator
+# ---------------------------------------------------------------------------
+
+def test_super_search_module_has_no_blocking_imports():
+    """A failsafe against accidentally importing the sync `requests` lib
+    or using `time.sleep` at module scope in the async orchestrator.
+    """
+    path = Path(__file__).resolve().parent.parent / "mwmbl" / "tinysearchengine" / "super_search.py"
+    source = path.read_text()
+    assert "\nimport requests" not in source and "\nfrom requests " not in source
+    assert "time.sleep" not in source

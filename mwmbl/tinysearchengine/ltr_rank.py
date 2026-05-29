@@ -80,3 +80,21 @@ class LTRRanker(Ranker):
         if self.include_wiki:
             return get_wiki_results(query, self.num_wiki_results)
         return []
+
+
+def score_documents(model, query: str, documents: list[Document]) -> list[float]:
+    """Run the LTR model over the given documents and return raw per-doc scores.
+
+    Sync — call from a thread when used inside an async context.
+    """
+    if not documents:
+        return []
+    data = [{
+        'query': query,
+        'url': page.url,
+        'title': page.title if page.title is not None else "",
+        'extract': page.extract if page.extract is not None else "",
+        'score': page.score if page.score is not None else 0.0,
+    } for page in documents]
+    predictions = model.predict(data)
+    return [float(p) for p in predictions]

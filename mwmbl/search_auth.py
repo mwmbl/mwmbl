@@ -30,7 +30,9 @@ def invalidate_user_api_key_cache(user_id: int) -> None:
 class SearchApiKeyAuth(APIKeyHeader):
     param_name = "X-API-Key"
 
-    def authenticate(self, request, key: str):
+    def authenticate(self, request, key: str | None):
+        if not key:
+            return None
         key_hash = hashlib.sha256(key.encode()).hexdigest()
         cache_key = _cache_key(key_hash)
 
