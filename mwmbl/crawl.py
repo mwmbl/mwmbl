@@ -33,12 +33,35 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 django.setup()
 
 from mwmbl.indexer.update_urls import record_urls_in_database
-from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION
+from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION, USER_AGENT
 from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.indexer.index_batches import index_batches, index_pages
 
 BATCH_QUEUE_KEY = "batch-queue"
 REMOTE_SERVER = "https://api.mwmbl.org"
+
+_curated_domains_cache: set[str] = set()
+_curated_domains_fetched_at: float = 0.0
+CURATED_DOMAINS_CACHE_SECONDS = 300.0
+
+
+def _fetch_curated_domains() -> set[str]:
+    global _curated_domains_cache, _curated_domains_fetched_at
+    now = time.monotonic()
+    if now - _curated_domains_fetched_at < CURATED_DOMAINS_CACHE_SECONDS:
+        return _curated_domains_cache
+    try:
+        response = requests.get(
+            f"{REMOTE_SERVER}/api/v1/crawler/curated-domains",
+            timeout=10,
+            headers={"User-Agent": USER_AGENT},
+        )
+        response.raise_for_status()
+        _curated_domains_cache = set(response.json())
+        _curated_domains_fetched_at = now
+    except Exception:
+        logger.exception("Failed to fetch curated domains, using cached value")
+    return _curated_domains_cache
 
 
 # Validate environment variables when actually needed
@@ -92,7 +115,7 @@ class Crawler:
     def url_queue(self):
         """Lazy initialization of URL queue."""
         if self._url_queue is None:
-            self._url_queue = RedisURLQueue(self.redis, lambda: set())
+            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains)
         return self._url_queue
     
     def check_redis(self):
