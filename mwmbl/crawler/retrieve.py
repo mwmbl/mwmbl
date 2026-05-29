@@ -110,6 +110,46 @@ def robots_allowed(url):
     return allowed
 
 
+def _resolve_and_validate_link(href: str, current_url: str, base_url: str) -> str | None:
+    """Resolve a raw href to an absolute URL and validate it. Returns None if invalid."""
+    if not href.startswith("http"):
+        if "://" in href:
+            return None
+        if href.startswith("/"):
+            href = urljoin(base_url, href)
+        else:
+            href = urljoin(current_url, href)
+    if not href.startswith("http") or len(href) > MAX_URL_LENGTH:
+        return None
+    if BAD_URL_REGEX.search(href):
+        return None
+    try:
+        parsed = urlparse(href)
+    except ValueError:
+        return None
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+
+def get_dom_links(dom, current_url: str) -> set[str]:
+    """Extract hrefs from all <a> elements in the DOM.
+
+    justext drops paragraphs with no text nodes (e.g. icon-only anchors like
+    <a href="/discord"><img .../></a>), so their links never reach get_new_links.
+    This function captures those missed hrefs directly via XPath.
+    """
+    parsed_url = urlparse(current_url)
+    base_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "", "", ""))
+    result = set()
+    for anchor in dom.xpath("//a[@href]"):
+        href = (anchor.get("href") or "").strip()
+        if not href or href.startswith("#"):
+            continue
+        resolved = _resolve_and_validate_link(href, current_url, base_url)
+        if resolved:
+            result.add(resolved)
+    return result
+
+
 def get_new_links(paragraphs: list[Paragraph], current_url):
     new_links = set()
     extra_links = set()
@@ -119,33 +159,16 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
     for paragraph in paragraphs:
         if len(paragraph.links) > 0:
             for link in paragraph.links:
-                if not link.startswith("http"):
-                    if "://" in link:
-                        logger.debug(f"Bad URL: {link}")
-                        continue
-
-                    # Relative link
-                    if link.startswith("/"):
-                        link = urljoin(base_url, link)
-                    else:
-                        link = urljoin(current_url, link)
-
-                if link.startswith('http') and len(link) <= MAX_URL_LENGTH:
-                    if BAD_URL_REGEX.search(link):
-                        logger.debug(f"Found bad URL: {link}")
-                        continue
-                    try:
-                        parsed_url = urlparse(link)
-                    except ValueError:
-                        logger.info(f"Unable to parse link {link}")
-                        continue
-                    url_without_hash = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.query, ''))
-                    if paragraph.class_type == 'good':
-                        if len(new_links) < MAX_NEW_LINKS:
-                            new_links.add(url_without_hash)
-                    else:
-                        if len(extra_links) < MAX_EXTRA_LINKS and url_without_hash not in new_links:
-                            extra_links.add(url_without_hash)
+                resolved = _resolve_and_validate_link(link, current_url, base_url)
+                if resolved is None:
+                    logger.debug(f"Bad URL: {link}")
+                    continue
+                if paragraph.class_type == 'good':
+                    if len(new_links) < MAX_NEW_LINKS:
+                        new_links.add(resolved)
+                else:
+                    if len(extra_links) < MAX_EXTRA_LINKS and resolved not in new_links:
+                        extra_links.add(resolved)
                 if len(new_links) >= MAX_NEW_LINKS and len(extra_links) >= MAX_EXTRA_LINKS:
                     return new_links, extra_links
     return new_links, extra_links
@@ -257,6 +280,13 @@ def crawl_url(url):
         }
 
     new_links, extra_links = get_new_links(paragraphs, url)
+
+    # Also capture links from image-only anchors (e.g. icon links) that justext
+    # drops because their paragraphs have no text nodes.
+    for link in get_dom_links(dom, url):
+        if link not in new_links and len(extra_links) < MAX_EXTRA_LINKS:
+            extra_links.add(link)
+
     logger.debug(f"Got new links {new_links}")
     logger.debug(f"Got extra links {extra_links}")
 
