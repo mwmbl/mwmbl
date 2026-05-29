@@ -34,7 +34,6 @@ from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.search_setup import ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
-from mwmbl.tinysearchengine.rank import get_features
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
 from mwmbl.tokenizer import tokenize
 
@@ -70,33 +69,31 @@ def _result_payload(doc: Document, score: float, source: str, origin: str) -> di
 
 
 def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
-    """Return True if more than half the query terms match somewhere in the document.
+    """Return True if more than half the query terms have a whole-word match in the document.
 
-    Mirrors the filter in rank.py (score_result) to avoid surfacing results with
-    no meaningful term overlap before the LTR model sees them.
+    Uses \b word boundaries so that a query term like "exa" does not match
+    "example" via substring. The combined title+extract+URL is checked so that
+    a term present in any of those fields counts.
     """
     if not terms:
         return True
-    features = get_features(
-        terms,
-        doc.title or "",
-        doc.url or "",
-        doc.extract or "",
-        doc.score or 0.0,
-        True,
+    text = f"{doc.title or ''} {doc.extract or ''} {doc.url or ''}".lower()
+    matches = sum(
+        1 for t in terms
+        if re.search(rf'\b{re.escape(t)}\b', text)
     )
-    return features["match_terms"] > len(terms) / 2
+    return matches > len(terms) / 2
 
 
 def _url_term_score(url: str, terms: list[str]) -> int:
-    """Count how many query terms appear anywhere in the URL (case-insensitive).
+    """Count how many query terms appear as whole words anywhere in the URL.
 
-    Used to rank outbound links before crawling them — the LTR model does poorly
-    with proxy docs that have only URL-derived titles, while simple term overlap
-    directly captures relevance signal available in the URL itself.
+    Uses \b word boundaries so that "exa" does not score a URL containing
+    "example". URL separators (., -, /) count as word boundaries, so
+    "kagi.com/discord" correctly matches both "kagi" and "discord".
     """
     url_lower = url.lower()
-    return sum(1 for t in terms if t in url_lower)
+    return sum(1 for t in terms if re.search(rf'\b{re.escape(t)}\b', url_lower))
 
 
 def _title_from_url(url: str) -> str:
