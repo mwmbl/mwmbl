@@ -13,9 +13,10 @@ ENDPOINT = "https://hn.algolia.com/api/v1/search"
 
 async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Document]:
     try:
+        quoted_query = " ".join(f'"{term}"' for term in query.split())
         response = await client.get(
             ENDPOINT,
-            params={"query": query, "hitsPerPage": limit, "tags": "story"},
+            params={"query": quoted_query, "hitsPerPage": limit, "tags": "story"},
         )
         response.raise_for_status()
         payload = response.json()
