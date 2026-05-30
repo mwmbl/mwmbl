@@ -141,6 +141,7 @@ def test_super_search_with_jwt(client, access_token, user, monkeypatch):
 
 
 @pytest.mark.django_db
+@override_settings(SUPER_SEARCH_MONTHLY_LIMIT=10)
 def test_super_search_quota_enforced(client, api_key, monkeypatch):
     cache.set(_super_search_monthly_key(api_key.user.id), 10, timeout=3600)
     _stub_sources(monkeypatch, {"hn": []})

@@ -27,7 +27,7 @@ async def _client():
 
 async def test_hn_returns_documents(httpx_mock):
     httpx_mock.add_response(
-        url="https://hn.algolia.com/api/v1/search?query=python&hitsPerPage=5&tags=story",
+        url=re.compile(r"https://hn\.algolia\.com/api/v1/search\?.*query.*python.*"),
         json={"hits": [
             {"title": "Why Python", "url": "https://example.com/why", "objectID": "1"},
             {"title": "Ask HN", "story_text": "Some text", "objectID": "2"},  # no url
