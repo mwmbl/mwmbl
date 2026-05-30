@@ -294,6 +294,8 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document]) -> None:
                     secondary.append(
                         asyncio.create_task(_follow_links(doc, name, query, emit, all_docs))
                     )
+            if all_docs:
+                await _emit_final_results(query, all_docs, emit)
 
         if secondary:
             await asyncio.gather(*secondary, return_exceptions=True)
@@ -383,7 +385,9 @@ def init_router() -> None:
             "or JWT bearer token). Quota is 10 requests per user per month.\n\n"
             "Returns `text/event-stream`. Event types: `source_started`, "
             "`source_returned`, `source_failed`, `result_promoted`, "
-            "`page_fetched`, `link_followed`, `error`, `done`."
+            "`page_fetched`, `link_followed`, `results` (emitted progressively "
+            "after each source returns, and once more as the authoritative final "
+            "ranking — clients should replace their display on each), `error`, `done`."
         ),
         openapi_extra={
             "parameters": [{

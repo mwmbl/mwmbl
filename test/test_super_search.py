@@ -220,11 +220,12 @@ def test_final_results_event_emitted(client, api_key, monkeypatch):
 
     assert "results" in event_types
     results_events = [d for t, d in events if t == "results"]
-    assert len(results_events) == 1
-    results = results_events[0]["results"]
-    assert len(results) >= 1
-    assert results[0]["url"] == "https://py.example/"
-    # 'results' must appear before 'done'
+    assert len(results_events) >= 1
+    # The last results event is the authoritative final ranking.
+    last_results = results_events[-1]["results"]
+    assert len(last_results) >= 1
+    assert last_results[0]["url"] == "https://py.example/"
+    # At least one 'results' must appear before 'done'
     assert event_types.index("results") < event_types.index("done")
 
 
