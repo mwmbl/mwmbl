@@ -239,6 +239,27 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
             'status': 'ok'
         }
 
+    class CuratedDomain(Schema):
+        name: str
+
+    class CuratedDomainsResponse(Schema):
+        domains: list[CuratedDomain]
+
+    @r.get(
+        '/curated-domains',
+        summary="Get curated domains for crawling",
+        description=(
+            "Retrieve the list of approved domains curated by mwmbl users. "
+            "Crawlers should prioritize these domains when selecting URLs to crawl. "
+            "Results are cached server-side for 5 minutes."
+        ),
+    )
+    def get_curated_domains_endpoint(request) -> CuratedDomainsResponse:
+        from mwmbl.search_setup import get_curated_domains
+        return CuratedDomainsResponse(
+            domains=[CuratedDomain(name=d) for d in sorted(get_curated_domains())]
+        )
+
     @r.post(
         '/results',
         response={200: PostResultsResponse, 400: Error, 401: Error},
