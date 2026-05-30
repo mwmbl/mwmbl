@@ -211,15 +211,34 @@ async def _follow_links(
             all_docs.append(doc)
 
 
-async def _run_pipeline(query: str, emit) -> None:
-    per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
-    top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
+async def _emit_final_results(query: str, all_docs: list[Document], emit) -> None:
     terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
+
+    seen: set[str] = set()
+    unique: list[Document] = []
+    for doc in all_docs:
+        if doc.url and doc.title and doc.extract and doc.url not in seen:
+            seen.add(doc.url)
+            unique.append(doc)
+
+    if terms:
+        unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
+
+    if unique:
+        final_scores = await asyncio.to_thread(score_documents, ltr_model, query, unique)
+        ranked = sorted(zip(unique, final_scores), key=lambda x: -x[1])[:final_limit]
+        await emit("results", {
+            "results": [_result_payload(doc, score, "", "final") for doc, score in ranked],
+            "count": len(ranked),
+        })
+
+
+async def _run_pipeline(query: str, emit, all_docs: list[Document]) -> None:
+    per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
+    top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     timeout = httpx.Timeout(settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT)
-
-    all_docs: list[Document] = []
 
     # Min-heap tracking top-K seen so far: (score, counter, doc).
     # A doc enters the top-K when the heap has < k entries or its score beats
@@ -279,25 +298,6 @@ async def _run_pipeline(query: str, emit) -> None:
         if secondary:
             await asyncio.gather(*secondary, return_exceptions=True)
 
-    # Deduplicate and produce final ranked list.
-    seen: set[str] = set()
-    unique: list[Document] = []
-    for doc in all_docs:
-        if doc.url and doc.title and doc.extract and doc.url not in seen:
-            seen.add(doc.url)
-            unique.append(doc)
-
-    if terms:
-        unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
-
-    if unique:
-        final_scores = await asyncio.to_thread(score_documents, ltr_model, query, unique)
-        ranked = sorted(zip(unique, final_scores), key=lambda x: -x[1])[:final_limit]
-        await emit("results", {
-            "results": [_result_payload(doc, score, "", "final") for doc, score in ranked],
-            "count": len(ranked),
-        })
-
 
 # ---------------------------------------------------------------------------
 # SSE generator
@@ -307,6 +307,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     queue: asyncio.Queue = asyncio.Queue()
     started = time.monotonic()
     reason = "complete"
+    all_docs: list[Document] = []
 
     async def emit(event_type: str, data: Any) -> None:
         await queue.put((event_type, data))
@@ -315,7 +316,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         nonlocal reason
         try:
             await asyncio.wait_for(
-                _run_pipeline(query, emit),
+                _run_pipeline(query, emit, all_docs),
                 timeout=settings.SUPER_SEARCH_DEADLINE_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -328,6 +329,11 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
             reason = "error"
             await queue.put(("error", {"message": str(e)}))
         finally:
+            if reason in ("complete", "timed_out"):
+                try:
+                    await _emit_final_results(query, all_docs, emit)
+                except Exception:
+                    logger.exception("super-search failed to emit final results")
             await queue.put(_SENTINEL)
 
     task = asyncio.create_task(producer())
