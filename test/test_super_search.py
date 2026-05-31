@@ -94,15 +94,21 @@ def _stub_sources(monkeypatch, by_source: dict[str, list[Document]]):
 
 
 def _stub_scoring(monkeypatch, scores: list[float]):
-    """Make score_documents return the supplied list (one score per doc)."""
+    """Stub both the promotion scorer (_heuristic_score_docs) and the LTR final
+    ranker (score_documents) to consume from a single shared score iterator.
+    Promotion scores are consumed first; remaining scores go to final ranking."""
     import mwmbl.tinysearchengine.super_search as ss
 
     iterator = iter(scores)
 
-    def fake_score(model, query, docs):
+    def fake_promote(query, docs):
         return [next(iterator, 0.0) for _ in docs]
 
-    monkeypatch.setattr(ss, "score_documents", fake_score)
+    def fake_ltr(model, query, docs):
+        return [next(iterator, 0.0) for _ in docs]
+
+    monkeypatch.setattr(ss, "_heuristic_score_docs", fake_promote)
+    monkeypatch.setattr(ss, "score_documents", fake_ltr)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +200,73 @@ def test_promoted_results_use_top_k(client, api_key, monkeypatch):
     assert "https://second.example/" in promoted_urls
     assert "https://third.example/" not in promoted_urls
     assert event_types[-1] == "done"
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_heap_replacement_promotes_better_late_doc(client, api_key, monkeypatch):
+    """When the heap is full, a later doc with a higher score replaces the minimum and
+    is still promoted — the heap min-replacement path must work."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Low A",  url="https://low-a.example/",  extract="x"),
+            Document(title="Low B",  url="https://low-b.example/",  extract="x"),
+            Document(title="Low C",  url="https://low-c.example/",  extract="x"),
+            Document(title="Best",   url="https://best.example/",   extract="x"),
+        ],
+    })
+    # First two fill the heap at 0.1; Low C can't enter (0.1 > 0.1 is False);
+    # Best (0.9) beats the minimum and must be promoted.
+    _stub_scoring(monkeypatch, [0.1, 0.1, 0.1, 0.9] + [0.0] * 20)
+
+    def fake_crawl(url):
+        return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    promoted_urls = {d["url"] for t, d in events if t == "result_promoted"}
+
+    assert "https://best.example/" in promoted_urls, "High-score late doc must be promoted"
+    assert "https://low-c.example/" not in promoted_urls, "Equal-score doc must not displace heap entries"
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_heap_equal_score_does_not_enter_full_heap(client, api_key, monkeypatch):
+    """A doc whose score equals the heap minimum must NOT be promoted — the check is
+    strictly greater-than, so ties don't displace existing entries."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="First",  url="https://first.example/",  extract="x"),
+            Document(title="Second", url="https://second.example/", extract="x"),
+            Document(title="Third",  url="https://third.example/",  extract="x"),
+        ],
+    })
+    _stub_scoring(monkeypatch, [0.5, 0.5, 0.5] + [0.0] * 20)
+
+    def fake_crawl(url):
+        return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    events = _parse_sse(_read_stream(response))
+    promoted = [d for t, d in events if t == "result_promoted"]
+    promoted_urls = {p["url"] for p in promoted}
+
+    assert len(promoted) == 2
+    assert "https://third.example/" not in promoted_urls
 
 
 @pytest.mark.django_db

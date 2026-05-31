@@ -53,6 +53,26 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     return 0.0
 
 
+def score_result_whole(terms: list[str], result: Document, is_complete: bool) -> float:
+    """Score a document using the combined whole-field match for promotion decisions.
+
+    Uses match_score_whole from get_features() without the majority-terms zero filter,
+    so partial matches score continuously rather than collapsing to 0.0.
+    """
+    if not result.url:
+        return 0.0
+    features = get_features(
+        terms,
+        result.title or '',
+        result.url,
+        result.extract or '',
+        result.score or 0.0,
+        is_complete,
+    )
+    length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
+    return features['match_score_whole'] * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+
+
 def score_match(last_match_char, match_length, total_possible_match_length):
     # return (match_length + 1. / last_match_char) / (total_possible_match_length + 1)
     return MATCH_EXPONENT ** (match_length - total_possible_match_length) / last_match_char

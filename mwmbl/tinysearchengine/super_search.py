@@ -34,6 +34,7 @@ from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.search_setup import ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
+from mwmbl.tinysearchengine.rank import score_result_whole
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
 from mwmbl.tokenizer import tokenize
 
@@ -83,6 +84,13 @@ def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
         if re.search(rf'\b{re.escape(t)}\b', text)
     )
     return matches > len(terms) / 2
+
+
+def _heuristic_score_docs(query: str, docs: list[Document]) -> list[float]:
+    terms = tokenize(query)
+    if not terms:
+        return [0.0] * len(docs)
+    return [score_result_whole(terms, doc, is_complete=True) for doc in docs]
 
 
 def _url_term_score(url: str, terms: list[str]) -> int:
@@ -301,7 +309,7 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
             if not docs:
                 continue
 
-            scores = await asyncio.to_thread(score_documents, ltr_model, query, docs)
+            scores = await asyncio.to_thread(_heuristic_score_docs, query, docs)
             for doc, score in zip(docs, scores):
                 if doc.url and doc.title and doc.extract:
                     all_docs.append(doc)
