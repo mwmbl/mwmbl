@@ -78,6 +78,12 @@ pub const FEATURE_NAMES: &[&str] = &[
 
 pub const NUM_FEATURES: usize = FEATURE_NAMES.len(); // 50
 
+/// Index of `num_terms` (number of query terms) in the feature vector.
+pub const NUM_TERMS_INDEX: usize = 42;
+/// Index of `match_terms` (max distinct terms matched over title/extract/domain/
+/// domain_tokenized/path) in the feature vector.
+pub const MATCH_TERMS_INDEX: usize = NUM_FEATURES - 1;
+
 /// Result of matching query terms against a text part.
 #[derive(Debug, Default)]
 pub struct MatchFeatures {
@@ -355,6 +361,12 @@ mod tests {
     fn test_feature_count() {
         assert_eq!(FEATURE_NAMES.len(), NUM_FEATURES);
         assert_eq!(NUM_FEATURES, 50);
+    }
+
+    #[test]
+    fn test_filter_feature_indices() {
+        assert_eq!(FEATURE_NAMES[NUM_TERMS_INDEX], "num_terms");
+        assert_eq!(FEATURE_NAMES[MATCH_TERMS_INDEX], "match_terms");
     }
 
     #[test]
