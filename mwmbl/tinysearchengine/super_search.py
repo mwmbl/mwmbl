@@ -5,23 +5,29 @@ existing LTR model, and for any result above the threshold fetches the page,
 picks promising outbound links, and re-ranks those too. Progress and results
 are streamed to the client over Server-Sent Events.
 
+The SSE event payloads are defined by the ``Schema`` classes in the "Event
+payload schemas" section below; those classes are both serialized onto the wire
+and used to generate the OpenAPI documentation, so the two cannot drift.
+
 See plan: /api/v2/super-search/
 """
 import asyncio
+import copy
 import heapq
 import json
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import StreamingHttpResponse
-from ninja import Router
+from ninja import Router, Schema
 from ninja.errors import HttpError
+from pydantic import BaseModel, Field
 
 from mwmbl.crawler.retrieve import crawl_url
 from mwmbl.models import MwmblUser
@@ -50,23 +56,188 @@ _URL_TOKEN_RE = re.compile(r"[-_+]+")
 
 
 # ---------------------------------------------------------------------------
+# Event payload schemas
+#
+# These ``Schema`` classes are the single source of truth for the SSE event
+# payloads: every ``emit(...)`` call constructs one of them and the serializer
+# (`_sse_frame`) dumps it to JSON, while the OpenAPI spec is generated from the
+# same classes (see ``_event_oneof``). The wire format therefore cannot drift
+# from the documentation, and pydantic raises if a payload is ever built with
+# the wrong shape.
+# ---------------------------------------------------------------------------
+
+class ResultItem(Schema):
+    """A single ranked search result.
+
+    Carried directly by ``result_promoted`` events and inside the ``results``
+    list. ``title`` and ``extract`` are nullable because upstream sources may
+    omit them.
+    """
+    url: str = Field(description="Canonical URL of the result.",
+                     examples=["https://docs.rs/tokio"])
+    title: str | None = Field(default=None, description="Page title, if known.",
+                              examples=["Tokio — asynchronous Rust runtime"])
+    extract: str | None = Field(default=None, description="Short text snippet, if known.",
+                                examples=["Tokio is an asynchronous runtime for Rust…"])
+    score: float = Field(description="Relevance score (higher is better), rounded to 4 dp.",
+                         examples=[1.8423])
+    source: str = Field(
+        description=(
+            "Originating source for `result_promoted` (one of the Super Search "
+            "sources, e.g. `github`); empty string for items in the final "
+            "`results` ranking, which merges all sources."
+        ),
+        examples=["github", ""],
+    )
+    origin: Literal["direct", "final"] = Field(
+        description=(
+            "`direct` for a result promoted straight from a source; `final` for "
+            "an item in the authoritative merged ranking."
+        ),
+        examples=["direct"],
+    )
+
+
+class SourceStartedEvent(Schema):
+    """`source_started` — a source's query task has been launched (one per source)."""
+    source: str = Field(description="Name of the source whose query just started.",
+                        examples=["hn"])
+
+
+class SourceReturnedEvent(Schema):
+    """`source_returned` — a source finished successfully."""
+    source: str = Field(description="Name of the source that returned.", examples=["github"])
+    count: int = Field(description="Number of raw documents the source returned.", examples=[10])
+
+
+class SourceFailedEvent(Schema):
+    """`source_failed` — a source errored or timed out and contributed nothing."""
+    source: str = Field(description="Name of the source that failed.", examples=["arxiv"])
+    error: str = Field(
+        description="Failure reason: `\"timeout\"` or an exception message.",
+        examples=["timeout"],
+    )
+
+
+class ResultPromotedEvent(ResultItem):
+    """`result_promoted` — a returned doc entered the live top-K (and will have
+    its outbound links followed). Same shape as :class:`ResultItem` with
+    ``origin="direct"``.
+    """
+
+
+class PageFetchedEvent(Schema):
+    """`page_fetched` — a promoted page was crawled."""
+    url: str = Field(description="URL of the crawled page.",
+                     examples=["https://docs.rs/tokio"])
+    links: int = Field(description="Number of outbound links discovered on the page.",
+                       examples=[42])
+
+
+class LinkFollowedEvent(Schema):
+    """`link_followed` — an outbound link from a crawled page was fetched and added
+    to the candidate pool.
+    """
+    url: str = Field(description="URL of the followed link.",
+                     examples=["https://tokio.rs/tokio/tutorial"])
+    from_: str = Field(alias="from", description="URL of the parent page the link came from.",
+                       examples=["https://docs.rs/tokio"])
+
+
+class ResultsEvent(Schema):
+    """`results` — the current authoritative ranking.
+
+    Emitted progressively after each source returns, and once more as the final
+    ranking. Clients should **replace** their displayed list on each event.
+    """
+    results: list[ResultItem] = Field(description="Ranked results, best first.")
+    count: int = Field(description="Number of results in this ranking.", examples=[100])
+
+
+class ErrorEvent(Schema):
+    """`error` — the pipeline crashed; the stream will end."""
+    message: str = Field(description="Error message.", examples=["internal error"])
+
+
+class DoneEvent(Schema):
+    """`done` — terminal event sent once when the stream finishes."""
+    reason: Literal["complete", "timed_out", "cancelled", "error"] = Field(
+        description="Why the stream ended.", examples=["complete"],
+    )
+    elapsed_seconds: float = Field(description="Total wall-clock time for the request.",
+                                   examples=[8.123])
+    monthly_usage: int = Field(description="Caller's Super Search requests used this month "
+                                           "(including this one).", examples=[3])
+    monthly_limit: int = Field(description="Caller's monthly Super Search quota.", examples=[100])
+
+
+# Maps each SSE event name to the model describing its `data` payload. Used both
+# to document the response in OpenAPI and as a reference for the emit sites.
+_EVENT_MODELS: dict[str, type[Schema]] = {
+    "source_started": SourceStartedEvent,
+    "source_returned": SourceReturnedEvent,
+    "source_failed": SourceFailedEvent,
+    "result_promoted": ResultPromotedEvent,
+    "page_fetched": PageFetchedEvent,
+    "link_followed": LinkFollowedEvent,
+    "results": ResultsEvent,
+    "error": ErrorEvent,
+    "done": DoneEvent,
+}
+
+
+def _inline_defs(schema: dict) -> dict:
+    """Inline pydantic ``$defs`` so the schema is self-contained.
+
+    ``model_json_schema`` emits nested models (e.g. ``ResultItem``) as
+    ``$ref``s into a top-level ``$defs``. Those refs do not resolve once the
+    schema is embedded under ``openapi_extra``, so we splice the definitions in.
+    """
+    defs = schema.pop("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if ref and ref.startswith("#/$defs/"):
+                return resolve(copy.deepcopy(defs[ref.rsplit("/", 1)[-1]]))
+            return {k: resolve(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(schema)
+
+
+def _event_oneof() -> list[dict]:
+    """Build a ``oneOf`` of the event `data` payloads for the OpenAPI response."""
+    branches = []
+    for name, model in _EVENT_MODELS.items():
+        s = _inline_defs(model.model_json_schema(by_alias=True))
+        s["title"] = name  # so the spec/Swagger labels each branch by event name
+        branches.append(s)
+    return branches
+
+
+# ---------------------------------------------------------------------------
 # SSE helpers
 # ---------------------------------------------------------------------------
 
 def _sse_frame(event_type: str, data: Any) -> bytes:
+    if isinstance(data, BaseModel):
+        data = data.model_dump(by_alias=True)
     payload = json.dumps(data, default=str, ensure_ascii=False)
     return f"event: {event_type}\ndata: {payload}\n\n".encode("utf-8")
 
 
-def _result_payload(doc: Document, score: float, source: str, origin: str) -> dict:
-    return {
-        "url": doc.url,
-        "title": doc.title,
-        "extract": doc.extract,
-        "score": round(score, 4),
-        "source": source,
-        "origin": origin,
-    }
+def _result_payload(doc: Document, score: float, source: str, origin: Literal["direct", "final"]) -> ResultItem:
+    return ResultItem(
+        url=doc.url,
+        title=doc.title,
+        extract=doc.extract,
+        score=round(score, 4),
+        source=source,
+        origin=origin,
+    )
 
 
 def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
@@ -187,7 +358,7 @@ async def _follow_links(
 
     raw_links = list(content.get("links") or []) + list(content.get("extra_links") or [])
     raw_links = raw_links[:50]
-    await emit("page_fetched", {"url": parent.url, "links": len(raw_links)})
+    await emit("page_fetched", PageFetchedEvent(url=parent.url, links=len(raw_links)))
 
     parent_title = content.get("title") or parent.title or _title_from_url(parent.url)
     parent_extract = content.get("extract") or parent.extract or ""
@@ -217,7 +388,7 @@ async def _follow_links(
         c = fetched.get("content") if isinstance(fetched, dict) else None
         if not c:
             continue
-        await emit("link_followed", {"url": proxy_doc.url, "from": parent.url})
+        await emit("link_followed", LinkFollowedEvent(url=proxy_doc.url, **{"from": parent.url}))
         doc = Document(
             title=c.get("title") or _title_from_url(proxy_doc.url),
             url=proxy_doc.url,
@@ -252,10 +423,10 @@ async def _emit_final_results(
         if key == last_results_key[0]:
             return
         last_results_key[0] = key
-        await emit("results", {
-            "results": [_result_payload(doc, score, "", "final") for doc, score in ranked],
-            "count": len(ranked),
-        })
+        await emit("results", ResultsEvent(
+            results=[_result_payload(doc, score, "", "final") for doc, score in ranked],
+            count=len(ranked),
+        ))
 
 
 async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results_key: list) -> None:
@@ -293,7 +464,7 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
     ) as client:
         source_tasks = []
         for name, fn in SOURCES.items():
-            await emit("source_started", {"source": name})
+            await emit("source_started", SourceStartedEvent(source=name))
             source_tasks.append(
                 asyncio.create_task(_call_source(name, fn, client, query, per_source_limit))
             )
@@ -303,9 +474,9 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
         for completed in asyncio.as_completed(source_tasks):
             name, docs, error = await completed
             if error is not None:
-                await emit("source_failed", {"source": name, "error": error})
+                await emit("source_failed", SourceFailedEvent(source=name, error=error))
                 continue
-            await emit("source_returned", {"source": name, "count": len(docs)})
+            await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
             if not docs:
                 continue
 
@@ -357,7 +528,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         except Exception as e:  # noqa: BLE001
             logger.exception("super-search pipeline crashed")
             reason = "error"
-            await queue.put(("error", {"message": str(e)}))
+            await queue.put(("error", ErrorEvent(message=str(e))))
         finally:
             if reason in ("complete", "timed_out"):
                 try:
@@ -380,12 +551,12 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
             event_type, data = item
             yield _sse_frame(event_type, data)
 
-        yield _sse_frame("done", {
-            "reason": reason,
-            "elapsed_seconds": round(time.monotonic() - started, 3),
-            "monthly_usage": monthly_usage,
-            "monthly_limit": monthly_limit,
-        })
+        yield _sse_frame("done", DoneEvent(
+            reason=reason,
+            elapsed_seconds=round(time.monotonic() - started, 3),
+            monthly_usage=monthly_usage,
+            monthly_limit=monthly_limit,
+        ))
     finally:
         if not task.done():
             task.cancel()
@@ -405,17 +576,33 @@ def init_router() -> None:
         auth=None,  # handled manually in the view to support both API key and JWT under an async view
         summary="Super Search (streaming, SSE)",
         description=(
-            "Multi-source streaming search. Fans out to Hacker News, GitHub, "
-            "Stack Exchange, ArXiv and PyPI, re-ranks all results with the "
-            "Mwmbl LTR model, and for items above the relevance threshold "
+            "Multi-source streaming search. Fans out to Mwmbl, Hacker News, "
+            "GitHub, Stack Exchange, ArXiv and PyPI, re-ranks all results with "
+            "the Mwmbl LTR model, and for items above the relevance threshold "
             "crawls the page and follows the most promising outbound links.\n\n"
             "Authentication is required (search-scoped API key in `X-API-Key` "
-            "or JWT bearer token). Quota is 10 requests per user per month.\n\n"
-            "Returns `text/event-stream`. Event types: `source_started`, "
-            "`source_returned`, `source_failed`, `result_promoted`, "
-            "`page_fetched`, `link_followed`, `results` (emitted progressively "
-            "after each source returns, and once more as the authoritative final "
-            "ranking — clients should replace their display on each), `error`, `done`."
+            "or JWT bearer token). A per-user monthly quota applies; the limit "
+            "and your current usage are reported in the final `done` event.\n\n"
+            "## Response\n\n"
+            "Returns `text/event-stream`. Each event is framed as "
+            "`event: <type>\\ndata: <json>\\n\\n`, where `<json>` is the payload "
+            "described below. While the pipeline is idle the server sends SSE "
+            "comment lines (`: keepalive\\n\\n`, no event/data) to keep the "
+            "connection open; clients should ignore them.\n\n"
+            "### Event types\n\n"
+            "| Event | `data` payload | Meaning |\n"
+            "|---|---|---|\n"
+            "| `source_started` | `{source}` | A source's query task was launched (one per source). |\n"
+            "| `source_returned` | `{source, count}` | A source finished; `count` is the number of raw results it returned. |\n"
+            "| `source_failed` | `{source, error}` | A source errored or timed out; `error` is `\"timeout\"` or an exception message. |\n"
+            "| `result_promoted` | result item (`origin=\"direct\"`) | A result entered the live top-K and will have its outbound links followed. |\n"
+            "| `page_fetched` | `{url, links}` | A promoted page was crawled; `links` is the number of outbound links found. |\n"
+            "| `link_followed` | `{url, from}` | An outbound link from a crawled page was fetched and added to the candidate pool. |\n"
+            "| `results` | `{results[], count}` | The current authoritative ranking (items have `origin=\"final\"`). Emitted progressively after each source and once more at the end — **replace** your displayed list on each. |\n"
+            "| `error` | `{message}` | The pipeline crashed; the stream ends. |\n"
+            "| `done` | `{reason, elapsed_seconds, monthly_usage, monthly_limit}` | Terminal event. `reason` is `complete`, `timed_out`, `cancelled` or `error`. |\n\n"
+            "The exact JSON shape of every payload is given by the `oneOf` schema "
+            "of the 200 response below."
         ),
         openapi_extra={
             "parameters": [{
@@ -426,8 +613,15 @@ def init_router() -> None:
             }],
             "responses": {
                 "200": {
-                    "description": "An SSE stream of search events.",
-                    "content": {"text/event-stream": {"schema": {"type": "string"}}},
+                    "description": (
+                        "An SSE stream of search events. The body is a "
+                        "`text/event-stream`; each event's `data:` line is a JSON "
+                        "object matching one of the schemas below (keyed by event "
+                        "type via the schema `title`)."
+                    ),
+                    "content": {
+                        "text/event-stream": {"schema": {"oneOf": _event_oneof()}},
+                    },
                 },
             },
         },
