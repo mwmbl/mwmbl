@@ -6,6 +6,7 @@ These tests:
 - Verify quota, auth, event ordering, and forbidden-symbol presence in
   the orchestrator (architecture guard).
 """
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -321,6 +322,118 @@ def test_source_failure_emits_source_failed(client, api_key, monkeypatch):
     types = [t for t, _ in events]
     assert "source_failed" in types
     assert types[-1] == "done"
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_MONTHLY_LIMIT=2)
+def test_quota_increment_refunded_when_over_limit(client, api_key, monkeypatch):
+    """An over-limit request is rejected and the increment is refunded, so the
+    stored counter is not left permanently inflated (increment-first + refund)."""
+    key = _super_search_monthly_key(api_key.user.id)
+    cache.set(key, 2, timeout=3600)  # already at the limit
+    _stub_sources(monkeypatch, {"hn": []})
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 429
+    assert cache.get(key) == 2, "the rejected request must not leave the counter incremented"
+    cache.delete(key)
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_DEADLINE_SECONDS=0.05, SUPER_SEARCH_PER_SOURCE_TIMEOUT=2.0)
+def test_pipeline_deadline_times_out(client, api_key, monkeypatch):
+    """When the pipeline overruns the deadline, the stream still terminates with
+    a `done` event whose reason is `timed_out`."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+
+    import mwmbl.tinysearchengine.super_search as ss
+
+    async def slow_source(client, query, limit):
+        await asyncio.sleep(0.5)
+        return []
+
+    monkeypatch.setattr(ss, "SOURCES", {"hn": slow_source})
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    events = _parse_sse(_read_stream(response))
+    assert events[-1][0] == "done"
+    assert events[-1][1]["reason"] == "timed_out"
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_link_following_adds_followed_docs(client, api_key, monkeypatch):
+    """A promoted page is crawled, its outbound links followed, and the followed
+    docs appear in the final ranking — exercises page_fetched / link_followed."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Python parent", url="https://parent.example/",
+                        extract="python parent text")],
+    })
+    _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
+
+    def fake_crawl(url):
+        if url == "https://parent.example/":
+            return {"url": url, "status": 200, "content": {
+                "title": "Python parent", "extract": "python parent text",
+                "links": ["https://child.example/python-guide"], "extra_links": [],
+            }}
+        return {"url": url, "status": 200, "content": {
+            "title": "Python child", "extract": "about python", "links": [], "extra_links": [],
+        }}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    types = [t for t, _ in events]
+
+    assert "page_fetched" in types
+    followed = [d for t, d in events if t == "link_followed"]
+    assert any(d["url"] == "https://child.example/python-guide" and d["from"] == "https://parent.example/"
+               for d in followed)
+
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    final_urls = {r["url"] for r in final}
+    assert "https://child.example/python-guide" in final_urls
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=3)
+def test_no_duplicate_consecutive_results_frames(client, api_key, monkeypatch):
+    """The dedup guard must never emit two consecutive identical `results` frames."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Python one", url="https://one.example/", extract="python one"),
+            Document(title="Python two", url="https://two.example/", extract="python two"),
+        ],
+    })
+    _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 40)
+
+    def fake_crawl(url):
+        return {"url": url, "status": 200, "content": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    events = _parse_sse(_read_stream(response))
+    results_keys = [tuple(r["url"] for r in d["results"]) for t, d in events if t == "results"]
+    for prev, nxt in zip(results_keys, results_keys[1:]):
+        assert prev != nxt, "consecutive identical results frames must be deduplicated"
 
 
 # ---------------------------------------------------------------------------

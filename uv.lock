@@ -709,6 +709,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "defusedxml" },
     { name = "dj-database-url" },
     { name = "django" },
     { name = "django-allauth" },
@@ -777,6 +778,7 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'indexer'", specifier = "==4.10.0" },
     { name = "boto3", specifier = "==1.35.99" },
+    { name = "defusedxml", specifier = ">=0.7.0" },
     { name = "dj-database-url", specifier = ">=2.1.0" },
     { name = "django", specifier = ">=4.2.4" },
     { name = "django-allauth", specifier = "==0.57.2" },

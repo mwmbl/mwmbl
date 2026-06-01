@@ -1,8 +1,10 @@
 """ArXiv search via the public Atom API."""
 import logging
-from xml.etree import ElementTree as ET
+from xml.etree.ElementTree import ParseError
 
 import httpx
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring
 
 from mwmbl.tinysearchengine.indexer import Document
 
@@ -25,8 +27,8 @@ async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Docu
             },
         )
         response.raise_for_status()
-        root = ET.fromstring(response.text)
-    except (httpx.HTTPError, ET.ParseError) as e:
+        root = fromstring(response.text)
+    except (httpx.HTTPError, ParseError, DefusedXmlException) as e:
         logger.info("ArXiv source failed: %s", e)
         return []
 

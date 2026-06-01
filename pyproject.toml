@@ -47,6 +47,7 @@ dependencies = [
     "django-redis>=5.4.0",
     "polar-sdk>=0.10.0",
     "httpx>=0.27.0",
+    "defusedxml>=0.7.0",
 ]
 
 [project.optional-dependencies]

@@ -91,6 +91,20 @@ def increment_monthly_super_search(user_id: int) -> int:
     return cache.incr(key)
 
 
+def decrement_monthly_super_search(user_id: int) -> None:
+    """Refund one super-search increment (e.g. when the request is rejected over-limit).
+
+    Never drops below 0. No-op if the counter is missing.
+    """
+    key = _super_search_monthly_key(user_id)
+    try:
+        if cache.get(key, default=0) > 0:
+            cache.decr(key)
+    except ValueError:
+        # decr() raises if the key vanished between the get and the decr; ignore.
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Key scanning (used by background jobs only — requires django-redis)
 # ---------------------------------------------------------------------------

@@ -12,17 +12,21 @@ from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
+from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
 
-ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
+# UnsafeURLError subclasses ValueError, so it is already covered here, but list
+# it explicitly for clarity: an SSRF-blocked URL is skipped like any other bad URL.
+ALLOWED_EXCEPTIONS = (ValueError, UnsafeURLError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
 
 POST_BATCH_URL = '/api/v1/crawler/batches/'
 POST_NEW_BATCH_URL = '/api/v1/crawler/batches/new'
 
 TIMEOUT_SECONDS = 3
+MAX_REDIRECTS = 5
 MAX_FETCH_SIZE = 1024*1024
 MAX_URL_LENGTH = 150
 BAD_URL_REGEX = re.compile(r'\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$')
@@ -44,27 +48,41 @@ def fetch(url):
     """
     Fetch with a maximum timeout and maximum fetch size to avoid big pages bringing us down.
 
+    Redirects are followed manually so each hop can be re-validated against the
+    SSRF guard: a public URL must not be able to 3xx us into an internal address.
+
     https://stackoverflow.com/a/22347526
     """
 
-    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    for _ in range(MAX_REDIRECTS + 1):
+        validate_url(url)
+        r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS,
+                         headers=headers, allow_redirects=False)
 
-    size = 0
-    start = time.time()
+        if r.is_redirect and r.next is not None:
+            r.close()
+            url = urljoin(url, r.headers.get("Location", ""))
+            continue
 
-    content = b""
-    for chunk in r.iter_content(1024):
-        if time.time() - start > TIMEOUT_SECONDS:
-            raise ValueError('Timeout reached')
+        size = 0
+        start = time.time()
 
-        content += chunk
+        content = b""
+        for chunk in r.iter_content(1024):
+            if time.time() - start > TIMEOUT_SECONDS:
+                raise ValueError('Timeout reached')
 
-        size += len(chunk)
-        if size > MAX_FETCH_SIZE:
-            logger.debug(f"Maximum size reached for URL {url}")
-            break
+            content += chunk
 
-    return r.status_code, content
+            size += len(chunk)
+            if size > MAX_FETCH_SIZE:
+                logger.debug(f"Maximum size reached for URL {url}")
+                break
+
+        return r.status_code, content
+
+    raise ValueError(f"Too many redirects for URL {url}")
 
 
 def robots_allowed(url):

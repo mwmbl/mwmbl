@@ -23,6 +23,7 @@ from mwmbl.justext.core import html_to_dom, ParagraphMaker, classify_paragraphs,
 from requests.exceptions import RequestException
 
 from mwmbl.crawler.app import stats_manager
+from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
 from mwmbl.justext.utils import get_stoplist
 from mwmbl.models import Curation, FlagCuration, DomainSubmission
 from mwmbl.search_setup import ranker, index_path
@@ -138,7 +139,12 @@ def add_url(request):
     query = request.POST["query"]
 
     try:
-        response = requests.get(new_url, timeout=5)
+        validate_url(new_url)
+    except UnsafeURLError:
+        return HttpResponseBadRequest("Refusing to fetch that URL.")
+
+    try:
+        response = requests.get(new_url, timeout=5, allow_redirects=False)
     except RequestException as e:
         return HttpResponseBadRequest(f"Could not fetch URL: {str(e)}")
 

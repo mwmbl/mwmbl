@@ -14,6 +14,7 @@ See plan: /api/v2/super-search/
 import asyncio
 import copy
 import heapq
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import re
@@ -33,7 +34,7 @@ from mwmbl.crawler.retrieve import crawl_url
 from mwmbl.models import MwmblUser
 from mwmbl.quota import (
     check_rate_limit,
-    get_monthly_super_search_count,
+    decrement_monthly_super_search,
     increment_monthly_super_search,
 )
 from mwmbl.search_auth import SearchApiKeyAuth
@@ -53,6 +54,21 @@ HTTP_USER_AGENT = "mwmbl-super-search/0.1 (+https://mwmbl.org)"
 _SENTINEL: object = object()
 _URL_EXT_RE = re.compile(r"\.\w{1,5}$")
 _URL_TOKEN_RE = re.compile(r"[-_+]+")
+
+# Dedicated, bounded pool for the (synchronous, self-timeout-bounded) crawl_url
+# calls. Keeping crawls off the default executor stops a burst of page fetches
+# from starving the threads used by score_documents / the ORM, and caps how many
+# crawl threads can keep running after the pipeline deadline fires.
+_CRAWL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=getattr(settings, "SUPER_SEARCH_CRAWL_WORKERS", 8),
+    thread_name_prefix="ss-crawl",
+)
+
+
+async def _crawl(url: str):
+    """Run the synchronous crawl_url on the dedicated crawl executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url)
 
 
 # ---------------------------------------------------------------------------
@@ -340,14 +356,14 @@ async def _call_source(name: str, fn, client: httpx.AsyncClient, query: str, lim
 
 
 async def _follow_links(
-    parent: Document, parent_source: str, query: str, emit, all_docs: list[Document],
-    last_results_key: list,
+    parent: Document, query: str, emit, all_docs: list[Document],
+    last_results_key: list, lock: asyncio.Lock,
 ) -> None:
     """Crawl the parent URL, score its outbound links, and collect the best for final ranking."""
     max_links = settings.SUPER_SEARCH_MAX_LINKS_PER_PAGE
 
     try:
-        result = await asyncio.to_thread(crawl_url, parent.url)
+        result = await _crawl(parent.url)
     except Exception as e:  # noqa: BLE001
         logger.info("crawl_url failed for %s: %s", parent.url, e)
         return
@@ -366,7 +382,7 @@ async def _follow_links(
         all_docs.append(Document(title=parent_title, url=parent.url, extract=parent_extract))
 
     if not raw_links:
-        await _emit_final_results(query, all_docs, emit, last_results_key)
+        await _emit_final_results(query, all_docs, emit, last_results_key, lock)
         return
 
     terms = tokenize(query)
@@ -378,7 +394,7 @@ async def _follow_links(
         return
 
     fetches = await asyncio.gather(
-        *[asyncio.to_thread(crawl_url, d.url) for d, _ in ranked],
+        *[_crawl(d.url) for d, _ in ranked],
         return_exceptions=True,
     )
 
@@ -397,26 +413,33 @@ async def _follow_links(
         if doc.url and doc.title and doc.extract:
             all_docs.append(doc)
 
-    await _emit_final_results(query, all_docs, emit, last_results_key)
+    await _emit_final_results(query, all_docs, emit, last_results_key, lock)
 
 
 async def _emit_final_results(
-    query: str, all_docs: list[Document], emit, last_results_key: list
+    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock
 ) -> None:
     terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
 
-    seen: set[str] = set()
-    unique: list[Document] = []
-    for doc in all_docs:
-        if doc.url and doc.title and doc.extract and doc.url not in seen:
-            seen.add(doc.url)
-            unique.append(doc)
+    # Serialize the score → dedup-check → emit sequence: concurrent secondary
+    # tasks would otherwise both pass the dedup check before either updates the
+    # key, emitting duplicate identical `results` frames and re-scoring the same
+    # set in parallel.
+    async with lock:
+        seen: set[str] = set()
+        unique: list[Document] = []
+        for doc in all_docs:
+            if doc.url and doc.title and doc.extract and doc.url not in seen:
+                seen.add(doc.url)
+                unique.append(doc)
 
-    if terms:
-        unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
+        if terms:
+            unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
 
-    if unique:
+        if not unique:
+            return
+
         final_scores = await asyncio.to_thread(score_documents, ltr_model, query, unique)
         ranked = sorted(zip(unique, final_scores), key=lambda x: -x[1])[:final_limit]
         key = tuple(doc.url for doc, _ in ranked)
@@ -429,7 +452,9 @@ async def _emit_final_results(
         ))
 
 
-async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results_key: list) -> None:
+async def _run_pipeline(
+    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock
+) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
@@ -487,10 +512,10 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
                 if _maybe_promote(doc, score):
                     await emit("result_promoted", _result_payload(doc, score, name, "direct"))
                     secondary.append(
-                        asyncio.create_task(_follow_links(doc, name, query, emit, all_docs, last_results_key))
+                        asyncio.create_task(_follow_links(doc, query, emit, all_docs, last_results_key, lock))
                     )
             if all_docs:
-                await _emit_final_results(query, all_docs, emit, last_results_key)
+                await _emit_final_results(query, all_docs, emit, last_results_key, lock)
 
         if secondary:
             results = await asyncio.gather(*secondary, return_exceptions=True)
@@ -509,6 +534,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     reason = "complete"
     all_docs: list[Document] = []
     last_results_key: list = [None]
+    results_lock = asyncio.Lock()
 
     async def emit(event_type: str, data: Any) -> None:
         await queue.put((event_type, data))
@@ -517,7 +543,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         nonlocal reason
         try:
             await asyncio.wait_for(
-                _run_pipeline(query, emit, all_docs, last_results_key),
+                _run_pipeline(query, emit, all_docs, last_results_key, results_lock),
                 timeout=settings.SUPER_SEARCH_DEADLINE_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -532,7 +558,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         finally:
             if reason in ("complete", "timed_out"):
                 try:
-                    await _emit_final_results(query, all_docs, emit, last_results_key)
+                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock)
                 except Exception:
                     logger.exception("super-search failed to emit final results")
             await queue.put(_SENTINEL)
@@ -633,14 +659,17 @@ def init_router() -> None:
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
 
         monthly_limit = settings.SUPER_SEARCH_MONTHLY_LIMIT
-        current = await sync_to_async(get_monthly_super_search_count)(user.id)
-        if current >= monthly_limit:
+        # Increment first, then check: this makes the quota check atomic under
+        # concurrent requests (a check-then-increment would let racing requests
+        # both pass). Refund the increment if the caller is over the limit.
+        monthly_usage = await sync_to_async(increment_monthly_super_search)(user.id)
+        if monthly_usage > monthly_limit:
+            await sync_to_async(decrement_monthly_super_search)(user.id)
             raise HttpError(
                 429,
                 f"Super Search monthly quota exceeded: {monthly_limit} requests per month "
-                f"and you have used {current}.",
+                f"and you have used {monthly_limit}.",
             )
-        monthly_usage = await sync_to_async(increment_monthly_super_search)(user.id)
 
         return StreamingHttpResponse(
             _sse_stream(q, monthly_usage, monthly_limit),
