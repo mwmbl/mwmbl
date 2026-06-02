@@ -128,15 +128,9 @@ def robots_allowed(url):
     return allowed
 
 
-def _resolve_and_validate_link(href: str, current_url: str, base_url: str) -> str | None:
+def _resolve_and_validate_link(href: str, current_url: str) -> str | None:
     """Resolve a raw href to an absolute URL and validate it. Returns None if invalid."""
-    if not href.startswith("http"):
-        if "://" in href:
-            return None
-        if href.startswith("/"):
-            href = urljoin(base_url, href)
-        else:
-            href = urljoin(current_url, href)
+    href = urljoin(current_url, href)
     if not href.startswith("http") or len(href) > MAX_URL_LENGTH:
         return None
     if BAD_URL_REGEX.search(href):
@@ -155,14 +149,12 @@ def get_dom_links(dom, current_url: str) -> set[str]:
     <a href="/discord"><img .../></a>), so their links never reach get_new_links.
     This function captures those missed hrefs directly via XPath.
     """
-    parsed_url = urlparse(current_url)
-    base_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "", "", ""))
     result = set()
     for anchor in dom.xpath("//a[@href]"):
         href = (anchor.get("href") or "").strip()
         if not href or href.startswith("#"):
             continue
-        resolved = _resolve_and_validate_link(href, current_url, base_url)
+        resolved = _resolve_and_validate_link(href, current_url)
         if resolved:
             result.add(resolved)
     return result
@@ -171,13 +163,11 @@ def get_dom_links(dom, current_url: str) -> set[str]:
 def get_new_links(paragraphs: list[Paragraph], current_url):
     new_links = set()
     extra_links = set()
-    parsed_url = urlparse(current_url)
-    base_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "", "", ""))
 
     for paragraph in paragraphs:
         if len(paragraph.links) > 0:
             for link in paragraph.links:
-                resolved = _resolve_and_validate_link(link, current_url, base_url)
+                resolved = _resolve_and_validate_link(link, current_url)
                 if resolved is None:
                     logger.debug(f"Bad URL: {link}")
                     continue
