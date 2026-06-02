@@ -12,17 +12,21 @@ from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
+from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
 
-ALLOWED_EXCEPTIONS = (ValueError, ConnectionError, ReadTimeout, TimeoutError,
+# UnsafeURLError subclasses ValueError, so it is already covered here, but list
+# it explicitly for clarity: an SSRF-blocked URL is skipped like any other bad URL.
+ALLOWED_EXCEPTIONS = (ValueError, UnsafeURLError, ConnectionError, ReadTimeout, TimeoutError,
                       OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
 
 POST_BATCH_URL = '/api/v1/crawler/batches/'
 POST_NEW_BATCH_URL = '/api/v1/crawler/batches/new'
 
 TIMEOUT_SECONDS = 3
+MAX_REDIRECTS = 5
 MAX_FETCH_SIZE = 1024*1024
 MAX_URL_LENGTH = 150
 BAD_URL_REGEX = re.compile(r'\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$')
@@ -44,27 +48,41 @@ def fetch(url):
     """
     Fetch with a maximum timeout and maximum fetch size to avoid big pages bringing us down.
 
+    Redirects are followed manually so each hop can be re-validated against the
+    SSRF guard: a public URL must not be able to 3xx us into an internal address.
+
     https://stackoverflow.com/a/22347526
     """
 
-    r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    for _ in range(MAX_REDIRECTS + 1):
+        validate_url(url)
+        r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS,
+                         headers=headers, allow_redirects=False)
 
-    size = 0
-    start = time.time()
+        if r.is_redirect and r.next is not None:
+            r.close()
+            url = urljoin(url, r.headers.get("Location", ""))
+            continue
 
-    content = b""
-    for chunk in r.iter_content(1024):
-        if time.time() - start > TIMEOUT_SECONDS:
-            raise ValueError('Timeout reached')
+        size = 0
+        start = time.time()
 
-        content += chunk
+        content = b""
+        for chunk in r.iter_content(1024):
+            if time.time() - start > TIMEOUT_SECONDS:
+                raise ValueError('Timeout reached')
 
-        size += len(chunk)
-        if size > MAX_FETCH_SIZE:
-            logger.debug(f"Maximum size reached for URL {url}")
-            break
+            content += chunk
 
-    return r.status_code, content
+            size += len(chunk)
+            if size > MAX_FETCH_SIZE:
+                logger.debug(f"Maximum size reached for URL {url}")
+                break
+
+        return r.status_code, content
+
+    raise ValueError(f"Too many redirects for URL {url}")
 
 
 def robots_allowed(url):
@@ -110,45 +128,93 @@ def robots_allowed(url):
     return allowed
 
 
+def _resolve_and_validate_link(href: str, current_url: str) -> str | None:
+    """Resolve a raw href to an absolute URL and validate it. Returns None if invalid."""
+    href = urljoin(current_url, href)
+    if not href.startswith("http") or len(href) > MAX_URL_LENGTH:
+        return None
+    if BAD_URL_REGEX.search(href):
+        return None
+    try:
+        parsed = urlparse(href)
+    except ValueError:
+        return None
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+
+def get_dom_links(dom, current_url: str) -> set[str]:
+    """Extract hrefs from all <a> elements in the DOM.
+
+    justext drops paragraphs with no text nodes (e.g. icon-only anchors like
+    <a href="/discord"><img .../></a>), so their links never reach get_new_links.
+    This function captures those missed hrefs directly via XPath.
+    """
+    result = set()
+    for anchor in dom.xpath("//a[@href]"):
+        href = (anchor.get("href") or "").strip()
+        if not href or href.startswith("#"):
+            continue
+        resolved = _resolve_and_validate_link(href, current_url)
+        if resolved:
+            result.add(resolved)
+    return result
+
+
 def get_new_links(paragraphs: list[Paragraph], current_url):
     new_links = set()
     extra_links = set()
-    parsed_url = urlparse(current_url)
-    base_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "", "", ""))
 
     for paragraph in paragraphs:
         if len(paragraph.links) > 0:
             for link in paragraph.links:
-                if not link.startswith("http"):
-                    if "://" in link:
-                        logger.debug(f"Bad URL: {link}")
-                        continue
-
-                    # Relative link
-                    if link.startswith("/"):
-                        link = urljoin(base_url, link)
-                    else:
-                        link = urljoin(current_url, link)
-
-                if link.startswith('http') and len(link) <= MAX_URL_LENGTH:
-                    if BAD_URL_REGEX.search(link):
-                        logger.debug(f"Found bad URL: {link}")
-                        continue
-                    try:
-                        parsed_url = urlparse(link)
-                    except ValueError:
-                        logger.info(f"Unable to parse link {link}")
-                        continue
-                    url_without_hash = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.query, ''))
-                    if paragraph.class_type == 'good':
-                        if len(new_links) < MAX_NEW_LINKS:
-                            new_links.add(url_without_hash)
-                    else:
-                        if len(extra_links) < MAX_EXTRA_LINKS and url_without_hash not in new_links:
-                            extra_links.add(url_without_hash)
+                resolved = _resolve_and_validate_link(link, current_url)
+                if resolved is None:
+                    logger.debug(f"Bad URL: {link}")
+                    continue
+                if paragraph.class_type == 'good':
+                    if len(new_links) < MAX_NEW_LINKS:
+                        new_links.add(resolved)
+                else:
+                    if len(extra_links) < MAX_EXTRA_LINKS and resolved not in new_links:
+                        extra_links.add(resolved)
                 if len(new_links) >= MAX_NEW_LINKS and len(extra_links) >= MAX_EXTRA_LINKS:
                     return new_links, extra_links
     return new_links, extra_links
+
+
+def extract_from_html_text(html_text: str) -> str:
+    """Extract a clean plain-text snippet from an HTML fragment using the justext pipeline."""
+    html_bytes = f"<html><body>{html_text}</body></html>".encode(DEFAULT_ENCODING)
+    try:
+        dom = html_to_dom(html_bytes, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
+        paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
+    except Exception:
+        return ""
+    extract = ""
+    for paragraph in paragraphs:
+        if paragraph.class_type != "good":
+            continue
+        extract += " " + paragraph.text.strip()
+        if len(extract) > NUM_EXTRACT_CHARS:
+            extract = extract[:NUM_EXTRACT_CHARS - 1] + "…"
+            break
+    return extract.strip()
+
+
+def get_og_meta(dom) -> tuple[str, str]:
+    """Return (og:title, og:description) from Open Graph meta tags, or empty strings."""
+    og_title = ""
+    og_desc = ""
+    for meta in dom.xpath("//meta[@property and @content]"):
+        prop = (meta.get("property") or "").strip().lower()
+        value = (meta.get("content") or "").strip()
+        if prop == "og:title" and not og_title:
+            og_title = value
+        elif prop == "og:description" and not og_desc:
+            og_desc = value
+        if og_title and og_desc:
+            break
+    return og_title, og_desc
 
 
 def crawl_url(url):
@@ -238,6 +304,13 @@ def crawl_url(url):
         }
 
     new_links, extra_links = get_new_links(paragraphs, url)
+
+    # Also capture links from image-only anchors (e.g. icon links) that justext
+    # drops because their paragraphs have no text nodes.
+    for link in get_dom_links(dom, url):
+        if link not in new_links and len(extra_links) < MAX_EXTRA_LINKS:
+            extra_links.add(link)
+
     logger.debug(f"Got new links {new_links}")
     logger.debug(f"Got extra links {extra_links}")
 
@@ -249,6 +322,15 @@ def crawl_url(url):
         if len(extract) > NUM_EXTRACT_CHARS:
             extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
             break
+
+    # For JS-first pages (e.g. Discord, SPAs) justext finds no body content.
+    # Fall back to Open Graph meta tags so these pages are still indexable.
+    if not title or not extract:
+        og_title, og_desc = get_og_meta(dom)
+        if not title and og_title:
+            title = og_title[:NUM_TITLE_CHARS - 1] + '…' if len(og_title) > NUM_TITLE_CHARS else og_title
+        if not extract and og_desc:
+            extract = og_desc[:NUM_EXTRACT_CHARS - 1] + '…' if len(og_desc) > NUM_EXTRACT_CHARS else og_desc
 
     return {
       'url': url,

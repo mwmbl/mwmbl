@@ -113,6 +113,7 @@ v2_api = NinjaExtraAPI(
     openapi_extra={
         "tags": [
             {"name": "Search"},
+            {"name": "Super Search"},
         ]
     },
 )
@@ -137,12 +138,14 @@ def register_routers(ranker, batch_cache, queued_batches):
     dependencies (ranker, batch_cache, queued_batches) are available.
     """
     import mwmbl.tinysearchengine.search as search_module
+    import mwmbl.tinysearchengine.super_search as super_search_module
     import mwmbl.crawler.app as crawler_module
     from mwmbl.platform.api import router as platform_router
 
     # Initialise routers that depend on runtime objects
     search_module.init_router(ranker)
     search_module.init_v2_router(ranker)
+    super_search_module.init_router()
     crawler_module.init_router(batch_cache, queued_batches)
 
     api.add_router("/search/", search_module.router, tags=["Search"])
@@ -150,3 +153,4 @@ def register_routers(ranker, batch_cache, queued_batches):
     api.add_router("/platform/", platform_router, tags=["Platform"])
 
     v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
+    v2_api.add_router("/super-search/", super_search_module.router, tags=["Super Search"])

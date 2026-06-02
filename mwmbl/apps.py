@@ -50,6 +50,21 @@ class MwmblConfig(AppConfig):
         Schedule periodic background tasks if they are not already queued.
         Uses django-background-tasks; requires `manage.py process_tasks` to be running.
         """
+        import asyncio
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Under bare `uvicorn` (as opposed to gunicorn+uvicorn-workers), apps.ready()
+        # runs with an active event loop, so the sync ORM call below raises
+        # SynchronousOnlyOperation. The scheduling is idempotent and the production
+        # `process_tasks` worker creates the entry too, so skip with a quiet note.
+        try:
+            asyncio.get_running_loop()
+            log.info("Skipping background task scheduling: running in async context.")
+            return
+        except RuntimeError:
+            pass
+
         try:
             from background_task.models import Task
             from mwmbl.background import sync_search_counts
@@ -62,7 +77,4 @@ class MwmblConfig(AppConfig):
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
-            import logging
-            logging.getLogger(__name__).exception(
-                "Failed to schedule background tasks"
-            )
+            log.exception("Failed to schedule background tasks")

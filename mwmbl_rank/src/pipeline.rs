@@ -6,7 +6,7 @@
 
 use xgb::{parameters, Booster, DMatrix};
 
-use crate::features::{get_features_with_regex, NUM_FEATURES};
+use crate::features::{get_features_with_regex, MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX};
 use crate::text::{tokenize, build_query_regex};
 
 /// A single document record passed from Python.
@@ -252,8 +252,19 @@ impl XGBPipeline {
         let dmat = DMatrix::from_dense(&flat_features, n_rows)
             .map_err(|e| format!("Failed to create DMatrix: {}", e))?;
 
-        let predictions = booster.predict(&dmat)
+        let mut predictions = booster.predict(&dmat)
             .map_err(|e| format!("XGBoost prediction failed: {}", e))?;
+
+        // Replicate the heuristic ranker's majority-terms filter: drop any result that
+        // matches no more than half the query terms. match_terms (the max matched terms
+        // over fields) and num_terms are already in the extracted feature matrix, so this
+        // reuses the computed features rather than recomputing them.
+        for (i, pred) in predictions.iter_mut().enumerate() {
+            let row = &flat_features[i * NUM_FEATURES..(i + 1) * NUM_FEATURES];
+            if row[MATCH_TERMS_INDEX] <= row[NUM_TERMS_INDEX] / 2.0 {
+                *pred = 0.0;
+            }
+        }
 
         Ok(predictions)
     }
@@ -329,6 +340,41 @@ mod tests {
         for &p in &preds {
             assert!(p >= 0.0 && p <= 1.0, "Prediction {} out of [0,1]", p);
         }
+    }
+
+    #[test]
+    fn test_predict_filters_too_few_match_terms() {
+        // Train on records that all match the query, then predict on a mix of
+        // matching and non-matching documents. Non-matching docs (match_terms <=
+        // num_terms / 2) must be forced to 0.0 regardless of the model output.
+        let records = make_records(20);
+        let labels: Vec<f32> = vec![1.0; 20];
+        let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        pipeline.fit(&records, &labels).expect("fit should succeed");
+
+        let test = vec![
+            // Matches both query terms ("rust programming") -> kept.
+            DocumentRecord {
+                query: "rust programming".to_string(),
+                url: "https://example.com/rust".to_string(),
+                title: "Rust Programming".to_string(),
+                extract: "rust programming language".to_string(),
+                score: 1.0,
+            },
+            // Matches no query terms -> filtered to 0.0.
+            DocumentRecord {
+                query: "rust programming".to_string(),
+                url: "https://example.com/cooking".to_string(),
+                title: "Cooking Recipes".to_string(),
+                extract: "how to bake bread".to_string(),
+                score: 1.0,
+            },
+        ];
+
+        let preds = pipeline.predict(&test).expect("predict should succeed");
+        assert_eq!(preds.len(), 2);
+        assert!(preds[0] > 0.0, "matching doc should keep its prediction");
+        assert_eq!(preds[1], 0.0, "non-matching doc should be filtered to 0.0");
     }
 
     #[test]

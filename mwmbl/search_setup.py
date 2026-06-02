@@ -33,7 +33,7 @@ index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
-ranker = DomainLimitingRanker(LTRRanker(tiny_index, completer, _model, include_wiki=True, num_wiki_results=3))
+ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
+ranker = DomainLimitingRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True, num_wiki_results=3))
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
