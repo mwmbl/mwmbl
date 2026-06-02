@@ -31,13 +31,12 @@ from ninja.errors import HttpError
 from pydantic import BaseModel, Field
 
 from mwmbl.crawler.retrieve import crawl_url
-from mwmbl.models import MwmblUser
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_super_search,
     increment_monthly_super_search,
 )
-from mwmbl.search_auth import SearchApiKeyAuth
+from mwmbl.search_auth import authenticate_user
 from mwmbl.search_setup import ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
@@ -304,37 +303,6 @@ def _title_from_url(url: str) -> str:
     last = _URL_EXT_RE.sub("", last)
     return _URL_TOKEN_RE.sub(" ", last).strip() or parsed.netloc
 
-
-
-async def _authenticate(request) -> MwmblUser:
-    """Resolve the requesting user from either an X-API-Key header or a JWT.
-
-    Returns the user on success; raises HttpError(401) otherwise.
-    Database lookups are off-loaded via ``sync_to_async`` because the view
-    that calls this is async.
-    """
-    raw_key = request.headers.get("X-API-Key")
-    if raw_key:
-        api_key = await sync_to_async(SearchApiKeyAuth().authenticate)(request, raw_key)
-        if api_key is None:
-            raise HttpError(401, "Invalid API key.")
-        return await sync_to_async(lambda: api_key.user)()
-
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[len("Bearer "):]
-        try:
-            from ninja_jwt.tokens import AccessToken
-            access = AccessToken(token)
-            user_id = access["user_id"]
-        except Exception:
-            raise HttpError(401, "Invalid token.")
-        try:
-            return await sync_to_async(MwmblUser.objects.get)(id=user_id)
-        except MwmblUser.DoesNotExist:
-            raise HttpError(401, "Unknown user.")
-
-    raise HttpError(401, "Authentication required: X-API-Key or Bearer token.")
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +621,7 @@ def init_router() -> None:
         },
     )
     async def super_search(request, q: str):
-        user = await _authenticate(request)
+        user = await authenticate_user(request)
 
         if not await sync_to_async(check_rate_limit)(user.id):
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
