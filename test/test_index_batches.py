@@ -1,5 +1,11 @@
-from mwmbl.indexer.index_batches import sort_documents, combine_documents, _merge_user_ids, MAX_USER_IDS
-from mwmbl.tinysearchengine.indexer import Document, DocumentState
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from mwmbl.indexer.index_batches import (
+    sort_documents, combine_documents, _merge_user_ids, MAX_USER_IDS,
+    index_results_against_query,
+)
+from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 
 
 class UrlRanker:
@@ -81,6 +87,44 @@ def test_sort_documents_duplicates_keep_synced_state():
     assert combined_documents == [
         Document(title="title1", url="1", extract="extract1", term="term1", state=DocumentState.SYNCED_WITH_MAIN_INDEX),
     ]
+
+
+# ---------------------------------------------------------------------------
+# index_results_against_query
+# ---------------------------------------------------------------------------
+
+def test_index_results_against_query():
+    # "rust", "async" and the bigram "rust async" land on distinct pages here,
+    # so cross-term URL dedup within a page does not interfere with the asserts.
+    num_pages = 64
+    a = Document(title="Rust async runtime", url="http://a.example/page", extract="an async runtime")
+    b = Document(title="Rust systems guide", url="http://b.example", extract="low level")
+    c = Document(title="Async patterns", url="http://c.example", extract="concurrency primitives")
+    docs = [a, b, c]
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        with TinyIndex.create(Document, index_path, num_pages=num_pages, page_size=4096):
+            pass
+
+        new_count = index_results_against_query(docs, "rust async", index_path)
+
+        # All three pages are newly added (each matches at least one term).
+        assert new_count == 3
+
+        with TinyIndex(Document, index_path, 'r') as indexer:
+            rust_urls = {d.url for d in indexer.retrieve("rust")}
+            async_urls = {d.url for d in indexer.retrieve("async")}
+            bigram_urls = {d.url for d in indexer.retrieve("rust async")}
+
+        # Unigram "rust" matches A and B; "async" matches A and C.
+        assert rust_urls == {a.url, b.url}
+        assert async_urls == {a.url, c.url}
+        # The bigram needs both words present, so only A matches.
+        assert bigram_urls == {a.url}
+
+        # Re-indexing the same results adds nothing new.
+        assert index_results_against_query(docs, "rust async", index_path) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -7,15 +7,17 @@ from datetime import datetime
 from functools import reduce
 from logging import getLogger
 from typing import Collection, Iterable, Optional
+from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.index import tokenize_document
+from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
+from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
@@ -86,6 +88,63 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
             term_new_doc_counts.update(document.term for document in combined_documents
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
     return term_new_doc_counts
+
+
+def _document_token_set(doc: Document) -> set[str]:
+    """Unigram tokens of a document's title, URL and extract (no bigrams)."""
+    prepared_url = prepare_url_for_tokenizing(unquote(doc.url))
+    return (set(tokenize(doc.title))
+            | set(tokenize(prepared_url))
+            | set(tokenize(doc.extract)))
+
+
+def index_results_against_query(documents: list[Document], query: str, index_path: str) -> int:
+    """Index each document against the query unigrams/bigrams it matches.
+
+    A query term matches a document when all of the term's words are present in
+    the document's token set (unigram: the token; bigram: both words, in any
+    order). Matching docs are stored against that term via index_pages(), which
+    applies the normal combine/prioritise path. Returns the number of distinct
+    URLs newly added to the index.
+
+    The count is computed in the read pass, before combine/store, so a candidate
+    later dropped by URL/title dedup or by the full-page trim is still counted;
+    the figure is therefore a slight upper bound on what is persisted.
+    """
+    tokens = tokenize(query)
+    if not tokens or not documents:
+        return 0
+
+    # term string -> the set of words that must all be present to match.
+    query_terms: dict[str, frozenset[str]] = {t: frozenset((t,)) for t in tokens}
+    for bigram in get_bigrams(len(tokens), tokens):
+        query_terms[bigram] = frozenset(bigram.split())
+
+    # Read pass: build per-page candidates and track which (term, url) are new.
+    page_documents: dict[int, list[Document]] = defaultdict(list)
+    new_urls: set[str] = set()
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        existing_keys: dict[int, set[tuple]] = {}
+        for doc in documents:
+            if not (doc.url and doc.title and doc.extract):
+                continue
+            doc_tokens = _document_token_set(doc)
+            for term, words in query_terms.items():
+                if not (words <= doc_tokens):
+                    continue
+                page = indexer.get_key_page_index(term)
+                page_documents[page].append(Document(
+                    doc.title, doc.url, doc.extract,
+                    term=term, last_crawled=doc.last_crawled,
+                ))
+                if page not in existing_keys:
+                    existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
+                if (term, doc.url) not in existing_keys[page]:
+                    new_urls.add(doc.url)
+
+    if page_documents:
+        index_pages(index_path, page_documents)  # reuse the existing write path
+    return len(new_urls)
 
 
 def combine_documents(existing_documents, documents, mark_synced, ranker):

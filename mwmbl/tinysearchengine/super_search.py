@@ -31,13 +31,14 @@ from ninja.errors import HttpError
 from pydantic import BaseModel, Field
 
 from mwmbl.crawler.retrieve import crawl_url
+from mwmbl.indexer.index_batches import index_results_against_query
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_super_search,
     increment_monthly_super_search,
 )
 from mwmbl.search_auth import authenticate_user
-from mwmbl.search_setup import ltr_model
+from mwmbl.search_setup import index_path, ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.rank import score_result_whole
@@ -184,6 +185,14 @@ class DoneEvent(Schema):
     monthly_usage: int = Field(description="Caller's Super Search requests used this month "
                                            "(including this one).", examples=[3])
     monthly_limit: int = Field(description="Caller's monthly Super Search quota.", examples=[100])
+    pages_indexed: int = Field(
+        default=0,
+        description="Number of distinct new pages (URLs) added to the Mwmbl index as a "
+                    "result of this search. Can exceed the number of results returned, "
+                    "since a page may match a unigram or bigram of the query without "
+                    "matching the whole query.",
+        examples=[7],
+    )
 
 
 # Maps each SSE event name to the model describing its `data` payload. Used both
@@ -420,6 +429,23 @@ async def _emit_final_results(
         ))
 
 
+async def _index_results(query: str, docs: list[Document]) -> int:
+    """Index everything Super Search found against the query's unigrams/bigrams.
+
+    Runs the blocking index write off the event loop and never lets an indexing
+    failure break the response. Returns the number of distinct new pages indexed.
+    """
+    if not docs:
+        return 0
+    try:
+        return await asyncio.to_thread(
+            index_results_against_query, docs, query, str(index_path)
+        )
+    except Exception:
+        logger.exception("super-search failed to index results")
+        return 0
+
+
 async def _run_pipeline(
     query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock
 ) -> None:
@@ -500,6 +526,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     queue: asyncio.Queue = asyncio.Queue()
     started = time.monotonic()
     reason = "complete"
+    pages_indexed = 0
     all_docs: list[Document] = []
     last_results_key: list = [None]
     results_lock = asyncio.Lock()
@@ -508,7 +535,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         await queue.put((event_type, data))
 
     async def producer():
-        nonlocal reason
+        nonlocal reason, pages_indexed
         try:
             await asyncio.wait_for(
                 _run_pipeline(query, emit, all_docs, last_results_key, results_lock),
@@ -529,6 +556,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
                     await _emit_final_results(query, all_docs, emit, last_results_key, results_lock)
                 except Exception:
                     logger.exception("super-search failed to emit final results")
+                pages_indexed = await _index_results(query, all_docs)
             await queue.put(_SENTINEL)
 
     task = asyncio.create_task(producer())
@@ -550,6 +578,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
             elapsed_seconds=round(time.monotonic() - started, 3),
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
+            pages_indexed=pages_indexed,
         ))
     finally:
         if not task.done():
@@ -594,7 +623,7 @@ def init_router() -> None:
             "| `link_followed` | `{url, from}` | An outbound link from a crawled page was fetched and added to the candidate pool. |\n"
             "| `results` | `{results[], count}` | The current authoritative ranking (items have `origin=\"final\"`). Emitted progressively after each source and once more at the end — **replace** your displayed list on each. |\n"
             "| `error` | `{message}` | The pipeline crashed; the stream ends. |\n"
-            "| `done` | `{reason, elapsed_seconds, monthly_usage, monthly_limit}` | Terminal event. `reason` is `complete`, `timed_out`, `cancelled` or `error`. |\n\n"
+            "| `done` | `{reason, elapsed_seconds, monthly_usage, monthly_limit, pages_indexed}` | Terminal event. `reason` is `complete`, `timed_out`, `cancelled` or `error`; `pages_indexed` is the number of new pages added to the Mwmbl index by this search. |\n\n"
             "The exact JSON shape of every payload is given by the `oneOf` schema "
             "of the 200 response below."
         ),

@@ -304,6 +304,42 @@ def test_final_results_event_emitted(client, api_key, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_done_reports_pages_indexed(client, api_key, monkeypatch):
+    """Results are indexed at the end and the count is reported in 'done'."""
+    import mwmbl.tinysearchengine.super_search as ss
+
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
+    })
+    _stub_scoring(monkeypatch, [0.5] + [0.0] * 20)
+    monkeypatch.setattr(
+        "mwmbl.tinysearchengine.super_search.crawl_url",
+        lambda url: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None},
+    )
+
+    captured = {}
+
+    def fake_index(documents, query, index_path):
+        captured["query"] = query
+        captured["urls"] = {d.url for d in documents}
+        return 4
+
+    monkeypatch.setattr(ss, "index_results_against_query", fake_index)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+
+    done = next(d for t, d in events if t == "done")
+    assert done["reason"] == "complete"
+    assert done["pages_indexed"] == 4
+    # The collected results are what gets indexed, against the original query.
+    assert captured["query"] == "python"
+    assert "https://py.example/" in captured["urls"]
+
+
+@pytest.mark.django_db
 def test_source_failure_emits_source_failed(client, api_key, monkeypatch):
     cache.delete(_super_search_monthly_key(api_key.user.id))
 
