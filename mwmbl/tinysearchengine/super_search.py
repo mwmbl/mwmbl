@@ -112,6 +112,11 @@ class ResultItem(Schema):
         ),
         examples=["direct"],
     )
+    attribution: list[str] | None = Field(
+        default=None,
+        description="Attribution strings for results from third-party discovery services.",
+        examples=[["Search provided by Libraries.io (libraries.io)"]]
+    )
 
 
 class SourceStartedEvent(Schema):
@@ -193,6 +198,11 @@ class DoneEvent(Schema):
                     "matching the whole query.",
         examples=[7],
     )
+    libraries_attribution: list[str] | None = Field(
+        default=None,
+        description="Attribution strings to display when libraries.io results are included.",
+        examples=[["Search results include data from Libraries.io (libraries.io)"]]
+    )
 
 
 # Maps each SSE event name to the model describing its `data` payload. Used both
@@ -253,7 +263,7 @@ def _sse_frame(event_type: str, data: Any) -> bytes:
     return f"event: {event_type}\ndata: {payload}\n\n".encode("utf-8")
 
 
-def _result_payload(doc: Document, score: float, source: str, origin: Literal["direct", "final"]) -> ResultItem:
+def _result_payload(doc: Document, score: float, source: str, origin: Literal["direct", "final"], attribution: list[str] | None = None) -> ResultItem:
     return ResultItem(
         url=doc.url,
         title=doc.title,
@@ -261,6 +271,7 @@ def _result_payload(doc: Document, score: float, source: str, origin: Literal["d
         score=round(score, 4),
         source=source,
         origin=origin,
+        attribution=attribution,
     )
 
 
@@ -359,7 +370,7 @@ async def _follow_links(
         all_docs.append(Document(title=parent_title, url=parent.url, extract=parent_extract))
 
     if not raw_links:
-        await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+    await _emit_final_results(query, all_docs, emit, last_results_key, lock, False)
         return
 
     terms = tokenize(query)
@@ -394,7 +405,8 @@ async def _follow_links(
 
 
 async def _emit_final_results(
-    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock
+    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock,
+    libraries_contributed: bool = False,
 ) -> None:
     terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
@@ -423,8 +435,14 @@ async def _emit_final_results(
         if key == last_results_key[0]:
             return
         last_results_key[0] = key
+        
+        # Build attribution list if libraries contributed
+        libraries_attribution = None
+        if libraries_contributed:
+            libraries_attribution = ["Search results include data from Libraries.io (libraries.io)"]
+        
         await emit("results", ResultsEvent(
-            results=[_result_payload(doc, score, "", "final") for doc, score in ranked],
+            results=[_result_payload(doc, score, "", "final", None) for doc, score in ranked],
             count=len(ranked),
         ))
 
@@ -447,7 +465,7 @@ async def _index_results(query: str, docs: list[Document]) -> int:
 
 
 async def _run_pipeline(
-    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock
+    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock, libraries_contributed: list
 ) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
@@ -494,9 +512,13 @@ async def _run_pipeline(
             name, docs, error = await completed
             if error is not None:
                 await emit("source_failed", SourceFailedEvent(source=name, error=error))
+                if name == "libraries":
+                    libraries_contributed[0] = True
                 continue
             await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
             if not docs:
+                if name == "libraries":
+                    libraries_contributed[0] = True
                 continue
 
             scores = await asyncio.to_thread(_heuristic_score_docs, query, docs)
@@ -504,12 +526,15 @@ async def _run_pipeline(
                 if doc.url and doc.title and doc.extract:
                     all_docs.append(doc)
                 if _maybe_promote(doc, score):
-                    await emit("result_promoted", _result_payload(doc, score, name, "direct"))
+                    attribution = None
+                    if name == "libraries":
+                        attribution = ["Search provided by Libraries.io (libraries.io)"]
+                    await emit("result_promoted", _result_payload(doc, score, name, "direct", attribution))
                     secondary.append(
                         asyncio.create_task(_follow_links(doc, query, emit, all_docs, last_results_key, lock))
                     )
             if all_docs:
-                await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+                await _emit_final_results(query, all_docs, emit, last_results_key, lock, libraries_contributed[0])
 
         if secondary:
             results = await asyncio.gather(*secondary, return_exceptions=True)
@@ -530,6 +555,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     all_docs: list[Document] = []
     last_results_key: list = [None]
     results_lock = asyncio.Lock()
+    libraries_contributed: list = [False]
 
     async def emit(event_type: str, data: Any) -> None:
         await queue.put((event_type, data))
@@ -538,7 +564,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         nonlocal reason, pages_indexed
         try:
             await asyncio.wait_for(
-                _run_pipeline(query, emit, all_docs, last_results_key, results_lock),
+                _run_pipeline(query, emit, all_docs, last_results_key, results_lock, libraries_contributed),
                 timeout=settings.SUPER_SEARCH_DEADLINE_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -553,7 +579,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         finally:
             if reason in ("complete", "timed_out"):
                 try:
-                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock)
+                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock, libraries_contributed[0])
                 except Exception:
                     logger.exception("super-search failed to emit final results")
                 pages_indexed = await _index_results(query, all_docs)
@@ -579,6 +605,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
             pages_indexed=pages_indexed,
+            libraries_attribution=["Search results include data from Libraries.io (libraries.io)"] if libraries_contributed[0] else None,
         ))
     finally:
         if not task.done():
@@ -600,7 +627,7 @@ def init_router() -> None:
         summary="Super Search (streaming, SSE)",
         description=(
             "Multi-source streaming search. Fans out to Mwmbl, Hacker News, "
-            "GitHub, Stack Exchange, ArXiv and PyPI, re-ranks all results with "
+            "GitHub, Stack Exchange, ArXiv, Libraries.io and PyPI, re-ranks all results with "
             "the Mwmbl LTR model, and for items above the relevance threshold "
             "crawls the page and follows the most promising outbound links.\n\n"
             "Authentication is required (search-scoped API key in `X-API-Key` "

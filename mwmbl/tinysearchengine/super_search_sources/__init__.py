@@ -8,6 +8,7 @@ orchestrator.
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
+from mwmbl.tinysearchengine.super_search_sources.libraries import search as search_libraries
 from mwmbl.tinysearchengine.super_search_sources.mwmbl_index import search as search_mwmbl
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
@@ -18,5 +19,6 @@ SOURCES = {
     "github": search_github,
     "stackexchange": search_stackexchange,
     "arxiv": search_arxiv,
+    "libraries": search_libraries,
     "pypi": search_pypi,
 }

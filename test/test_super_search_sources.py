@@ -13,6 +13,7 @@ import pytest
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
+from mwmbl.tinysearchengine.super_search_sources.libraries import search as search_libraries
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
 
@@ -142,6 +143,81 @@ async def test_pypi_404_returns_empty(httpx_mock):
     async with httpx.AsyncClient() as client:
         docs = await search_pypi(client, "nonsense", 5)
     assert docs == []
+
+
+# ---------------------------------------------------------------------------
+# Libraries.io
+# ---------------------------------------------------------------------------
+
+async def test_libraries_returns_documents(httpx_mock):
+    httpx_mock.add_response(
+        url=re.compile(r"https://libraries\.io/api/search.*"),
+        json={
+            "results": [
+                {
+                    "name": "requests",
+                    "platform": "PyPI",
+                    "description": "HTTP for humans",
+                    "repository_url": "https://github.com/psf/requests",
+                    "documentation_url": "https://docs.python-requests.org/"
+                },
+                {
+                    "name": "lodash",
+                    "platform": "npm",
+                    "description": "A JavaScript utility library",
+                    "repository_url": "https://github.com/lodash/lodash"
+                }
+            ]
+        },
+    )
+    async with httpx.AsyncClient() as client:
+        docs = await search_libraries(client, "requests", 5)
+    assert len(docs) == 3  # 2 repos + 1 doc
+    assert "requests" in docs[0].title
+    assert "PyPI" in docs[0].title
+    assert docs[0].url == "https://github.com/psf/requests"
+
+
+async def test_libraries_swallows_http_errors(httpx_mock):
+    httpx_mock.add_response(status_code=401)
+    async with httpx.AsyncClient() as client:
+        docs = await search_libraries(client, "python", 5)
+    assert docs == []
+
+
+async def test_libraries_swallows_rate_limit(httpx_mock):
+    httpx_mock.add_response(status_code=429)
+    async with httpx.AsyncClient() as client:
+        docs = await search_libraries(client, "python", 5)
+    assert docs == []
+
+
+async def test_libraries_raises_without_api_key():
+    import os
+    import importlib
+    
+    # Temporarily remove API key
+    original_key = os.environ.get("LIBRARIES_IO_API_KEY")
+    if "LIBRARIES_IO_API_KEY" in os.environ:
+        del os.environ["LIBRARIES_IO_API_KEY"]
+    
+    # Reload the libraries module to pick up the new environment
+    from mwmbl.tinysearchengine.super_search_sources import libraries
+    importlib.reload(libraries)
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            try:
+                docs = await libraries.search(client, "test", 5)
+                assert False, "Should have raised ValueError"
+            except ValueError as e:
+                assert "LIBRARIES_IO_API_KEY" in str(e)
+    finally:
+        # Restore API key
+        if original_key:
+            os.environ["LIBRARIES_IO_API_KEY"] = original_key
+        # Reload again to restore the original state
+        importlib.reload(libraries)
 
 
 async def test_pypi_rejects_invalid_name():

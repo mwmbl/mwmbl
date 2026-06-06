@@ -1,3 +1,4 @@
+import os
 from multiprocessing import Process, Queue
 from pathlib import Path
 
@@ -39,10 +40,21 @@ class MwmblConfig(AppConfig):
     verbose_name = "Mwmbl Application"
 
     def ready(self):
+        _validate_libraries_io_config()
         create_index()
         if settings.HAS_DATABASE:
             create_index_db()
             self._schedule_background_tasks()
+
+def _validate_libraries_io_config():
+    """Validate that libraries.io API key is configured."""
+    api_key = os.getenv("LIBRARIES_IO_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "LIBRARIES_IO_API_KEY environment variable is required for Super Search. "
+            "Please set it in your .env file or environment before starting the server."
+        )
+
 
     @staticmethod
     def _schedule_background_tasks():
