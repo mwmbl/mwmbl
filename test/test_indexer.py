@@ -153,3 +153,19 @@ def test_document_backward_compat_old_six_element_tuple():
     doc = Document(*old_tuple)
     assert doc.user_ids is None
     assert doc.last_crawled is None
+
+
+def test_document_invalid_state_false_resolves_to_none():
+    doc = Document(title='t', url='u', extract='e', state=False)
+    assert doc.state is None
+
+
+def test_document_invalid_state_string_resolves_to_none():
+    doc = Document(title='t', url='u', extract='e', state='invalid')
+    assert doc.state is None
+
+
+def test_document_valid_state_preserved():
+    from mwmbl.tinysearchengine.indexer import DocumentState
+    doc = Document(title='t', url='u', extract='e', state=DocumentState.FROM_USER)
+    assert doc.state == DocumentState.FROM_USER

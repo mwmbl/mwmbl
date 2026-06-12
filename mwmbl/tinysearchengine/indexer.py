@@ -67,7 +67,10 @@ class Document:
         self.extract = extract if extract is not None else ''
         self.score = score
         self.term = term
-        self.state = None if state is None else DocumentState(state)
+        try:
+            self.state = None if state is None else DocumentState(state)
+        except (ValueError, TypeError):
+            self.state = None
         self.user_ids = user_ids
         self.last_crawled = last_crawled
 
