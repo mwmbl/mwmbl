@@ -92,10 +92,6 @@ def robots_allowed(url):
         logger.info(f"Unable to parse URL: {url}")
         return False
 
-    if parsed_url.path.rstrip('/') == '' and parsed_url.query == '':
-        logger.debug(f"Allowing root domain for URL: {url}")
-        return True
-
     robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, 'robots.txt', '', ''))
 
     parse_robots = RobotFileParser(robots_url)
@@ -123,7 +119,7 @@ def robots_allowed(url):
         return True
     
     parse_robots.parse(decoded)
-    allowed = parse_robots.can_fetch('Mwmbl', url)
+    allowed = parse_robots.can_fetch(USER_AGENT, url)
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
