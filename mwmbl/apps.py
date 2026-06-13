@@ -46,16 +46,6 @@ class MwmblConfig(AppConfig):
             create_index_db()
             self._schedule_background_tasks()
 
-def _validate_libraries_io_config():
-    """Validate that libraries.io API key is configured."""
-    api_key = os.getenv("LIBRARIES_IO_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "LIBRARIES_IO_API_KEY environment variable is required for Super Search. "
-            "Please set it in your .env file or environment before starting the server."
-        )
-
-
     @staticmethod
     def _schedule_background_tasks():
         """
@@ -90,3 +80,13 @@ def _validate_libraries_io_config():
         except Exception:
             # Don't prevent startup if background task scheduling fails
             log.exception("Failed to schedule background tasks")
+
+
+def _validate_libraries_io_config():
+    """Validate that libraries.io API key is configured."""
+    api_key = os.getenv("LIBRARIES_IO_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "LIBRARIES_IO_API_KEY environment variable is required for Super Search. "
+            "Please set it in your .env file or environment before starting the server."
+        )

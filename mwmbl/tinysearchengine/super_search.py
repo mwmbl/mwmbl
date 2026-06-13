@@ -112,10 +112,10 @@ class ResultItem(Schema):
         ),
         examples=["direct"],
     )
-    attribution: list[str] | None = Field(
+    attribution: str | None = Field(
         default=None,
         description="Attribution strings for results from third-party discovery services.",
-        examples=[["Search provided by Libraries.io (libraries.io)"]]
+        examples=["libraries.io"]
     )
 
 
@@ -263,7 +263,7 @@ def _sse_frame(event_type: str, data: Any) -> bytes:
     return f"event: {event_type}\ndata: {payload}\n\n".encode("utf-8")
 
 
-def _result_payload(doc: Document, score: float, source: str, origin: Literal["direct", "final"], attribution: list[str] | None = None) -> ResultItem:
+def _result_payload(doc: Document, score: float, source: str, origin: Literal["direct", "final"], attribution: str | None = None) -> ResultItem:
     return ResultItem(
         url=doc.url,
         title=doc.title,
@@ -370,7 +370,7 @@ async def _follow_links(
         all_docs.append(Document(title=parent_title, url=parent.url, extract=parent_extract))
 
     if not raw_links:
-    await _emit_final_results(query, all_docs, emit, last_results_key, lock, False)
+        await _emit_results(query, all_docs, emit, last_results_key, lock)
         return
 
     terms = tokenize(query)
@@ -401,12 +401,11 @@ async def _follow_links(
         if doc.url and doc.title and doc.extract:
             all_docs.append(doc)
 
-    await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+    await _emit_results(query, all_docs, emit, last_results_key, lock)
 
 
-async def _emit_final_results(
-    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock,
-    libraries_contributed: bool = False,
+async def _emit_results(
+    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock
 ) -> None:
     terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
@@ -529,12 +528,12 @@ async def _run_pipeline(
                     attribution = None
                     if name == "libraries":
                         attribution = ["Search provided by Libraries.io (libraries.io)"]
-                    await emit("result_promoted", _result_payload(doc, score, name, "direct", attribution))
+                    await emit("result_promoted", _result_payload(doc, score, name, "direct"))
                     secondary.append(
                         asyncio.create_task(_follow_links(doc, query, emit, all_docs, last_results_key, lock))
                     )
             if all_docs:
-                await _emit_final_results(query, all_docs, emit, last_results_key, lock, libraries_contributed[0])
+                await _emit_results(query, all_docs, emit, last_results_key, lock)
 
         if secondary:
             results = await asyncio.gather(*secondary, return_exceptions=True)
@@ -579,7 +578,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         finally:
             if reason in ("complete", "timed_out"):
                 try:
-                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock, libraries_contributed[0])
+                    await _emit_results(query, all_docs, emit, last_results_key, results_lock)
                 except Exception:
                     logger.exception("super-search failed to emit final results")
                 pages_indexed = await _index_results(query, all_docs)

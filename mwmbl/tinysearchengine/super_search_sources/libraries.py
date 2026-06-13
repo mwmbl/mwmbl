@@ -47,7 +47,9 @@ async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Docu
         return []
     
     docs: list[Document] = []
-    for item in payload.get("results", []) or payload.get("packages", []) or []:
+    # libraries.io API returns results as a list directly
+    results = payload if isinstance(payload, list) else payload.get("results", []) or payload.get("packages", []) or []
+    for item in results:
         name = item.get("name") or ""
         platform = item.get("platform", "Unknown")
         description = item.get("description") or item.get("readme") or ""
