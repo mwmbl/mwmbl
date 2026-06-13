@@ -10,7 +10,7 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel, SubscriptionUpdateProduct
+from polar_sdk.models import SubscriptionCancel, CustomerSubscriptionUpdateProduct
 from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
@@ -733,7 +733,7 @@ def change_plan(request, body: ChangePlanRequest):
     with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
         result = polar.subscriptions.update(
             id=billing.polar_subscription_id,
-            subscription_update=SubscriptionUpdateProduct(product_id=product_id),
+            subscription_update=CustomerSubscriptionUpdateProduct(product_id=product_id),
         )
     billing.current_period_end = result.current_period_end
     billing.save()
