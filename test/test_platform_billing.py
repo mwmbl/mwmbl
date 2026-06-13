@@ -80,8 +80,8 @@ def test_cancel_subscription_success(api_client, access_token, verified_user_wit
     billing = UserBilling.objects.get(user=verified_user_with_billing)
     assert billing.cancel_at_period_end is False
 
-    with patch("mwmbl.platform.api.polar_sdk.Polar") as mock_polar:
-        mock_polar_instance = mock_polar.return_value.__enter__.return_value
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
         mock_result = mock_polar_instance.subscriptions.update.return_value
         mock_result.current_period_end = None
 
@@ -102,16 +102,26 @@ def test_cancel_subscription_success(api_client, access_token, verified_user_wit
 @pytest.mark.django_db
 def test_cancel_subscription_already_canceled(api_client, access_token, verified_user_with_billing):
     """Test that canceling an already canceled subscription returns 409."""
+    from unittest.mock import Mock
+    from polar_sdk.models import AlreadyCanceledSubscription
+
     billing = UserBilling.objects.get(user=verified_user_with_billing)
     billing.cancel_at_period_end = True
     billing.save()
 
-    with patch("mwmbl.platform.api.polar_sdk.Polar") as mock_polar:
-        mock_polar_instance = mock_polar.return_value.__enter__.return_value
-        mock_polar_instance.subscriptions.update.side_effect = (
-            mock_polar_instance.sdk.models.AlreadyCanceledSubscription(
-                status_code=409, message="Subscription is already canceled"
-            )
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
+        
+        # Create a mock response
+        mock_response = Mock()
+        mock_response.status_code = 409
+        mock_response.text = "Subscription is already canceled"
+        
+        # Create AlreadyCanceledSubscription with proper arguments
+        mock_data = Mock()
+        mock_data.detail = "Subscription is already canceled"
+        mock_polar_instance.subscriptions.update.side_effect = AlreadyCanceledSubscription(
+            data=mock_data, raw_response=mock_response
         )
 
         response = api_client.post(
@@ -135,9 +145,9 @@ def test_cancel_subscription_unauthenticated(api_client):
 
 @pytest.mark.django_db
 def test_cancel_subscription_unverified_email(api_client, access_token, verified_user_with_billing):
-    """Test that canceling with unverified email returns 403."""
+    """Test that canceling without a subscription returns 404."""
     billing = UserBilling.objects.get(user=verified_user_with_billing)
-    billing.polar_subscription_id = None
+    billing.polar_subscription_id = ""
     billing.save()
 
     response = api_client.post(
@@ -161,8 +171,8 @@ def test_uncancel_subscription_success(api_client, access_token, verified_user_w
     billing.cancel_at_period_end = True
     billing.save()
 
-    with patch("mwmbl.platform.api.polar_sdk.Polar") as mock_polar:
-        mock_polar_instance = mock_polar.return_value.__enter__.return_value
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
         mock_result = mock_polar_instance.subscriptions.update.return_value
         mock_result.current_period_end = None
 
@@ -214,8 +224,11 @@ def test_uncancel_subscription_unauthenticated(api_client):
 @pytest.mark.django_db
 def test_change_plan_success(api_client, access_token, verified_user_with_billing):
     """Test successful plan change."""
-    with patch("mwmbl.platform.api.polar_sdk.Polar") as mock_polar:
-        mock_polar_instance = mock_polar.return_value.__enter__.return_value
+    from django.conf import settings
+
+    with patch.object(settings, "POLAR_PRODUCT_ID_PRO", "prod_test123"), \
+         patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
         mock_result = mock_polar_instance.subscriptions.update.return_value
         mock_result.current_period_end = None
 
@@ -265,7 +278,7 @@ def test_change_plan_invalid_plan(api_client, access_token, verified_user_with_b
 def test_change_plan_no_subscription(api_client, access_token, verified_user_with_billing):
     """Test that changing plan without a subscription returns 404."""
     billing = UserBilling.objects.get(user=verified_user_with_billing)
-    billing.polar_subscription_id = None
+    billing.polar_subscription_id = ""
     billing.save()
 
     response = api_client.post(
