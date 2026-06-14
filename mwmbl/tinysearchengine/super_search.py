@@ -68,7 +68,7 @@ _CRAWL_EXECUTOR = ThreadPoolExecutor(
 async def _crawl(url: str):
     """Run the synchronous crawl_url on the dedicated crawl executor."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url)
+    return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url, None)
 
 
 # ---------------------------------------------------------------------------

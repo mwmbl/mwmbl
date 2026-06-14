@@ -60,7 +60,7 @@ def main():
     results = []
     for url in urls:
         print(f"      {url}")
-        raw = crawl_url(url)
+        raw = crawl_url(url, None)
         content = raw.get("content")
         if content and not raw.get("error") and content.get("title"):
             last_crawled = int(raw["timestamp"] / 1000)  # ms → seconds

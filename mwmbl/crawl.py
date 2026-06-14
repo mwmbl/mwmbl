@@ -153,7 +153,7 @@ class Crawler:
                 delay = CRAWL_DELAY_SECONDS * (0.9 + 0.2 * random.random())
                 time.sleep(delay)
 
-            result = crawl_url(url)
+            result = crawl_url(url, self.redis)
             results.append(result)
             logger.debug("Result", result)
         

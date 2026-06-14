@@ -1,13 +1,16 @@
+import json
 import re
 import time
 from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
+from typing import List, Optional
 from urllib.parse import urlparse, urlunsplit, urljoin
 from urllib.robotparser import RobotFileParser
 
 import requests
 from mwmbl.justext import core, utils
+from redis import Redis
 from requests import ReadTimeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 
@@ -40,6 +43,8 @@ MAX_SITE_URLS = 100
 CRAWLER_VERSION: str = "0.2.0"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
+ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
+ROBOTS_CACHE_ERROR_TTL_SECONDS = 60 * 60
 
 logger = getLogger(__name__)
 
@@ -85,25 +90,38 @@ def fetch(url):
     raise ValueError(f"Too many redirects for URL {url}")
 
 
-def robots_allowed(url):
+def robots_allowed(url: str, redis: Redis = None) -> bool:
     try:
         parsed_url = urlparse(url)
     except ValueError:
         logger.info(f"Unable to parse URL: {url}")
         return False
 
+    domain = parsed_url.netloc
     robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, 'robots.txt', '', ''))
 
-    parse_robots = RobotFileParser(robots_url)
+    if redis:
+        cached_content = _get_robots_from_cache(redis, domain)
+        if cached_content is not None:
+            logger.debug(f"Robots cache hit for {domain}")
+            parse_robots = RobotFileParser()
+            parse_robots.parse(cached_content)
+            allowed = parse_robots.can_fetch(USER_AGENT, url)
+            logger.debug(f"Robots allowed for {url} (cached): {allowed}")
+            return allowed
 
     try:
         status_code, content = fetch(robots_url)
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Robots error: {robots_url}, {e}")
+        if redis:
+            _cache_robots_content(redis, domain, [], error=True)
         return True
 
     if status_code != 200:
         logger.debug(f"Robots status code: {status_code}")
+        if redis:
+            _cache_robots_content(redis, domain, [], error=True)
         return True
 
     decoded = None
@@ -116,12 +134,52 @@ def robots_allowed(url):
 
     if decoded is None:
         logger.info(f"Unable to decode robots file {robots_url}")
+        if redis:
+            _cache_robots_content(redis, domain, [], error=True)
         return True
     
+    parse_robots = RobotFileParser()
     parse_robots.parse(decoded)
     allowed = parse_robots.can_fetch(USER_AGENT, url)
+    
+    if redis:
+        _cache_robots_content(redis, domain, decoded, error=False)
+    
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
+
+
+def _get_robots_from_cache(redis: Redis, domain: str) -> Optional[List[str]]:
+    cache_key = f"robots:{domain}"
+    cached = redis.get(cache_key)
+    if cached is None:
+        return None
+    
+    try:
+        data = json.loads(cached)
+        if time.time() > data['expires_at']:
+            redis.delete(cache_key)
+            return None
+        return data['content']
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning(f"Invalid cache entry for {cache_key}: {e}, removing")
+        redis.delete(cache_key)
+        return None
+
+
+def _cache_robots_content(redis: Redis, domain: str, content: List[str], error: bool = False):
+    cache_key = f"robots:{domain}"
+    now = time.time()
+    ttl = ROBOTS_CACHE_ERROR_TTL_SECONDS if error else ROBOTS_CACHE_TTL_SECONDS
+    
+    cache_data = {
+        'content': content,
+        'cached_at': int(now),
+        'expires_at': int(now + ttl)
+    }
+    
+    redis.setex(cache_key, ttl, json.dumps(cache_data))
+    logger.debug(f"Cached robots.txt for {domain}, expires in {ttl}s")
 
 
 def _resolve_and_validate_link(href: str, current_url: str) -> str | None:
@@ -213,10 +271,10 @@ def get_og_meta(dom) -> tuple[str, str]:
     return og_title, og_desc
 
 
-def crawl_url(url):
+def crawl_url(url, redis=None):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
-    allowed = robots_allowed(url)
+    allowed = robots_allowed(url, redis)
     if not allowed:
         return {
             'url': url,
@@ -342,9 +400,10 @@ def crawl_url(url):
     }
 
 
-def crawl_batch(batch, num_threads):
+def crawl_batch(batch, num_threads, redis=None):
+    from functools import partial
     with ThreadPool(num_threads) as pool:
-        result = pool.map(crawl_url, batch)
+        result = pool.map(partial(crawl_url, redis=redis), batch)
     return result
 
 
