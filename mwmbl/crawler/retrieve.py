@@ -90,7 +90,7 @@ def fetch(url):
     raise ValueError(f"Too many redirects for URL {url}")
 
 
-def robots_allowed(url: str, redis: Redis = None) -> bool:
+def robots_allowed(url: str, redis: Redis | None = None) -> bool:
     try:
         parsed_url = urlparse(url)
     except ValueError:
@@ -271,7 +271,7 @@ def get_og_meta(dom) -> tuple[str, str]:
     return og_title, og_desc
 
 
-def crawl_url(url, redis=None):
+def crawl_url(url, redis: Redis | None = None):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url, redis)
@@ -400,10 +400,9 @@ def crawl_url(url, redis=None):
     }
 
 
-def crawl_batch(batch, num_threads, redis=None):
-    from functools import partial
+def crawl_batch(batch, num_threads, redis: Redis | None = None):
     with ThreadPool(num_threads) as pool:
-        result = pool.map(partial(crawl_url, redis=redis), batch)
+        result = pool.map(lambda url: crawl_url(url, redis), batch)
     return result
 
 
