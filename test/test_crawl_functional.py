@@ -244,7 +244,7 @@ class TestCrawlFunctional:
             with patch('mwmbl.crawler.retrieve.robots_allowed', return_value=True):
                 mock_fetch.return_value = (200, mock_html_content)
                 
-                result = crawl_url('https://example.com')
+                result = crawl_url('https://example.com', redis=None)
                 
                 assert result['url'] == 'https://example.com'
                 assert result['status'] == 200
@@ -261,7 +261,7 @@ class TestCrawlFunctional:
                 # Test connection error
                 mock_fetch.side_effect = ConnectionError("Connection failed")
                 
-                result = crawl_url('https://example.com')
+                result = crawl_url('https://example.com', redis=None)
                 
                 assert result['url'] == 'https://example.com'
                 assert result['status'] is None
@@ -272,7 +272,7 @@ class TestCrawlFunctional:
     def test_robots_denied_handling(self, mock_environment):
         """Test robots.txt denial handling"""
         with patch('mwmbl.crawler.retrieve.robots_allowed', return_value=False):
-            result = crawl_url('https://example.com')
+            result = crawl_url('https://example.com', redis=None)
             
             assert result['url'] == 'https://example.com'
             assert result['status'] is None

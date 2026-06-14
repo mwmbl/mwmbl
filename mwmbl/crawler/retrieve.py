@@ -90,7 +90,7 @@ def fetch(url):
     raise ValueError(f"Too many redirects for URL {url}")
 
 
-def robots_allowed(url: str, redis: Redis | None = None) -> bool:
+def robots_allowed(url: str, redis: Redis) -> bool:
     try:
         parsed_url = urlparse(url)
     except ValueError:
@@ -100,28 +100,25 @@ def robots_allowed(url: str, redis: Redis | None = None) -> bool:
     domain = parsed_url.netloc
     robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, 'robots.txt', '', ''))
 
-    if redis:
-        cached_content = _get_robots_from_cache(redis, domain)
-        if cached_content is not None:
-            logger.debug(f"Robots cache hit for {domain}")
-            parse_robots = RobotFileParser()
-            parse_robots.parse(cached_content)
-            allowed = parse_robots.can_fetch(USER_AGENT, url)
-            logger.debug(f"Robots allowed for {url} (cached): {allowed}")
-            return allowed
+    cached_content = _get_robots_from_cache(redis, domain)
+    if cached_content is not None:
+        logger.debug(f"Robots cache hit for {domain}")
+        parse_robots = RobotFileParser()
+        parse_robots.parse(cached_content)
+        allowed = parse_robots.can_fetch(USER_AGENT, url)
+        logger.debug(f"Robots allowed for {url} (cached): {allowed}")
+        return allowed
 
     try:
         status_code, content = fetch(robots_url)
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Robots error: {robots_url}, {e}")
-        if redis:
-            _cache_robots_content(redis, domain, [], error=True)
+        _cache_robots_content(redis, domain, [], error=True)
         return True
 
     if status_code != 200:
         logger.debug(f"Robots status code: {status_code}")
-        if redis:
-            _cache_robots_content(redis, domain, [], error=True)
+        _cache_robots_content(redis, domain, [], error=True)
         return True
 
     decoded = None
@@ -134,16 +131,14 @@ def robots_allowed(url: str, redis: Redis | None = None) -> bool:
 
     if decoded is None:
         logger.info(f"Unable to decode robots file {robots_url}")
-        if redis:
-            _cache_robots_content(redis, domain, [], error=True)
+        _cache_robots_content(redis, domain, [], error=True)
         return True
     
     parse_robots = RobotFileParser()
     parse_robots.parse(decoded)
     allowed = parse_robots.can_fetch(USER_AGENT, url)
     
-    if redis:
-        _cache_robots_content(redis, domain, decoded, error=False)
+    _cache_robots_content(redis, domain, decoded, error=False)
     
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
@@ -271,7 +266,7 @@ def get_og_meta(dom) -> tuple[str, str]:
     return og_title, og_desc
 
 
-def crawl_url(url, redis: Redis | None = None):
+def crawl_url(url, redis: Redis):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
     allowed = robots_allowed(url, redis)
@@ -400,7 +395,7 @@ def crawl_url(url, redis: Redis | None = None):
     }
 
 
-def crawl_batch(batch, num_threads, redis: Redis | None = None):
+def crawl_batch(batch, num_threads, redis: Redis):
     with ThreadPool(num_threads) as pool:
         result = pool.map(lambda url: crawl_url(url, redis), batch)
     return result
