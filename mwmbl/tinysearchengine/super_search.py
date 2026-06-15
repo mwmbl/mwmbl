@@ -23,6 +23,7 @@ from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
+import redis
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import StreamingHttpResponse
@@ -64,11 +65,22 @@ _CRAWL_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="ss-crawl",
 )
 
+# Redis connection for caching robots.txt
+_redis = None
+
+
+def _get_redis() -> redis.Redis:
+    """Get or create Redis connection for robots.txt caching."""
+    global _redis
+    if _redis is None:
+        _redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    return _redis
+
 
 async def _crawl(url: str):
     """Run the synchronous crawl_url on the dedicated crawl executor."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url)
+    return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url, _get_redis())
 
 
 # ---------------------------------------------------------------------------

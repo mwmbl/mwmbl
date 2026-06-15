@@ -90,7 +90,8 @@ class URLDatabase:
         Update URLs with the most recent crawl date, if they've been crawled before, or None otherwise.
         Update the most recent URL status in the database.
         """
-        most_recent_urls = next(iter(self.urls.values()))
+        most_recent_date = next(iter(self.urls.keys()))
+        most_recent_urls = self.urls[most_recent_date]
         new_urls = []
         for url in found_urls:
             found_date = None
@@ -101,6 +102,11 @@ class URLDatabase:
 
             if url.status in CRAWLED_STATUSES:
                 most_recent_urls.add(url.url)
+                # The URL has just been crawled (or failed): mark it as crawled now so
+                # it isn't immediately re-queued. Without this, a first-time crawl has
+                # found_date=None (it wasn't in any bloom filter before this batch), so
+                # queue_urls treats it as never-crawled and hands it out again.
+                found_date = most_recent_date
 
             new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls

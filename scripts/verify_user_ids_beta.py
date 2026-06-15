@@ -17,12 +17,24 @@ import os
 import time
 import json
 
+import redis
 import requests
 
 # Must be set before importing retrieve (used in the User-Agent string)
 os.environ.setdefault("MWMBL_CONTACT_INFO", "beta-test@mwmbl.org")
 
 from mwmbl.crawler.retrieve import crawl_url, CRAWLER_VERSION
+from mwmbl.settings import REDIS_URL
+
+_redis = None
+
+
+def _get_redis() -> redis.Redis:
+    """Get or create Redis connection for robots.txt caching."""
+    global _redis
+    if _redis is None:
+        _redis = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis
 
 BETA_BASE = "http://localhost:8000"
 MAX_URLS = 5
@@ -60,7 +72,7 @@ def main():
     results = []
     for url in urls:
         print(f"      {url}")
-        raw = crawl_url(url)
+        raw = crawl_url(url, _get_redis())
         content = raw.get("content")
         if content and not raw.get("error") and content.get("title"):
             last_crawled = int(raw["timestamp"] / 1000)  # ms → seconds

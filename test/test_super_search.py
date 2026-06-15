@@ -179,7 +179,7 @@ def test_promoted_results_use_top_k(client, api_key, monkeypatch):
     # Scores in descending order — only the top-2 should be promoted.
     _stub_scoring(monkeypatch, [0.9, 0.5, 0.1] + [0.0] * 20)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
@@ -221,7 +221,7 @@ def test_heap_replacement_promotes_better_late_doc(client, api_key, monkeypatch)
     # Best (0.9) beats the minimum and must be promoted.
     _stub_scoring(monkeypatch, [0.1, 0.1, 0.1, 0.9] + [0.0] * 20)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
@@ -253,7 +253,7 @@ def test_heap_equal_score_does_not_enter_full_heap(client, api_key, monkeypatch)
     })
     _stub_scoring(monkeypatch, [0.5, 0.5, 0.5] + [0.0] * 20)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
@@ -279,7 +279,7 @@ def test_final_results_event_emitted(client, api_key, monkeypatch):
     })
     _stub_scoring(monkeypatch, [0.5] + [0.0] * 20)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
@@ -414,7 +414,7 @@ def test_link_following_adds_followed_docs(client, api_key, monkeypatch):
     })
     _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         if url == "https://parent.example/":
             return {"url": url, "status": 200, "content": {
                 "title": "Python parent", "extract": "python parent text",
@@ -457,7 +457,7 @@ def test_no_duplicate_consecutive_results_frames(client, api_key, monkeypatch):
     })
     _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 40)
 
-    def fake_crawl(url):
+    def fake_crawl(url, redis):
         return {"url": url, "status": 200, "content": None}
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)

@@ -801,7 +801,7 @@ requires-dist = [
     { name = "numpy", specifier = "==1.23.2" },
     { name = "objgraph", specifier = ">=3.6.1" },
     { name = "pandas", specifier = ">=1.3.5,<2.0.0" },
-    { name = "polar-sdk", specifier = ">=0.10.0" },
+    { name = "polar-sdk", specifier = "==0.31.7" },
     { name = "psutil", specifier = ">=6.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.3" },
     { name = "py-spy", specifier = ">=0.4.1" },
@@ -956,7 +956,7 @@ wheels = [
 
 [[package]]
 name = "polar-sdk"
-version = "0.31.3"
+version = "0.31.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpcore" },
@@ -965,9 +965,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "standardwebhooks" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/cb/60c71f31c2c0afe9fc70c593a218ffde6c017b03f9a581e2af0ea63b5230/polar_sdk-0.31.3.tar.gz", hash = "sha256:d69b73e66040adab5ace51bb67c72d91edfca56c67c6aad5cbe6a5cb2a1295f7", size = 303751, upload-time = "2026-04-10T09:42:54.574Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/8f/c60e5793fa9d1ea4344ae61522567ba2b8660170341794e869b936fcd5c2/polar_sdk-0.31.7.tar.gz", hash = "sha256:05fd6d47c15b2bae5efa068bee8f2251527db982584a81b5c78e042b9723874a", size = 323115, upload-time = "2026-06-12T06:51:02.634Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/23/bd856ec12a8faef40bfb6b30e7add657952c7266f5f0ac7c156067fa30ea/polar_sdk-0.31.3-py3-none-any.whl", hash = "sha256:22fa1ae3fa2c79cf2279dd3b1ff633d193132197dcdd807ec7191fb14544ff80", size = 853744, upload-time = "2026-04-10T09:42:53.032Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/e0/a88026b9432c7e2c0c096911ddc97cb06f483036a00a8afd5254efe1c16a/polar_sdk-0.31.7-py3-none-any.whl", hash = "sha256:acff8f3405046d45fa31130674f269314586fee1d3d2fec221eed21cb8697340", size = 902336, upload-time = "2026-06-12T06:51:01.002Z" },
 ]
 
 [[package]]
