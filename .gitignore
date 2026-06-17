@@ -186,6 +186,9 @@ test_env/
 # Script download cache
 scripts/downloads/
 
+# Super Search candidate classification intermediates
+candidate_chunks/
+
 # AI planning documents
 plans/
 
