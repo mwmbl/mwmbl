@@ -127,6 +127,27 @@ def test_index_results_against_query():
         assert index_results_against_query(docs, "rust async", index_path) == 0
 
 
+def test_index_results_against_query_keeps_title_only_documents():
+    # Title-only results (empty extract) must still be indexed, matching what
+    # Super Search now keeps for display. The term is matched via the URL/title
+    # token set, so an empty extract should not exclude the document.
+    num_pages = 64
+    doc = Document(title="Kitsas dictionary", url="https://en.wiktionary.org/wiki/kitsas", extract="")
+    docs = [doc]
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        with TinyIndex.create(Document, index_path, num_pages=num_pages, page_size=4096):
+            pass
+
+        new_count = index_results_against_query(docs, "kitsas", index_path)
+        assert new_count == 1
+
+        with TinyIndex(Document, index_path, 'r') as indexer:
+            kitsas_urls = {d.url for d in indexer.retrieve("kitsas")}
+        assert kitsas_urls == {doc.url}
+
+
 # ---------------------------------------------------------------------------
 # _merge_user_ids
 # ---------------------------------------------------------------------------

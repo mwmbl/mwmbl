@@ -126,7 +126,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     with TinyIndex(Document, index_path, 'r') as indexer:
         existing_keys: dict[int, set[tuple]] = {}
         for doc in documents:
-            if not (doc.url and doc.title and doc.extract):
+            if not (doc.url and doc.title):
                 continue
             doc_tokens = _document_token_set(doc)
             for term, words in query_terms.items():
