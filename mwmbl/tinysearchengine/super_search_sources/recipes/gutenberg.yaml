@@ -1,0 +1,22 @@
+# Project Gutenberg has no JSON search API, so we scrape the HTML results page.
+# Each result is an <li class="booklink"> with a relative href that base_url
+# resolves to an absolute URL.
+name: gutenberg
+domain: www.gutenberg.org
+field: books-literature
+request:
+  url: https://www.gutenberg.org/ebooks/search/
+  params:
+    query: "{query}"
+response:
+  format: html
+  results: "li.booklink"
+  base_url: https://www.gutenberg.org
+  fields:
+    title:
+      selector: "span.title"
+    extract:
+      selector: "span.subtitle"
+    url:
+      selector: "a.link"
+      attr: href

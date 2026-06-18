@@ -1,0 +1,23 @@
+# Internet Archive via the advancedsearch JSON API. The result list is nested
+# under response.docs; the item URL is templated from the identifier.
+name: archive_org
+domain: archive.org
+field: tech
+request:
+  url: https://archive.org/advancedsearch.php
+  params:
+    q: "{query}"
+    "fl[]":
+      - identifier
+      - title
+      - description
+    rows: "{limit}"
+    output: json
+response:
+  format: json
+  results: response.docs
+  fields:
+    title: title
+    extract: description
+    url:
+      template: "https://archive.org/details/{identifier}"
