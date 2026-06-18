@@ -472,6 +472,100 @@ def test_no_duplicate_consecutive_results_frames(client, api_key, monkeypatch):
         assert prev != nxt, "consecutive identical results frames must be deduplicated"
 
 
+@pytest.mark.django_db
+def test_title_only_source_result_retained(client, api_key, monkeypatch):
+    """A source/index result with an empty extract is kept (title + URL only),
+    matching standard Mwmbl search rather than being silently dropped.
+
+    Regression test for Super Search returning fewer results than standard search
+    (e.g. "olearia macrodonta", where two relevant pages have empty extracts).
+    """
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "mwmbl": [
+            Document(title="Python guide", url="https://py.example/", extract="A guide"),
+            Document(title="Python reference", url="https://noextract.example/", extract=""),
+        ],
+    })
+    _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 40)
+
+    def fake_crawl(url, redis):
+        return {"url": url, "status": 200, "content": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    final_urls = {r["url"] for r in final}
+    assert "https://noextract.example/" in final_urls, "title-only result must not be dropped"
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_followed_link_without_title_excluded(client, api_key, monkeypatch):
+    """A followed link whose crawl yields no real title is a pseudo-result
+    (its only title would be URL-derived) and must not enter the final ranking,
+    even though its extract matches the query."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Python parent", url="https://parent.example/",
+                        extract="python parent text")],
+    })
+    _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
+
+    def fake_crawl(url, redis):
+        if url == "https://parent.example/":
+            return {"url": url, "status": 200, "content": {
+                "title": "Python parent", "extract": "python parent text",
+                "links": ["https://child.example/python-guide"], "extra_links": [],
+            }}
+        return {"url": url, "status": 200, "content": {
+            "title": "", "extract": "python child text", "links": [], "extra_links": [],
+        }}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    final_urls = {r["url"] for r in final}
+    assert "https://child.example/python-guide" not in final_urls
+
+
+@pytest.mark.django_db
+@override_settings(SUPER_SEARCH_TOP_K=2)
+def test_followed_link_with_title_and_no_extract_kept(client, api_key, monkeypatch):
+    """A followed link with a genuine crawled title but an empty extract is kept."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Python parent", url="https://parent.example/",
+                        extract="python parent text")],
+    })
+    _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
+
+    def fake_crawl(url, redis):
+        if url == "https://parent.example/":
+            return {"url": url, "status": 200, "content": {
+                "title": "Python parent", "extract": "python parent text",
+                "links": ["https://child.example/python-guide"], "extra_links": [],
+            }}
+        return {"url": url, "status": 200, "content": {
+            "title": "Python child", "extract": "", "links": [], "extra_links": [],
+        }}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    final_urls = {r["url"] for r in final}
+    assert "https://child.example/python-guide" in final_urls
+
+
 # ---------------------------------------------------------------------------
 # Architecture guard: no forbidden sync symbols in the orchestrator
 # ---------------------------------------------------------------------------
