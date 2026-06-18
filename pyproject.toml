@@ -92,5 +92,8 @@ log_cli = true
 log_cli_level = "INFO"
 DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = "--reuse-db"
+addopts = "--reuse-db -m 'not live'"
 asyncio_mode = "auto"
+markers = [
+    "live: hits real external endpoints; excluded from the default run. Run with -m live (used by the weekly Super Search smoke workflow).",
+]
