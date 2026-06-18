@@ -24,61 +24,64 @@ from mwmbl.tokenizer import tokenize
 # list instead of hard-capping one result per domain).
 MMR_LAMBDA = 0.7  # weight on relevance vs. diversity (1.0 = pure relevance, 0.0 = max diversity)
 DOMAIN_SIMILARITY_WEIGHT = 0.8  # within the kernel: weight on same-domain vs. text overlap
+MMR_WINDOW = 50  # only diversify the top candidates; the long tail keeps relevance order
 
 
-def _bag_of_words(doc: Document) -> Counter:
-    return Counter(tokenize(f"{doc.title or ''} {doc.extract or ''}"))
+def _normalized_bow(doc: Document) -> dict[str, float]:
+    """L2-normalised bag-of-words over title + extract, so cosine is a plain dot product."""
+    counts = Counter(tokenize(f"{doc.title or ''} {doc.extract or ''}"))
+    if not counts:
+        return {}
+    norm = math.sqrt(sum(c * c for c in counts.values()))
+    return {token: count / norm for token, count in counts.items()}
 
 
-def _cosine(a: Counter, b: Counter) -> float:
-    if not a or not b:
-        return 0.0
-    dot = sum(count * b[token] for token, count in a.items() if token in b)
-    if dot == 0:
-        return 0.0
-    norm_a = math.sqrt(sum(c * c for c in a.values()))
-    norm_b = math.sqrt(sum(c * c for c in b.values()))
-    return dot / (norm_a * norm_b)
-
-
-def _similarity(bow_a: Counter, netloc_a: str, bow_b: Counter, netloc_b: str) -> float:
-    """Domain-dominant similarity: same-domain pairs are penalised hardest, with a
-    bag-of-words cosine as a secondary signal to catch cross-domain near-duplicates."""
-    domain_sim = 1.0 if netloc_a and netloc_a == netloc_b else 0.0
-    text_sim = _cosine(bow_a, bow_b)
-    return DOMAIN_SIMILARITY_WEIGHT * domain_sim + (1 - DOMAIN_SIMILARITY_WEIGHT) * text_sim
+def _text_cosine(a: dict[str, float], b: dict[str, float]) -> float:
+    # a and b are already L2-normalised, so the sparse dot product is the cosine.
+    if len(a) > len(b):
+        a, b = b, a
+    return sum(weight * b[token] for token, weight in a.items() if token in b)
 
 
 def mmr_rerank(ranked_pages: list[Document]) -> list[Document]:
     """Re-order a relevance-sorted list to demote near-duplicate / same-domain results.
 
-    Greedy Maximal Marginal Relevance with the domain-dominant kernel above. Relevance
-    is rank-based (scale-invariant): the i-th most relevant page has relevance
-    (n - i) / n, so it does not depend on the model's compressed score magnitudes.
-    Each candidate is discounted by its greatest similarity to an already-selected page,
-    so e.g. the second result from a domain sinks below fresher domains but is never
-    dropped. Complexity is O(n^2) over the (small) per-query candidate set.
+    Greedy Maximal Marginal Relevance with a domain-dominant kernel
+    (sim = w_domain * same_domain + (1 - w_domain) * bag-of-words cosine). Relevance is
+    rank-based (scale-invariant): the i-th most relevant page has relevance
+    (window - i) / window, so it does not depend on the model's compressed score
+    magnitudes. Each candidate is discounted by its greatest similarity to an
+    already-selected page, so e.g. the second result from a domain sinks below fresher
+    domains but is never dropped.
+
+    Only the top MMR_WINDOW candidates are diversified (O(window^2)); the long tail,
+    which is rarely seen, keeps plain relevance order so the cost stays bounded.
     """
     n = len(ranked_pages)
     if n <= 2:
         return ranked_pages
 
-    relevance = [(n - i) / n for i in range(n)]
-    bows = [_bag_of_words(p) for p in ranked_pages]
-    netlocs = [urlparse(p.url).netloc for p in ranked_pages]
+    window = min(n, MMR_WINDOW)
+    head, tail = ranked_pages[:window], ranked_pages[window:]
 
-    remaining = set(range(n))
-    max_sim = [0.0] * n
+    relevance = [(window - i) / window for i in range(window)]
+    bows = [_normalized_bow(p) for p in head]
+    netlocs = [urlparse(p.url).netloc for p in head]
+
+    remaining = set(range(window))
+    max_sim = [0.0] * window
     selected: list[int] = []
     while remaining:
         best = max(remaining, key=lambda i: MMR_LAMBDA * relevance[i] - (1 - MMR_LAMBDA) * max_sim[i])
         selected.append(best)
         remaining.discard(best)
+        best_bow, best_netloc = bows[best], netlocs[best]
         for j in remaining:
-            sim = _similarity(bows[best], netlocs[best], bows[j], netlocs[j])
+            domain_sim = DOMAIN_SIMILARITY_WEIGHT if best_netloc and best_netloc == netlocs[j] else 0.0
+            sim = domain_sim + (1 - DOMAIN_SIMILARITY_WEIGHT) * _text_cosine(best_bow, bows[j])
             if sim > max_sim[j]:
                 max_sim[j] = sim
-    return [ranked_pages[i] for i in selected]
+    return [head[i] for i in selected] + tail
 
 
 class LTRRanker(Ranker):

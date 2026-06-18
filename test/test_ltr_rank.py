@@ -1,5 +1,5 @@
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.ltr_rank import mmr_rerank
+from mwmbl.tinysearchengine.ltr_rank import MMR_WINDOW, mmr_rerank
 
 
 def _doc(title, url, extract=""):
@@ -43,3 +43,14 @@ def test_mmr_preserves_order_without_duplicates():
 def test_mmr_short_lists_are_unchanged():
     pages = [_doc("a", "https://github.com/x/a"), _doc("b", "https://github.com/x/b")]
     assert mmr_rerank(pages) == pages
+
+
+def test_mmr_caps_work_to_window_and_keeps_tail():
+    # Beyond MMR_WINDOW the long tail keeps plain relevance order (bounded cost),
+    # and no document is ever dropped.
+    pages = [_doc(f"t{i}", f"https://github.com/x/{i}", "same kind of content") for i in range(MMR_WINDOW + 25)]
+    reranked = mmr_rerank(pages)
+    assert len(reranked) == len(pages)
+    assert {p.url for p in reranked} == {p.url for p in pages}
+    # The tail past the window is untouched.
+    assert reranked[MMR_WINDOW:] == pages[MMR_WINDOW:]
