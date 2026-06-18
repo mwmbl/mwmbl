@@ -365,9 +365,9 @@ async def _follow_links(
     raw_links = raw_links[:50]
     await emit("page_fetched", PageFetchedEvent(url=parent.url, links=len(raw_links)))
 
-    parent_title = content.get("title") or parent.title or _title_from_url(parent.url)
+    parent_title = content.get("title") or parent.title
     parent_extract = content.get("extract") or parent.extract or ""
-    if parent_title and parent_extract:
+    if parent_title:
         all_docs.append(Document(title=parent_title, url=parent.url, extract=parent_extract))
 
     if not raw_links:
@@ -394,13 +394,16 @@ async def _follow_links(
         if not c:
             continue
         await emit("link_followed", LinkFollowedEvent(url=proxy_doc.url, **{"from": parent.url}))
-        doc = Document(
-            title=c.get("title") or _title_from_url(proxy_doc.url),
-            url=proxy_doc.url,
-            extract=c.get("extract") or "",
-        )
-        if doc.url and doc.title and doc.extract:
-            all_docs.append(doc)
+        # Only keep links where the crawl produced a genuine page title; a
+        # URL-derived title (via _title_from_url) with no real content is a
+        # pseudo-result, not worth ranking or indexing. The extract may be empty.
+        crawled_title = (c.get("title") or "").strip()
+        if proxy_doc.url and crawled_title:
+            all_docs.append(Document(
+                title=crawled_title,
+                url=proxy_doc.url,
+                extract=c.get("extract") or "",
+            ))
 
     await _emit_final_results(query, all_docs, emit, last_results_key, lock)
 
@@ -419,7 +422,7 @@ async def _emit_final_results(
         seen: set[str] = set()
         unique: list[Document] = []
         for doc in all_docs:
-            if doc.url and doc.title and doc.extract and doc.url not in seen:
+            if doc.url and doc.title and doc.url not in seen:
                 seen.add(doc.url)
                 unique.append(doc)
 
@@ -513,7 +516,7 @@ async def _run_pipeline(
 
             scores = await asyncio.to_thread(_heuristic_score_docs, query, docs)
             for doc, score in zip(docs, scores):
-                if doc.url and doc.title and doc.extract:
+                if doc.url and doc.title:
                     all_docs.append(doc)
                 if _maybe_promote(doc, score):
                     await emit("result_promoted", _result_payload(doc, score, name, "direct"))
