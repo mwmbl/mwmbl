@@ -37,6 +37,10 @@ MAX_NEW_LINKS = 50
 MAX_EXTRA_LINKS = 50
 NUM_TITLE_CHARS = 65
 NUM_EXTRACT_CHARS = 155
+# Fallback extract (first-paragraph) tuning: ignore paragraphs shorter than this
+# or whose text is mostly link anchors (nav/breadcrumbs rather than prose).
+MIN_FALLBACK_PARAGRAPH_CHARS = 20
+MAX_FALLBACK_PARAGRAPH_LINK_DENSITY = 0.5
 DEFAULT_ENCODING = 'utf8'
 DEFAULT_ENC_ERRORS = 'replace'
 MAX_SITE_URLS = 100
@@ -266,6 +270,39 @@ def get_og_meta(dom) -> tuple[str, str]:
     return og_title, og_desc
 
 
+def get_meta_description(dom) -> str:
+    """Return the <meta name="description"> content, or empty string."""
+    for meta in dom.xpath("//meta[@name and @content]"):
+        if (meta.get("name") or "").strip().lower() == "description":
+            return (meta.get("content") or "").strip()
+    return ""
+
+
+def get_first_paragraph(dom) -> str:
+    """Return the text of the first substantive <p> element, or empty string.
+
+    A last-resort fallback for pages where justext finds no 'good' content — most
+    commonly non-English pages, where the English stoplist gives ~0 stopword
+    density so genuine prose is classified as boilerplate. Paragraphs that are too
+    short or dominated by link text (nav/breadcrumbs) are skipped so the snippet
+    is real body text.
+    """
+    for p in dom.xpath("//p"):
+        text = " ".join(" ".join(p.itertext()).split())
+        if len(text) < MIN_FALLBACK_PARAGRAPH_CHARS:
+            continue
+        link_text = " ".join(" ".join(a.itertext()) for a in p.xpath(".//a"))
+        link_chars = len(" ".join(link_text.split()))
+        if link_chars > len(text) * MAX_FALLBACK_PARAGRAPH_LINK_DENSITY:
+            continue
+        return text
+    return ""
+
+
+def _truncate(text: str, limit: int) -> str:
+    return text[:limit - 1] + '…' if len(text) > limit else text
+
+
 def crawl_url(url, redis: Redis):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
@@ -372,14 +409,18 @@ def crawl_url(url, redis: Redis):
             extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
             break
 
-    # For JS-first pages (e.g. Discord, SPAs) justext finds no body content.
-    # Fall back to Open Graph meta tags so these pages are still indexable.
+    # justext finds no body content for JS-first pages (e.g. Discord, SPAs) and
+    # for non-English pages (the English stoplist classifies real prose as
+    # boilerplate). Fall back, in order, to Open Graph tags, the meta description,
+    # and finally the first substantive paragraph so these pages stay indexable.
     if not title or not extract:
         og_title, og_desc = get_og_meta(dom)
         if not title and og_title:
-            title = og_title[:NUM_TITLE_CHARS - 1] + '…' if len(og_title) > NUM_TITLE_CHARS else og_title
-        if not extract and og_desc:
-            extract = og_desc[:NUM_EXTRACT_CHARS - 1] + '…' if len(og_desc) > NUM_EXTRACT_CHARS else og_desc
+            title = _truncate(og_title, NUM_TITLE_CHARS)
+        if not extract:
+            fallback = og_desc or get_meta_description(dom) or get_first_paragraph(dom)
+            if fallback:
+                extract = _truncate(fallback, NUM_EXTRACT_CHARS)
 
     return {
       'url': url,
