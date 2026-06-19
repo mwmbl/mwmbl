@@ -13,6 +13,7 @@ from mwmbl.rankeval.paths import MODEL_PATH, RUST_MODEL_PATH
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
+from mwmbl.tinysearchengine.mmr_rank import MMRRanker
 from mwmbl.tinysearchengine.rank import Ranker, HeuristicRanker, HeuristicAndWikiRanker
 
 from mwmbl.rankeval.evaluation.evaluate import RankingModel, evaluate
@@ -32,7 +33,8 @@ def run():
  
     # model = pickle.load(open(MODEL_PATH, 'rb'))
     model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
-    ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3)
+    ranker = MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3))
+    # ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3)  # MMR off
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
     # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
     model = MwmblRankingModel(ranker)

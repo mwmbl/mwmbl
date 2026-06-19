@@ -1,5 +1,5 @@
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.ltr_rank import MMR_WINDOW, mmr_rerank
+from mwmbl.tinysearchengine.mmr_rank import MMR_WINDOW, MMRRanker, mmr_rerank
 
 
 def _doc(title, url, extract=""):
@@ -54,3 +54,46 @@ def test_mmr_caps_work_to_window_and_keeps_tail():
     assert {p.url for p in reranked} == {p.url for p in pages}
     # The tail past the window is untouched.
     assert reranked[MMR_WINDOW:] == pages[MMR_WINDOW:]
+
+
+class _FakeRanker:
+    """Minimal ranker stub exposing the methods MMRRanker delegates to."""
+
+    def __init__(self, results):
+        self._results = results
+        self.completed = None
+        self.raw_queried = None
+
+    def search(self, s, additional_results):
+        self.searched = (s, additional_results)
+        return self._results
+
+    def complete(self, q):
+        self.completed = q
+        return ["completion"]
+
+    def get_raw_results(self, query):
+        self.raw_queried = query
+        return ["raw"]
+
+
+def test_mmrranker_reranks_wrapped_search_output():
+    # The wrapped ranker returns results in relevance order: two same-domain then a
+    # fresh domain. MMRRanker should demote the second same-domain result below it.
+    a = _doc("Alpha repo", "https://github.com/x/alpha", "alpha project")
+    b = _doc("Beta repo", "https://github.com/x/beta", "beta project")
+    c = _doc("Gamma site", "https://example.org/gamma", "gamma encyclopedia entry")
+    ranker = MMRRanker(_FakeRanker([a, b, c]))
+
+    urls = [p.url for p in ranker.search("q", [])]
+    assert urls[0] == a.url
+    assert urls.index(c.url) < urls.index(b.url)
+
+
+def test_mmrranker_delegates_complete_and_raw_results():
+    fake = _FakeRanker([])
+    ranker = MMRRanker(fake)
+    assert ranker.complete("foo") == ["completion"]
+    assert fake.completed == "foo"
+    assert ranker.get_raw_results("bar") == ["raw"]
+    assert fake.raw_queried == "bar"
