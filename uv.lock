@@ -708,6 +708,7 @@ name = "mwmbl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "boto3" },
     { name = "defusedxml" },
     { name = "dj-database-url" },
@@ -751,7 +752,6 @@ dependencies = [
 
 [package.optional-dependencies]
 indexer = [
-    { name = "beautifulsoup4" },
     { name = "idna" },
     { name = "langdetect" },
     { name = "levenshtein" },
@@ -776,7 +776,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "beautifulsoup4", marker = "extra == 'indexer'", specifier = "==4.10.0" },
+    { name = "beautifulsoup4", specifier = "==4.10.0" },
     { name = "boto3", specifier = "==1.35.99" },
     { name = "defusedxml", specifier = ">=0.7.0" },
     { name = "dj-database-url", specifier = ">=2.1.0" },
