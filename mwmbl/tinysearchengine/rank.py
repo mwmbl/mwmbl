@@ -414,27 +414,3 @@ class HeuristicAndWikiRanker(HeuristicRanker):
             return []
 
         return results
-
-class DomainLimitingRanker:
-    def __init__(self, ranker: Ranker):
-        self.ranker = ranker
-    
-    def search(self, s: str, additional_results: list[Document]):
-        results = self.ranker.search(s, additional_results)
-        seen_domains = set()
-        
-        filtered_results = []
-        for result in results:
-            domain = urlparse(result.url).netloc
-            if domain in seen_domains:
-                continue
-
-            filtered_results.append(result)
-            seen_domains.add(domain)
-        return filtered_results
-
-    def complete(self, q: str):
-        return self.ranker.complete(q)
-
-    def get_raw_results(self, query: str):
-        return self.ranker.get_raw_results(query)

@@ -71,8 +71,10 @@ class LTRRanker(Ranker):
         mask = predictions > 0.0
         filtered_predictions = predictions[mask]
         filtered_pages = np.array(results)[mask]
+        if len(filtered_pages) == 0:
+            return []
 
-        # Vectorized sorting
+        # Sort by model relevance (descending).
         indices = np.argsort(filtered_predictions)[::-1]
         return filtered_pages[indices].tolist()
 
