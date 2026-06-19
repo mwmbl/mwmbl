@@ -20,3 +20,6 @@ response:
     url:
       selector: "a.link"
       attr: href
+smoke:
+  query: frankenstein
+  expect_title_contains: Frankenstein

@@ -44,6 +44,7 @@ class Recipe:
     response: dict
     domain: str = ""
     field: str = ""
+    smoke: dict | None = None
 
     @property
     def response_format(self) -> str:
@@ -54,28 +55,26 @@ def load_recipe(path: Path | str) -> Recipe:
     data = yaml.safe_load(Path(path).read_text())
     return Recipe(
         name=data["name"],
-        domain=data.get("domain", ""),
-        field=data.get("field", ""),
+        domain=data["domain"],
+        field=data["field"],
         request=data["request"],
         response=data["response"],
+        smoke=data["smoke"],
     )
 
 
 def load_recipes(directory: Path | str = RECIPES_DIR) -> dict[str, Recipe]:
     """Load every ``*.yaml`` recipe in ``directory``, keyed by recipe name.
 
-    Invalid recipes are logged and skipped rather than failing the import.
+    A malformed recipe (missing required keys, bad YAML) raises rather than
+    being silently skipped, so a broken recipe fails loudly at load time.
     """
     recipes: dict[str, Recipe] = {}
     directory = Path(directory)
     if not directory.is_dir():
         return recipes
     for path in sorted(directory.glob("*.yaml")):
-        try:
-            recipe = load_recipe(path)
-        except (yaml.YAMLError, KeyError, OSError) as e:
-            logger.warning("Skipping invalid recipe %s: %s", path, e)
-            continue
+        recipe = load_recipe(path)
         recipes[recipe.name] = recipe
     return recipes
 

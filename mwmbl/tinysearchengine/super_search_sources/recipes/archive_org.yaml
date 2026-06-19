@@ -21,3 +21,6 @@ response:
     extract: description
     url:
       template: "https://archive.org/details/{identifier}"
+smoke:
+  query: frankenstein
+  expect_title_contains: Frankenstein

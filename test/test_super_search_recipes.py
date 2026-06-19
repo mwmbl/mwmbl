@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import httpx
+import pytest
 
 from mwmbl.tinysearchengine.super_search_sources.recipe import (
     RECIPES_DIR,
@@ -38,9 +39,15 @@ def test_recipes_registered_in_sources():
     assert "wiktionary" in SOURCES and "gutenberg" in SOURCES
 
 
-def test_load_recipes_skips_invalid(tmp_path):
+def test_load_recipes_raises_on_invalid(tmp_path):
     (tmp_path / "broken.yaml").write_text("name: x\nrequest: {}\n")  # no response
-    assert load_recipes(tmp_path) == {}
+    with pytest.raises(KeyError):
+        load_recipes(tmp_path)
+
+
+@pytest.mark.parametrize("recipe", RECIPES.values(), ids=lambda r: r.name)
+def test_recipe_has_smoke_block(recipe):
+    assert recipe.smoke and recipe.smoke["query"] and recipe.smoke["expect_title_contains"]
 
 
 # ---------------------------------------------------------------------------

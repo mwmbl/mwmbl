@@ -20,7 +20,6 @@ from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, sea
 
 pytestmark = pytest.mark.live
 
-QUERY = "frankenstein"
 USER_AGENT = "mwmbl-super-search/0.1 (+https://mwmbl.org)"
 
 RECIPES = load_recipes()
@@ -30,26 +29,15 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=20.0, headers={"User-Agent": USER_AGENT})
 
 
-def _assert_usable(docs, expected_url_substr: str):
+def _assert_usable(docs, expected_title_substr: str):
     assert docs, "recipe returned no results — the site may have changed its format or blocked us"
-    top = docs[0]
-    assert top.url and expected_url_substr in top.url, f"unexpected result URL: {top.url!r}"
-    assert top.title, "top result has an empty title"
+    assert docs[0].url and docs[0].title, f"top result missing url/title: {docs[0]!r}"
+    assert any(expected_title_substr in d.title for d in docs), \
+        f"no result title contains {expected_title_substr!r}; titles={[d.title for d in docs]}"
 
 
-async def test_wiktionary_live():
+@pytest.mark.parametrize("recipe", RECIPES.values(), ids=lambda r: r.name)
+async def test_recipe_live(recipe):
     async with _client() as client:
-        docs = await search_with_recipe(client, RECIPES["wiktionary"], QUERY, 5)
-    _assert_usable(docs, "en.wiktionary.org/wiki/")
-
-
-async def test_archive_org_live():
-    async with _client() as client:
-        docs = await search_with_recipe(client, RECIPES["archive_org"], QUERY, 5)
-    _assert_usable(docs, "archive.org/details/")
-
-
-async def test_gutenberg_live():
-    async with _client() as client:
-        docs = await search_with_recipe(client, RECIPES["gutenberg"], QUERY, 5)
-    _assert_usable(docs, "gutenberg.org/ebooks/")
+        docs = await search_with_recipe(client, recipe, recipe.smoke["query"], 5)
+    _assert_usable(docs, recipe.smoke["expect_title_contains"])

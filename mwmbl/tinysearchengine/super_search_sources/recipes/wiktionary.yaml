@@ -23,3 +23,6 @@ response:
       template: "https://en.wiktionary.org/wiki/{title}"
   strip_html:
     - extract
+smoke:
+  query: frankenstein
+  expect_title_contains: Frankenstein
