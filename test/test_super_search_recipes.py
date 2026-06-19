@@ -20,6 +20,27 @@ from mwmbl.tinysearchengine.super_search_sources.recipe import (
 
 RECIPES = load_recipes()
 
+# A minimal but complete recipe, used to check that valid recipes still load
+# alongside a malformed one.
+GOOD_RECIPE_YAML = """\
+name: good
+domain: example.com
+field: other
+request:
+  url: https://example.com/api
+  params:
+    q: "{query}"
+response:
+  format: json
+  results: results
+  fields:
+    title: title
+    url: url
+smoke:
+  query: x
+  expect_title_contains: x
+"""
+
 
 def _recipe(name: str) -> Recipe:
     return RECIPES[name]
@@ -39,10 +60,15 @@ def test_recipes_registered_in_sources():
     assert "wiktionary" in SOURCES and "gutenberg" in SOURCES
 
 
-def test_load_recipes_raises_on_invalid(tmp_path):
-    (tmp_path / "broken.yaml").write_text("name: x\nrequest: {}\n")  # no response
-    with pytest.raises(KeyError):
-        load_recipes(tmp_path)
+def test_load_recipes_skips_malformed(tmp_path, caplog):
+    """A malformed recipe is logged and skipped, not raised — so one bad file
+    can't crash the whole app at import time. Valid recipes still load."""
+    (tmp_path / "broken.yaml").write_text("name: x\nrequest: {}\n")  # missing keys
+    (tmp_path / "good.yaml").write_text(GOOD_RECIPE_YAML)
+    with caplog.at_level("WARNING"):
+        recipes = load_recipes(tmp_path)
+    assert set(recipes) == {"good"}
+    assert "broken.yaml" in caplog.text
 
 
 @pytest.mark.parametrize("recipe", RECIPES.values(), ids=lambda r: r.name)

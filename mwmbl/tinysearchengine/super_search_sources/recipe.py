@@ -66,15 +66,22 @@ def load_recipe(path: Path | str) -> Recipe:
 def load_recipes(directory: Path | str = RECIPES_DIR) -> dict[str, Recipe]:
     """Load every ``*.yaml`` recipe in ``directory``, keyed by recipe name.
 
-    A malformed recipe (missing required keys, bad YAML) raises rather than
-    being silently skipped, so a broken recipe fails loudly at load time.
+    A malformed recipe (missing required keys, bad YAML) is logged and skipped
+    rather than aborting the whole load. This mirrors the engine's "one broken
+    source can't sink the orchestrator" stance: ``load_recipes`` runs at import
+    time, so raising here would take down the entire app at startup instead of
+    just dropping the one bad recipe.
     """
     recipes: dict[str, Recipe] = {}
     directory = Path(directory)
     if not directory.is_dir():
         return recipes
     for path in sorted(directory.glob("*.yaml")):
-        recipe = load_recipe(path)
+        try:
+            recipe = load_recipe(path)
+        except (KeyError, yaml.YAMLError, OSError) as e:
+            logger.warning("Skipping malformed recipe %s: %s", path.name, e)
+            continue
         recipes[recipe.name] = recipe
     return recipes
 
