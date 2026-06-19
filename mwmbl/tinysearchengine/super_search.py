@@ -42,6 +42,7 @@ from mwmbl.search_auth import authenticate_user
 from mwmbl.search_setup import index_path, ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
+from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
 from mwmbl.tinysearchengine.rank import score_result_whole
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
 from mwmbl.tokenizer import tokenize
@@ -434,6 +435,11 @@ async def _emit_final_results(
 
         final_scores = await asyncio.to_thread(score_documents, ltr_model, query, unique)
         ranked = sorted(zip(unique, final_scores), key=lambda x: -x[1])[:final_limit]
+        # Diversify with MMR (demotes, never drops, same-domain / near-duplicate
+        # results) to match standard search — see MMRRanker in search_setup.py.
+        score_by_url = {doc.url: score for doc, score in ranked}
+        diversified = mmr_rerank([doc for doc, _ in ranked])
+        ranked = [(doc, score_by_url[doc.url]) for doc in diversified]
         key = tuple(doc.url for doc, _ in ranked)
         if key == last_results_key[0]:
             return

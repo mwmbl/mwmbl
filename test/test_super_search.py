@@ -304,6 +304,50 @@ def test_final_results_event_emitted(client, api_key, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_final_results_are_mmr_diversified(client, api_key, monkeypatch):
+    """The final ranking applies MMR diversity (as standard search does): a second
+    same-domain result is demoted below a lower-scored fresh-domain result, while
+    all results are retained (MMR demotes, never drops)."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    # Relevance order a > b > c. a and b share a domain (and text); c is a fresh
+    # domain. MMR should lift c above the second same-domain result b.
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Python alpha repo", url="https://github.com/x/alpha",
+                     extract="python alpha project"),
+            Document(title="Python beta repo", url="https://github.com/x/beta",
+                     extract="python beta project"),
+            Document(title="Python gamma site", url="https://example.org/gamma",
+                     extract="python gamma guide"),
+        ],
+    })
+    # Promotion scores, then descending final-ranking scores (consumed once per
+    # _emit_final_results call) all in the same a > b > c order.
+    _stub_scoring(monkeypatch, [0.9, 0.8, 0.7] * 4 + [0.0] * 30)
+
+    def fake_crawl(url, redis):
+        return {"url": url, "status": 200, "content": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    urls = [r["url"] for r in final]
+
+    # All retained (demoted, not dropped).
+    assert set(urls) == {
+        "https://github.com/x/alpha",
+        "https://github.com/x/beta",
+        "https://example.org/gamma",
+    }
+    # Most relevant stays first; fresh domain lifted above the 2nd same-domain result.
+    assert urls[0] == "https://github.com/x/alpha"
+    assert urls.index("https://example.org/gamma") < urls.index("https://github.com/x/beta")
+
+
+@pytest.mark.django_db
 def test_done_reports_pages_indexed(client, api_key, monkeypatch):
     """Results are indexed at the end and the count is reported in 'done'."""
     import mwmbl.tinysearchengine.super_search as ss
