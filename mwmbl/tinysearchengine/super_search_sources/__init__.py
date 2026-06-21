@@ -10,6 +10,7 @@ from mwmbl.tinysearchengine.super_search_sources.github import search as search_
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
 from mwmbl.tinysearchengine.super_search_sources.mwmbl_index import search as search_mwmbl
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
+from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, make_recipe_source
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
 
 SOURCES = {
@@ -20,3 +21,8 @@ SOURCES = {
     "arxiv": search_arxiv,
     "pypi": search_pypi,
 }
+
+# Declarative YAML recipes (recipes/*.yaml) are loaded at import time and added
+# as ordinary sources. A hand-written adapter wins if it shares a recipe's name.
+for _name, _recipe in load_recipes().items():
+    SOURCES.setdefault(_name, make_recipe_source(_recipe))

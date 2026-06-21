@@ -1,0 +1,28 @@
+# English Wiktionary via the MediaWiki search API.
+# Representative of the whole MediaWiki class (Wikipedia, Wikisource,
+# minecraft.wiki, ...): same API shape, just a different host. The result has a
+# page title and an HTML snippet; the page URL is templated from the title.
+name: wiktionary
+domain: en.wiktionary.org
+field: other
+request:
+  url: https://en.wiktionary.org/w/api.php
+  params:
+    action: query
+    list: search
+    format: json
+    srsearch: "{query}"
+    srlimit: "{limit}"
+response:
+  format: json
+  results: query.search
+  fields:
+    title: title
+    extract: snippet
+    url:
+      template: "https://en.wiktionary.org/wiki/{title}"
+  strip_html:
+    - extract
+smoke:
+  query: frankenstein
+  expect_title_contains: Frankenstein

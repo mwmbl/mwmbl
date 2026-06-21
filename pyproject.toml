@@ -48,6 +48,9 @@ dependencies = [
     "polar-sdk==0.31.7",
     "httpx>=0.27.0",
     "defusedxml>=0.7.0",
+    # Used by the Super Search recipe engine (super_search_sources/recipe.py),
+    # which is imported at app startup — must be a core dep, not indexer-only.
+    "beautifulsoup4==4.10.0",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +58,6 @@ indexer = [
     "ujson==4.3.0",
     "warcio==1.7.4",
     "idna==3.3",
-    "beautifulsoup4==4.10.0",
     "langdetect==1.0.9",
     "pyarrow==6.0.0",
     "pyspark==3.2.0",
@@ -92,5 +94,8 @@ log_cli = true
 log_cli_level = "INFO"
 DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = "--reuse-db"
+addopts = "--reuse-db -m 'not live'"
 asyncio_mode = "auto"
+markers = [
+    "live: hits real external endpoints; excluded from the default run. Run with -m live (used by the weekly Super Search smoke workflow).",
+]
