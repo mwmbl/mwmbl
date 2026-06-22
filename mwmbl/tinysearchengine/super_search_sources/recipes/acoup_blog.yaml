@@ -1,0 +1,23 @@
+# ACOUP (A Collection of Unmitigated Pedantry) - popular history blog via HTML scraping.
+name: acoup_blog
+domain: acoup.blog
+field: history
+request:
+  url: https://acoup.blog/
+  params:
+    s: "{query}"
+response:
+  format: html
+  results: "article.post"
+  base_url: https://acoup.blog
+  fields:
+    title:
+      selector: "h1.entry-title a"
+    extract:
+      selector: "p"
+    url:
+      selector: "h1.entry-title a"
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history
