@@ -1,0 +1,19 @@
+# DuckDuckGo search via instant answer API
+name: duckduckgo_com
+domain: duckduckgo.com
+field: tech
+request:
+  url: https://api.duckduckgo.com/
+  params:
+    q: "{query}"
+    format: json
+response:
+  format: json
+  results: RelatedTopics
+  fields:
+    title: Text
+    extract: Text
+    url: FirstURL
+smoke:
+  query: python programming
+  expect_title_contains: Python

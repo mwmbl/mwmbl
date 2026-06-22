@@ -1,0 +1,20 @@
+# O'Reilly - conferences and tech events.
+# Using O'Reilly Platform search API at learning.oreilly.com
+name: conferences_oreilly_com
+domain: conferences.oreilly.com
+field: business-finance
+request:
+  url: https://learning.oreilly.com/api/v2/search/
+  params:
+    q: "{query}"
+    limit: "{limit}"
+response:
+  format: json
+  results: results
+  fields:
+    title: title
+    extract: summary
+    url: web_url
+smoke:
+  query: machine learning
+  expect_title_contains: Machine

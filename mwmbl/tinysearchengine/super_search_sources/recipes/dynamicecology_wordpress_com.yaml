@@ -1,0 +1,23 @@
+# Dynamic Ecology WordPress blog via HTML search results page.
+name: dynamicecology_wordpress_com
+domain: dynamicecology.wordpress.com
+field: science
+request:
+  url: https://dynamicecology.wordpress.com/
+  params:
+    s: "{query}"
+response:
+  format: html
+  results: "article.post"
+  base_url: https://dynamicecology.wordpress.com
+  fields:
+    title:
+      selector: "h1.entry-title a"
+    extract:
+      selector: "p"
+    url:
+      selector: "h1.entry-title a"
+      attr: href
+smoke:
+  query: ecology
+  expect_title_contains: ecology

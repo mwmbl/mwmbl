@@ -1,0 +1,27 @@
+# Factorio Forums via HTML search results scraping.
+# Each result is a div.search with title in a dd that contains a link to viewtopic.php.
+# The extract is from the div.content preview text.
+name: forums_factorio_com
+domain: forums.factorio.com
+field: gaming
+request:
+  url: https://forums.factorio.com/search.php
+  params:
+    keywords: "{query}"
+response:
+  format: html
+  results: "div.search.post"
+  base_url: https://forums.factorio.com/
+  fields:
+    title:
+      selector: "dd a[href*='viewtopic.php']"
+    extract:
+      selector: "div.content"
+    url:
+      selector: "dd a[href*='viewtopic.php']"
+      attr: href
+  strip_html:
+    - extract
+smoke:
+  query: game
+  expect_title_contains: Space

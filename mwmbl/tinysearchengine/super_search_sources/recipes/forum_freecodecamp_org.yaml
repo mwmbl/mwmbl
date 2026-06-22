@@ -1,0 +1,19 @@
+# FreeCodeCamp forum via Discourse JSON API
+name: forum_freecodecamp_org
+domain: forum.freecodecamp.org
+field: education
+request:
+  url: https://forum.freecodecamp.org/search.json
+  params:
+    q: "{query}"
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    extract: ""
+    url:
+      template: "https://forum.freecodecamp.org/t/{slug}/{id}"
+smoke:
+  query: javascript
+  expect_title_contains: javascript

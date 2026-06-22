@@ -1,0 +1,21 @@
+name: technicshistory_com
+domain: technicshistory.com
+field: history
+request:
+  url: https://technicshistory.com/
+  params:
+    s: "{query}"
+response:
+  format: html
+  results: "article"
+  fields:
+    title:
+      selector: "h2.entry-title a"
+    extract:
+      selector: "div.entry-summary p"
+    url:
+      selector: "h2.entry-title a"
+      attr: href
+smoke:
+  query: computer
+  expect_title_contains: Computer

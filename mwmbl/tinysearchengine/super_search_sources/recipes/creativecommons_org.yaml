@@ -1,0 +1,21 @@
+# Creative Commons - WordPress site
+name: creativecommons_org
+domain: creativecommons.org
+field: business-finance
+request:
+  url: https://creativecommons.org/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: license
+  expect_title_contains: license

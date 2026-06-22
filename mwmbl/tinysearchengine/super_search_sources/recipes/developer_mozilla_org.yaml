@@ -1,0 +1,19 @@
+# Mozilla Developer Network - attempt WordPress REST API
+name: developer_mozilla_org
+domain: developer.mozilla.org
+field: programming
+request:
+  url: https://developer.mozilla.org/api/v1/search
+  params:
+    q: "{query}"
+    limit: "{limit}"
+response:
+  format: json
+  results: documents
+  fields:
+    title: title
+    extract: summary
+    url: mdn_url
+smoke:
+  query: javascript
+  expect_title_contains: JavaScript

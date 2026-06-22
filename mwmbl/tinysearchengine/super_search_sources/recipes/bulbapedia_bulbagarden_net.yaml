@@ -1,0 +1,25 @@
+# Bulbapedia via the MediaWiki search API.
+name: bulbapedia_bulbagarden_net
+domain: bulbapedia.bulbagarden.net
+field: gaming
+request:
+  url: https://bulbapedia.bulbagarden.net/w/api.php
+  params:
+    action: query
+    list: search
+    format: json
+    srsearch: "{query}"
+    srlimit: "{limit}"
+response:
+  format: json
+  results: query.search
+  fields:
+    title: title
+    extract: snippet
+    url:
+      template: "https://bulbapedia.bulbagarden.net/wiki/{title}"
+  strip_html:
+    - extract
+smoke:
+  query: pikachu
+  expect_title_contains: Pikachu

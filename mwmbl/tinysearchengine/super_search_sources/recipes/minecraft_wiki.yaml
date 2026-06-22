@@ -1,0 +1,25 @@
+# Minecraft Wiki via MediaWiki search API
+name: minecraft_wiki
+domain: minecraft.wiki
+field: gaming
+request:
+  url: https://minecraft.wiki/api.php
+  params:
+    action: query
+    list: search
+    format: json
+    srsearch: "{query}"
+    srlimit: "{limit}"
+response:
+  format: json
+  results: query.search
+  fields:
+    title: title
+    extract: snippet
+    url:
+      template: "https://minecraft.wiki/w/{title}"
+  strip_html:
+    - extract
+smoke:
+  query: creeper
+  expect_title_contains: Creeper
