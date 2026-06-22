@@ -282,6 +282,49 @@ def _select_diverse(entries, count):
     return selected
 
 
+# Recipes that existed before the first fan-out (used to reconstruct exactly
+# which 140 sites the first `select_targets` run attempted).
+_ORIGINAL_RECIPE_DOMAINS = {"archive.org", "www.gutenberg.org", "en.wiktionary.org"}
+REMAINING_BATCH_SIZE = 7
+
+
+def cmd_select_remaining():
+    """Select every still-uncovered shortlist site NOT attempted in the first
+    `select_targets` run, batched for a second recipe sub-agent fan-out."""
+    path = DEVDATA_SHORTLIST if DEVDATA_SHORTLIST.exists() else SHORTLIST
+    if not path.exists():
+        print("No shortlist found; run `shortlist` first.", file=sys.stderr)
+        return 1
+    entries = json.loads(path.read_text())["domains"]
+
+    # Reconstruct the first run's 140 attempted sites deterministically: same
+    # diverse selection over the pool as it was BEFORE any recipes were authored.
+    original_covered = set(ADAPTER_DOMAINS) | _ORIGINAL_RECIPE_DOMAINS
+    orig_uncovered = [e for e in entries if e["name"] not in original_covered]
+    attempted = {e["name"] for e in _select_diverse(orig_uncovered, TARGET_COUNT)}
+
+    covered_now = _covered_domains()
+    remaining = [e for e in entries
+                 if e["name"] not in covered_now and e["name"] not in attempted]
+    remaining = _select_diverse(remaining, len(remaining))  # field-interleaved order
+
+    TARGETS.write_text(json.dumps({"domains": remaining}, indent=2, ensure_ascii=False) + "\n")
+    RECIPE_CHUNK_DIR.mkdir(exist_ok=True)
+    for old in RECIPE_CHUNK_DIR.glob("input_*.json"):
+        old.unlink()
+    n_batches = 0
+    for i in range(0, len(remaining), REMAINING_BATCH_SIZE):
+        batch = remaining[i:i + REMAINING_BATCH_SIZE]
+        (RECIPE_CHUNK_DIR / f"input_{i // REMAINING_BATCH_SIZE:03d}.json").write_text(
+            json.dumps(batch, indent=2, ensure_ascii=False)
+        )
+        n_batches += 1
+    print(f"Remaining uncovered, not-yet-attempted: {len(remaining)} sites "
+          f"({len(covered_now)} covered, {len(attempted)} already attempted).")
+    print(f"Wrote {n_batches} batches (size {REMAINING_BATCH_SIZE}) in {RECIPE_CHUNK_DIR}.")
+    return 0
+
+
 def cmd_select_targets():
     """Pick ~TARGET_COUNT shortlist sites needing a recipe, batched for sub-agents."""
     path = DEVDATA_SHORTLIST if DEVDATA_SHORTLIST.exists() else SHORTLIST
@@ -319,7 +362,8 @@ def cmd_select_targets():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["prepare", "merge", "shortlist", "select_targets"]
+        "command",
+        choices=["prepare", "merge", "shortlist", "select_targets", "select_remaining"],
     )
     args = parser.parse_args()
     if args.command == "prepare":
@@ -329,6 +373,8 @@ def main():
         return cmd_shortlist()
     if args.command == "select_targets":
         return cmd_select_targets()
+    if args.command == "select_remaining":
+        return cmd_select_remaining()
     return cmd_merge()
 
 

@@ -1,0 +1,20 @@
+name: lexi_lambda_github_io
+domain: lexi-lambda.github.io
+field: programming
+request:
+  url: https://lexi-lambda.github.io/
+  params:
+    q: "{query}"
+response:
+  format: html
+  results: "article"
+  base_url: https://lexi-lambda.github.io
+  fields:
+    title:
+      selector: "h1 a"
+    url:
+      selector: "h1 a"
+      attr: href
+smoke:
+  query: programming
+  expect_title_contains: programming

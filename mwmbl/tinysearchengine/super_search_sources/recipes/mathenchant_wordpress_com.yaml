@@ -1,0 +1,22 @@
+name: mathenchant_wordpress_com
+domain: mathenchant.wordpress.com
+field: science
+request:
+  url: https://mathenchant.wordpress.com/
+  params:
+    s: "{query}"
+response:
+  format: html
+  results: "article"
+  base_url: https://mathenchant.wordpress.com
+  fields:
+    title:
+      selector: "h1.entry-title a"
+    extract:
+      selector: "div.entry-summary p"
+    url:
+      selector: "h1.entry-title a"
+      attr: href
+smoke:
+  query: mathematics
+  expect_title_contains: Pictur

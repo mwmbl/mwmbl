@@ -1,0 +1,17 @@
+name: forum_obsidian_md
+domain: forum.obsidian.md
+field: tech
+request:
+  url: https://forum.obsidian.md/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://forum.obsidian.md/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

@@ -1,0 +1,18 @@
+name: addons_mozilla_org
+domain: addons.mozilla.org
+field: tech
+request:
+  url: https://addons.mozilla.org/api/v5/addons/search/
+  params:
+    q: "{query}"
+    page_size: "{limit}"
+response:
+  format: json
+  results: results
+  fields:
+    title: name
+    extract: summary
+    url: url
+smoke:
+  query: ublock
+  expect_title_contains: uBlock

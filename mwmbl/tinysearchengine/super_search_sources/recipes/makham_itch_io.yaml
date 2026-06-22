@@ -1,0 +1,20 @@
+name: makham_itch_io
+domain: makham.itch.io
+field: gaming
+request:
+  url: https://makham.itch.io/
+  params:
+    q: "{query}"
+response:
+  format: html
+  results: ".game_cell"
+  base_url: https://makham.itch.io
+  fields:
+    title:
+      selector: ".game_title"
+    url:
+      selector: "a"
+      attr: href
+smoke:
+  query: game
+  expect_title_contains: game

@@ -1,0 +1,17 @@
+name: discourse_llvm_org
+domain: discourse.llvm.org
+field: programming
+request:
+  url: https://discourse.llvm.org/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://discourse.llvm.org/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

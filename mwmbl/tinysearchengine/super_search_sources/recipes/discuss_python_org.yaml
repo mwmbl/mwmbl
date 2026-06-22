@@ -1,0 +1,17 @@
+name: discuss_python_org
+domain: discuss.python.org
+field: programming
+request:
+  url: https://discuss.python.org/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://discuss.python.org/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

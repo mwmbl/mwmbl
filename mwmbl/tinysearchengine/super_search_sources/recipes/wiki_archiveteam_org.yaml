@@ -1,0 +1,24 @@
+name: wiki_archiveteam_org
+domain: wiki.archiveteam.org
+field: tech
+request:
+  url: https://wiki.archiveteam.org/api.php
+  params:
+    action: query
+    list: search
+    format: json
+    srsearch: '{query}'
+    srlimit: '{limit}'
+response:
+  format: json
+  results: query.search
+  fields:
+    title: title
+    extract: snippet
+    url:
+      template: https://wiki.archiveteam.org/wiki/{title}
+  strip_html:
+  - extract
+smoke:
+  query: history
+  expect_title_contains: history

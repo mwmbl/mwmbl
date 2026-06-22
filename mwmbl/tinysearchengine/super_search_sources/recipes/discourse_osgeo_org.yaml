@@ -1,0 +1,17 @@
+name: discourse_osgeo_org
+domain: discourse.osgeo.org
+field: tech
+request:
+  url: https://discourse.osgeo.org/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://discourse.osgeo.org/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

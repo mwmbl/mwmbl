@@ -1,0 +1,17 @@
+name: discourse_matplotlib_org
+domain: discourse.matplotlib.org
+field: programming
+request:
+  url: https://discourse.matplotlib.org/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://discourse.matplotlib.org/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history
