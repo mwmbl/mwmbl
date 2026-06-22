@@ -1,0 +1,19 @@
+name: www_space_com
+domain: www.space.com
+field: science
+request:
+  url: https://www.space.com/search
+  params:
+    searchTerm: '{query}'
+response:
+  format: html
+  results: div.listingResult
+  base_url: https://www.space.com
+  fields:
+    title: h3.article-name
+    url:
+      selector: a.article-link
+      attr: href
+smoke:
+  query: space
+  expect_title_contains: space

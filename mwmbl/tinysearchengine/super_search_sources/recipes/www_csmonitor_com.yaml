@@ -1,0 +1,19 @@
+name: www_csmonitor_com
+domain: www.csmonitor.com
+field: news-politics
+request:
+  url: https://www.csmonitor.com/content/search
+  params:
+    SearchText: '{query}'
+response:
+  format: html
+  results: div.ezv-listing.ezc-csm-story
+  base_url: https://www.csmonitor.com
+  fields:
+    title: h3.story-headline span.story_link
+    url:
+      selector: a.ezc-csm-story-link
+      attr: href
+smoke:
+  query: ukraine
+  expect_title_contains: ukraine

@@ -1,0 +1,19 @@
+name: www_cs_utexas_edu
+domain: www.cs.utexas.edu
+field: programming
+request:
+  url: https://www.cs.utexas.edu/search/node
+  params:
+    keys: '{query}'
+response:
+  format: html
+  results: ol.search_exclude_node_search-results li.list-group-item
+  base_url: https://www.cs.utexas.edu
+  fields:
+    title: h3 a
+    url:
+      selector: h3 a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

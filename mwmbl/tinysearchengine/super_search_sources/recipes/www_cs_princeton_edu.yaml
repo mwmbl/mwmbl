@@ -1,0 +1,19 @@
+name: www_cs_princeton_edu
+domain: www.cs.princeton.edu
+field: programming
+request:
+  url: https://www.cs.princeton.edu/search/node
+  params:
+    keys: '{query}'
+response:
+  format: html
+  results: ol.search-results li
+  base_url: https://www.cs.princeton.edu
+  fields:
+    title: h3.search-result__title a
+    url:
+      selector: h3.search-result__title a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

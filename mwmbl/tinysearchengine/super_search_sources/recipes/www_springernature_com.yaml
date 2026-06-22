@@ -1,0 +1,19 @@
+name: www_springernature_com
+domain: www.springernature.com
+field: science
+request:
+  url: https://www.springernature.com/gp/find
+  params:
+    queryString: '{query}'
+response:
+  format: html
+  results: div.search-entry
+  base_url: https://www.springernature.com
+  fields:
+    title: a.headline
+    url:
+      selector: a.headline
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science
