@@ -1,0 +1,18 @@
+name: f_droid_org
+domain: f-droid.org
+field: technology
+request:
+  url: https://search.f-droid.org/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: a.package-header
+  base_url: https://f-droid.org
+  fields:
+    title: h4.package-name
+    url:
+      attr: href
+smoke:
+  query: browser
+  expect_title_contains: browser
