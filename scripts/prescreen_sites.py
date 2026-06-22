@@ -81,13 +81,25 @@ def _harvest(base: str, html: str) -> dict:
     forms = []
     for form in soup.find_all("form"):
         action = form.get("action") or ""
-        names = {(i.get("name") or "").lower() for i in form.find_all("input")}
-        hit = names & SEARCH_INPUT_NAMES
-        looks_search = "search" in action.lower() or "search" in (form.get("id", "") +
-                                                                   form.get("class", [""])[0]).lower()
-        if hit or (looks_search and names):
-            field = next(iter(hit)) if hit else "q"
-            forms.append({"action": urljoin(base, action or "/"), "param": field})
+        # The real search field is a text/search input. Prefer one whose name is
+        # a conventional search param, but fall back to the form's ACTUAL first
+        # text-input name -- never a guessed "q" (e.g. Slashdot uses "fhfilter").
+        text_names = [
+            (i.get("name") or "").strip()
+            for i in form.find_all("input")
+            if (i.get("name") or "").strip()
+            and (i.get("type") or "text").lower() in ("", "text", "search")
+        ]
+        hit = [n for n in text_names if n.lower() in SEARCH_INPUT_NAMES]
+        cls = (form.get("class") or [""])[0]
+        looks_search = "search" in action.lower() or "search" in (form.get("id", "") + cls).lower()
+        if hit:
+            field = hit[0]
+        elif looks_search and text_names:
+            field = text_names[0]
+        else:
+            continue
+        forms.append({"action": urljoin(base, action or "/"), "param": field})
     # De-dup forms by (action, param).
     seen, uniq = set(), []
     for f in forms:

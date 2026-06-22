@@ -1,0 +1,19 @@
+name: slashdot_org
+domain: slashdot.org
+field: technology
+request:
+  url: https://slashdot.org/index2.pl
+  params:
+    fhfilter: '{query}'
+response:
+  format: html
+  results: article.fhitem
+  base_url: https://slashdot.org
+  fields:
+    title: span.story-title > a
+    url:
+      selector: span.story-title > a
+      attr: href
+smoke:
+  query: linux
+  expect_title_contains: linux
