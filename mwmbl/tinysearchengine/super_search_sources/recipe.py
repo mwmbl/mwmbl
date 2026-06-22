@@ -99,8 +99,12 @@ async def search_with_recipe(
     req = recipe.request
     method = req.get("method", "GET").upper()
     params = _build_params(req.get("params"), query, limit)
+    headers = _substitute(req.get("headers"), query, limit) if req.get("headers") else None
+    json_body = _substitute(req.get("json"), query, limit) if req.get("json") is not None else None
     try:
-        response = await client.request(method, req["url"], params=params)
+        response = await client.request(
+            method, req["url"], params=params, headers=headers, json=json_body
+        )
         response.raise_for_status()
         fmt = recipe.response_format
         if fmt == "json":
@@ -125,6 +129,8 @@ def _substitute(value, query: str, limit: int):
         return value.format(query=query, limit=limit)
     if isinstance(value, list):
         return [_substitute(v, query, limit) for v in value]
+    if isinstance(value, dict):
+        return {k: _substitute(v, query, limit) for k, v in value.items()}
     return value
 
 
@@ -165,13 +171,23 @@ def _make_doc(values: dict, url: str) -> Document | None:
 # ---------------------------------------------------------------------------
 
 def _walk(data, path: str):
-    """Walk a dotted path (``a.b.c``) through nested dicts; None if absent."""
+    """Walk a dotted path through nested dicts/lists; None if absent.
+
+    A path segment that is an integer (e.g. ``data.0.items``) indexes a list,
+    so APIs that wrap results in a single-element list or a fixed slot can be
+    expressed without Python.
+    """
     if not path:
         return data
     current = data
     for part in path.split("."):
         if isinstance(current, dict) and part in current:
             current = current[part]
+        elif isinstance(current, list) and part.lstrip("-").isdigit():
+            try:
+                current = current[int(part)]
+            except IndexError:
+                return None
         else:
             return None
     return current
@@ -259,30 +275,33 @@ def _resolve_url_html(url_spec, el, base_url: str) -> str:
 def _parse_xml(xml_text: str, spec: dict) -> list[Document]:
     root = fromstring(xml_text)
     results_path = spec.get("results", "")
-    items = root.findall(results_path) if results_path else [root]
+    # Optional XML namespace prefix map, e.g. {atom: "http://www.w3.org/2005/Atom"},
+    # so namespaced feeds (Atom/arXiv-style) can be expressed as pure recipes.
+    namespaces = spec.get("namespaces") or None
+    items = root.findall(results_path, namespaces) if results_path else [root]
     fields = spec["fields"]
     strip = set(spec.get("strip_html", []))
     docs: list[Document] = []
     for item in items:
         values = {
-            name: _select_xml(item, field_spec, name in strip)
+            name: _select_xml(item, field_spec, name in strip, namespaces)
             for name, field_spec in fields.items()
             if name != "url"
         }
-        doc = _make_doc(values, _resolve_url_xml(fields.get("url"), item, values))
+        doc = _make_doc(values, _resolve_url_xml(fields.get("url"), item, values, namespaces))
         if doc is not None:
             docs.append(doc)
     return docs
 
 
-def _select_xml(item: Element, spec, strip_html: bool = False) -> str:
+def _select_xml(item: Element, spec, strip_html: bool = False, namespaces: dict | None = None) -> str:
     value = ""
     if isinstance(spec, str):
-        child = item.find(spec)
+        child = item.find(spec, namespaces)
         value = (child.text or "") if child is not None else ""
     elif isinstance(spec, dict):
         attr, selector = spec.get("attr"), spec.get("selector")
-        target = item.find(selector) if selector else item
+        target = item.find(selector, namespaces) if selector else item
         if target is not None:
             value = target.get(attr, "") if attr else (target.text or "")
     if strip_html and value:
@@ -290,9 +309,9 @@ def _select_xml(item: Element, spec, strip_html: bool = False) -> str:
     return value.strip()
 
 
-def _resolve_url_xml(url_spec, item: Element, values: dict) -> str:
+def _resolve_url_xml(url_spec, item: Element, values: dict, namespaces: dict | None = None) -> str:
     if url_spec is None:
         return ""
     if isinstance(url_spec, dict) and "template" in url_spec:
         return _fill_template(url_spec["template"], {**item.attrib, **values})
-    return _select_xml(item, url_spec)
+    return _select_xml(item, url_spec, namespaces=namespaces)

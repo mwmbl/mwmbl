@@ -67,13 +67,18 @@ class MwmblConfig(AppConfig):
 
         try:
             from background_task.models import Task
-            from mwmbl.background import sync_search_counts
+            from mwmbl.background import sync_search_counts, sync_super_search_bandit
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
                 sync_search_counts(repeat=3600, repeat_until=None)
+
+            # Persist Super Search bandit state Redis <-> Postgres once per hour.
+            BANDIT_TASK = "mwmbl.background.sync_super_search_bandit"
+            if not Task.objects.filter(task_name=BANDIT_TASK).exists():
+                sync_super_search_bandit(repeat=3600, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

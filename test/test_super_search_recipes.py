@@ -202,3 +202,95 @@ async def test_http_error_returns_empty(httpx_mock):
 
 def test_recipes_dir_exists():
     assert Path(RECIPES_DIR).is_dir()
+
+
+# ---------------------------------------------------------------------------
+# v2 engine enhancements: headers, POST json body, XML namespaces, list index
+# ---------------------------------------------------------------------------
+
+async def test_request_headers_sent(httpx_mock):
+    recipe = Recipe(
+        name="hdr",
+        request={
+            "url": "https://example.com/api",
+            "headers": {"User-Agent": "custom-agent", "Accept": "application/json"},
+            "params": {"q": "{query}"},
+        },
+        response={"format": "json", "results": "results", "fields": {"title": "t", "url": "u"}},
+    )
+    httpx_mock.add_response(url=re.compile(r"https://example\.com/.*"), json={"results": []})
+    async with httpx.AsyncClient() as client:
+        await search_with_recipe(client, recipe, "x", 5)
+    request = httpx_mock.get_requests()[0]
+    assert request.headers["user-agent"] == "custom-agent"
+    assert request.headers["accept"] == "application/json"
+
+
+async def test_post_json_body_with_substitution(httpx_mock):
+    recipe = Recipe(
+        name="post",
+        request={
+            "url": "https://example.com/search",
+            "method": "POST",
+            "json": {"query": "{query}", "size": "{limit}"},
+        },
+        response={"format": "json", "results": "hits", "fields": {"title": "title", "url": "url"}},
+    )
+    httpx_mock.add_response(
+        url=re.compile(r"https://example\.com/.*"),
+        json={"hits": [{"title": "Hit", "url": "https://example.com/1"}]},
+    )
+    async with httpx.AsyncClient() as client:
+        docs = await search_with_recipe(client, recipe, "neutrino", 7)
+    request = httpx_mock.get_requests()[0]
+    assert request.method == "POST"
+    import json as _json
+    body = _json.loads(request.content)
+    assert body == {"query": "neutrino", "size": "7"}
+    assert docs[0].url == "https://example.com/1"
+
+
+async def test_json_list_index_path(httpx_mock):
+    recipe = Recipe(
+        name="listidx",
+        request={"url": "https://example.com/api", "params": {"q": "{query}"}},
+        response={"format": "json", "results": "data.0.items",
+                  "fields": {"title": "name", "url": "link"}},
+    )
+    httpx_mock.add_response(
+        url=re.compile(r"https://example\.com/.*"),
+        json={"data": [{"items": [{"name": "First", "link": "https://example.com/a"}]}]},
+    )
+    async with httpx.AsyncClient() as client:
+        docs = await search_with_recipe(client, recipe, "x", 5)
+    assert len(docs) == 1 and docs[0].title == "First"
+
+
+ATOM_XML = """<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Deep Learning</title>
+    <summary>A survey</summary>
+    <id>http://arxiv.org/abs/1234.5678</id>
+  </entry>
+</feed>
+"""
+
+
+async def test_xml_namespaces(httpx_mock):
+    recipe = Recipe(
+        name="atom",
+        request={"url": "https://export.arxiv.org/api/query"},
+        response={
+            "format": "xml",
+            "namespaces": {"atom": "http://www.w3.org/2005/Atom"},
+            "results": ".//atom:entry",
+            "fields": {"title": "atom:title", "extract": "atom:summary", "url": "atom:id"},
+        },
+    )
+    httpx_mock.add_response(url=re.compile(r"https://export\.arxiv\.org/.*"), text=ATOM_XML)
+    async with httpx.AsyncClient() as client:
+        docs = await search_with_recipe(client, recipe, "deep learning", 5)
+    assert len(docs) == 1
+    assert docs[0].title == "Deep Learning"
+    assert docs[0].url == "http://arxiv.org/abs/1234.5678"

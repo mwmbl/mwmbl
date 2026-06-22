@@ -45,6 +45,14 @@ from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
 from mwmbl.tinysearchengine.rank import score_result_whole
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
+from mwmbl.tinysearchengine.super_search_select import bandit as ss_bandit
+from mwmbl.tinysearchengine.super_search_select import profiles as ss_profiles
+from mwmbl.tinysearchengine.super_search_select.policy import select_sources
+from mwmbl.tinysearchengine.super_search_select.rewards import (
+    SelectionContext,
+    compute_rewards,
+    log_impression,
+)
 from mwmbl.tokenizer import tokenize
 
 logger = logging.getLogger(__name__)
@@ -82,6 +90,14 @@ async def _crawl(url: str):
     """Run the synchronous crawl_url on the dedicated crawl executor."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_CRAWL_EXECUTOR, crawl_url, url, _get_redis())
+
+
+async def _update_profile(name: str, docs: list[Document]) -> None:
+    """Fold a source's results into its content profile (off-thread, best-effort)."""
+    try:
+        await asyncio.to_thread(ss_profiles.update_profile, name, docs)
+    except Exception:
+        logger.exception("super-search profile update failed for %s", name)
 
 
 # ---------------------------------------------------------------------------
@@ -467,10 +483,30 @@ async def _index_results(query: str, docs: list[Document]) -> int:
         return 0
 
 
+async def _record_rewards(query: str, ctx: SelectionContext, last_results_key: list) -> None:
+    """Compute implicit per-source rewards from the final top-K and log the impression."""
+    if not ctx.selected:
+        return
+    final_urls = list(last_results_key[0] or ())
+    top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
+    rewards = compute_rewards(ctx, final_urls[:top_k])
+    try:
+        await asyncio.to_thread(log_impression, query, ctx, rewards)
+    except Exception:
+        logger.exception("super-search failed to record rewards")
+    if getattr(settings, "SUPER_SEARCH_USE_BANDIT", False):
+        try:
+            await asyncio.to_thread(ss_bandit.update, ctx.features, rewards)
+        except Exception:
+            logger.exception("super-search failed to update bandit")
+
+
 async def _run_pipeline(
-    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock
+    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock,
+    ctx: SelectionContext,
 ) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
+    ctx.per_source_limit = per_source_limit
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     timeout = httpx.Timeout(settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT)
@@ -502,11 +538,20 @@ async def _run_pipeline(
         follow_redirects=True,
         headers={"User-Agent": HTTP_USER_AGENT},
     ) as client:
+        # Select a subset of sources to query (cosine/bandit policy) rather than
+        # fanning out to every registered source.
+        sources_to_query = getattr(settings, "SUPER_SEARCH_SOURCES_TO_QUERY", len(SOURCES))
+        ctx.candidates = list(SOURCES.keys())
+        selected = await asyncio.to_thread(
+            select_sources, query, ctx.candidates, sources_to_query, ctx
+        )
+        ctx.selected = selected
+
         source_tasks = []
-        for name, fn in SOURCES.items():
+        for name in selected:
             await emit("source_started", SourceStartedEvent(source=name))
             source_tasks.append(
-                asyncio.create_task(_call_source(name, fn, client, query, per_source_limit))
+                asyncio.create_task(_call_source(name, SOURCES[name], client, query, per_source_limit))
             )
 
         secondary: list[asyncio.Task] = []
@@ -519,6 +564,12 @@ async def _run_pipeline(
             await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
             if not docs:
                 continue
+
+            # Fold this source's results into its decaying-mean content profile
+            # (best-effort; tracked in `secondary` so failures are logged at gather).
+            secondary.append(asyncio.create_task(_update_profile(name, docs)))
+            # Remember which source produced each URL, for reward attribution.
+            ctx.record_results(name, [d.url for d in docs if d.url])
 
             scores = await asyncio.to_thread(_heuristic_score_docs, query, docs)
             for doc, score in zip(docs, scores):
@@ -551,6 +602,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     all_docs: list[Document] = []
     last_results_key: list = [None]
     results_lock = asyncio.Lock()
+    selection_ctx = SelectionContext()
 
     async def emit(event_type: str, data: Any) -> None:
         await queue.put((event_type, data))
@@ -559,7 +611,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         nonlocal reason, pages_indexed
         try:
             await asyncio.wait_for(
-                _run_pipeline(query, emit, all_docs, last_results_key, results_lock),
+                _run_pipeline(query, emit, all_docs, last_results_key, results_lock, selection_ctx),
                 timeout=settings.SUPER_SEARCH_DEADLINE_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -578,6 +630,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
                 except Exception:
                     logger.exception("super-search failed to emit final results")
                 pages_indexed = await _index_results(query, all_docs)
+                await _record_rewards(query, selection_ctx, last_results_key)
             await queue.put(_SENTINEL)
 
     task = asyncio.create_task(producer())

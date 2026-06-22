@@ -89,6 +89,42 @@ def copy_indexes_continuously():
 # ---------------------------------------------------------------------------
 
 @background(schedule=0)
+def sync_super_search_bandit():
+    """Bidirectional sync of Super Search bandit state between Redis and Postgres.
+
+    Step 1 (Postgres → Redis): seed any arms missing from Redis (restores live
+    state after a Redis restart without clobbering newer in-memory updates).
+    Step 2 (Redis → Postgres): persist live arm state as a durable backup.
+    """
+    import numpy as np
+
+    from mwmbl.models import SuperSearchBanditState
+    from mwmbl.tinysearchengine.super_search_select import bandit
+
+    # Step 1: restore missing arms from Postgres.
+    pg_states = {}
+    for row in SuperSearchBanditState.objects.all():
+        d = row.dim
+        pg_states[row.site] = bandit.ArmState(
+            A=np.frombuffer(bytes(row.a), dtype=np.float64).reshape(d, d).copy(),
+            b=np.frombuffer(bytes(row.b), dtype=np.float64).copy(),
+        )
+    if pg_states:
+        bandit.seed_states(pg_states, overwrite=False)
+
+    # Step 2: persist live Redis state back to Postgres.
+    for site, state in bandit.export_all().items():
+        SuperSearchBanditState.objects.update_or_create(
+            site=site,
+            defaults={
+                "dim": int(state.b.shape[0]),
+                "a": state.A.astype(np.float64).tobytes(),
+                "b": state.b.astype(np.float64).tobytes(),
+            },
+        )
+
+
+@background(schedule=0)
 def sync_search_counts():
     """
     Bidirectional sync between Redis and UsageBucket, run once per hour.

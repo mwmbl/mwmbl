@@ -226,3 +226,37 @@ class SearchResultVote(models.Model):
             models.Index(fields=['url', 'query']),
             models.Index(fields=['timestamp']),
         ]
+
+
+class SuperSearchImpression(models.Model):
+    """One Super Search request: which sources were available, which were queried,
+    the features they were selected on, and the implicit reward each earned.
+
+    Feeds the offline feature-selection / policy-tuning harness and provides
+    durable training data for the contextual bandit.
+    """
+    query = models.CharField(max_length=512)
+    candidates = models.JSONField(default=list)   # all selectable source names (action space)
+    selected = models.JSONField(default=list)     # sources actually queried
+    features = models.JSONField(default=dict)     # {source: [feature vector]} for selected sources
+    rewards = models.JSONField(default=dict)      # {source: reward in [0, 1]}
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['timestamp']),
+        ]
+
+
+class SuperSearchBanditState(models.Model):
+    """Durable backup of a source's Thompson-sampling sufficient statistics.
+
+    The live state lives in Redis; this table is synced periodically so the
+    bandit survives a Redis restart. ``a`` / ``b`` are raw float64 bytes
+    (``A`` is ``dim*dim``, ``b`` is ``dim``).
+    """
+    site = models.CharField(max_length=128, unique=True)
+    dim = models.IntegerField()
+    a = models.BinaryField()
+    b = models.BinaryField()
+    updated_at = models.DateTimeField(auto_now=True)

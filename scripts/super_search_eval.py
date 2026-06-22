@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Offline evaluation harness for Super Search source selection.
+
+Subcommands:
+
+  build-matrix  - query every source for each query in a query file, rank the
+                  union with the LTR model, and write a dense (queries x sources)
+                  reward + feature matrix. Requires network + Django.
+
+  select        - fit the XGBoost reward model on the matrix (grouped CV by
+                  query) and print each feature's ablation drop in coverage@k.
+
+  simulate      - replay Thompson sampling over the matrix, sweep the
+                  exploration scale nu, and print it against random / popularity
+                  / cosine / oracle baselines.
+
+Usage:
+  DJANGO_SETTINGS_MODULE=mwmbl.settings_dev uv run python scripts/super_search_eval.py \
+      build-matrix --queries queries.txt --out eval_matrix
+  uv run python scripts/super_search_eval.py select   --matrix eval_matrix
+  uv run python scripts/super_search_eval.py simulate --matrix eval_matrix
+"""
+import argparse
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+import django
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
+
+
+def _bootstrap_django():
+    django.setup()
+
+
+# ---------------------------------------------------------------------------
+# build-matrix (network + Django)
+# ---------------------------------------------------------------------------
+
+async def _query_all_sources(query: str, limit: int):
+    import httpx
+    from django.conf import settings
+    from mwmbl.tinysearchengine.super_search_sources import SOURCES
+
+    timeout = settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
+                                 headers={"User-Agent": "mwmbl-super-search-eval/0.1"}) as client:
+        async def one(name, fn):
+            try:
+                docs = await asyncio.wait_for(fn(client, query, limit), timeout=timeout)
+                return name, docs
+            except Exception:
+                return name, []
+        results = await asyncio.gather(*[one(n, f) for n, f in SOURCES.items()])
+    return dict(results)
+
+
+def build_matrix(queries: list[str], out: str):
+    from django.conf import settings
+    from mwmbl.search_setup import ltr_model
+    from mwmbl.tinysearchengine.ltr_rank import score_documents
+    from mwmbl.tinysearchengine.super_search_sources import SOURCES
+    from mwmbl.tinysearchengine.super_search_select import profiles, vectors
+    from mwmbl.tinysearchengine.super_search_select.features import (
+        FEATURE_NAMES, QueryContext, feature_vector,
+    )
+    from mwmbl.tinysearchengine.super_search_select.registry import get_meta
+    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
+
+    sources = list(SOURCES.keys())
+    s_index = {name: i for i, name in enumerate(sources)}
+    limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
+    top_k = settings.SUPER_SEARCH_TOP_K
+    dim = settings.SUPER_SEARCH_PROJECTION_DIM
+    F = len(FEATURE_NAMES)
+
+    # Pass 1: query everything, recording per-query docs and accumulating each
+    # site's content profile (mean of its projected result samples).
+    per_query_docs = []   # list[dict[source -> list[Document]]]
+    prof_bow = {n: np.zeros(dim) for n in sources}
+    prof_cng = {n: np.zeros(dim) for n in sources}
+    for qi, query in enumerate(queries):
+        docs_by_source = asyncio.run(_query_all_sources(query, limit))
+        per_query_docs.append(docs_by_source)
+        for name, docs in docs_by_source.items():
+            if docs:
+                text = profiles.sample_text(docs)
+                prof_bow[name] += vectors.project_bow(text, dim)
+                prof_cng[name] += vectors.project_char_ngrams(text, dim)
+        print(f"  [{qi + 1}/{len(queries)}] {query!r}: "
+              f"{sum(len(d) for d in docs_by_source.values())} docs")
+    profile = {n: (vectors._l2_normalise(prof_bow[n]), vectors._l2_normalise(prof_cng[n]))
+               for n in sources}
+
+    # Pass 2: features + implicit-contribution reward against the LTR top-K.
+    Q, S = len(queries), len(sources)
+    X = np.zeros((Q, S, F))
+    R = np.zeros((Q, S))
+    mask = np.zeros((Q, S), dtype=bool)
+    for qi, (query, docs_by_source) in enumerate(zip(queries, per_query_docs)):
+        bow = vectors.project_bow(query, dim)
+        cng = vectors.project_char_ngrams(query, dim)
+        qctx = QueryContext.build(query, bow, cng)
+
+        source_by_url, all_docs = {}, []
+        for name, docs in docs_by_source.items():
+            si = s_index[name]
+            X[qi, si] = feature_vector(qctx, get_meta(name), profile[name])
+            if docs:
+                mask[qi, si] = True
+            for d in docs:
+                if d.url and d.title:
+                    source_by_url.setdefault(d.url, name)
+                    all_docs.append(d)
+        if all_docs:
+            scores = score_documents(ltr_model, query, all_docs)
+            ranked = [d.url for d, _ in sorted(zip(all_docs, scores), key=lambda x: -x[1])][:top_k]
+            counts = {}
+            for url in ranked:
+                src = source_by_url.get(url)
+                if src:
+                    counts[src] = counts.get(src, 0) + 1
+            for name, c in counts.items():
+                R[qi, s_index[name]] = min(c / max(limit, 1), 1.0)
+
+    matrix = RewardMatrix(queries=queries, sources=sources,
+                          feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask)
+    matrix.save(out)
+    print(f"Wrote matrix {out}.npz/.json: {Q} queries x {S} sources, "
+          f"{int(mask.sum())} filled cells.")
+
+
+# ---------------------------------------------------------------------------
+# select / simulate (pure, no network)
+# ---------------------------------------------------------------------------
+
+def cmd_select(matrix_path: str, k: int):
+    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix, select_features
+    m = RewardMatrix.load(matrix_path)
+    result = select_features(m, k=k)
+    print(f"baseline coverage@{k}: {result['baseline_coverage']:.4f}\n")
+    print("feature ablation (drop in coverage@k when removed; higher = more useful):")
+    for name, drop in sorted(result["ablation_drop"].items(), key=lambda kv: -kv[1]):
+        print(f"  {name:18} {drop:+.4f}")
+
+
+def cmd_simulate(matrix_path: str, k: int):
+    from mwmbl.tinysearchengine.super_search_select.evaluation import (
+        RewardMatrix, simulate_baselines, sweep_explore_scale,
+    )
+    m = RewardMatrix.load(matrix_path)
+    base = simulate_baselines(m, k=k)
+    print("baselines (mean captured reward per query):")
+    for name, val in sorted(base.items(), key=lambda kv: -kv[1]):
+        print(f"  {name:12} {val:.4f}")
+    print("\nThompson sampling by exploration scale nu:")
+    sweep = sweep_explore_scale(m, k=k, nus=[0.0, 0.25, 0.5, 1.0, 2.0, 4.0])
+    best = max(sweep, key=sweep.get)
+    for nu, val in sweep.items():
+        marker = "  <- best" if nu == best else ""
+        print(f"  nu={nu:<4} {val:.4f}{marker}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_build = sub.add_parser("build-matrix")
+    p_build.add_argument("--queries", required=True, help="file with one query per line")
+    p_build.add_argument("--out", default="eval_matrix")
+
+    p_select = sub.add_parser("select")
+    p_select.add_argument("--matrix", default="eval_matrix")
+    p_select.add_argument("--k", type=int, default=10)
+
+    p_sim = sub.add_parser("simulate")
+    p_sim.add_argument("--matrix", default="eval_matrix")
+    p_sim.add_argument("--k", type=int, default=10)
+
+    args = parser.parse_args()
+    _bootstrap_django()
+
+    if args.command == "build-matrix":
+        queries = [ln.strip() for ln in Path(args.queries).read_text().splitlines() if ln.strip()]
+        build_matrix(queries, args.out)
+    elif args.command == "select":
+        cmd_select(args.matrix, args.k)
+    elif args.command == "simulate":
+        cmd_simulate(args.matrix, args.k)
+
+
+if __name__ == "__main__":
+    main()

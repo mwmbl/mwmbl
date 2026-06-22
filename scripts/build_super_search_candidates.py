@@ -11,6 +11,13 @@ Two-phase helper for the Super Search v2 candidate analysis:
              schema/taxonomy, merge in original order, and write
              super-search-candidates.json. Prints distribution stats.
 
+  shortlist       - filter candidates to recommended + has_search + non-obscure.
+
+  select_targets  - pick ~140 shortlist sites that still need a recipe (excluding
+                    those already served by an adapter/recipe), maximising field
+                    diversity, and split them into small batches under
+                    recipe_chunks/input_NNN.json for the recipe sub-agent fan-out.
+
 Run from the repo root (the directory containing curated-domains.json).
 """
 import argparse
@@ -25,8 +32,25 @@ CURATED = REPO_ROOT / "curated-domains.json"
 CHUNK_DIR = REPO_ROOT / "candidate_chunks"
 OUTPUT = REPO_ROOT / "super-search-candidates.json"
 SHORTLIST = REPO_ROOT / "super-search-shortlist.json"
+DEVDATA_SHORTLIST = REPO_ROOT / "devdata" / "super-search-shortlist.json"
+RECIPES_DIR = REPO_ROOT / "mwmbl" / "tinysearchengine" / "super_search_sources" / "recipes"
+TARGETS = REPO_ROOT / "super-search-targets.json"
+RECIPE_CHUNK_DIR = REPO_ROOT / "recipe_chunks"
 
 CHUNK_SIZE = 150
+# Over-select so ~20-30% dropped (API key / no clean endpoint / un-passable smoke)
+# still leaves ~100 landed recipes.
+TARGET_COUNT = 140
+RECIPE_BATCH_SIZE = 5
+
+# Domains already served by a hand-written adapter (recipe domains are detected
+# from the YAML files). The Stack Exchange adapter covers the whole SE network.
+ADAPTER_DOMAINS = {
+    "mwmbl.org", "news.ycombinator.com", "github.com", "pypi.org",
+    "arxiv.org", "info.arxiv.org",
+    "stackoverflow.com", "stackexchange.com", "superuser.com",
+    "mathoverflow.net", "serverfault.com", "askubuntu.com",
+}
 
 # Fixed taxonomy / enums (keep in sync with the subagent prompt).
 FIELDS = {
@@ -228,15 +252,83 @@ def cmd_shortlist():
     return 0
 
 
+def _covered_domains():
+    """Domains already served: hand-written adapters + existing recipe YAML files."""
+    import yaml
+    covered = set(ADAPTER_DOMAINS)
+    for path in RECIPES_DIR.glob("*.yaml"):
+        try:
+            covered.add(yaml.safe_load(path.read_text())["domain"])
+        except (KeyError, yaml.YAMLError, OSError):
+            continue
+    return covered
+
+
+def _select_diverse(entries, count):
+    """Round-robin across fields (popularity-first within a field) to maximise diversity."""
+    pop_rank = {"high": 0, "medium": 1, "low": 2}
+    by_field = {}
+    for e in entries:
+        by_field.setdefault(e["field"], []).append(e)
+    for field_entries in by_field.values():
+        field_entries.sort(key=lambda e: (pop_rank[e["popularity"]], e["name"]))
+    selected, fields = [], sorted(by_field)
+    while len(selected) < count and any(by_field.values()):
+        for field in fields:
+            if by_field[field]:
+                selected.append(by_field[field].pop(0))
+                if len(selected) >= count:
+                    break
+    return selected
+
+
+def cmd_select_targets():
+    """Pick ~TARGET_COUNT shortlist sites needing a recipe, batched for sub-agents."""
+    path = DEVDATA_SHORTLIST if DEVDATA_SHORTLIST.exists() else SHORTLIST
+    if not path.exists():
+        print("No shortlist found; run `shortlist` first.", file=sys.stderr)
+        return 1
+    entries = json.loads(path.read_text())["domains"]
+    covered = _covered_domains()
+    candidates = [e for e in entries if e["name"] not in covered]
+    targets = _select_diverse(candidates, TARGET_COUNT)
+
+    TARGETS.write_text(json.dumps({"domains": targets}, indent=2, ensure_ascii=False) + "\n")
+
+    RECIPE_CHUNK_DIR.mkdir(exist_ok=True)
+    for old in RECIPE_CHUNK_DIR.glob("input_*.json"):
+        old.unlink()
+    n_batches = 0
+    for i in range(0, len(targets), RECIPE_BATCH_SIZE):
+        batch = targets[i:i + RECIPE_BATCH_SIZE]
+        (RECIPE_CHUNK_DIR / f"input_{i // RECIPE_BATCH_SIZE:03d}.json").write_text(
+            json.dumps(batch, indent=2, ensure_ascii=False)
+        )
+        n_batches += 1
+
+    print(f"Selected {len(targets)} targets from {len(candidates)} uncovered "
+          f"shortlist sites ({len(covered)} already covered).")
+    print(f"Wrote {TARGETS} and {n_batches} batches (size {RECIPE_BATCH_SIZE}) "
+          f"in {RECIPE_CHUNK_DIR} for the recipe sub-agent fan-out.")
+    print("\n-- field --")
+    for k, v in Counter(e["field"] for e in targets).most_common():
+        print(f"  {k:20} {v}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["prepare", "merge", "shortlist"])
+    parser.add_argument(
+        "command", choices=["prepare", "merge", "shortlist", "select_targets"]
+    )
     args = parser.parse_args()
     if args.command == "prepare":
         cmd_prepare()
         return 0
     if args.command == "shortlist":
         return cmd_shortlist()
+    if args.command == "select_targets":
+        return cmd_select_targets()
     return cmd_merge()
 
 
