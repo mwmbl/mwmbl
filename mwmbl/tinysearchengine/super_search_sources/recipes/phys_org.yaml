@@ -1,0 +1,19 @@
+name: phys_org
+domain: phys.org
+field: science
+request:
+  url: https://phys.org/search/
+  params:
+    search: '{query}'
+response:
+  format: html
+  results: h4.mb-2
+  base_url: https://phys.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: music
+  expect_title_contains: music

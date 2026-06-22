@@ -1,0 +1,19 @@
+name: theconversation_com
+domain: theconversation.com
+field: news-politics
+request:
+  url: https://theconversation.com/uk/search
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h3.legacy
+  base_url: https://theconversation.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

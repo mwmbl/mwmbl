@@ -1,0 +1,19 @@
+name: itch_io
+domain: itch.io
+field: gaming
+request:
+  url: https://itch.io/search
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: div.game_title
+  base_url: https://itch.io
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: game
+  expect_title_contains: game

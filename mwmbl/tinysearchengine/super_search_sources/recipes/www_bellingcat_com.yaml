@@ -1,0 +1,19 @@
+name: www_bellingcat_com
+domain: www.bellingcat.com
+field: news-politics
+request:
+  url: https://www.bellingcat.com/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h3
+  base_url: https://www.bellingcat.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

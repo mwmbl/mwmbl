@@ -1,0 +1,19 @@
+name: spectrum_ieee_org
+domain: spectrum.ieee.org
+field: tech
+request:
+  url: https://spectrum.ieee.org/search/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h2.widget__headline.h2
+  base_url: https://spectrum.ieee.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: music
+  expect_title_contains: music

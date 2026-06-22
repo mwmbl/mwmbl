@@ -1,0 +1,19 @@
+name: www_etymonline_com
+domain: www.etymonline.com
+field: books-literature
+request:
+  url: https://www.etymonline.com/search
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: div.flex.p-3
+  base_url: https://www.etymonline.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: book
+  expect_title_contains: book

@@ -1,0 +1,19 @@
+name: www_neh_gov
+domain: www.neh.gov
+field: academia
+request:
+  url: https://www.neh.gov/search
+  params:
+    keywords: '{query}'
+response:
+  format: html
+  results: div.views-field.views-field-field-formatted-title
+  base_url: https://www.neh.gov
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: research
+  expect_title_contains: research

@@ -1,0 +1,19 @@
+name: home_cern
+domain: home.cern
+field: science
+request:
+  url: https://home.cern/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: li.search-result-item
+  base_url: https://home.cern
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

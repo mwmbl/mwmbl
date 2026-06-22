@@ -16,7 +16,8 @@ assertions below turn into a clear failure.
 import httpx
 import pytest
 
-from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, search_with_recipe
+from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes
+from mwmbl.tinysearchengine.super_search_sources.smoke import check_recipe
 
 pytestmark = pytest.mark.live
 
@@ -29,15 +30,8 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=20.0, headers={"User-Agent": USER_AGENT})
 
 
-def _assert_usable(docs, expected_title_substr: str):
-    assert docs, "recipe returned no results — the site may have changed its format or blocked us"
-    assert docs[0].url and docs[0].title, f"top result missing url/title: {docs[0]!r}"
-    assert any(expected_title_substr in d.title for d in docs), \
-        f"no result title contains {expected_title_substr!r}; titles={[d.title for d in docs]}"
-
-
 @pytest.mark.parametrize("recipe", RECIPES.values(), ids=lambda r: r.name)
 async def test_recipe_live(recipe):
     async with _client() as client:
-        docs = await search_with_recipe(client, recipe, recipe.smoke["query"], 5)
-    _assert_usable(docs, recipe.smoke["expect_title_contains"])
+        ok, reason = await check_recipe(client, recipe)
+    assert ok, reason

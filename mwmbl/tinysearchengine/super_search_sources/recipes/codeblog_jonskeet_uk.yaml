@@ -1,0 +1,19 @@
+name: codeblog_jonskeet_uk
+domain: codeblog.jonskeet.uk
+field: programming
+request:
+  url: https://codeblog.jonskeet.uk/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h1.entry-title
+  base_url: https://codeblog.jonskeet.uk
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: design
+  expect_title_contains: design

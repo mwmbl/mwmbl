@@ -1,0 +1,19 @@
+name: diff_wikimedia_org
+domain: diff.wikimedia.org
+field: tech
+request:
+  url: https://diff.wikimedia.org/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h3.entry-title
+  base_url: https://diff.wikimedia.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

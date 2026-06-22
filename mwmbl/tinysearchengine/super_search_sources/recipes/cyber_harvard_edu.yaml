@@ -1,0 +1,19 @@
+name: cyber_harvard_edu
+domain: cyber.harvard.edu
+field: academia
+request:
+  url: https://cyber.harvard.edu/search/node
+  params:
+    keys: '{query}'
+response:
+  format: html
+  results: .views-field-title
+  base_url: https://cyber.harvard.edu
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: internet
+  expect_title_contains: internet

@@ -1,0 +1,19 @@
+name: www_esa_int
+domain: www.esa.int
+field: science
+request:
+  url: https://www.esa.int/esearch
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: div.grid-item.story
+  base_url: https://www.esa.int
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science
