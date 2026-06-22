@@ -1,0 +1,19 @@
+name: docs_djangoproject_com
+domain: docs.djangoproject.com
+field: programming
+request:
+  url: https://docs.djangoproject.com/en/6.0/search/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h2.result-title
+  base_url: https://docs.djangoproject.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: design
+  expect_title_contains: design

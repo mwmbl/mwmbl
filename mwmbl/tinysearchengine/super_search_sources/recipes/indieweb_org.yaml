@@ -1,0 +1,19 @@
+name: indieweb_org
+domain: indieweb.org
+field: tech
+request:
+  url: https://indieweb.org/wiki/index.php
+  params:
+    search: '{query}'
+response:
+  format: html
+  results: div.mw-search-result-heading
+  base_url: https://indieweb.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

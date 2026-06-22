@@ -1,0 +1,19 @@
+name: www_nist_gov
+domain: www.nist.gov
+field: science
+request:
+  url: https://www.nist.gov/search
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h3.nist-teaser__title
+  base_url: https://www.nist.gov
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

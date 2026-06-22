@@ -14,6 +14,7 @@ JSON it pretty-prints so the response shape is obvious to a recipe author.
 Usage:
   uv run python scripts/fetch_url.py "https://example.com/search?q=test"
   uv run python scripts/fetch_url.py "https://example.com/api?q=test" --max-chars 12000
+  uv run python scripts/fetch_url.py "https://example.com/search?q=test" --out /tmp/page.html
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ ENGINE_HEADERS = {"User-Agent": "mwmbl-super-search-smoke/0.1 (+https://mwmbl.or
 TIMEOUT = 15.0
 
 
-async def _fetch(url: str, max_chars: int) -> int:
+async def _fetch(url: str, max_chars: int, out: str | None) -> int:
     try:
         async with httpx.AsyncClient(
             follow_redirects=True, timeout=TIMEOUT, headers=ENGINE_HEADERS,
@@ -43,6 +44,14 @@ async def _fetch(url: str, max_chars: int) -> int:
     print(f"HTTP {r.status_code}  final-url: {r.url}")
     print(f"content-type: {ctype}")
     print(f"length: {len(r.text)} chars\n---")
+
+    if out:
+        # Write the full, untruncated body so a recipe author can read/grep the
+        # real markup when picking a CSS selector.
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(r.text)
+        print(f"wrote {len(r.text)} chars to {out}")
+        return 0
 
     body = r.text
     if "json" in ctype.lower():
@@ -60,8 +69,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("url")
     ap.add_argument("--max-chars", type=int, default=6000)
+    ap.add_argument("--out", help="write full untruncated body to this file")
     args = ap.parse_args()
-    return asyncio.run(_fetch(args.url, args.max_chars))
+    return asyncio.run(_fetch(args.url, args.max_chars, args.out))
 
 
 if __name__ == "__main__":

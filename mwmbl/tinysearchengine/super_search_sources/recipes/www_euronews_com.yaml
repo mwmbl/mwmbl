@@ -1,0 +1,19 @@
+name: www_euronews_com
+domain: www.euronews.com
+field: news
+request:
+  url: https://www.euronews.com/search
+  params:
+    query: '{query}'
+response:
+  format: html
+  results: '#c-search-articles article.the-media-object'
+  base_url: https://www.euronews.com
+  fields:
+    title: h2.the-media-object__title
+    url:
+      selector: a.the-media-object__link
+      attr: href
+smoke:
+  query: world
+  expect_title_contains: world
