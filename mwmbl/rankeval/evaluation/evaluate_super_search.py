@@ -7,17 +7,23 @@ with the LTR model, crawl promoted pages, follow outbound links, and MMR-diversi
 into a final ranking. Only the SSE/auth/quota/indexing/reward machinery of the
 HTTP endpoint is skipped; the ranking logic is exactly what production serves.
 
+The expensive part — source fan-out, page crawling and link-following — is cached
+per query (joblib ``Memory`` in ``devdata/super-search-eval-cache``). The cache
+stores the collected document pool *before* ranking, so the LTR/MMR ranking step
+is re-run fresh every time: iterate on ranking code and re-run without re-paying
+the network cost. The cache is keyed by query and by the collection code; pass
+``--clear-cache`` to force a full re-fetch (e.g. after changing source adapters,
+promotion or crawl logic).
+
 Usage::
 
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
         uv run python -m mwmbl.rankeval.evaluation.evaluate_super_search --fraction 0.02
-
-The pipeline crawls pages and follows links, so it is network-heavy; use
-``--fraction`` to sample the gold queries.
 """
 import asyncio
 import os
 from argparse import ArgumentParser
+from pathlib import Path
 
 import django
 
@@ -26,19 +32,40 @@ django.setup()
 
 # Imported after django.setup(): super_search pulls in search_setup (index + model).
 from django.conf import settings  # noqa: E402
+from joblib import Memory  # noqa: E402
 
 from mwmbl.rankeval.evaluation.evaluate import RankingModel, evaluate  # noqa: E402
+from mwmbl.rankeval.paths import DATA_DIR  # noqa: E402
 from mwmbl.tinysearchengine.indexer import Document  # noqa: E402
 from mwmbl.tinysearchengine.super_search import _emit_final_results, _run_pipeline  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext  # noqa: E402
 
 
+memory = Memory(location=str(DATA_DIR / "super-search-eval-cache"), verbose=0)
+
+
 async def _noop_emit(event_type, data):
-    """Discard the SSE events the pipeline emits; we only want the final ranking."""
+    """Discard the SSE events the pipeline emits; we only want the documents."""
 
 
-async def _super_search(query: str) -> list[str]:
-    """Run the pipeline for one query and return the final ranked URLs."""
+def _doc_to_dict(doc: Document) -> dict:
+    return {"title": doc.title, "url": doc.url, "extract": doc.extract,
+            "score": doc.score, "term": doc.term, "state": doc.state}
+
+
+def _dict_to_doc(d: dict) -> Document:
+    return Document(title=d["title"], url=d["url"], extract=d["extract"],
+                    score=d["score"], term=d["term"], state=d["state"])
+
+
+async def _collect(query: str) -> list[Document]:
+    """Run the network pipeline (sources + crawl + links) and return the doc pool.
+
+    The collected pool depends only on source selection, heuristic promotion and
+    crawling — not on the LTR/MMR ranking — so it is safe to cache across ranking
+    changes. ``_run_pipeline`` also produces interim rankings internally; we
+    ignore those and keep only the accumulated documents.
+    """
     all_docs: list[Document] = []
     last_results_key: list = [None]
     lock = asyncio.Lock()
@@ -50,23 +77,41 @@ async def _super_search(query: str) -> list[str]:
         )
     except asyncio.TimeoutError:
         pass
-    # Emit one final ranking over whatever was collected before the deadline.
-    await _emit_final_results(query, all_docs, _noop_emit, last_results_key, lock)
+    return all_docs
+
+
+@memory.cache
+def _collect_docs(query: str) -> list[dict]:
+    """Cached: the collected document pool for a query, as plain dicts."""
+    return [_doc_to_dict(d) for d in asyncio.run(_collect(query))]
+
+
+async def _rank(query: str, docs: list[Document]) -> list[str]:
+    """Run the final LTR + MMR ranking over a document pool (cheap, not cached)."""
+    last_results_key: list = [None]
+    lock = asyncio.Lock()
+    await _emit_final_results(query, docs, _noop_emit, last_results_key, lock)
     return list(last_results_key[0] or ())
 
 
 class SuperSearchRankingModel(RankingModel):
     def predict(self, query: str) -> list[str]:
-        return asyncio.run(_super_search(query))
+        docs = [_dict_to_doc(d) for d in _collect_docs(query)]
+        return asyncio.run(_rank(query, docs))
 
 
 def run():
     parser = ArgumentParser()
     parser.add_argument("--fraction", type=float, default=0.02,
-                        help="Fraction of gold queries to sample (pipeline is slow).")
+                        help="Fraction of gold queries to sample (collection is slow).")
     parser.add_argument("--train", action="store_true",
                         help="Evaluate on the train split instead of test.")
+    parser.add_argument("--clear-cache", action="store_true",
+                        help="Clear the cached document pools before evaluating.")
     args = parser.parse_args()
+
+    if args.clear_cache:
+        memory.clear(warn=False)
     evaluate(SuperSearchRankingModel(), fraction=args.fraction, use_test=not args.train)
 
 
