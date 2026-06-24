@@ -2,9 +2,7 @@ import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent.parent
-OLD_DATA_DIR = ROOT_DIR / 'devdata' / 'rankeval-2024-06'
 DATA_DIR = ROOT_DIR / 'devdata' / 'rankeval-2026-04'
-QUERIES_DATASET_PATH = DATA_DIR / 'queries.csv'
 
 REMOTE_DATA_DIR = DATA_DIR / 'remote-datasets'
 RANKINGS_DATASET_TRAIN_PATH = REMOTE_DATA_DIR / 'rankings-train.csv'
