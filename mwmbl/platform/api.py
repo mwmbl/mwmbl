@@ -4,6 +4,8 @@ from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
 from allauth.account.utils import setup_user_email, send_email_confirmation
 from django.conf import settings
+from django.core import signing
+from django.http import HttpResponse
 from django.utils import timezone
 from ninja import Router
 from ninja.pagination import paginate
@@ -15,7 +17,7 @@ from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
-from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, generate_username
+from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
     VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
@@ -23,6 +25,7 @@ from mwmbl.platform.schemas import (
     UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse, ChangePlanRequest,
     ForgotPasswordRequest, ResetPasswordRequest,
     AgreementAcceptRequest, AgreementResponse,
+    MarketingConsentRequest, MarketingConsentResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,9 @@ def register(request, registration: Registration):
 
     if registration.agreements:
         _record_agreements(user, registration.agreements)
+
+    if registration.source is not None:
+        _record_marketing_consent(user, registration.source, registration.marketing_opt_in)
 
     setup_user_email(request, user, [])
     send_email_confirmation(request, user, signup=True)
@@ -360,6 +366,21 @@ def _record_agreements(user: MwmblUser, agreement_types: list) -> None:
             )
 
 
+def _record_marketing_consent(user: MwmblUser, source: MarketingSource, opted_in: bool) -> None:
+    MarketingConsent.objects.create(user=user, source=source, opted_in=opted_in)
+
+
+_UNSUBSCRIBE_SALT = "marketing-unsubscribe"
+
+
+def make_unsubscribe_token(user: MwmblUser, source: MarketingSource) -> str:
+    """
+    Build a signed, URL-safe token identifying a (user, source) pair for one-click
+    unsubscribe. No expiry: unsubscribe links in old emails must keep working.
+    """
+    return signing.dumps({"user_id": user.id, "source": source}, salt=_UNSUBSCRIBE_SALT)
+
+
 def _require_current_agreement(user: MwmblUser, agreement_type: AgreementType) -> None:
     current_version = settings.CURRENT_AGREEMENT_VERSIONS.get(agreement_type)
     accepted = UserAgreement.objects.filter(
@@ -454,6 +475,110 @@ def get_agreements(request) -> list[AgreementResponse]:
 def get_agreement_history(request) -> list[AgreementResponse]:
     check_email_verified(request)
     return UserAgreement.objects.filter(user=request.user).order_by("-accepted_at")
+
+
+# ---------------------------------------------------------------------------
+# Marketing consent
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/marketing-consent",
+    auth=JWTAuth(),
+    response=list[MarketingConsentResponse],
+    summary="Get marketing email consent",
+    description=(
+        "Returns the current marketing email consent state for each source the user has a "
+        "record for (`GUI` = mwmbl.org, `API` = developer.mwmbl.org). The state for a source "
+        "is its most recently recorded decision. Sources with no record are omitted. "
+        "Requires a verified account."
+    ),
+    tags=["Marketing"],
+)
+def get_marketing_consent(request) -> list[MarketingConsentResponse]:
+    check_email_verified(request)
+    result = []
+    for source in MarketingSource:
+        latest = (
+            MarketingConsent.objects.filter(user=request.user, source=source)
+            .order_by("-timestamp")
+            .first()
+        )
+        if latest:
+            result.append(MarketingConsentResponse(
+                source=latest.source,
+                opted_in=latest.opted_in,
+                timestamp=latest.timestamp,
+            ))
+    return result
+
+
+@router.post(
+    "/marketing-consent",
+    auth=JWTAuth(),
+    response=MarketingConsentResponse,
+    summary="Update marketing email consent",
+    description=(
+        "Record a marketing email consent decision for the authenticated user against a "
+        "source. Use `opted_in=false` to withdraw consent. Each call appends a new "
+        "timestamped record, preserving the full consent history. Requires a verified account."
+    ),
+    tags=["Marketing"],
+)
+def update_marketing_consent(request, body: MarketingConsentRequest):
+    check_email_verified(request)
+    _record_marketing_consent(request.user, body.source, body.opted_in)
+    return MarketingConsentResponse(
+        source=body.source,
+        opted_in=body.opted_in,
+        timestamp=timezone.now(),
+    )
+
+
+def _unsubscribe_from_token(token: str) -> None:
+    try:
+        data = signing.loads(token, salt=_UNSUBSCRIBE_SALT)
+    except signing.BadSignature:
+        raise InvalidRequest("Invalid or malformed unsubscribe token.", status=400)
+    user = MwmblUser.objects.filter(id=data["user_id"]).first()
+    if user is None:
+        raise InvalidRequest("Unknown user.", status=400)
+    _record_marketing_consent(user, data["source"], opted_in=False)
+
+
+@router.post(
+    "/marketing/unsubscribe",
+    auth=None,
+    summary="One-click unsubscribe from marketing emails",
+    description=(
+        "RFC 8058 one-click unsubscribe target for the `List-Unsubscribe` email header. "
+        "Takes a signed `token` identifying the recipient and source — no login required. "
+        "Records an opt-out and is idempotent. Mail clients POST here with the body "
+        "`List-Unsubscribe=One-Click`."
+    ),
+    tags=["Marketing"],
+)
+def unsubscribe_marketing(request, token: str):
+    _unsubscribe_from_token(token)
+    return {"status": "ok", "message": "You have been unsubscribed from marketing emails."}
+
+
+@router.get(
+    "/marketing/unsubscribe",
+    auth=None,
+    summary="One-click unsubscribe (browser-friendly)",
+    description=(
+        "Browser-friendly variant of the one-click unsubscribe endpoint, for users who open "
+        "the `List-Unsubscribe` link directly. Records the opt-out and returns a confirmation page."
+    ),
+    tags=["Marketing"],
+)
+def unsubscribe_marketing_page(request, token: str):
+    _unsubscribe_from_token(token)
+    return HttpResponse(
+        "<html><body><h1>You have been unsubscribed</h1>"
+        "<p>You will no longer receive marketing emails from Mwmbl.</p></body></html>",
+        content_type="text/html",
+    )
 
 
 # ---------------------------------------------------------------------------

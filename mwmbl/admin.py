@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.contrib.admin import ModelAdmin
 from django.contrib.auth.admin import UserAdmin
 
-from mwmbl.models import MwmblUser, OldIndex, Curation, FlagCuration, DomainSubmission, ApiKey, generate_api_key
+from mwmbl.models import MwmblUser, OldIndex, Curation, FlagCuration, DomainSubmission, ApiKey, MarketingConsent, generate_api_key
 
 
 class ApiKeyForm(forms.ModelForm):
@@ -50,4 +50,11 @@ admin.site.register(Curation, ModelAdmin)
 admin.site.register(OldIndex, ModelAdmin)
 admin.site.register(FlagCuration, ModelAdmin)
 admin.site.register(DomainSubmission, ModelAdmin)
+class MarketingConsentAdmin(ModelAdmin):
+    list_display = ("user", "source", "opted_in", "timestamp")
+    list_filter = ("source", "opted_in")
+    readonly_fields = ("user", "source", "opted_in", "timestamp")
+
+
 admin.site.register(ApiKey, ApiKeyAdmin)
+admin.site.register(MarketingConsent, MarketingConsentAdmin)

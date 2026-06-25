@@ -208,6 +208,33 @@ class UserAgreement(models.Model):
         ]
 
 
+class MarketingSource(models.TextChoices):
+    GUI = "GUI", "Consumer site (mwmbl.org)"
+    API = "API", "Developer site (developer.mwmbl.org)"
+
+
+class MarketingConsent(models.Model):
+    """
+    Append-only audit trail of marketing email consent decisions.
+
+    Every opt-in and opt-out writes a new row; the current state for a source is
+    the `opted_in` of the latest row. Mirrors UserAgreement.
+    """
+    # SET_NULL (not CASCADE) so the consent proof survives account deletion,
+    # matching UserAgreement.
+    user = models.ForeignKey(
+        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="marketing_consents"
+    )
+    source = models.CharField(max_length=10, choices=MarketingSource.choices)
+    opted_in = models.BooleanField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "source", "-timestamp"]),
+        ]
+
+
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
         "upvote": "User upvoted this result",
