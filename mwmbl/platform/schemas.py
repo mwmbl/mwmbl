@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Literal
 from ninja import Schema, ModelSchema, Field
 
-from mwmbl.models import AgreementType, DomainSubmission
+from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
 
 
 class UserProfileResponse(Schema):
@@ -100,6 +100,21 @@ class AgreementResponse(Schema):
     accepted_at: datetime = Field(description="When the agreement was accepted.")
 
 
+# ---------------------------------------------------------------------------
+# Marketing consent
+# ---------------------------------------------------------------------------
+
+class MarketingConsentRequest(Schema):
+    source: MarketingSource = Field(description="The property the consent applies to (`GUI` or `API`).")
+    opted_in: bool = Field(description="True to opt in to marketing emails, False to withdraw consent.")
+
+
+class MarketingConsentResponse(Schema):
+    source: str = Field(description="The property the consent applies to.")
+    opted_in: bool = Field(description="The current opt-in state for this source.")
+    timestamp: datetime = Field(description="When this consent decision was recorded.")
+
+
 class Registration(Schema):
     email: str = Field(description="Email address for the new account. Must be unique.")
     password: str = Field(description="Password for the new account.")
@@ -116,6 +131,21 @@ class Registration(Schema):
             "Optional list of agreement types accepted at signup. "
             "The server stamps the current version and timestamp. "
             "Accepted values: `TERMS_OF_SERVICE_GUI`, `TERMS_OF_SERVICE_API`."
+        ),
+    )
+    source: Optional[MarketingSource] = Field(
+        default=None,
+        description=(
+            "Which Mwmbl property the user signed up from (`GUI` = mwmbl.org, "
+            "`API` = developer.mwmbl.org). Determines the type of marketing email. "
+            "When provided, the marketing opt-in decision is recorded against this source."
+        ),
+    )
+    marketing_opt_in: bool = Field(
+        default=False,
+        description=(
+            "Whether the user opted in to marketing emails. Must reflect an affirmative, "
+            "unticked-by-default checkbox. Only recorded when `source` is also provided."
         ),
     )
 
