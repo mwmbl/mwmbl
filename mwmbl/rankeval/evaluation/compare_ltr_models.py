@@ -19,10 +19,12 @@ import os
 from argparse import ArgumentParser
 
 import django
+import numpy as np
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 django.setup()
 
+import mwmbl.rankeval.evaluation.evaluate as evaluate_module  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import evaluate  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
@@ -50,6 +52,9 @@ def run():
     labelled = [spec.split("=", 1) for spec in args.model]
     for label, path in labelled:
         print(f"\n{'=' * 70}\nEvaluating model {label!r} from {path}\n{'=' * 70}")
+        # Reseed evaluate's module-level RNG so every model is scored on the
+        # exact same sampled query subset (a fair head-to-head).
+        evaluate_module.random = np.random.default_rng(42)
         evaluate(model_from_path(path), fraction=args.fraction, use_test=not args.train)
 
 
