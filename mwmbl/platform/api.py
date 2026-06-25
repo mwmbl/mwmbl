@@ -5,7 +5,6 @@ from allauth.account.models import EmailConfirmationHMAC
 from allauth.account.utils import setup_user_email, send_email_confirmation
 from django.conf import settings
 from django.core import signing
-from django.http import HttpResponse
 from django.utils import timezone
 from ninja import Router
 from ninja.pagination import paginate
@@ -366,8 +365,8 @@ def _record_agreements(user: MwmblUser, agreement_types: list) -> None:
             )
 
 
-def _record_marketing_consent(user: MwmblUser, source: MarketingSource, opted_in: bool) -> None:
-    MarketingConsent.objects.create(user=user, source=source, opted_in=opted_in)
+def _record_marketing_consent(user: MwmblUser, source: MarketingSource, opted_in: bool) -> MarketingConsent:
+    return MarketingConsent.objects.create(user=user, source=source, opted_in=opted_in)
 
 
 _UNSUBSCRIBE_SALT = "marketing-unsubscribe"
@@ -500,7 +499,7 @@ def get_marketing_consent(request) -> list[MarketingConsentResponse]:
     for source in MarketingSource:
         latest = (
             MarketingConsent.objects.filter(user=request.user, source=source)
-            .order_by("-timestamp")
+            .order_by("-timestamp", "-id")
             .first()
         )
         if latest:
@@ -526,11 +525,11 @@ def get_marketing_consent(request) -> list[MarketingConsentResponse]:
 )
 def update_marketing_consent(request, body: MarketingConsentRequest):
     check_email_verified(request)
-    _record_marketing_consent(request.user, body.source, body.opted_in)
+    consent = _record_marketing_consent(request.user, body.source, body.opted_in)
     return MarketingConsentResponse(
-        source=body.source,
-        opted_in=body.opted_in,
-        timestamp=timezone.now(),
+        source=consent.source,
+        opted_in=consent.opted_in,
+        timestamp=consent.timestamp,
     )
 
 
@@ -560,25 +559,6 @@ def _unsubscribe_from_token(token: str) -> None:
 def unsubscribe_marketing(request, token: str):
     _unsubscribe_from_token(token)
     return {"status": "ok", "message": "You have been unsubscribed from marketing emails."}
-
-
-@router.get(
-    "/marketing/unsubscribe",
-    auth=None,
-    summary="One-click unsubscribe (browser-friendly)",
-    description=(
-        "Browser-friendly variant of the one-click unsubscribe endpoint, for users who open "
-        "the `List-Unsubscribe` link directly. Records the opt-out and returns a confirmation page."
-    ),
-    tags=["Marketing"],
-)
-def unsubscribe_marketing_page(request, token: str):
-    _unsubscribe_from_token(token)
-    return HttpResponse(
-        "<html><body><h1>You have been unsubscribed</h1>"
-        "<p>You will no longer receive marketing emails from Mwmbl.</p></body></html>",
-        content_type="text/html",
-    )
 
 
 # ---------------------------------------------------------------------------

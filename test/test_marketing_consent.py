@@ -146,9 +146,11 @@ def test_unsubscribe_rejects_bad_token(client, verified_user):
 
 
 @pytest.mark.django_db
-def test_unsubscribe_get_renders_confirmation(client, verified_user):
+def test_unsubscribe_get_not_allowed(client, verified_user):
+    # The API only exposes a POST endpoint; the browser-facing unsubscribe page
+    # lives in the front-end (mwmbl.org), which calls this POST via JS. A GET
+    # (e.g. from a link prefetcher or scanner) must never record an opt-out.
     token = make_unsubscribe_token(verified_user, MarketingSource.API)
     response = client.get(f"{UNSUBSCRIBE_URL}?token={token}")
-    assert response.status_code == 200
-    assert b"unsubscribed" in response.content.lower()
-    assert MarketingConsent.objects.filter(user=verified_user).count() == 1
+    assert response.status_code == 405
+    assert MarketingConsent.objects.filter(user=verified_user).count() == 0
