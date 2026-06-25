@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+from requests.adapters import HTTPAdapter, Retry
 
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
@@ -354,6 +355,14 @@ class HeuristicRanker(Ranker):
 WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 
+# Wikipedia rate-limits (HTTP 429, with a non-JSON body) bursts of search-API
+# calls — e.g. an evaluation run that queries it once per gold query. Retry with
+# backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
+# query's wiki results. Live search never bursts, so this adds no latency in
+# normal operation. Successful responses are cached for weeks (see request_cache).
+WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
+                   allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
+
 
 def get_wiki_url(title: str):
     return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
@@ -373,6 +382,7 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     }
     try:
         with request_cache(timedelta(weeks=10)) as session:
+            session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
     except Exception:
