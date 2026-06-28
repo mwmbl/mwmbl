@@ -81,8 +81,14 @@ async def _collect(query: str) -> list[Document]:
 
 
 @memory.cache
-def _collect_docs(query: str) -> list[dict]:
-    """Cached: the collected document pool for a query, as plain dicts."""
+def _collect_docs(query: str, selection_key: str = "") -> list[dict]:
+    """Cached: the collected document pool for a query, as plain dicts.
+
+    ``selection_key`` is part of the cache key only: the collected pool depends on
+    which sources are queried (source selection is read from settings at call
+    time), so callers that change selection — e.g. force-including extra sources —
+    must pass a distinct key to avoid colliding with another config's cached pool.
+    """
     return [_doc_to_dict(d) for d in asyncio.run(_collect(query))]
 
 
@@ -95,8 +101,13 @@ async def _rank(query: str, docs: list[Document]) -> list[str]:
 
 
 class SuperSearchRankingModel(RankingModel):
+    def __init__(self, selection_key: str = ""):
+        # Distinguishes cached doc pools when source selection differs between runs
+        # (e.g. force-including extra sources). Set settings to match before use.
+        self.selection_key = selection_key
+
     def predict(self, query: str) -> list[str]:
-        docs = [_dict_to_doc(d) for d in _collect_docs(query)]
+        docs = [_dict_to_doc(d) for d in _collect_docs(query, self.selection_key)]
         return asyncio.run(_rank(query, docs))
 
 

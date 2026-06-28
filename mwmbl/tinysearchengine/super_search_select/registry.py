@@ -47,6 +47,7 @@ _STATIC_META: dict[str, SiteMeta] = {
     "stackexchange": SiteMeta("stackexchange", "stackoverflow.com", "programming", 1.0, 1.0),
     "arxiv": SiteMeta("arxiv", "arxiv.org", "academia", 1.0, 1.0),
     "pypi": SiteMeta("pypi", "pypi.org", "programming", 0.6, 0.6),
+    "imdb": SiteMeta("imdb", "www.imdb.com", "media", 1.0, 1.0),
 }
 
 

@@ -1,0 +1,22 @@
+# GOV.UK via its public search API. Results carry a site-relative ``link``
+# (e.g. "/contact-hmrc"); base_url joins it to the canonical absolute URL that
+# the gold dataset records (https://www.gov.uk/contact-hmrc).
+name: www_gov_uk
+domain: www.gov.uk
+field: law-government
+request:
+  url: https://www.gov.uk/api/search.json
+  params:
+    q: "{query}"
+    count: "{limit}"
+response:
+  format: json
+  base_url: https://www.gov.uk
+  results: results
+  fields:
+    title: title
+    extract: description
+    url: link
+smoke:
+  query: vat rates
+  expect_title_contains: VAT

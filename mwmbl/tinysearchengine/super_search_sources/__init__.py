@@ -8,6 +8,7 @@ orchestrator.
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
+from mwmbl.tinysearchengine.super_search_sources.imdb import search as search_imdb
 from mwmbl.tinysearchengine.super_search_sources.mwmbl_index import search as search_mwmbl
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, make_recipe_source
@@ -20,6 +21,7 @@ SOURCES = {
     "stackexchange": search_stackexchange,
     "arxiv": search_arxiv,
     "pypi": search_pypi,
+    "imdb": search_imdb,
 }
 
 # Declarative YAML recipes (recipes/*.yaml) are loaded at import time and added

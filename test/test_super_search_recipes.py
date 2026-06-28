@@ -125,6 +125,26 @@ async def test_archive_org_nested_results_and_template(httpx_mock):
     assert docs[0].extract == "Moon landing"
 
 
+async def test_json_base_url_joins_relative_path(httpx_mock):
+    """A JSON API returning a site-relative url (e.g. gov.uk's "/contact-hmrc") is
+    joined onto base_url to the canonical absolute URL, without %-quoting slashes."""
+    recipe = Recipe(
+        name="govuk", domain="www.gov.uk", field="law-government",
+        request={"url": "https://www.gov.uk/api/search.json", "params": {"q": "{query}"}},
+        response={"format": "json", "base_url": "https://www.gov.uk", "results": "results",
+                  "fields": {"title": "title", "url": "link"}},
+        smoke={"query": "vat", "expect_title_contains": "VAT"},
+    )
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"),
+        json={"results": [{"title": "Contact HMRC", "link": "/find-hmrc-contacts/income-tax"}]},
+    )
+    async with httpx.AsyncClient() as client:
+        docs = await search_with_recipe(client, recipe, "hmrc", 5)
+    assert len(docs) == 1
+    assert docs[0].url == "https://www.gov.uk/find-hmrc-contacts/income-tax"
+
+
 # ---------------------------------------------------------------------------
 # HTML: Project Gutenberg — CSS selectors + relative href resolution
 # ---------------------------------------------------------------------------

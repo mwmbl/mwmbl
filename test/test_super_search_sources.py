@@ -13,6 +13,7 @@ import pytest
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
+from mwmbl.tinysearchengine.super_search_sources.imdb import search as search_imdb
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
 
@@ -148,4 +149,33 @@ async def test_pypi_rejects_invalid_name():
     async with httpx.AsyncClient() as client:
         # Spaces / punctuation -> not a valid package name
         docs = await search_pypi(client, "this is a phrase!", 5)
+    assert docs == []
+
+
+# ---------------------------------------------------------------------------
+# IMDb (autosuggest)
+# ---------------------------------------------------------------------------
+
+async def test_imdb_maps_ids_to_canonical_urls(httpx_mock):
+    httpx_mock.add_response(
+        url=re.compile(r"https://v3\.sg\.media-imdb\.com/suggestion/.*"),
+        json={"d": [
+            {"id": "tt0468569", "l": "The Dark Knight", "q": "feature", "s": "Christian Bale"},
+            {"id": "nm0000288", "l": "Christian Bale", "s": "Actor"},
+            {"id": "ls123", "l": "a user list"},  # not a title/name -> skipped
+        ]},
+    )
+    async with httpx.AsyncClient() as client:
+        docs = await search_imdb(client, "the dark knight", 5)
+    assert [d.url for d in docs] == [
+        "https://www.imdb.com/title/tt0468569/",
+        "https://www.imdb.com/name/nm0000288/",
+    ]
+    assert docs[0].title == "The Dark Knight"
+
+
+async def test_imdb_swallows_http_errors(httpx_mock):
+    httpx_mock.add_response(status_code=500)
+    async with httpx.AsyncClient() as client:
+        docs = await search_imdb(client, "inception", 5)
     assert docs == []

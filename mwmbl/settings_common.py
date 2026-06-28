@@ -297,3 +297,4 @@ SUPER_SEARCH_TS_PRIOR_PRECISION = 1.0  # ridge prior precision (lambda); A0 = la
 SUPER_SEARCH_TS_NOISE_VARIANCE = 0.25  # reward noise variance (sigma^2); reward in [0,1]
 SUPER_SEARCH_QVEC_CACHE_TTL = 3600   # seconds to cache a query's projected vectors
 SUPER_SEARCH_USE_BANDIT = False      # False = cosine-top-10 baseline; True = Thompson sampling
+SUPER_SEARCH_FORCE_INCLUDE = []      # source names always queried (high-value sources), like always_on

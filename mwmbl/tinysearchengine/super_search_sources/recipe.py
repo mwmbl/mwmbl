@@ -197,6 +197,7 @@ def _parse_json(payload, spec: dict) -> list[Document]:
     items = _walk(payload, spec.get("results", "")) or []
     fields = spec["fields"]
     strip = set(spec.get("strip_html", []))
+    base_url = spec.get("base_url", "")
     docs: list[Document] = []
     for item in items:
         if not isinstance(item, dict):
@@ -206,20 +207,24 @@ def _parse_json(payload, spec: dict) -> list[Document]:
             for name, field_spec in fields.items()
             if name != "url" and isinstance(field_spec, str)
         }
-        doc = _make_doc(values, _resolve_url_json(fields.get("url"), item, values))
+        doc = _make_doc(values, _resolve_url_json(fields.get("url"), item, values, base_url))
         if doc is not None:
             docs.append(doc)
     return docs
 
 
-def _resolve_url_json(url_spec, item: dict, values: dict) -> str:
+def _resolve_url_json(url_spec, item: dict, values: dict, base_url: str = "") -> str:
+    # A JSON API often returns a relative path (e.g. gov.uk's "/contact-hmrc"); join
+    # it onto ``base_url`` to produce the canonical absolute URL, mirroring HTML.
     if url_spec is None:
         return ""
     if isinstance(url_spec, str):
-        return _coerce_str(_walk(item, url_spec))
-    if isinstance(url_spec, dict) and "template" in url_spec:
-        return _fill_template(url_spec["template"], {**item, **values})
-    return ""
+        url = _coerce_str(_walk(item, url_spec))
+    elif isinstance(url_spec, dict) and "template" in url_spec:
+        url = _fill_template(url_spec["template"], {**item, **values})
+    else:
+        return ""
+    return urljoin(base_url, url) if (url and base_url) else url
 
 
 # ---------------------------------------------------------------------------

@@ -49,11 +49,16 @@ def select_sources(
             _record_features(ctx, query, source_names)
         return list(source_names)
 
-    always_on = [n for n in source_names if get_meta(n).always_on]
-    selectable = [n for n in source_names if n not in set(always_on)]
-    budget = max(k - len(always_on), 0)
+    # Pinned sources are always queried: the global always-on sources plus any
+    # high-value sources named in SUPER_SEARCH_FORCE_INCLUDE (the offline-chosen
+    # sources that carry real gold relevance but a content-blind policy would skip).
+    force_include = getattr(settings, "SUPER_SEARCH_FORCE_INCLUDE", []) or []
+    pinned = [n for n in source_names if get_meta(n).always_on]
+    pinned += [n for n in source_names if n in force_include and n not in pinned]
+    selectable = [n for n in source_names if n not in set(pinned)]
+    budget = max(k - len(pinned), 0)
     if budget == 0:
-        chosen = always_on[:k]
+        chosen = pinned[:k]
         if ctx is not None:
             _record_features(ctx, query, chosen)
         return chosen
@@ -69,16 +74,16 @@ def select_sources(
         chosen = _select_cosine(qctx, selectable, profs, budget)
 
     if ctx is not None:
-        for name in always_on + chosen:
+        for name in pinned + chosen:
             if name in feats:
                 ctx.features[name] = feats[name].tolist()
             elif name not in ctx.features:
-                # always-on sources weren't scored; compute their features too.
+                # pinned sources weren't scored; compute their features too.
                 ctx.features[name] = feature_vector(
                     qctx, get_meta(name), profs.get(name, (None, None))
                 ).tolist()
 
-    return always_on + chosen
+    return pinned + chosen
 
 
 def _select_cosine(qctx, selectable, profs, budget) -> list[str]:
