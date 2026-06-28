@@ -45,12 +45,30 @@ from django.conf import settings  # noqa: E402
 from sklearn.metrics import ndcg_score  # noqa: E402
 
 from mwmbl.rankeval.evaluation.evaluate import CLICK_PROPORTIONS, NUM_RESULTS_FOR_EVAL  # noqa: E402
-from mwmbl.rankeval.evaluation.evaluate_fallback import _standard_model  # noqa: E402
+from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
-from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH  # noqa: E402
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
+from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RUST_MODEL_PATH  # noqa: E402
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline  # noqa: E402
+from mwmbl.tinysearchengine.ltr_rank import LTRRanker, score_documents  # noqa: E402
+from mwmbl.tinysearchengine.mmr_rank import MMRRanker  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.registry import get_meta  # noqa: E402
 
 NEW_SOURCES = ["www_gov_uk", "imdb"]
+
+
+def _standard_ranker_and_model(use_local: bool):
+    """Standard search ranker (LTR + MMR + 3 wiki) and its raw LTR model.
+
+    Returning the model too lets us score standard's top result for the relevance-
+    score fallback trigger (the ranker's output Documents carry only the index score,
+    not the LTR relevance). Remote = production index at api.mwmbl.org.
+    """
+    if use_local:
+        from mwmbl.search_setup import ltr_model, ranker  # local index + LTR + MMR + wiki
+        return ranker, ltr_model
+    ltr_model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
+    return MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), ltr_model, True, 3)), ltr_model
 
 
 def _registrable(host: str) -> str:
@@ -84,6 +102,10 @@ def main():
     parser.add_argument("--fallback-thresholds", type=int, nargs="+", default=[1, 3, 5],
                         help="Fall back to Super Search when standard returns <= threshold "
                              "results. Evaluated post-hoc for each value.")
+    parser.add_argument("--score-thresholds", type=float, nargs="+", default=None,
+                        help="Relevance-score trigger: fall back when standard's top-result "
+                             "LTR score < threshold. Default: deciles of the observed score "
+                             "distribution (data-driven sweep).")
     args = parser.parse_args()
 
     df = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
@@ -106,23 +128,32 @@ def main():
         gold[q] = rows.set_index("url")["score"].to_dict()
 
     print(f"standard-search index: {args.standard_index}")
-    arms = [
-        ("standard", lambda: _standard_model(use_local=args.standard_index == "local"), None),
+    per_query = {"standard": {}, "ss-baseline": {}, "ss+new": {}}
+    standard_count = {}       # number of results standard returned (count-based gate)
+    standard_top_score = {}   # LTR relevance of standard's top result (score-based gate)
+
+    # Standard arm: handled directly (not via the generic loop) so we can read the
+    # ranker's Documents and re-score the top one with the LTR model.
+    std_ranker, ltr_model = _standard_ranker_and_model(args.standard_index == "local")
+    print("\n--- arm standard ---")
+    for i, q in enumerate(queries):
+        results = std_ranker.search(q, [])
+        per_query["standard"][q] = _ndcg([r.url for r in results], gold[q])
+        standard_count[q] = len(results)
+        standard_top_score[q] = score_documents(ltr_model, q, results[:1])[0] if results else float("-inf")
+        if (i + 1) % 20 == 0:
+            print(f"  {i + 1}/{len(queries)}")
+
+    ss_arms = [
         ("ss-baseline", lambda: SuperSearchRankingModel(selection_key=""), []),
         ("ss+new", lambda: SuperSearchRankingModel(selection_key="+".join(NEW_SOURCES)), NEW_SOURCES),
     ]
-    per_query = {name: {} for name, _, _ in arms}
-    standard_count = {}  # number of results standard search returned (the fallback gate)
-    for name, make_model, force in arms:
-        if force is not None:
-            settings.SUPER_SEARCH_FORCE_INCLUDE = force
+    for name, make_model, force in ss_arms:
+        settings.SUPER_SEARCH_FORCE_INCLUDE = force
         model = make_model()
         print(f"\n--- arm {name} ---")
         for i, q in enumerate(queries):
-            preds = model.predict(q)
-            per_query[name][q] = _ndcg(preds, gold[q])
-            if name == "standard":
-                standard_count[q] = len(preds)
+            per_query[name][q] = _ndcg(model.predict(q), gold[q])
             if (i + 1) % 20 == 0:
                 print(f"  {i + 1}/{len(queries)}")
     settings.SUPER_SEARCH_FORCE_INCLUDE = []
@@ -175,6 +206,40 @@ def main():
     print(f"\nfired queries at n={nmax} (standard count, NDCG: standard / ss-baseline / ss+new):")
     for q in fired:
         print(f"  cnt={standard_count[q]:2d}  {std[q]:.3f} / {base[q]:.3f} / {new[q]:.3f}  {q!r}")
+
+    # ---- Relevance-score trigger: fall back when standard's top result is weak ----
+    # Result count is a poor proxy for "standard failed" (see above). A relevance
+    # signal — the LTR score of standard's top result — should target the queries
+    # where standard is *confidently wrong* rather than merely sparse.
+    finite = sorted(s for s in standard_top_score.values() if np.isfinite(s))
+    n_empty = len(queries) - len(finite)
+    print("\nstandard top-result LTR score distribution"
+          f" ({n_empty} queries with no results → -inf, always fire):")
+    if finite:
+        pcts = [0, 10, 25, 50, 75, 90, 100]
+        print("  " + "   ".join(f"p{p}={v:+.3f}" for p, v in zip(pcts, np.percentile(finite, pcts))))
+
+    if args.score_thresholds is not None:
+        score_thresholds = args.score_thresholds
+    elif finite:
+        score_thresholds = sorted(set(round(float(t), 3)
+                                      for t in np.percentile(finite, [10, 20, 30, 40, 50])))
+    else:
+        score_thresholds = []
+
+    print("\nrelevance-score fallback (fire when standard top score < threshold),"
+          " paired vs standard-always:")
+    print(f"  {'arm':26} {'fired':>11} {'mean NDCG':>10} {'Δ vs std':>9} {'better/worse':>13}")
+    for t in score_thresholds:
+        n_fired = sum(standard_top_score[q] < t for q in queries)
+        for ss_name in ("ss-baseline", "ss+new"):
+            fb = {q: (per_query[ss_name][q] if standard_top_score[q] < t else std[q]) for q in queries}
+            d = np.mean([fb[q] - std[q] for q in queries])
+            w = sum(fb[q] > std[q] + 1e-9 for q in queries)
+            l = sum(fb[q] < std[q] - 1e-9 for q in queries)
+            label = f"score<{t:+.3f}/{ss_name}"
+            print(f"  {label:26} {n_fired:3d} ({n_fired / len(queries):3.0%}) "
+                  f"{np.mean(list(fb.values())):>10.4f} {d:>+9.4f} {w:>5}/{l:<5}")
 
 
 if __name__ == "__main__":

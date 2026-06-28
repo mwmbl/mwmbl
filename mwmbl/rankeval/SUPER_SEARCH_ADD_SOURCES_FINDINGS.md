@@ -153,15 +153,44 @@ single regression is the entire n≥3 deficit.
 So **result count is the wrong trigger**: it does not correlate with where Super
 Search adds value. Super Search's entire aggregate edge (0.488 vs 0.478) comes from
 queries where standard returns *many* results but Super Search re-ranks/adds better
-ones — precisely the queries the `<= n` gate never fires on. A useful trigger would
-have to be a *relevance/score* signal (standard's top result is weak), not a count.
+ones — precisely the queries the `<= n` gate never fires on.
+
+### A relevance-score trigger instead of count
+
+The natural next hypothesis: fire when standard's *top result is weak*, not when it
+is sparse. We score standard's rank-1 result with the LTR model (`--score-thresholds`
+in the same script; the ranker's output Documents carry only the index score, so the
+top result is re-scored with the model) and fall back when that score `< threshold`.
+The score distribution over the 150 in-coverage queries is tiny and right-skewed
+(p10 +0.002, p50 +0.015, p90 +0.068), so we sweep thresholds at its lower deciles.
+
+| trigger (ss+new) | fires | NDCG | Δ vs standard | better / worse |
+|---|---|---|---|---|
+| score < 0.002 | 10% | 0.478 | **+0.000** | 0 / 0 |
+| score < 0.005 | 25% | 0.478 | −0.001 | 2 / 4 |
+| score < 0.008 | 34% | 0.477 | −0.001 | 4 / 6 |
+| score < 0.011 | 44% | 0.472 | −0.006 | 8 / 12 |
+| score < 0.015 | 52% | 0.474 | −0.004 | 10 / 13 |
+
+The score trigger is **better-behaved but still net-negative at every operating
+point**. Unlike the count gate (which never improves a single query), it *does* catch
+real Super Search wins — up to 8 queries at `score < 0.011` — but it catches ~1.5×
+as many losses. The best operating point is the most conservative one (`score < 0.002`,
+Δ = 0), which fires only on the queries standard returns nothing for; everything more
+aggressive loses. A weak standard top-score does **not** reliably predict that Super
+Search will rank better, because Super Search's own ranking over its heterogeneous
+pool is itself unreliable. **So the trigger is not the problem — the re-ranker is.**
 
 ## Conclusion
 
 **Adding good sources nets ≈ 0 on NDCG, and Super Search still trails plain
 standard search (0.488 vs 0.515) even on the queries where the new domains are
-relevant. Gating Super Search behind a standard-search result-count threshold does
-not help either — the count does not identify the queries Super Search can rescue.**
+relevant. Gating Super Search behind standard-search failure does not help either —
+neither a result-count threshold nor a top-result relevance-score threshold beats
+serving standard search alone (best case Δ = 0; both go negative as they fire more).
+The trigger is not the bottleneck: the re-ranker over the heterogeneous Super Search
+pool is, so even when standard is confidently weak, swapping to Super Search loses on
+net.**
 
 The mechanism works in isolation — the new sources produce large, real individual
 wins (gov.uk takes `inheritance tax threshold` and `login universal credit` to
@@ -244,15 +273,18 @@ the query *sample* is seeded (`default_rng(0)`) so the same queries are scored e
 and the signal to trust is the paired `ss+new − ss-baseline` delta and the better/worse count.
 
 The same script also evaluates the **fallback** arms (Super Search only when standard
-returns `<= n` results). Standard search defaults to the remote production index so the
-gate fires realistically; the fallback arms are derived post-hoc from the other arms'
+search fails). Standard search defaults to the remote production index so the gate
+fires realistically; the fallback arms are derived post-hoc from the other arms'
 per-query NDCG, so they add no model runs:
 ```
-$E uv run python scripts/super_search_new_sources_eval.py --max-queries 50 \
+$E uv run python scripts/super_search_new_sources_eval.py --max-queries 150 \
       --standard-index remote --fallback-thresholds 1 3 5
 ```
-It prints the `fallback@n/...` arms, the fire rate, the paired Δ vs standard-always, and a
-per-fired-query dump (standard count + the three arms' NDCG) showing why the gate nets ~0.
+It prints both triggers: the **count** gate (`fallback@n`, fire when standard returns
+`<= n` results) with its fire rate / paired Δ / per-fired-query dump, and the
+**relevance-score** gate (fire when standard's top-result LTR score `< threshold`,
+swept over the lower deciles of the observed score distribution, or pass explicit
+`--score-thresholds`). Both report paired Δ and better/worse vs standard-always.
 `FallbackRankingModel` itself (reusable, unit-tested) lives in
 `mwmbl/rankeval/evaluation/evaluate_fallback.py` / `test/test_fallback_model.py`.
 
