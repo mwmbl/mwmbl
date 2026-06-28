@@ -112,11 +112,56 @@ selection can actually change the ranking.
 | Δ (new − baseline) | +0.014 | **+0.003** |
 | queries better / worse | 7 / 6 | **16 / 31** |
 
+## Super Search as a fallback (only when standard search fails)
+
+The tables above run Super Search on *every* query. But Super Search is meant to
+*rescue* queries where standard search comes up short, not to replace every ranking.
+So we gated it: serve standard search, and fall back to Super Search only when
+standard returns `<= n` results. Implemented as `FallbackRankingModel` (in
+`mwmbl/rankeval/evaluation/evaluate_fallback.py`, unit-tested in
+`test/test_fallback_model.py`) and evaluated as extra arms in
+`scripts/super_search_new_sources_eval.py` (`--fallback-thresholds`). Standard
+search here uses the **remote production index** so the gate fires realistically —
+on the tiny local index standard returns `<= 3` for almost every query.
+
+In-coverage test subset, 150 queries, standard = remote index:
+
+| arm | mean NDCG | Δ vs standard | better / worse |
+|---|---|---|---|
+| standard search (remote) | 0.478 | — | — |
+| Super Search baseline (always) | 0.485 | +0.007 | — |
+| Super Search + new sources (always) | 0.488 | +0.010 | — |
+| fallback@1 → ss-baseline / ss+new | 0.478 | **+0.000** | 0 / 0 |
+| fallback@3 → ss-baseline / ss+new | 0.477 / 0.476 | **−0.001 / −0.002** | 0 / 1 |
+| fallback@5 → ss-baseline / ss+new | 0.477 / 0.476 | **−0.001 / −0.002** | 0 / 1 |
+
+The fallback fires on 11–19% of queries (n=1→5) and **never once improves over
+standard** (better = 0 at every threshold); at n≥3 it is marginally *negative*. On
+nearly every fired query standard, ss-baseline and ss+new score *identically*, in two
+useless buckets:
+
+- **all score 0.000** (`songs chelmsford`, `mathspad teach`, `ringgo login`, …):
+  standard is starved *and* Super Search also fails to surface the gold URL — these
+  obscure queries are exactly the ones Super Search can't rescue either.
+- **all score 1.000** (`roses film`, `dynamite kiss`, 4 results each): standard
+  already nails it with a handful of results — nothing to rescue.
+
+The only fired query where the arms differ is `pudsey leeds` (standard count 3),
+where falling back *hurts*: standard 0.631 → ss-baseline 0.431 → ss+new 0.356. That
+single regression is the entire n≥3 deficit.
+
+So **result count is the wrong trigger**: it does not correlate with where Super
+Search adds value. Super Search's entire aggregate edge (0.488 vs 0.478) comes from
+queries where standard returns *many* results but Super Search re-ranks/adds better
+ones — precisely the queries the `<= n` gate never fires on. A useful trigger would
+have to be a *relevance/score* signal (standard's top result is weak), not a count.
+
 ## Conclusion
 
 **Adding good sources nets ≈ 0 on NDCG, and Super Search still trails plain
 standard search (0.488 vs 0.515) even on the queries where the new domains are
-relevant.**
+relevant. Gating Super Search behind a standard-search result-count threshold does
+not help either — the count does not identify the queries Super Search can rescue.**
 
 The mechanism works in isolation — the new sources produce large, real individual
 wins (gov.uk takes `inheritance tax threshold` and `login universal credit` to
@@ -197,6 +242,19 @@ Slow because it runs the full Super Search pipeline (live source fan-out + crawl
 link-follow) per query. Absolute numbers drift run-to-run (live APIs, crawl variability);
 the query *sample* is seeded (`default_rng(0)`) so the same queries are scored each time,
 and the signal to trust is the paired `ss+new − ss-baseline` delta and the better/worse count.
+
+The same script also evaluates the **fallback** arms (Super Search only when standard
+returns `<= n` results). Standard search defaults to the remote production index so the
+gate fires realistically; the fallback arms are derived post-hoc from the other arms'
+per-query NDCG, so they add no model runs:
+```
+$E uv run python scripts/super_search_new_sources_eval.py --max-queries 50 \
+      --standard-index remote --fallback-thresholds 1 3 5
+```
+It prints the `fallback@n/...` arms, the fire rate, the paired Δ vs standard-always, and a
+per-fired-query dump (standard count + the three arms' NDCG) showing why the gate nets ~0.
+`FallbackRankingModel` itself (reusable, unit-tested) lives in
+`mwmbl/rankeval/evaluation/evaluate_fallback.py` / `test/test_fallback_model.py`.
 
 **5. Full-sample 3-way comparison (slower, and too diluted to show the effect — for context)**
 ```
