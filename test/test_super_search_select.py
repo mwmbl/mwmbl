@@ -173,3 +173,34 @@ def test_log_impression_noop_without_database(monkeypatch):
     monkeypatch.setattr("django.conf.settings.HAS_DATABASE", False)
     # Should not raise even though no DB is configured.
     rewards.log_impression("q", SelectionContext(selected=["a"]), {"a": 0.5})
+
+
+def test_record_source_provenance_noop_without_database(monkeypatch):
+    monkeypatch.setattr("django.conf.settings.HAS_DATABASE", False)
+    ctx = SelectionContext(selected=["a"])
+    ctx.record_results("a", ["https://x/u1"])
+    # Should not raise even though provenance is gated off.
+    rewards.record_source_provenance("q", ctx)
+
+
+@pytest.mark.django_db
+def test_record_source_provenance_writes_direct_rows(monkeypatch):
+    monkeypatch.setattr("django.conf.settings.HAS_DATABASE", True)
+    from mwmbl.models import SourceProvenance
+
+    ctx = SelectionContext(selected=["a", "b"])
+    ctx.record_results("a", ["https://x/u1", "https://x/u2"])
+    ctx.record_results("b", ["https://x/u3"])
+
+    rewards.record_source_provenance("my query", ctx)
+
+    assert SourceProvenance.objects.count() == 3
+    row = SourceProvenance.objects.get(url="https://x/u1")
+    assert row.source == "a"
+    assert row.depth == 0
+    assert row.query == "my query"
+    assert row.parent_url is None
+
+    # Idempotent: a second call must not raise or duplicate (unique url + ignore_conflicts).
+    rewards.record_source_provenance("my query", ctx)
+    assert SourceProvenance.objects.count() == 3

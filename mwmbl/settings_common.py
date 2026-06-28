@@ -298,3 +298,4 @@ SUPER_SEARCH_TS_NOISE_VARIANCE = 0.25  # reward noise variance (sigma^2); reward
 SUPER_SEARCH_QVEC_CACHE_TTL = 3600   # seconds to cache a query's projected vectors
 SUPER_SEARCH_USE_BANDIT = False      # False = cosine-top-10 baseline; True = Thompson sampling
 SUPER_SEARCH_FORCE_INCLUDE = []      # source names always queried (high-value sources), like always_on
+SOURCE_PROVENANCE_MAX_DEPTH = 3      # max crawl hops a Super Search source propagates to descendant pages

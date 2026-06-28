@@ -15,6 +15,7 @@ import asyncio
 import copy
 import heapq
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import json
 import logging
 import re
@@ -32,14 +33,16 @@ from ninja.errors import HttpError
 from pydantic import BaseModel, Field
 
 from mwmbl.crawler.retrieve import crawl_url
+from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.indexer.index_batches import index_results_against_query
+from mwmbl.indexer.update_urls import _add_found_urls_to_db_and_queue
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_super_search,
     increment_monthly_super_search,
 )
 from mwmbl.search_auth import authenticate_user
-from mwmbl.search_setup import index_path, ltr_model
+from mwmbl.search_setup import index_path, ltr_model, queued_batches
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
@@ -52,6 +55,7 @@ from mwmbl.tinysearchengine.super_search_select.rewards import (
     SelectionContext,
     compute_rewards,
     log_impression,
+    record_source_provenance,
 )
 from mwmbl.tokenizer import tokenize
 
@@ -128,9 +132,10 @@ class ResultItem(Schema):
                          examples=[1.8423])
     source: str = Field(
         description=(
-            "Originating source for `result_promoted` (one of the Super Search "
-            "sources, e.g. `github`); empty string for items in the final "
-            "`results` ranking, which merges all sources."
+            "Originating Super Search source for this result (e.g. `github`) — "
+            "the source that first produced the URL, for both `result_promoted` "
+            "and final `results` items. Empty string when the source is unknown "
+            "(e.g. an inline-followed link whose parent had no recorded source)."
         ),
         examples=["github", ""],
     )
@@ -363,10 +368,13 @@ async def _call_source(name: str, fn, client: httpx.AsyncClient, query: str, lim
 
 async def _follow_links(
     parent: Document, query: str, emit, all_docs: list[Document],
-    last_results_key: list, lock: asyncio.Lock,
+    last_results_key: list, lock: asyncio.Lock, ctx: SelectionContext,
 ) -> None:
     """Crawl the parent URL, score its outbound links, and collect the best for final ranking."""
     max_links = settings.SUPER_SEARCH_MAX_LINKS_PER_PAGE
+    # Inline-followed pages are surfaced by Super Search itself, so attribute
+    # them (and the parent) to the source that produced the parent result.
+    parent_source = ctx.source_by_url.get(parent.url)
 
     try:
         result = await _crawl(parent.url)
@@ -388,7 +396,7 @@ async def _follow_links(
         all_docs.append(Document(title=parent_title, url=parent.url, extract=parent_extract))
 
     if not raw_links:
-        await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+        await _emit_final_results(query, all_docs, emit, last_results_key, lock, ctx)
         return
 
     terms = tokenize(query)
@@ -421,12 +429,15 @@ async def _follow_links(
                 url=proxy_doc.url,
                 extract=c.get("extract") or "",
             ))
+            if parent_source:
+                ctx.record_results(parent_source, [proxy_doc.url])
 
-    await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+    await _emit_final_results(query, all_docs, emit, last_results_key, lock, ctx)
 
 
 async def _emit_final_results(
-    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock
+    query: str, all_docs: list[Document], emit, last_results_key: list, lock: asyncio.Lock,
+    ctx: SelectionContext,
 ) -> None:
     terms = tokenize(query)
     final_limit = getattr(settings, "SUPER_SEARCH_FINAL_RESULTS_LIMIT", 100)
@@ -461,7 +472,10 @@ async def _emit_final_results(
             return
         last_results_key[0] = key
         await emit("results", ResultsEvent(
-            results=[_result_payload(doc, score, "", "final") for doc, score in ranked],
+            results=[
+                _result_payload(doc, score, ctx.source_by_url.get(doc.url, ""), "final")
+                for doc, score in ranked
+            ],
             count=len(ranked),
         ))
 
@@ -483,6 +497,23 @@ async def _index_results(query: str, docs: list[Document]) -> int:
         return 0
 
 
+def _enqueue_discovered_urls(ctx: SelectionContext) -> None:
+    """Queue every URL Super Search discovered for organic crawling.
+
+    Tags each FoundURL with its originating source name in the user_id_hash slot
+    (consistent with the 'hn' seed precedent), so descendant pages crawled later
+    can inherit the source via SourceProvenance. Blocking (Redis + Postgres);
+    run off the event loop. Never raises into the caller.
+    """
+    now = datetime.utcnow()
+    found_urls = [
+        FoundURL(url, source, URLStatus.NEW, now, last_crawled=None)
+        for url, source in ctx.source_by_url.items()
+    ]
+    if found_urls:
+        _add_found_urls_to_db_and_queue(found_urls, queued_batches)
+
+
 async def _record_rewards(query: str, ctx: SelectionContext, last_results_key: list) -> None:
     """Compute implicit per-source rewards from the final top-K and log the impression."""
     if not ctx.selected:
@@ -494,6 +525,14 @@ async def _record_rewards(query: str, ctx: SelectionContext, last_results_key: l
         await asyncio.to_thread(log_impression, query, ctx, rewards)
     except Exception:
         logger.exception("super-search failed to record rewards")
+    try:
+        await asyncio.to_thread(record_source_provenance, query, ctx)
+    except Exception:
+        logger.exception("super-search failed to record source provenance")
+    try:
+        await asyncio.to_thread(_enqueue_discovered_urls, ctx)
+    except Exception:
+        logger.exception("super-search failed to enqueue discovered urls")
     if getattr(settings, "SUPER_SEARCH_USE_BANDIT", False):
         try:
             await asyncio.to_thread(ss_bandit.update, ctx.features, rewards)
@@ -578,10 +617,10 @@ async def _run_pipeline(
                 if _maybe_promote(doc, score):
                     await emit("result_promoted", _result_payload(doc, score, name, "direct"))
                     secondary.append(
-                        asyncio.create_task(_follow_links(doc, query, emit, all_docs, last_results_key, lock))
+                        asyncio.create_task(_follow_links(doc, query, emit, all_docs, last_results_key, lock, ctx))
                     )
             if all_docs:
-                await _emit_final_results(query, all_docs, emit, last_results_key, lock)
+                await _emit_final_results(query, all_docs, emit, last_results_key, lock, ctx)
 
         if secondary:
             results = await asyncio.gather(*secondary, return_exceptions=True)
@@ -626,7 +665,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
         finally:
             if reason in ("complete", "timed_out"):
                 try:
-                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock)
+                    await _emit_final_results(query, all_docs, emit, last_results_key, results_lock, selection_ctx)
                 except Exception:
                     logger.exception("super-search failed to emit final results")
                 pages_indexed = await _index_results(query, all_docs)

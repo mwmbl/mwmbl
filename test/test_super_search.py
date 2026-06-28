@@ -304,6 +304,35 @@ def test_final_results_event_emitted(client, api_key, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_final_results_carry_originating_source(client, api_key, monkeypatch):
+    """Final 'results' items report the source that produced their URL (not '')."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "github": [Document(title="Python repo", url="https://gh.example/", extract="python code")],
+        "hn": [Document(title="Python thread", url="https://hn.example/", extract="python talk")],
+    })
+    _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 20)
+
+    def fake_crawl(url, redis):
+        return {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get(
+        "/api/v2/super-search/?q=python",
+        HTTP_X_API_KEY=api_key.raw_key,
+    )
+    assert response.status_code == 200
+    events = _parse_sse(_read_stream(response))
+    final = [d for t, d in events if t == "results"][-1]["results"]
+    source_by_url = {item["url"]: item["source"] for item in final}
+    assert source_by_url["https://gh.example/"] == "github"
+    assert source_by_url["https://hn.example/"] == "hn"
+    # Every final item is tagged origin=final.
+    assert all(item["origin"] == "final" for item in final)
+
+
+@pytest.mark.django_db
 def test_final_results_are_mmr_diversified(client, api_key, monkeypatch):
     """The final ranking applies MMR diversity (as standard search does): a second
     same-domain result is demoted below a lower-scored fresh-domain result, while

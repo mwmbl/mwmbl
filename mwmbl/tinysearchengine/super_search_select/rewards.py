@@ -64,3 +64,27 @@ def log_impression(query: str, ctx: SelectionContext, rewards: dict[str, float])
         )
     except Exception:
         logger.exception("failed to log super-search impression")
+
+
+def record_source_provenance(query: str, ctx: SelectionContext) -> None:
+    """Persist a SourceProvenance row per (url, source) Super Search returned.
+
+    Records the durable url -> source mapping (depth 0) so source usefulness can
+    be judged offline, including for pages crawled later from these URLs. No-op
+    without a database; conflicts on the unique url are ignored (first source to
+    produce a URL wins, matching SelectionContext.record_results).
+    """
+    if not getattr(settings, "HAS_DATABASE", False):
+        return
+    if not ctx.source_by_url:
+        return
+    try:
+        from mwmbl.models import SourceProvenance
+
+        rows = [
+            SourceProvenance(url=url, source=source, query=query[:512], depth=0)
+            for url, source in ctx.source_by_url.items()
+        ]
+        SourceProvenance.objects.bulk_create(rows, ignore_conflicts=True)
+    except Exception:
+        logger.exception("failed to record super-search source provenance")

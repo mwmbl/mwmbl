@@ -50,6 +50,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
     url_timestamps = {}
     url_statuses = defaultdict(lambda: URLStatus.NEW)
     domain_links = defaultdict(set)
+    crawled_page_links: dict[str, list[str]] = {}
     for batch in batches:
         for item in batch.items:
             timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
@@ -66,7 +67,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
                     continue
                 for link in item.content.all_links:
                     process_link(batch.user_id_hash, crawled_page_domain, link, timestamp, url_timestamps, url_users,
-                                 blacklist_provider, domain_links)
+                                 blacklist_provider, domain_links, item.url, crawled_page_links)
 
     found_urls = [FoundURL(url, url_users[url], url_statuses[url], url_timestamps[url])
                   for url in url_statuses.keys() | url_users.keys()]
@@ -78,6 +79,8 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
     with DomainLinkDatabase() as domain_link_db:
         for source_domain, target_domains in domain_links.items():
             domain_link_db.update_domain_links(source_domain, target_domains)
+
+    _propagate_source_provenance(crawled_page_links)
 
     end = datetime.utcnow()
     logger.info(f"Recorded URLs in database in {end - start}")
@@ -108,7 +111,7 @@ def add_hn_links(new_item_queue: RedisURLQueue):
 
 def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timestamp: datetime,
                  url_timestamps: dict[str, datetime], url_users: dict[str, str], blacklist_provider,
-                 domain_links: dict[str, set[str]]):
+                 domain_links: dict[str, set[str]], page_url: str, crawled_page_links: dict[str, list[str]]):
     try:
         parsed_link = parse_url(link.url)
     except ValueError:
@@ -129,6 +132,52 @@ def process_link(user_id_hash: str, crawled_page_domain: str, link: Link, timest
     url_users[root_url] = user_id_hash
     url_timestamps[root_url] = timestamp
     domain_links[crawled_page_domain].add(parsed_link.netloc)
+    # Remember which links came off which crawled page, for source-provenance
+    # propagation (only used when the page itself has a known Super Search source).
+    if len(link.url) <= 500:
+        crawled_page_links.setdefault(page_url, []).append(link.url)
+
+
+def _propagate_source_provenance(crawled_page_links: dict[str, list[str]]):
+    """Carry a crawled page's Super Search source onto the links found on it.
+
+    Only pages already recorded in SourceProvenance propagate, so the common case
+    (no provenance) costs a single batched query. Propagation is bounded by
+    SOURCE_PROVENANCE_MAX_DEPTH to limit transitive spread. No-op without a
+    database; never raises into URL recording.
+    """
+    if not getattr(settings, "HAS_DATABASE", False):
+        return
+    if not crawled_page_links:
+        return
+    try:
+        from mwmbl.models import SourceProvenance
+
+        max_depth = getattr(settings, "SOURCE_PROVENANCE_MAX_DEPTH", 3)
+        known = {
+            url: (source, depth)
+            for url, source, depth in SourceProvenance.objects.filter(
+                url__in=list(crawled_page_links.keys())
+            ).values_list("url", "source", "depth")
+        }
+        rows = []
+        for page_url, link_urls in crawled_page_links.items():
+            entry = known.get(page_url)
+            if entry is None:
+                continue
+            source, depth = entry
+            if depth >= max_depth:
+                continue
+            for link_url in link_urls:
+                rows.append(SourceProvenance(
+                    url=link_url, source=source, parent_url=page_url[:500],
+                    depth=depth + 1, query=None,
+                ))
+        if rows:
+            SourceProvenance.objects.bulk_create(rows, ignore_conflicts=True)
+            logger.info(f"Propagated source provenance to {len(rows)} links")
+    except Exception:
+        logger.exception("failed to propagate source provenance")
 
 
 def get_datetime_from_timestamp(timestamp: float) -> datetime:

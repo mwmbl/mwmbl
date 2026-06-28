@@ -260,3 +260,24 @@ class SuperSearchBanditState(models.Model):
     a = models.BinaryField()
     b = models.BinaryField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class SourceProvenance(models.Model):
+    """Which Super Search source a URL was (transitively) discovered from.
+
+    Written for each URL a source returns, and propagated onto links found on
+    pages later crawled from those URLs, so source usefulness can be judged
+    offline including for descendant pages.
+    """
+    url = models.URLField(max_length=500, unique=True)   # first source wins, matches source_by_url semantics
+    source = models.CharField(max_length=128)            # super-search source name (e.g. "gov.uk")
+    query = models.CharField(max_length=512, null=True, blank=True)  # query for direct results; null when propagated
+    parent_url = models.URLField(max_length=500, null=True, blank=True)  # page this URL was found on (null = direct result)
+    depth = models.IntegerField(default=0)               # 0 = direct super-search result; +1 per crawl hop
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['source']),
+            models.Index(fields=['timestamp']),
+        ]
