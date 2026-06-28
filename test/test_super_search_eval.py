@@ -1,10 +1,25 @@
 """Tests for the offline evaluation harness on synthetic reward matrices."""
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from mwmbl.tinysearchengine.super_search_select import evaluation
+from mwmbl.tinysearchengine.super_search_select.domains import (
+    host_of, registrable, source_domain_map,
+)
 from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
 from mwmbl.tinysearchengine.super_search_select.features import FEATURE_NAMES
+
+
+def _load_eval_script():
+    """Load scripts/super_search_eval.py by path (it isn't an importable package)."""
+    path = Path(__file__).resolve().parents[1] / "scripts" / "super_search_eval.py"
+    spec = importlib.util.spec_from_file_location("super_search_eval_script", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _synthetic_matrix(Q=120, S=30, seed=0) -> RewardMatrix:
@@ -82,3 +97,59 @@ def test_feature_selection_flags_cos_bow(tmp_path):
     drops = result["ablation_drop"]
     # cos_bow is the dominant driver, so removing it should hurt coverage most.
     assert drops["cos_bow"] == max(drops.values())
+
+
+# ---------------------------------------------------------------------------
+# Domain matching (shared helpers behind the gold-grounded matrix)
+# ---------------------------------------------------------------------------
+
+def test_registrable_folds_subdomains_and_multi_suffixes():
+    assert registrable("www.github.com") == "github.com"
+    assert registrable("m.example.org") == "example.org"
+    assert registrable("news.ycombinator.com") == "ycombinator.com"
+    assert registrable("foo.bbc.co.uk") == "bbc.co.uk"   # multi-label suffix kept
+    assert registrable("example.com") == "example.com"
+
+
+def test_host_of_normalises_and_handles_junk():
+    assert host_of("https://User@News.YCombinator.com:443/x") == "news.ycombinator.com"
+    assert host_of("not a url") == ""
+
+
+def test_source_domain_map_groups_sources_by_registrable_domain():
+    m = source_domain_map()
+    assert "github" in m.get("github.com", [])
+    assert "hn" in m.get("ycombinator.com", [])  # news.ycombinator.com -> ycombinator.com
+
+
+# ---------------------------------------------------------------------------
+# Gold-grounded matrix construction (build-gold-matrix core logic)
+# ---------------------------------------------------------------------------
+
+def test_is_gold_treats_nan_none_blank_as_not_gold():
+    mod = _load_eval_script()
+    assert mod._is_gold(1) and mod._is_gold("3")
+    assert not mod._is_gold(None)
+    assert not mod._is_gold(float("nan"))
+    assert not mod._is_gold("")
+    assert not mod._is_gold("   ")
+
+
+def test_attribute_rows_binary_gold_and_in_coverage_filter():
+    mod = _load_eval_script()
+    reg_map = {"github.com": ["github"], "stackoverflow.com": ["stackexchange"]}
+    rows = [
+        ("q1", "https://github.com/a", "ta", "ea", float("nan")),  # available, not gold
+        ("q1", "https://github.com/b", "tb", "eb", 3),             # gold -> github True
+        ("q1", "https://stackoverflow.com/x", "tx", "ex", None),   # available, not gold
+        ("q2", "https://example.com/none", "t", "e", 1),           # off-source -> dropped
+    ]
+    per_query, prof_text = mod.attribute_rows(rows, reg_map)
+
+    # q2 had no in-source row, so it's filtered out of the in-coverage set.
+    assert set(per_query) == {"q1"}
+    # binary has-gold: github saw a gold row, stackexchange only non-gold.
+    assert per_query["q1"] == {"github": True, "stackexchange": False}
+    # both github rows accumulate into the source's content profile text.
+    assert len(prof_text["github"]) == 2
+    assert len(prof_text["stackexchange"]) == 1

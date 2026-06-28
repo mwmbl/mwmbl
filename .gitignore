@@ -188,6 +188,14 @@ scripts/downloads/
 
 # Super Search candidate classification intermediates
 candidate_chunks/
+recipe_chunks/
+
+# Super Search data artifacts (inputs/outputs of scripts/, not source)
+curated-domains.json
+super-search-targets.json
+prescreen.json
+devdata/ss_eval_matrix*
+devdata/ss_gold_matrix*
 
 # AI planning documents
 plans/

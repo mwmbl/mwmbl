@@ -40,49 +40,12 @@ from mwmbl.rankeval.paths import (  # noqa: E402
     RANKINGS_DATASET_TEST_PATH,
     RANKINGS_DATASET_TRAIN_PATH,
 )
+from mwmbl.tinysearchengine.super_search_select.domains import host_of, registrable  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.features import (  # noqa: E402
     INTENT_NAMES,
     classify_intent,
 )
 from mwmbl.tinysearchengine.super_search_select.registry import get_registry  # noqa: E402
-
-# Common multi-label public suffixes so registrable-domain folding doesn't collapse
-# e.g. bbc.co.uk -> co.uk. Not exhaustive (no full public-suffix list), but covers
-# the suffixes that actually appear in the gold set / source shortlist.
-_MULTI_SUFFIXES = {
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk",
-    "com.au", "net.au", "org.au", "edu.au", "gov.au",
-    "co.nz", "co.za", "co.in", "co.jp", "co.kr", "com.br", "com.mx",
-    "com.cn", "com.tr", "com.sg", "com.hk", "or.jp", "ne.jp",
-}
-
-
-def host_of(url: str) -> str:
-    """Lowercase host of a URL, sans userinfo and port. ``""`` if unparseable."""
-    try:
-        netloc = urlparse(str(url)).netloc.lower()
-    except ValueError:
-        return ""
-    return netloc.split("@")[-1].split(":")[0]
-
-
-def _strip_www(host: str) -> str:
-    for prefix in ("www.", "m."):
-        if host.startswith(prefix):
-            return host[len(prefix):]
-    return host
-
-
-def registrable(host: str) -> str:
-    """Registrable domain: strip ``www.``/``m.`` then take the last 2 labels (3 for
-    known multi-label suffixes like ``co.uk``)."""
-    host = _strip_www(host)
-    labels = host.split(".")
-    if len(labels) <= 2:
-        return host
-    if ".".join(labels[-2:]) in _MULTI_SUFFIXES:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
 
 
 def load_gold() -> pd.DataFrame:
