@@ -1,0 +1,23 @@
+name: openstreetmap_org
+domain: openstreetmap.org
+field: maps-places
+request:
+  url: https://nominatim.openstreetmap.org/search
+  params:
+    q: "{query}"
+    format: jsonv2
+    limit: "{limit}"
+  headers:
+    User-Agent: "mwmbl-supersearch/1.0 (+https://mwmbl.org)"
+response:
+  format: json
+  results: ""          # Nominatim returns a top-level JSON array
+  base_url: ""
+  fields:
+    title: display_name
+    extract: name
+    url:
+      template: "https://www.openstreetmap.org/{osm_type}/{osm_id}"
+smoke:
+  query: london
+  expect_title_contains: London

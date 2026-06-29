@@ -7,12 +7,16 @@ orchestrator.
 """
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
+from mwmbl.tinysearchengine.super_search_sources.guardian import search as search_guardian
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn
+from mwmbl.tinysearchengine.super_search_sources.homepage import search as search_homepage
 from mwmbl.tinysearchengine.super_search_sources.imdb import search as search_imdb
 from mwmbl.tinysearchengine.super_search_sources.mwmbl_index import search as search_mwmbl
+from mwmbl.tinysearchengine.super_search_sources.nhs import search as search_nhs
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, make_recipe_source
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
+from mwmbl.tinysearchengine.super_search_sources.wikidata import search as search_wikidata
 
 SOURCES = {
     "mwmbl": search_mwmbl,
@@ -22,6 +26,10 @@ SOURCES = {
     "arxiv": search_arxiv,
     "pypi": search_pypi,
     "imdb": search_imdb,
+    "nhs": search_nhs,                 # UK consumer-health (conditions, medicines)
+    "wikidata_official": search_wikidata,  # official website of an entity (P856)
+    "homepage": search_homepage,       # heuristic brand-homepage guesser
+    "guardian": search_guardian,       # UK/world news (Content API, needs key)
 }
 
 # Declarative YAML recipes (recipes/*.yaml) are loaded at import time and added
