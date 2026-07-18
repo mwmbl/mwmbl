@@ -11,6 +11,7 @@ from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
 from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.tinysearchengine.staan import get_staan_results
 
 logger = getLogger(__name__)
 
@@ -229,7 +230,10 @@ def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n\n"
-            "**Query parameter:** `s` — the search query string (required)."
+            "**Query parameter:** `s` — the search query string (required).\n\n"
+            "**Query parameter:** `source` — experimental override to fetch results from an "
+            "alternative provider instead of the Mwmbl index, for manual evaluation. "
+            "Currently supports `staan`. Omit for normal Mwmbl-ranked results."
         ),
         openapi_extra={
             "parameters": [
@@ -238,11 +242,19 @@ def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
                     "in": "query",
                     "required": True,
                     "schema": {"type": "string", "example": "python tutorial"},
-                }
+                },
+                {
+                    "name": "source",
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "string", "example": "staan"},
+                },
             ]
         },
     )
-    def search(request, s: str):
+    def search(request, s: str, source: str = "mwmbl"):
+        if source == "staan":
+            return get_staan_results(s)
         results = ranker.search(s, [])
         return [format_result(result, s) for result in results]
 
