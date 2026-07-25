@@ -12,6 +12,7 @@ from mwmbl.tinysearchengine.super_search_sources.mwmbl_index import search as se
 from mwmbl.tinysearchengine.super_search_sources.pypi import search as search_pypi
 from mwmbl.tinysearchengine.super_search_sources.recipe import load_recipes, make_recipe_source
 from mwmbl.tinysearchengine.super_search_sources.stackexchange import search as search_stackexchange
+from mwmbl.tinysearchengine.super_search_sources.youcom import search as search_youcom
 
 SOURCES = {
     "mwmbl": search_mwmbl,
@@ -20,6 +21,7 @@ SOURCES = {
     "stackexchange": search_stackexchange,
     "arxiv": search_arxiv,
     "pypi": search_pypi,
+    "youcom": search_youcom,
 }
 
 # Declarative YAML recipes (recipes/*.yaml) are loaded at import time and added
