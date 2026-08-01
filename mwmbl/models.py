@@ -12,22 +12,7 @@ from mwmbl.usernames import generate_username
 
 
 class MwmblUser(AbstractUser):
-    class Tier(models.TextChoices):
-        FREE    = "free",    "Free"
-        STARTER = "starter", "Starter"
-        PRO     = "pro",     "Pro"
-
-    TIER_MONTHLY_LIMITS = {
-        Tier.FREE:    1_000,
-        Tier.STARTER: 10_000,
-        Tier.PRO:     50_000,
-    }
-
-    tier = models.CharField(
-        max_length=20,
-        choices=Tier.choices,
-        default=Tier.FREE,
-    )
+    pass
 
 
 class UserCuration(models.Model):
@@ -172,6 +157,10 @@ class UsageBucket(models.Model):
     year = models.IntegerField()
     month = models.IntegerField()
     count = models.IntegerField(default=0)
+    # How many billable (over-the-free-allowance) requests have already been
+    # ingested to Polar as usage events for this month. Lets the reporting job
+    # send only the incremental delta each run, idempotently.
+    reported_overage = models.IntegerField(default=0)
 
     class Meta:
         unique_together = [('user', 'year', 'month')]
@@ -186,6 +175,9 @@ class UserBilling(models.Model):
     polar_subscription_id = models.CharField(max_length=100, blank=True, default="")
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
+    # Maximum amount (in cents) the account may be billed per month for metered
+    # usage beyond the free allowance. 0 = free-tier-only (hard capped).
+    max_monthly_spend_cents = models.IntegerField(default=0)
 
 
 class AgreementType(models.TextChoices):
