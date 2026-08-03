@@ -101,8 +101,13 @@ class MwmblConfig(AppConfig):
                 report_usage_to_polar(repeat=3600, repeat_until=None)
 
         except Exception:
-            # Don't prevent startup if background task scheduling fails. Release
-            # the lock so a later-starting worker can retry instead of waiting
-            # out the full TTL.
+            # Don't prevent startup if background task scheduling fails
             log.exception("Failed to schedule background tasks")
+        finally:
+            # Release promptly rather than holding it for the full TTL: by the
+            # time we get here the Task rows (if created) are already committed,
+            # so a worker that acquires the lock next will see them via the
+            # exists() checks above and correctly skip creating duplicates. The
+            # TTL above is only a safety net for a process that dies before
+            # reaching this point.
             cache.delete(MwmblConfig._SCHEDULE_LOCK_KEY)
