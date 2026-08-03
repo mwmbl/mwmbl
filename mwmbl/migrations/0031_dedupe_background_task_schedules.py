@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("mwmbl", "0030_remove_mwmbluser_tier_usagebucket_reported_overage_and_more"),
-        ("background_task", "0003_alter_completedtask_id_alter_task_id"),
+        ("background_task", "0002_auto_20170927_1109"),
     ]
 
     operations = [
