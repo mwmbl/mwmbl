@@ -67,13 +67,18 @@ class MwmblConfig(AppConfig):
 
         try:
             from background_task.models import Task
-            from mwmbl.background import sync_search_counts
+            from mwmbl.background import sync_search_counts, report_usage_to_polar
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
+            POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
                 sync_search_counts(repeat=3600, repeat_until=None)
+
+            # Report billable usage overage to Polar once per hour (3600 seconds)
+            if not Task.objects.filter(task_name=POLAR_REPORT_TASK).exists():
+                report_usage_to_polar(repeat=3600, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

@@ -22,8 +22,9 @@ from ninja_jwt.tokens import RefreshToken
 
 from django.conf import settings
 
+from mwmbl import pricing
 from mwmbl.background import sync_search_counts
-from mwmbl.models import ApiKey, AgreementType, MwmblUser, UsageBucket, UserAgreement, generate_api_key
+from mwmbl.models import ApiKey, AgreementType, MwmblUser, UsageBucket, UserAgreement, UserBilling, generate_api_key
 from mwmbl.quota import RATE_LIMIT, _monthly_key, check_rate_limit, get_monthly_count, increment_monthly
 
 User = get_user_model()
@@ -371,7 +372,7 @@ def test_search_response_includes_usage_fields(api_client, search_api_key):
     data = response.json()
     assert "monthly_usage" in data
     assert "monthly_limit" in data
-    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
+    assert data["monthly_limit"] == pricing.FREE_KEYED_MONTHLY_LIMIT
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +392,7 @@ def test_search_rate_limit_exceeded(api_client, search_api_key):
 
 @pytest.mark.django_db
 def test_search_monthly_quota_exceeded(api_client, search_api_key):
-    limit = MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
+    limit = pricing.FREE_KEYED_MONTHLY_LIMIT
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
          patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
         response = api_client.get(
@@ -401,25 +402,45 @@ def test_search_monthly_quota_exceeded(api_client, search_api_key):
     assert response.status_code == 429
     detail = response.json()["detail"]
     assert "quota" in detail.lower() or "monthly" in detail.lower()
-    # Free tier should mention upgrade options
-    assert "starter" in detail.lower() or "pro" in detail.lower() or "upgrade" in detail.lower()
+    assert "spend limit" in detail.lower()
 
 
 @pytest.mark.django_db
-def test_search_monthly_quota_exceeded_pro_no_upgrade_message(api_client, search_api_key, verified_user):
-    """Pro tier 429 message should not suggest an upgrade."""
-    verified_user.tier = MwmblUser.Tier.PRO
-    verified_user.save()
-    limit = MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.PRO]
+def test_search_keyed_default_zero_spend_cap_is_free_allowance(api_client, search_api_key):
+    """A fresh account with no UserBilling row defaults to the free-only cap."""
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
+         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT - 1), \
+         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT):
+        response = api_client.get(
+            "/api/v2/search/?q=python",
+            **api_key_header(search_api_key.raw_key),
+        )
+    assert response.status_code == 200
+    assert response.json()["monthly_limit"] == pricing.FREE_KEYED_MONTHLY_LIMIT
+
+
+@pytest.mark.django_db
+def test_search_keyed_with_spend_limit_raises_cap(api_client, search_api_key, verified_user):
+    """Raising the configured spend limit raises the effective monthly request cap."""
+    UserBilling.objects.create(user=verified_user, max_monthly_spend_cents=1_000)
+    cap = pricing.effective_monthly_request_cap(1_000)
+    assert cap == pricing.FREE_KEYED_MONTHLY_LIMIT + 2_000
+
+    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
+         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap - 1):
+        response = api_client.get(
+            "/api/v2/search/?q=python",
+            **api_key_header(search_api_key.raw_key),
+        )
+    assert response.status_code == 200
+
+    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
+         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 429
-    detail = response.json()["detail"]
-    assert "upgrade" not in detail.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -636,10 +657,11 @@ def test_subscription_free_user_no_usage(api_client, access_token, verified_user
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["plan"] == MwmblUser.Tier.FREE
     assert data["status"] == "free"
-    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.FREE]
+    assert data["max_monthly_spend_cents"] == 0
+    assert data["monthly_limit"] == pricing.FREE_KEYED_MONTHLY_LIMIT
     assert data["monthly_usage"] == 0
+    assert data["estimated_cost_cents"] == 0
     assert data["current_period_end"] is None
     assert data["polar_customer_id"] is None
 
@@ -689,9 +711,8 @@ def test_subscription_usage_matches_search_response(api_client, access_token, ve
 
 
 @pytest.mark.django_db
-def test_subscription_correct_limit_for_starter_tier(api_client, access_token, verified_user):
-    verified_user.tier = MwmblUser.Tier.STARTER
-    verified_user.save()
+def test_subscription_reflects_spend_limit(api_client, access_token, verified_user):
+    UserBilling.objects.create(user=verified_user, max_monthly_spend_cents=1_000)
 
     response = api_client.get(
         "/api/v1/platform/billing/subscription",
@@ -699,9 +720,9 @@ def test_subscription_correct_limit_for_starter_tier(api_client, access_token, v
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["plan"] == MwmblUser.Tier.STARTER
     assert data["status"] == "active"
-    assert data["monthly_limit"] == MwmblUser.TIER_MONTHLY_LIMITS[MwmblUser.Tier.STARTER]
+    assert data["max_monthly_spend_cents"] == 1_000
+    assert data["monthly_limit"] == pricing.effective_monthly_request_cap(1_000)
 
 
 # ---------------------------------------------------------------------------
