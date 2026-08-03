@@ -393,6 +393,19 @@ def get_wiki_url(title: str):
     return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
 
 
+def _is_wiki_rate_limited(e: RetryError) -> bool:
+    """True if a RetryError was caused by exhausting retries on 429s specifically.
+
+    Inspects the wrapped MaxRetryError's `reason` (e.g. "too many 429 error
+    responses") rather than str(e). str(e) also embeds the request URL - and with
+    it the user's (private) query - which both risks logging it and means a query
+    that happens to contain the substring "429" would be misread as a rate limit.
+    """
+    cause = e.args[0] if e.args else None
+    reason = getattr(cause, "reason", None)
+    return reason is not None and "429" in str(reason)
+
+
 HTML_TAG_REGEX = re.compile(r'<[^>]+>')
 
 
@@ -414,7 +427,7 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
     except RetryError as e:
-        if "429" in str(e):
+        if _is_wiki_rate_limited(e):
             _trip_wiki_circuit()
             logger.warning(
                 "Wikipedia is rate-limiting us; pausing wiki lookups for %ds", WIKI_CIRCUIT_COOLDOWN_SECONDS
