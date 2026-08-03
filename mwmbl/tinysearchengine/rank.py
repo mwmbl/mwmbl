@@ -2,6 +2,8 @@ import html
 import json
 import math
 import re
+import threading
+import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
@@ -13,6 +15,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 from requests.adapters import HTTPAdapter, Retry
+from requests.exceptions import RetryError
 
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
@@ -260,7 +263,10 @@ class Ranker:
         return ranked_results
 
     def complete(self, q: str):
-        ordered_results, terms, completions = self.get_results(q, [])
+        # Autocomplete fires on every keystroke, so it must never trigger external_search
+        # (e.g. a live Wikipedia lookup) - that would multiply outbound requests by the
+        # length of every query typed and can get us rate-limited (see fix-wiki-overuse).
+        ordered_results, terms, completions = self.get_results(q, [], use_external_search=False)
         if len(ordered_results) == 0:
             # There are no results so suggest Google searches instead
             completion_queries = [' '.join(terms[:-1] + [t]) for t in completions]
@@ -275,7 +281,7 @@ class Ranker:
             completed = [' '.join(terms[:-1] + [t]) for t in adjusted_completions]
             return [q, urls + completed]
 
-    def get_results(self, q: str, additional_results: list[Document]):
+    def get_results(self, q: str, additional_results: list[Document], use_external_search: bool = True):
         logger.info(f"Get results with {len(additional_results)} additional results")
         terms = tokenize(q)
 
@@ -314,7 +320,7 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        external_search_items = self.external_search(q)
+        external_search_items = self.external_search(q) if use_external_search else []
         ordered_results = self.order_results(terms, pages + additional_results + external_search_items, is_complete)
         deduplicated_results = deduplicate(curated_items + ordered_results, set())
         state_fixed = [fix_document_state(result) for result in deduplicated_results]
@@ -363,6 +369,25 @@ WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
+# If Wikipedia has already rate-limited us hard enough that WIKI_RETRY exhausted its
+# retries, hammering it again on the very next query just makes things worse. Trip a
+# process-local circuit breaker instead: stop calling Wikipedia for a cooldown period
+# and let the rate limit clear, rather than every subsequent request paying for its own
+# doomed retry-with-backoff sequence.
+WIKI_CIRCUIT_COOLDOWN_SECONDS = 60
+_wiki_circuit_lock = threading.Lock()
+_wiki_blocked_until = 0.0
+
+
+def _wiki_circuit_open() -> bool:
+    return time.monotonic() < _wiki_blocked_until
+
+
+def _trip_wiki_circuit():
+    global _wiki_blocked_until
+    with _wiki_circuit_lock:
+        _wiki_blocked_until = time.monotonic() + WIKI_CIRCUIT_COOLDOWN_SECONDS
+
 
 def get_wiki_url(title: str):
     return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
@@ -376,6 +401,9 @@ def clean_html(s: str):
 
 
 def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
+    if _wiki_circuit_open():
+        return []
+
     escaped_query = urllib.parse.quote(s, safe='')
     headers = {
         'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
@@ -385,13 +413,25 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
-    except Exception:
-        logger.exception("Failed to fetch Wikipedia results for query %s", s)
+    except RetryError as e:
+        if "429" in str(e):
+            _trip_wiki_circuit()
+            logger.warning(
+                "Wikipedia is rate-limiting us; pausing wiki lookups for %ds", WIKI_CIRCUIT_COOLDOWN_SECONDS
+            )
+        else:
+            # Don't log str(e)/exc_info here - RetryError embeds the request URL, which
+            # embeds the (private) user query, and logger.exception would log both.
+            logger.warning("Failed to fetch Wikipedia results: %s", type(e).__name__)
+        return []
+    except Exception as e:
+        logger.warning("Failed to fetch Wikipedia results: %s", type(e).__name__)
         return []
 
     if 'query' not in wiki_response or 'search' not in wiki_response['query']:
         if 'error' in wiki_response:
-            logger.warning("Error in wiki response: %s", wiki_response['error'])
+            # Don't log the error body - it can echo back the (private) user query.
+            logger.warning("Wikipedia API returned an error response")
 
         return []
 
