@@ -172,7 +172,7 @@ Like "mumble". I live in
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=mwmbl/mwmbl&type=Date)](https://www.star-history.com/#mwmbl/mwmbl&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=mwmbl/mwmbl&type=Date)](https://star-history.dera.page/#mwmbl/mwmbl&Date)
 
 Acknowledgements
 ================
