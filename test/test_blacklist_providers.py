@@ -6,8 +6,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from mwmbl.indexer.blacklist_providers import (
-    StaticBlacklistProvider, 
-    HaGeZiBlacklistProvider, 
+    StaticBlacklistProvider,
+    HaGeZiBlacklistProvider,
+    AdultContentBlacklistProvider,
     CombinedBlacklistProvider
 )
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
@@ -50,6 +51,27 @@ badsite.net
         assert provider.is_domain_blacklisted('badsite.net') == True
         
         # Test domain that should not be blacklisted
+        assert provider.is_domain_blacklisted('github.com') == False
+
+
+def test_adult_content_blacklist_provider_success():
+    """Test AdultContentBlacklistProvider parses hosts-format lines correctly."""
+    with patch('mwmbl.indexer.blacklist_providers.request_cache') as mock_cache:
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = '''# Title: Porn Block List
+# Homepage: https://github.com/blocklistproject/Lists
+
+0.0.0.0 fineartteens.com
+0.0.0.0 milforia.com
+'''
+        mock_session.get.return_value = mock_response
+        mock_cache.return_value.__enter__.return_value = mock_session
+
+        provider = AdultContentBlacklistProvider()
+
+        assert provider.is_domain_blacklisted('fineartteens.com') == True
+        assert provider.is_domain_blacklisted('milforia.com') == True
         assert provider.is_domain_blacklisted('github.com') == False
 
 

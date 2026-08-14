@@ -74,9 +74,52 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
         return False
 
 
-class HaGeZiBlacklistProvider(BlacklistProvider):
+class RemoteListBlacklistProvider(BlacklistProvider):
+    """Provider that fetches a remote newline-delimited domain list, with caching.
+
+    Handles both plain domain-per-line lists and hosts-file format
+    (``0.0.0.0 domain.com``), which is what most public blocklists use.
+    """
+
+    def __init__(self, url: str, cache_expire_days: int = 1):
+        self.url = url
+        self.cache_expire_days = cache_expire_days
+        self._cached_domains = None
+
+    def _get_blacklisted_domains(self) -> Set[str]:
+        if self._cached_domains is not None:
+            return self._cached_domains
+
+        with request_cache(expire_after=timedelta(days=self.cache_expire_days)) as session:
+            try:
+                response = session.get(self.url)
+                response.raise_for_status()
+
+                domains = set()
+                for line in response.text.split('\n'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
+                    parts = line.split()
+                    domains.add(parts[1] if len(parts) == 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
+
+                self._cached_domains = domains
+                return domains
+            except requests.RequestException as e:
+                # Log the error but don't fail - return empty set as fallback
+                print(f"Warning: Failed to fetch blacklist from {self.url}: {e}")
+                self._cached_domains = set()
+                return set()
+
+    def is_domain_blacklisted(self, domain: str) -> bool:
+        domains = self._get_blacklisted_domains()
+        return domain in domains
+
+
+class HaGeZiBlacklistProvider(RemoteListBlacklistProvider):
     """Provider that fetches HaGeZi blocklist."""
-    
+
     # HaGeZi provides several lists, this is their main threat intelligence feeds
     HAGEZI_URLS = {
         'light': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt',
@@ -84,44 +127,26 @@ class HaGeZiBlacklistProvider(BlacklistProvider):
         'pro': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt',
         'ultimate': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/ultimate.txt',
     }
-    
+
     def __init__(self, list_type: str = 'light', cache_expire_days: int = 1):
         if list_type not in self.HAGEZI_URLS:
             raise ValueError(f"Invalid list_type. Must be one of: {list(self.HAGEZI_URLS.keys())}")
-        
-        self.url = self.HAGEZI_URLS[list_type]
-        self.cache_expire_days = cache_expire_days
-        self._cached_domains = None
-    
-    def _get_blacklisted_domains(self) -> Set[str]:
-        """Fetch HaGeZi blacklist with caching."""
-        if self._cached_domains is not None:
-            return self._cached_domains
-            
-        with request_cache(expire_after=timedelta(days=self.cache_expire_days)) as session:
-            try:
-                response = session.get(self.url)
-                response.raise_for_status()
-                
-                # Parse HaGeZi format - one domain per line, skip comments and empty lines
-                domains = set()
-                for line in response.text.split('\n'):
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        domains.add(line)
-                
-                self._cached_domains = domains
-                return domains
-            except requests.RequestException as e:
-                # Log the error but don't fail - return empty set as fallback
-                print(f"Warning: Failed to fetch HaGeZi blacklist from {self.url}: {e}")
-                self._cached_domains = set()
-                return set()
-    
-    def is_domain_blacklisted(self, domain: str) -> bool:
-        """Check if domain is in the HaGeZi blacklist."""
-        domains = self._get_blacklisted_domains()
-        return domain in domains
+
+        super().__init__(self.HAGEZI_URLS[list_type], cache_expire_days)
+
+
+class AdultContentBlacklistProvider(RemoteListBlacklistProvider):
+    """Provider that fetches The Block List Project's maintained adult-content domain list.
+
+    See https://github.com/blocklistproject/Lists - hosts-format, ~950k domains,
+    updated regularly. Covers the general adult-content gap that the built-in
+    regex/domain rules (aimed at spam and a handful of known-bad domains) don't.
+    """
+
+    URL = 'https://raw.githubusercontent.com/blocklistproject/Lists/master/porn.txt'
+
+    def __init__(self, cache_expire_days: int = 7):
+        super().__init__(self.URL, cache_expire_days)
 
 
 class CombinedBlacklistProvider(BlacklistProvider):
