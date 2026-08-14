@@ -5,6 +5,7 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
+from mwmbl.indexer.index_batches import index_documents
 from mwmbl.tinysearchengine.indexer import Document, PAGE_SIZE, TinyIndex
 
 
@@ -59,3 +60,53 @@ def test_purge_dry_run_does_not_modify_index(index_path):
 
     urls = _get_all_urls(index_path)
     assert "https://fineartteens.com/x" in urls
+
+
+@pytest.mark.django_db
+def test_purge_targeted_finds_domain_via_guessed_terms(index_path):
+    """With no --term, the domain's own name (run through the real tokenizer, the same
+    way the indexer would have derived tokens from the URL) is enough to find and
+    remove every page it was actually filed under."""
+    documents = [
+        Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
+        Document(title="Good Example", url="https://example.com/y", extract="a good example page"),
+    ]
+    index_documents(documents, index_path)
+
+    with override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        call_command("purge_blacklisted_domains", "--domain", "fineartteens.com")
+
+    urls = _get_all_urls(index_path)
+    assert "https://fineartteens.com/x" not in urls
+    assert "https://example.com/y" in urls
+
+
+@pytest.mark.django_db
+def test_purge_targeted_dry_run_does_not_modify_index(index_path):
+    documents = [Document(title="Fine Art Teens", url="https://fineartteens.com/x", extract="teen gallery")]
+    index_documents(documents, index_path)
+
+    with override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        call_command("purge_blacklisted_domains", "--domain", "fineartteens.com", "--dry-run")
+
+    assert "https://fineartteens.com/x" in _get_all_urls(index_path)
+
+
+@pytest.mark.django_db
+def test_purge_targeted_uses_extra_terms_as_seeds(index_path):
+    """A --term seed reaches a page the domain-guessed terms alone wouldn't hit,
+    e.g. a term that only appears in the title/extract, not the URL."""
+    documents = [
+        Document(title="Kusowanka - Hentai Posts, XXX Toons", url="https://kusowanka.com/", extract="anime porn"),
+    ]
+    index_documents(documents, index_path)
+
+    with override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        call_command("purge_blacklisted_domains", "--domain", "kusowanka.com", "--term", "hentai")
+
+    assert "https://kusowanka.com/" not in _get_all_urls(index_path)
+
+
+def test_purge_targeted_term_without_domain_raises(index_path):
+    with override_settings(DATA_PATH="", INDEX_NAME=index_path), pytest.raises(ValueError):
+        call_command("purge_blacklisted_domains", "--term", "hentai")
