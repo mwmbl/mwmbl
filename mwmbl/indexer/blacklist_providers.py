@@ -57,18 +57,14 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
         # Trusted domains are never blacklisted
         if domain in self.trusted_domains:
             return False
-        
+
         # Spam detection heuristics for SEO spam domains
         domain_parts = domain.split('.')
-        
-        # Domains like: brofqpxj.uelinc.com, gzsmjc.fba01.com, 59648.etnomurcia.com
-        if (len(domain_parts) == 3 and 
-            domain_parts[2] == "com" and 
-            len(domain_parts[0]) in {6, 8}):
-            return True
-        
-        # Domains with all numeric first parts
-        if len(domain_parts) > 0 and set(domain_parts[0]) <= set("1234567890"):
+
+        # Domains with all-numeric generated-looking subdomains, e.g. 59648.etnomurcia.com.
+        # Restricted to len > 2 so this doesn't catch a numeric *apex* domain like 350.org,
+        # where the numeric part is the actual site name rather than a generated subdomain.
+        if len(domain_parts) > 2 and set(domain_parts[0]) <= set("1234567890"):
             return True
         
         return False
@@ -118,17 +114,39 @@ class RemoteListBlacklistProvider(BlacklistProvider):
 
 
 class HaGeZiBlacklistProvider(RemoteListBlacklistProvider):
-    """Provider that fetches HaGeZi blocklist."""
+    """Provider that fetches a HaGeZi blocklist.
 
-    # HaGeZi provides several lists, this is their main threat intelligence feeds
+    NB: upstream restructured their repo from domains/{tier}.txt to
+    wildcard/{tier}-onlydomains.txt at some point - the old domains/*.txt URLs now
+    404 silently (request_cache treats that as "list temporarily empty", not an
+    error), so whichever tier was previously configured here had been contributing
+    nothing.
+
+    The 'light'/'normal'/'pro'/'ultimate' tiers are HaGeZi's general "Multi" lists:
+    ads, affiliate, tracking, telemetry, and only *also* phishing/malware/scam mixed
+    in. They're built for personal ad-blocking, not "should this be excluded from a
+    search index" - they flag plenty of legitimate businesses purely for running
+    analytics/trackers (e.g. baremetrics.com, covidtracking.com), which is a false
+    positive for our purposes even though it's correct behaviour for a DNS ad-blocker.
+
+    The 'tif'/'tif_medium'/'tif_mini' tiers are HaGeZi's dedicated Threat
+    Intelligence Feed - malware, phishing, scam and C2 domains specifically, no
+    general ad/tracker noise. That's the actually-relevant category here, and
+    tif_medium (390k entries) tested clean against every legitimate domain in our
+    Search Console sample. get_default_blacklist_provider() uses 'tif_medium'.
+    """
+
     HAGEZI_URLS = {
-        'light': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt',
-        'normal': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/normal.txt',
-        'pro': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt',
-        'ultimate': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/ultimate.txt',
+        'light': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt',
+        'normal': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt',
+        'pro': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt',
+        'ultimate': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt',
+        'tif': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt',
+        'tif_medium': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt',
+        'tif_mini': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt',
     }
 
-    def __init__(self, list_type: str = 'light', cache_expire_days: int = 1):
+    def __init__(self, list_type: str = 'tif_medium', cache_expire_days: int = 1):
         if list_type not in self.HAGEZI_URLS:
             raise ValueError(f"Invalid list_type. Must be one of: {list(self.HAGEZI_URLS.keys())}")
 

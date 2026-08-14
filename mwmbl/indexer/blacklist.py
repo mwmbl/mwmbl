@@ -18,6 +18,6 @@ def get_default_blacklist_provider() -> BlacklistProvider:
     """Get the default blacklist provider configuration."""
     return CombinedBlacklistProvider([
         BuiltInRulesBlacklistProvider(),
-        HaGeZiBlacklistProvider('light'),
+        HaGeZiBlacklistProvider('tif_medium'),
         AdultContentBlacklistProvider(),
     ])

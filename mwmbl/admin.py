@@ -2,8 +2,23 @@ from django import forms
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
 from django.contrib.auth.admin import UserAdmin
+from django.urls import path
 
+from mwmbl.admin_views import purge_blacklisted_domains_view
 from mwmbl.models import MwmblUser, OldIndex, Curation, FlagCuration, DomainSubmission, ApiKey, MarketingConsent, UserBilling, generate_api_key
+
+
+_default_get_urls = admin.site.get_urls
+
+
+def _get_urls():
+    return [
+        path("purge-blacklisted-domains/", admin.site.admin_view(purge_blacklisted_domains_view),
+             name="purge_blacklisted_domains"),
+    ] + _default_get_urls()
+
+
+admin.site.get_urls = _get_urls
 
 
 class ApiKeyForm(forms.ModelForm):

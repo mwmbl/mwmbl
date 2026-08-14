@@ -1,0 +1,60 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p>Paste queries, one per line (a pasted Search Console CSV, header row and all, also works -
+only the query column is used). Every indexed result for those queries is checked against the
+configured blacklist. This never scans the whole index, so it's fast enough to run interactively -
+but it can only find documents reachable from these exact queries.</p>
+
+<form method="post">
+    {% csrf_token %}
+    <p>
+        <textarea name="queries" rows="10" cols="80" placeholder="fineartteens&#10;newcapbooru&#10;nyoubooru">{{ queries_text }}</textarea>
+    </p>
+    <input type="submit" value="Preview" class="default">
+</form>
+
+{% if error %}
+    <p class="errornote">{{ error }}</p>
+{% endif %}
+
+{% if result %}
+    {% if result.matches %}
+        <h2>{{ result.matches|length }} matching document{{ result.matches|length|pluralize }} on blacklisted domains
+            {% if result.dry_run %}(preview - nothing removed yet){% else %}- removed{% endif %}</h2>
+
+        <table>
+            <thead>
+                <tr><th>Domain</th><th>Title</th><th>URL</th><th>Found via</th><th>Indexed under / removed from</th></tr>
+            </thead>
+            <tbody>
+                {% for match in result.matches %}
+                <tr>
+                    <td>{{ match.domain }}</td>
+                    <td>{{ match.title }}</td>
+                    <td><a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.url }}</a></td>
+                    <td>{{ match.found_via_terms|join:", " }}</td>
+                    <td>{{ match.indexed_under_terms|join:", " }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p>{{ total_removed }} document{{ total_removed|pluralize }} across
+            {{ result.pages_changed }} page{{ result.pages_changed|pluralize }}
+            (scanned {{ result.pages_scanned }} page{{ result.pages_scanned|pluralize }}).</p>
+
+        {% if result.dry_run %}
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="queries" value="{{ queries_text }}">
+                <input type="hidden" name="confirm" value="1">
+                <input type="submit" value="Confirm and remove {{ total_removed }} document{{ total_removed|pluralize }}" class="default"
+                       onclick="return confirm('Remove {{ total_removed }} document{{ total_removed|pluralize }} from the index? This cannot be undone from here.');">
+            </form>
+        {% endif %}
+    {% else %}
+        <p>No results for these queries matched the configured blacklist.</p>
+    {% endif %}
+{% endif %}
+{% endblock %}
