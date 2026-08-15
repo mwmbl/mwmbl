@@ -5,7 +5,9 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
+from mwmbl.indexer.index import tokenize_document
 from mwmbl.indexer.index_batches import index_documents
+from mwmbl.indexer.purge_blacklisted import guess_terms_for_domain
 from mwmbl.tinysearchengine.indexer import Document, PAGE_SIZE, TinyIndex
 
 PATCH_TARGET = "mwmbl.management.commands.purge_blacklisted_domains.get_default_blacklist_provider"
@@ -120,6 +122,34 @@ def test_targeted_extra_term_reaches_pages_domain_guess_alone_would_miss(index_p
         call_command("purge_blacklisted_domains", "--domain", "kusowanka.com", "--term", "hentai")
 
     assert "https://kusowanka.com/" not in _get_all_urls(index_path)
+
+
+@pytest.mark.django_db
+def test_targeted_purge_does_not_sweep_unrelated_document_sharing_a_page(index_path):
+    """Regression test: expanding to every page a matched document's own tokens hash to can
+    land on a page shared with a totally unrelated document (a real risk with generic terms
+    like "com" or "you" on a large index). That unrelated document must not be swept up and
+    removed just because it also happens to be blacklisted - only the documents actually
+    shown in the preview should ever be removed."""
+    target = Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos")
+    index_documents([target], index_path)
+
+    # Find a real term this document is filed under that ISN'T one of the seed terms this
+    # --domain run will use, then plant an unrelated blacklisted document on that same page -
+    # simulating a hash collision with a document that was never reachable from the seed terms.
+    tokenized = tokenize_document(target.url, target.title, target.extract, None)
+    guessed = guess_terms_for_domain("fineartteens.com")
+    collision_term = next(t for t in tokenized.tokens if t not in guessed)
+    unrelated = Document(title="Unrelated bad site", url="https://otherbad.example/z", extract="unrelated")
+    _put(index_path, collision_term, unrelated)
+
+    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com", "otherbad.example"})), \
+            override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        call_command("purge_blacklisted_domains", "--domain", "fineartteens.com")
+
+    urls = _get_all_urls(index_path)
+    assert "https://fineartteens.com/x" not in urls
+    assert "https://otherbad.example/z" in urls  # not swept up, even though also blacklisted
 
 
 @pytest.mark.django_db

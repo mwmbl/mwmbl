@@ -140,11 +140,42 @@ def purge_pages(index: TinyIndex, page_indexes: Iterable[int], is_blacklisted: C
     return removed_by_domain, pages_changed, pages_scanned
 
 
+def purge_matched_documents(index: TinyIndex, matches: list[MatchedDocument], dry_run: bool):
+    """Remove exactly the given matched documents (by URL) from every page one of them is
+    filed under - and nothing else on those pages. candidate_pages_for_matches() finds pages
+    shared with many unrelated documents (a common token like "com" or "you" hashes to a page
+    used by thousands of others), so this must filter by URL rather than re-applying
+    is_blacklisted() to the whole page - otherwise it would silently remove other, unrelated
+    blacklisted-domain documents that were never shown in the preview.
+    Returns (removed_by_domain, pages_changed, pages_scanned)."""
+    target_urls = {match.url for match in matches}
+    candidate_pages = candidate_pages_for_matches(index, matches)
+
+    removed_by_domain: dict[str, int] = {}
+    pages_changed = 0
+    pages_scanned = 0
+
+    for page_index in candidate_pages:
+        pages_scanned += 1
+        documents = index.get_page(page_index)
+        kept = [d for d in documents if d.url not in target_urls]
+        removed = [d for d in documents if d.url in target_urls]
+
+        if removed:
+            pages_changed += 1
+            for document in removed:
+                domain = get_domain(document.url)
+                removed_by_domain[domain] = removed_by_domain.get(domain, 0) + 1
+            if not dry_run:
+                index.store_in_page(page_index, kept)
+
+    return removed_by_domain, pages_changed, pages_scanned
+
+
 def purge_targeted(index: TinyIndex, seed_terms: set[str], is_blacklisted: Callable[[str], bool], dry_run: bool):
-    """Full targeted purge: discover matches from seed terms, then purge every page
-    they're filed under. Returns (matches, removed_by_domain, pages_changed, pages_scanned)."""
+    """Full targeted purge: discover matches from seed terms, then remove exactly those
+    documents from every page they're filed under - nothing else.
+    Returns (matches, removed_by_domain, pages_changed, pages_scanned)."""
     matches = discover_targeted_matches(index, seed_terms, is_blacklisted)
-    candidate_pages = candidate_pages_for_matches(index, matches) | {
-        index.get_key_page_index(term) for term in seed_terms}
-    removed_by_domain, pages_changed, pages_scanned = purge_pages(index, candidate_pages, is_blacklisted, dry_run)
+    removed_by_domain, pages_changed, pages_scanned = purge_matched_documents(index, matches, dry_run)
     return matches, removed_by_domain, pages_changed, pages_scanned
