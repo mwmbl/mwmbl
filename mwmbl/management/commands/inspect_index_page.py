@@ -94,7 +94,7 @@ class Command(BaseCommand):
                 "a torn write mixing bytes from two different writes."))
             return
 
-        self.stdout.write(f"Item count: {len(items)}")
+        self.stdout.write(f"Raw item count (parsed directly from JSON): {len(items)}")
         domains = {}
         for item in items:
             url = item[1] if len(item) > 1 else "?"
@@ -104,6 +104,49 @@ class Command(BaseCommand):
                 domain = "?"
             domains[domain] = domains.get(domain, 0) + 1
 
-        self.stdout.write("Domains on this page:")
+        self.stdout.write("Domains on this page (from raw JSON):")
         for domain, count in sorted(domains.items(), key=lambda kv: -kv[1])[:20]:
+            self.stdout.write(f"  {domain}: {count}")
+
+        # Now compare against what TinyIndex.get_page() actually returns - it reconstructs each
+        # item as Document(*item), and on failure has a recovery path that can silently DROP an
+        # item entirely if reconstruction fails even after retrying. If that's happening, this
+        # page's raw JSON can show documents that the purge tool (which only ever sees
+        # get_page()'s output) can never find.
+        self.stdout.write("")
+        self.stdout.write("Reconstructing each raw item as Document(*item), same as get_page() does:")
+        constructed = 0
+        failed = []
+        for i, item in enumerate(items):
+            try:
+                Document(*item)
+                constructed += 1
+            except Exception as e:
+                failed.append((i, item, e))
+
+        self.stdout.write(f"Successfully constructed: {constructed}/{len(items)}")
+        if failed:
+            self.stdout.write(self.style.ERROR(
+                f"{len(failed)} item(s) FAILED Document(*item) construction - get_page() would "
+                f"drop these (its retry strips the last field once; if that still fails, the "
+                f"item vanishes from every caller, including this purge tool, with no error "
+                f"surfaced to the user):"))
+            for i, item, e in failed[:10]:
+                self.stdout.write(self.style.ERROR(f"  item[{i}]: {e}. Raw: {item}"))
+        else:
+            self.stdout.write("All items reconstructed cleanly - get_page() is not dropping anything here.")
+
+        with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
+            via_get_page = index.get_page(page_index)
+        self.stdout.write(f"\nindex.get_page({page_index}) returns: {len(via_get_page)} items "
+                           f"(vs {len(items)} in the raw JSON)")
+        get_page_domains = {}
+        for document in via_get_page:
+            try:
+                domain = get_domain(document.url)
+            except ValueError:
+                domain = "?"
+            get_page_domains[domain] = get_page_domains.get(domain, 0) + 1
+        self.stdout.write("Domains via get_page():")
+        for domain, count in sorted(get_page_domains.items(), key=lambda kv: -kv[1])[:20]:
             self.stdout.write(f"  {domain}: {count}")
