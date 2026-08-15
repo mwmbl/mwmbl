@@ -4,12 +4,15 @@
 <p>Paste queries, one per line (a pasted Search Console CSV, header row and all, also works -
 only the query column is used). Every indexed result for those queries is checked against the
 configured blacklist. This never scans the whole index, so it's fast enough to run interactively -
-but it can only find documents reachable from these exact queries.</p>
+but it can only find documents reachable from these exact queries. Once you have a preview, the
+"add these terms" button below lets you feed every term a matched document was found under back
+into the list, so a re-run can turn up other pages on the same domain that your original queries
+didn't happen to hit.</p>
 
 <form method="post">
     {% csrf_token %}
     <p>
-        <textarea name="queries" rows="10" cols="80" placeholder="fineartteens&#10;newcapbooru&#10;nyoubooru">{{ queries_text }}</textarea>
+        <textarea id="queries-textarea" name="queries" rows="10" cols="80" placeholder="fineartteens&#10;newcapbooru&#10;nyoubooru">{{ queries_text }}</textarea>
     </p>
     <input type="submit" value="Preview" class="default">
 </form>
@@ -43,6 +46,32 @@ but it can only find documents reachable from these exact queries.</p>
         <p>{{ total_removed }} document{{ total_removed|pluralize }} across
             {{ result.pages_changed }} page{{ result.pages_changed|pluralize }}
             (scanned {{ result.pages_scanned }} page{{ result.pages_scanned|pluralize }}).</p>
+
+        {{ all_terms|json_script:"all-terms-data" }}
+        <p>
+            <button type="button" id="add-terms-btn">Add these {{ all_terms|length }} term{{ all_terms|length|pluralize }} to the input list above</button>
+            <span id="add-terms-status"></span>
+        </p>
+        <script>
+            document.getElementById("add-terms-btn").addEventListener("click", function () {
+                var terms = JSON.parse(document.getElementById("all-terms-data").textContent);
+                var textarea = document.getElementById("queries-textarea");
+                var existing = new Set(
+                    textarea.value.split("\n").map(function (line) { return line.trim(); }).filter(Boolean)
+                );
+                var added = 0;
+                terms.forEach(function (term) {
+                    if (!existing.has(term)) {
+                        existing.add(term);
+                        added++;
+                    }
+                });
+                textarea.value = Array.from(existing).join("\n");
+                document.getElementById("add-terms-status").textContent =
+                    added > 0 ? " added " + added + " new term" + (added === 1 ? "" : "s") + " - click Preview to re-scan"
+                               : " no new terms to add";
+            });
+        </script>
 
         {% if result.dry_run %}
             <form method="post">

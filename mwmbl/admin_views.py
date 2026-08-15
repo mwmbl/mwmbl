@@ -50,11 +50,22 @@ def purge_blacklisted_domains_view(request):
         else:
             result = _run_purge(queries, dry_run=not confirming)
 
+    all_terms = []
+    if result:
+        seen = set()
+        for match in result.matches:
+            for term in match.found_via_terms + match.indexed_under_terms:
+                if term not in seen:
+                    seen.add(term)
+                    all_terms.append(term)
+        all_terms.sort()
+
     return render(request, "admin/purge_blacklisted_domains.html", {
         "title": "Purge blacklisted domains",
         "queries_text": queries_text,
         "result": result,
         "error": error,
         "total_removed": sum(result.removed_by_domain.values()) if result else 0,
+        "all_terms": all_terms,
         "opts": {"app_label": "mwmbl"},
     })

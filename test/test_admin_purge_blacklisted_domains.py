@@ -1,3 +1,5 @@
+import json
+import re
 from unittest.mock import patch
 
 import pytest
@@ -54,6 +56,31 @@ def test_preview_shows_matches_without_modifying_index(client, staff_user, index
     assert response.status_code == 200
     assert b"fineartteens.com" in response.content
     assert "https://fineartteens.com/x" in _get_all_urls(index_path)  # not yet removed
+
+
+@pytest.mark.django_db
+def test_preview_embeds_deduplicated_terms_for_the_add_button(client, staff_user, index_path):
+    documents = [
+        Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
+    ]
+    index_documents(documents, index_path)
+
+    client.force_login(staff_user)
+    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \
+            override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        response = client.post(reverse("admin:purge_blacklisted_domains"), {"queries": "fineartteens"})
+
+    content = response.content.decode()
+    match = re.search(
+        r'<script id="all-terms-data" type="application/json">(.*?)</script>', content, re.DOTALL)
+    assert match, "expected an embedded all-terms-data JSON script"
+    terms = json.loads(match.group(1))
+
+    assert "fineartteens" in terms
+    # the seed term itself should appear exactly once, not duplicated between
+    # found_via_terms and indexed_under_terms
+    assert terms.count("fineartteens") == 1
+    assert len(terms) == len(set(terms))
 
 
 @pytest.mark.django_db

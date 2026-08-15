@@ -125,21 +125,32 @@ def test_targeted_extra_term_reaches_pages_domain_guess_alone_would_miss(index_p
 
 
 @pytest.mark.django_db
-def test_targeted_purge_does_not_sweep_unrelated_document_sharing_a_page(index_path):
+def test_targeted_purge_does_not_sweep_unrelated_document_sharing_a_page(tmp_path):
     """Regression test: expanding to every page a matched document's own tokens hash to can
     land on a page shared with a totally unrelated document (a real risk with generic terms
     like "com" or "you" on a large index). That unrelated document must not be swept up and
     removed just because it also happens to be blacklisted - only the documents actually
     shown in the preview should ever be removed."""
+    # A larger page count than the other tests here, so there's room to find a token whose
+    # page genuinely doesn't coincide with any seed page by chance (with only e.g. 10 pages,
+    # unrelated terms collide onto the same page constantly, which would make the "unrelated"
+    # document actually reachable from the seed terms too - not what this test is checking).
+    path = tmp_path / "test.tinysearch"
+    TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=5000, page_size=PAGE_SIZE)
+    index_path = str(path)
+
     target = Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos")
     index_documents([target], index_path)
 
-    # Find a real term this document is filed under that ISN'T one of the seed terms this
-    # --domain run will use, then plant an unrelated blacklisted document on that same page -
-    # simulating a hash collision with a document that was never reachable from the seed terms.
+    # Find a real term this document is filed under whose PAGE isn't any seed page (comparing
+    # page indexes, not term strings, since two different terms can still hash to the same
+    # page), then plant an unrelated blacklisted document on that page - simulating a hash
+    # collision with a document that was never reachable from the seed terms.
     tokenized = tokenize_document(target.url, target.title, target.extract, None)
-    guessed = guess_terms_for_domain("fineartteens.com")
-    collision_term = next(t for t in tokenized.tokens if t not in guessed)
+    with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
+        seed_pages = {index.get_key_page_index(t) for t in guess_terms_for_domain("fineartteens.com")}
+        collision_term = next(t for t in tokenized.tokens if index.get_key_page_index(t) not in seed_pages)
+
     unrelated = Document(title="Unrelated bad site", url="https://otherbad.example/z", extract="unrelated")
     _put(index_path, collision_term, unrelated)
 
@@ -147,7 +158,7 @@ def test_targeted_purge_does_not_sweep_unrelated_document_sharing_a_page(index_p
             override_settings(DATA_PATH="", INDEX_NAME=index_path):
         call_command("purge_blacklisted_domains", "--domain", "fineartteens.com")
 
-    urls = _get_all_urls(index_path)
+    urls = _get_all_urls(index_path, num_pages=5000)
     assert "https://fineartteens.com/x" not in urls
     assert "https://otherbad.example/z" in urls  # not swept up, even though also blacklisted
 
