@@ -7,10 +7,8 @@ making the system more flexible and testable.
 
 import time
 from abc import ABC, abstractmethod
-from datetime import timedelta
 from typing import Set
 import requests
-from mwmbl.utils import request_cache
 
 # Parsed remote lists (~950k+ lines) are expensive to re-parse, and get_default_blacklist_provider()
 # is now called on every index_documents() call (indexing needs to check the blacklist too, not just
@@ -95,28 +93,36 @@ class RemoteListBlacklistProvider(BlacklistProvider):
             if time.monotonic() - fetched_at < self.cache_expire_days * 86400:
                 return domains
 
-        with request_cache(expire_after=timedelta(days=self.cache_expire_days)) as session:
-            try:
-                response = session.get(self.url)
-                response.raise_for_status()
+        # Deliberately NOT using mwmbl.utils.request_cache here. That is a *filesystem*
+        # cache rooted at settings.REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache" - the
+        # same volume that holds the multi-hundred-GB index. These blocklists are tens of
+        # megabytes each, so caching them there fills that volume, and once it is full
+        # *every* user of request_cache breaks - including get_wiki_results(), which runs
+        # on the normal search path and then retries a live fetch 4 times per uncached
+        # query (WIKI_RETRY, 5s timeout each) until the worker is killed. A big periodic
+        # download has no business in a shared small-response cache on the index volume;
+        # the module-level parsed cache above already gives us reuse without touching disk.
+        try:
+            response = requests.get(self.url, timeout=60)
+            response.raise_for_status()
 
-                domains = set()
-                for line in response.text.split('\n'):
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
-                    parts = line.split()
-                    domains.add(parts[1] if len(parts) == 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
+            domains = set()
+            for line in response.text.split('\n'):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
+                parts = line.split()
+                domains.add(parts[1] if len(parts) == 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
 
-                _parsed_domains_cache[self.url] = (time.monotonic(), domains)
-                return domains
-            except requests.RequestException as e:
-                # Log the error but don't fail. Fall back to the last known-good parsed set
-                # rather than caching an empty one - a transient fetch error shouldn't silently
-                # disable this provider's coverage until the next successful fetch.
-                print(f"Warning: Failed to fetch blacklist from {self.url}: {e}")
-                return cached[1] if cached is not None else set()
+            _parsed_domains_cache[self.url] = (time.monotonic(), domains)
+            return domains
+        except requests.RequestException as e:
+            # Log the error but don't fail. Fall back to the last known-good parsed set
+            # rather than caching an empty one - a transient fetch error shouldn't silently
+            # disable this provider's coverage until the next successful fetch.
+            print(f"Warning: Failed to fetch blacklist from {self.url}: {e}")
+            return cached[1] if cached is not None else set()
 
     def is_domain_blacklisted(self, domain: str) -> bool:
         domains = self._get_blacklisted_domains()
