@@ -37,6 +37,17 @@ def _get_all_urls(index_path, num_pages=10):
     return urls
 
 
+def _index_without_blacklist(documents, index_path):
+    """index_documents() now enforces the blacklist itself (see index_batches.py), so
+    seeding a test index with documents on a domain that's for real blacklisted (e.g.
+    fineartteens.com, added to settings.EXCLUDED_DOMAINS) needs this to bypass it -
+    simulating content that was indexed *before* the domain was blacklisted, which is
+    the scenario these purge tests are about."""
+    with patch("mwmbl.indexer.index_batches.get_default_blacklist_provider",
+               return_value=StaticBlacklistProvider(set())):
+        index_documents(documents, index_path)
+
+
 def _write_csv(tmp_path, *queries):
     path = tmp_path / "queries.csv"
     lines = ["Top queries,Clicks,Impressions,CTR,Position"]
@@ -85,7 +96,7 @@ def test_targeted_domain_finds_via_guessed_terms(index_path):
         Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
         Document(title="Good Example", url="https://example.com/y", extract="a good example page"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \
             override_settings(DATA_PATH="", INDEX_NAME=index_path):
@@ -99,7 +110,7 @@ def test_targeted_domain_finds_via_guessed_terms(index_path):
 @pytest.mark.django_db
 def test_targeted_domain_dry_run_does_not_modify_index(index_path):
     documents = [Document(title="Fine Art Teens", url="https://fineartteens.com/x", extract="teen gallery")]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \
             override_settings(DATA_PATH="", INDEX_NAME=index_path):
@@ -115,7 +126,7 @@ def test_targeted_extra_term_reaches_pages_domain_guess_alone_would_miss(index_p
     documents = [
         Document(title="Kusowanka - Hentai Posts, XXX Toons", url="https://kusowanka.com/", extract="anime porn"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \
             override_settings(DATA_PATH="", INDEX_NAME=index_path):
@@ -140,7 +151,7 @@ def test_targeted_purge_does_not_sweep_unrelated_document_sharing_a_page(tmp_pat
     index_path = str(path)
 
     target = Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos")
-    index_documents([target], index_path)
+    _index_without_blacklist([target], index_path)
 
     # Find a real term this document is filed under whose PAGE isn't any seed page (comparing
     # page indexes, not term strings, since two different terms can still hash to the same
@@ -172,7 +183,7 @@ def test_csv_auto_detects_blacklisted_domain_from_query_results(index_path, tmp_
         Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
         Document(title="Good Example", url="https://example.com/y", extract="fineartteens is not this site"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
     csv_path = _write_csv(tmp_path, "fineartteens", "unrelated query with no results")
 
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \
@@ -187,7 +198,7 @@ def test_csv_auto_detects_blacklisted_domain_from_query_results(index_path, tmp_
 @pytest.mark.django_db
 def test_csv_with_no_matching_blacklisted_domains_changes_nothing(index_path, tmp_path):
     documents = [Document(title="Good Example", url="https://example.com/y", extract="a good example page")]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
     csv_path = _write_csv(tmp_path, "good example")
 
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \

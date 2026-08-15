@@ -30,6 +30,17 @@ def _get_all_urls(index_path, num_pages=10):
     return urls
 
 
+def _index_without_blacklist(documents, index_path):
+    """index_documents() now enforces the blacklist itself (see index_batches.py), so
+    seeding a test index with documents on a domain that's for real blacklisted (e.g.
+    fineartteens.com, added to settings.EXCLUDED_DOMAINS) needs this to bypass it -
+    simulating content that was indexed *before* the domain was blacklisted, which is
+    the scenario these purge tests are about."""
+    with patch("mwmbl.indexer.index_batches.get_default_blacklist_provider",
+               return_value=StaticBlacklistProvider(set())):
+        index_documents(documents, index_path)
+
+
 @pytest.fixture
 def staff_user(db):
     return User.objects.create_user(username="staff", password="x", is_staff=True)
@@ -46,7 +57,7 @@ def test_preview_shows_matches_without_modifying_index(client, staff_user, index
         Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
         Document(title="Good Example", url="https://example.com/y", extract="a good example page"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     client.force_login(staff_user)
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \
@@ -63,7 +74,7 @@ def test_preview_embeds_deduplicated_terms_for_the_add_button(client, staff_user
     documents = [
         Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     client.force_login(staff_user)
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \
@@ -86,7 +97,7 @@ def test_preview_embeds_deduplicated_terms_for_the_add_button(client, staff_user
 @pytest.mark.django_db
 def test_confirm_by_staff_non_superuser_is_rejected(client, staff_user, index_path):
     documents = [Document(title="Fine Art Teens", url="https://fineartteens.com/x", extract="teen gallery")]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     client.force_login(staff_user)
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \
@@ -103,7 +114,7 @@ def test_confirm_by_superuser_removes_matches(client, superuser, index_path):
         Document(title="Fine Art Teens - galleries", url="https://fineartteens.com/x", extract="teen gallery photos"),
         Document(title="Good Example", url="https://example.com/y", extract="a good example page"),
     ]
-    index_documents(documents, index_path)
+    _index_without_blacklist(documents, index_path)
 
     client.force_login(superuser)
     with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})), \

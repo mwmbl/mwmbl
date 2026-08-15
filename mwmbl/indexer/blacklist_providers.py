@@ -5,11 +5,18 @@ This module provides different ways to check if domains should be blacklisted,
 making the system more flexible and testable.
 """
 
+import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from typing import Set
 import requests
 from mwmbl.utils import request_cache
+
+# Parsed remote lists (~950k+ lines) are expensive to re-parse, and get_default_blacklist_provider()
+# is now called on every index_documents() call (indexing needs to check the blacklist too, not just
+# crawling), so the parsed result is cached here at module level - shared across every
+# RemoteListBlacklistProvider instance, however many get constructed - keyed by URL.
+_parsed_domains_cache: dict[str, tuple[float, Set[str]]] = {}
 
 
 class BlacklistProvider(ABC):
@@ -80,11 +87,13 @@ class RemoteListBlacklistProvider(BlacklistProvider):
     def __init__(self, url: str, cache_expire_days: int = 1):
         self.url = url
         self.cache_expire_days = cache_expire_days
-        self._cached_domains = None
 
     def _get_blacklisted_domains(self) -> Set[str]:
-        if self._cached_domains is not None:
-            return self._cached_domains
+        cached = _parsed_domains_cache.get(self.url)
+        if cached is not None:
+            fetched_at, domains = cached
+            if time.monotonic() - fetched_at < self.cache_expire_days * 86400:
+                return domains
 
         with request_cache(expire_after=timedelta(days=self.cache_expire_days)) as session:
             try:
@@ -100,13 +109,14 @@ class RemoteListBlacklistProvider(BlacklistProvider):
                     parts = line.split()
                     domains.add(parts[1] if len(parts) == 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
 
-                self._cached_domains = domains
+                _parsed_domains_cache[self.url] = (time.monotonic(), domains)
                 return domains
             except requests.RequestException as e:
-                # Log the error but don't fail - return empty set as fallback
+                # Log the error but don't fail. Fall back to the last known-good parsed set
+                # rather than caching an empty one - a transient fetch error shouldn't silently
+                # disable this provider's coverage until the next successful fetch.
                 print(f"Warning: Failed to fetch blacklist from {self.url}: {e}")
-                self._cached_domains = set()
-                return set()
+                return cached[1] if cached is not None else set()
 
     def is_domain_blacklisted(self, domain: str) -> bool:
         domains = self._get_blacklisted_domains()

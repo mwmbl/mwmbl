@@ -5,6 +5,7 @@ Tests for blacklist providers and the abstraction system.
 import pytest
 from unittest.mock import patch, MagicMock
 
+from mwmbl.indexer import blacklist_providers
 from mwmbl.indexer.blacklist_providers import (
     StaticBlacklistProvider,
     HaGeZiBlacklistProvider,
@@ -12,6 +13,17 @@ from mwmbl.indexer.blacklist_providers import (
     CombinedBlacklistProvider
 )
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
+
+
+@pytest.fixture(autouse=True)
+def clear_shared_domains_cache():
+    """_parsed_domains_cache is a module-level dict shared across every
+    RemoteListBlacklistProvider instance (see blacklist_providers.py) so that
+    index_documents() can call get_default_blacklist_provider() cheaply on every call.
+    Clear it around each test so a mocked response in one test can't leak into another."""
+    blacklist_providers._parsed_domains_cache.clear()
+    yield
+    blacklist_providers._parsed_domains_cache.clear()
 
 
 def test_static_blacklist_provider():
