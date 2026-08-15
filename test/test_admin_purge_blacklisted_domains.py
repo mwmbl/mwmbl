@@ -130,3 +130,36 @@ def test_confirm_by_superuser_removes_matches(client, superuser, index_path):
 def test_anonymous_is_redirected_to_login(client):
     response = client.post(reverse("admin:purge_blacklisted_domains"), {"queries": "fineartteens"})
     assert response.status_code in (302, 403)
+
+
+@pytest.mark.django_db
+def test_zero_match_run_explains_what_it_checked(client, staff_user, index_path):
+    """A run that finds nothing must still show the seed terms and the pages it scanned -
+    otherwise "no matches" is indistinguishable from "scanned nothing at all", which is
+    exactly the ambiguity that made a production zero-match report impossible to diagnose."""
+    documents = [Document(title="Good Example", url="https://example.com/y", extract="a good page")]
+    _index_without_blacklist(documents, index_path)
+
+    client.force_login(staff_user)
+    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \
+            override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        response = client.post(reverse("admin:purge_blacklisted_domains"), {"queries": "example"})
+
+    content = response.content.decode()
+    assert "No results for these queries matched" in content
+    assert "What was actually checked" in content
+    assert "Seed terms looked up" in content
+    assert "example" in content
+
+
+@pytest.mark.django_db
+def test_input_producing_no_seed_terms_says_so_explicitly(client, staff_user, index_path):
+    """Input that parses to no queries at all (here: only a Search Console header row) must
+    say plainly that nothing was checked, rather than implying the index was searched."""
+    client.force_login(staff_user)
+    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())), \
+            override_settings(DATA_PATH="", INDEX_NAME=index_path):
+        response = client.post(reverse("admin:purge_blacklisted_domains"), {"queries": "Top queries"})
+
+    content = response.content.decode()
+    assert "No seed terms were produced from your input" in content

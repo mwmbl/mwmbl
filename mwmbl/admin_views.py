@@ -16,6 +16,13 @@ class PurgeResult:
     pages_changed: int
     pages_scanned: int
     dry_run: bool
+    # Recorded so a zero-match run can still explain itself: which queries were parsed out
+    # of the pasted text, which terms they produced, which pages those hash to, and how many
+    # documents were actually on those pages. Without this, "no matches" is indistinguishable
+    # from "scanned nothing at all".
+    queries: list[str]
+    seed_terms: list[str]
+    seed_pages: list[tuple[int, int]]  # (page index, document count on that page)
 
 
 def _run_purge(queries: list[str], dry_run: bool) -> PurgeResult:
@@ -28,10 +35,14 @@ def _run_purge(queries: list[str], dry_run: bool) -> PurgeResult:
     mode = "r" if dry_run else "w"
 
     with TinyIndex(item_factory=Document, index_path=index_path, mode=mode) as index:
+        seed_pages = sorted({index.get_key_page_index(term) for term in seed_terms})
+        seed_page_counts = [(page, len(index.get_page(page))) for page in seed_pages]
+
         matches, removed_by_domain, pages_changed, pages_scanned = purge_targeted(
             index, seed_terms, blacklist_provider.is_domain_blacklisted, dry_run)
 
-    return PurgeResult(matches, removed_by_domain, pages_changed, pages_scanned, dry_run)
+    return PurgeResult(matches, removed_by_domain, pages_changed, pages_scanned, dry_run,
+                       queries, sorted(seed_terms), seed_page_counts)
 
 
 def purge_blacklisted_domains_view(request):

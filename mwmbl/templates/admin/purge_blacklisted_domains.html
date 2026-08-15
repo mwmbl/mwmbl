@@ -84,6 +84,28 @@ didn't happen to hit.</p>
         {% endif %}
     {% else %}
         <p>No results for these queries matched the configured blacklist.</p>
+        <h3>What was actually checked</h3>
+        <table>
+            <tr><th>Queries parsed from your input</th><td>{{ result.queries|join:", "|default:"(none)" }}</td></tr>
+            <tr><th>Seed terms looked up</th><td>{{ result.seed_terms|join:", "|default:"(none)" }}</td></tr>
+            <tr><th>Pages scanned</th><td>{{ result.pages_scanned }}</td></tr>
+        </table>
+        {% if result.seed_pages %}
+            <p>Documents found on each seed page (before any blacklist check):</p>
+            <table>
+                <thead><tr><th>Page</th><th>Documents on page</th></tr></thead>
+                <tbody>
+                    {% for page, count in result.seed_pages %}
+                    <tr><td>{{ page }}</td><td>{{ count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p>If those pages hold documents but nothing matched, every document on them was
+            judged not-blacklisted. If a page shows 0 documents, nothing was there to match.</p>
+        {% else %}
+            <p class="errornote">No seed terms were produced from your input, so no pages were
+            checked at all. Nothing could have matched regardless of what is in the index.</p>
+        {% endif %}
     {% endif %}
 {% endif %}
 {% endblock %}
