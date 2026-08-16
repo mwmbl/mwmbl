@@ -13,12 +13,13 @@ from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import add_term_infos
+from mwmbl.utils import add_term_infos, get_domain
 
 logger = getLogger(__name__)
 
@@ -69,10 +70,35 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Count
 
 
 def index_documents(documents, index_path):
+    """The common choke point every indexing path (offline batch processing, the
+    trusted-crawler POST /results endpoint, the standalone crawl tool) goes through, so
+    this is where the blacklist is enforced. Crawling/link-discovery also check the
+    blacklist (RedisURLQueue, update_urls.process_link) but only to stop *new* crawling -
+    a submitted batch or a direct /results submission can contain a blacklisted domain's
+    pages regardless of whether that domain was ever handed out to be crawled (e.g. a
+    browser-extension user organically visiting the site), so indexing needs its own check
+    rather than relying on those upstream gates."""
+    documents = filter_blacklisted_documents(documents)
     page_documents = preprocess_documents(documents, index_path)
     new_page_doc_counts = index_pages(index_path, page_documents)
     end_time = datetime.utcnow()
     return end_time, new_page_doc_counts
+
+
+def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
+    blacklist_provider = get_default_blacklist_provider()
+    kept = []
+    for document in documents:
+        try:
+            domain = get_domain(document.url)
+        except ValueError:
+            kept.append(document)
+            continue
+        if blacklist_provider.is_domain_blacklisted(domain):
+            logger.info(f"Skipping indexing for blacklisted domain {domain}: {document.url}")
+            continue
+        kept.append(document)
+    return kept
 
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:

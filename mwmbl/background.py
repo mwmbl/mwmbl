@@ -1,8 +1,10 @@
 """
 Script that updates data in a background process.
 
-Also contains Django Background Tasks for periodic quota maintenance:
+Also contains Django Background Tasks for periodic maintenance:
   - sync_search_counts: syncs Redis monthly counters → DB once per hour
+  - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
+  - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
 """
 import logging
 import sys
@@ -129,5 +131,50 @@ def sync_search_counts():
             )
         except Exception:
             logger.exception("Error syncing search count for key %s", key)
+
+
+# ---------------------------------------------------------------------------
+# Blacklisted-domain maintenance (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+@background(schedule=0)
+def refresh_blacklist_snapshot():
+    """
+    Rebuild the blacklist snapshot that the search workers filter against.
+
+    This is the only place the multi-megabyte remote blocklists are downloaded and
+    parsed. Search workers only ever read the ~11 MB hash array this publishes to Redis,
+    so no query ever waits on a blocklist fetch. See mwmbl.indexer.blacklist_snapshot.
+    """
+    from mwmbl.indexer.blacklist_snapshot import refresh_snapshot
+
+    refresh_snapshot()
+
+
+@background(schedule=0)
+def purge_blacklisted_from_queue():
+    """
+    Remove the documents that retrieval filtered out from the index itself.
+
+    Retrieval already guarantees these are never shown; this closes the loop so the same
+    documents are not re-filtered on every future query. The queue is best-effort, and
+    that is fine: anything lost is re-queued the next time a query surfaces it.
+    """
+    from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
+    from mwmbl.indexer.purge_blacklisted import purge_documents
+    from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
+    from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+
+    documents = drain_purge_queue(settings.BLACKLIST_PURGE_BATCH_SIZE)
+    if not documents:
+        return
+
+    blacklist = get_snapshot_blacklist()
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    with TinyIndex(Document, str(index_path), 'w') as index:
+        removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
+
+    logger.info("Purged %d documents from the index across %d domains; %d still queued",
+                sum(removed_by_domain.values()), len(removed_by_domain), queue_size())
 
 

@@ -313,3 +313,12 @@ SUPER_SEARCH_XGB_EPSILON = 0.1            # epsilon-greedy exploration rate
 SUPER_SEARCH_XGB_MIN_TRAIN_ROWS = 2000    # (source, reward) pairs required before an online retrain
 SUPER_SEARCH_XGB_TRAIN_WINDOW_DAYS = 90   # impression window for online retrains
 SOURCE_PROVENANCE_MAX_DEPTH = 3      # max crawl hops a Super Search source propagates to descendant pages
+
+# Blacklisted-domain filtering on the search path. Set BLACKLIST_FILTER_AT_RETRIEVAL to
+# False to turn retrieval-time filtering off without a rollback; the index-time filter in
+# index_documents() is unaffected.
+BLACKLIST_FILTER_AT_RETRIEVAL = os.environ.get("BLACKLIST_FILTER_AT_RETRIEVAL", "true").lower() != "false"
+BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300     # how often a worker checks Redis for a new snapshot
+BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60   # how often the snapshot is rebuilt from the remote lists
+BLACKLIST_PURGE_INTERVAL_SECONDS = 300     # how often the purge queue is drained
+BLACKLIST_PURGE_BATCH_SIZE = 1000          # documents removed from the index per purge run

@@ -6,6 +6,7 @@ from django.core.cache import cache
 from redis import Redis
 
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.models import DomainSubmission
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
@@ -33,6 +34,10 @@ completer = Completer()
 index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
+
+# Pull the blacklist snapshot in at worker startup rather than letting the first query
+# pay for the ~11 MB Redis read. Subsequent refreshes happen on a daemon thread.
+get_snapshot_blacklist()
 
 ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # Diversity is applied by the wrapping MMRRanker, which demotes (rather than drops)
