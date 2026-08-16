@@ -33,6 +33,17 @@ def run():
         background.copy_indexes_continuously()
     elif mwmbl_app == "count_urls":
         count_urls_continuously()
+    elif mwmbl_app == "process_tasks":
+        # Runs the django-background-tasks queue. Without a process running this, the
+        # @background functions in mwmbl.background only ever get *scheduled* - apps.ready()
+        # writes a Task row and nothing executes it - so they sit pending indefinitely,
+        # which is exactly what had happened to every periodic task in production.
+        #
+        # The tasks are registered by the @background decorator at import time, so this
+        # relies on `from mwmbl import background` above having run; process_tasks' own
+        # autodiscover() only looks for <app>/tasks.py, which mwmbl does not have.
+        # test_process_tasks_worker.py guards that.
+        call_command("process_tasks")
     elif mwmbl_app == "server":
         workers = multiprocessing.cpu_count() * 2 + 1
 
