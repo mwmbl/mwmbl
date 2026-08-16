@@ -30,6 +30,15 @@ EXCLUDED_DOMAINS, the numeric-subdomain heuristic and the hn_top_domains trust e
 is cheap and stays a local in-process check, so editing mwmbl/settings.py takes effect on
 deploy instead of waiting for the next snapshot refresh. Evaluating them as
 `built_in_rules OR snapshot` reproduces CombinedBlacklistProvider's semantics exactly.
+
+Curated domains - the ones a moderator has approved, see mwmbl.curated_domains - are
+subtracted here, at build time, rather than being checked per query. The remote lists are
+maintained for DNS ad-blocking and their false positives are wrong for a search index, so
+an approval has to remove the domain from the blacklist outright. Dropping the hash while
+the snapshot is built means the query path stays a single binary search with no database
+access, and every worker picks the exemption up with the next snapshot. The cost is that an
+approval only takes effect on the next rebuild, which is why approving a submission
+schedules one (mwmbl.signals).
 """
 import hashlib
 import threading
@@ -42,6 +51,7 @@ import numpy as np
 import redis
 from django.conf import settings
 
+from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.blacklist_providers import (
     BlacklistProvider,
@@ -49,6 +59,7 @@ from mwmbl.indexer.blacklist_providers import (
     CombinedBlacklistProvider,
     RemoteListBlacklistProvider,
     domain_and_parents,
+    domains_to_unblock,
 )
 
 logger = getLogger(__name__)
@@ -107,12 +118,19 @@ def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
 
 
 def build_snapshot(provider: BlacklistProvider) -> bytes:
-    """Download/parse the remote lists and return the sorted hash array as bytes."""
-    domains = collect_remote_domains(provider)
+    """Download/parse the remote lists and return the sorted hash array as bytes.
+
+    Curated domains are removed from the listed set first - see the module docstring.
+    """
+    listed_domains = collect_remote_domains(provider)
+    unblocked = domains_to_unblock(get_curated_domains())
+    domains = listed_domains - unblocked
+    num_unblocked = len(listed_domains) - len(domains)
     all_hashes = hash_domains(domains)
     hashes = np.unique(all_hashes)  # np.unique sorts, which is what we need
-    logger.info("Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB",
-                len(domains), len(hashes), hashes.nbytes / 1e6)
+    logger.info("Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB; "
+                "%d entries removed by curated domains",
+                len(domains), len(hashes), hashes.nbytes / 1e6, num_unblocked)
     return hashes.astype(HASH_DTYPE).tobytes()
 
 
@@ -268,7 +286,10 @@ class SnapshotBlacklist:
         blacklisted = {d for d in domains if self._built_in_rules.is_domain_blacklisted(d)}
 
         array = self._array  # read once: a background refresh may swap it mid-call
-        if array is None:
+        if array is None or len(array) == 0:
+            # An empty array is not the same as no array, and it cannot go through the
+            # search below: clamping an out-of-range position to index 0 needs there to be
+            # an index 0. Nothing is a member of an empty snapshot anyway.
             return blacklisted
 
         remaining = [d for d in domains if d not in blacklisted]

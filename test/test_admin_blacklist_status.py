@@ -7,7 +7,9 @@ from redis import ConnectionError as RedisConnectionError
 
 from mwmbl import admin_views
 from mwmbl.indexer import blacklist_snapshot, purge_queue
-from mwmbl.indexer.blacklist_snapshot import HASH_DTYPE, SnapshotBlacklist, publish_snapshot
+from mwmbl.indexer.blacklist_snapshot import (
+    HASH_DTYPE, SnapshotBlacklist, hash_domains, publish_snapshot,
+)
 from mwmbl.indexer.purge_queue import drain_purge_queue, enqueue_for_purge, peek_purge_queue, queue_size
 from mwmbl.tinysearchengine.indexer import Document
 
@@ -222,3 +224,30 @@ def test_admin_index_links_to_the_status_page(staff_client):
     response = staff_client.get("/admin/")
 
     assert STATUS_URL in response.content.decode()
+
+
+# ---------------------------------------------------------------------------
+# Curated domains
+# ---------------------------------------------------------------------------
+
+def test_curated_status_reports_nothing_still_blacklisted(wired_redis, monkeypatch):
+    monkeypatch.setattr(admin_views, "get_curated_domains", lambda: {"pudding.cool"})
+    publish_snapshot(np.array(hash_domains(["badsite.test"]), dtype=HASH_DTYPE).tobytes(), wired_redis)
+    admin_views.get_snapshot_blacklist().load_now()
+
+    status = admin_views._curated_status()
+
+    assert status["count"] == 1
+    assert status["still_blacklisted"] == []
+
+
+def test_curated_status_flags_a_domain_the_snapshot_still_blocks(wired_redis, monkeypatch):
+    """Either the rebuild has not run yet, or a local rule curation cannot override is
+    catching it. Both are invisible without this."""
+    monkeypatch.setattr(admin_views, "get_curated_domains", lambda: {"pudding.cool"})
+    publish_snapshot(np.array(hash_domains(["pudding.cool"]), dtype=HASH_DTYPE).tobytes(), wired_redis)
+    admin_views.get_snapshot_blacklist().load_now()
+
+    status = admin_views._curated_status()
+
+    assert status["still_blacklisted"] == ["pudding.cool"]
