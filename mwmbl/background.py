@@ -17,8 +17,10 @@ from time import sleep
 from background_task import background
 from django.conf import settings
 from django.core.cache import cache
+from redis import Redis
 
 from mwmbl import pricing
+from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
@@ -34,6 +36,8 @@ NUM_PAGES_TO_COPY = 1024
 
 basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
+
+stats_manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
 
 
 def run(data_path: str):
@@ -173,8 +177,11 @@ def purge_blacklisted_from_queue():
     with TinyIndex(Document, str(index_path), 'w') as index:
         removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
 
+    num_removed = sum(removed_by_domain.values())
+    stats_manager.record_blacklisted_removed(num_removed)
+
     logger.info("Purged %d documents from the index across %d domains; %d still queued",
-                sum(removed_by_domain.values()), len(removed_by_domain), queue_size())
+                num_removed, len(removed_by_domain), queue_size())
 
 
 @background(schedule=0)

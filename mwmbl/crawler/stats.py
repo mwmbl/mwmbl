@@ -31,6 +31,7 @@ RESULTS_COUNT_KEY = "results-count-{date}"
 USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
 DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
+BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
@@ -59,6 +60,7 @@ class MwmblStats(BaseModel):
     results_in_index_daily: dict[str, int]
     dataset_queries_daily: dict[str, int]
     dataset_results_daily: dict[str, int]
+    blacklisted_results_removed_daily: dict[str, int]
 
 
 # New stats we want per domain:
@@ -150,6 +152,7 @@ class StatsManager:
         results_indexed_daily = {}
         dataset_queries_daily = {}
         dataset_results_daily = {}
+        blacklisted_results_removed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
             url_count_key = URL_DATE_COUNT_KEY.format(date=date_i)
@@ -179,6 +182,12 @@ class StatsManager:
             if dataset_results_count is None:
                 dataset_results_count = 0
             dataset_results_daily[str(date_i)] = dataset_results_count
+
+            blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=date_i)
+            blacklisted_removed_count = self.redis.get(blacklisted_removed_count_key)
+            if blacklisted_removed_count is None:
+                blacklisted_removed_count = 0
+            blacklisted_results_removed_daily[str(date_i)] = blacklisted_removed_count
 
         hour_counts = []
         for i in range(date_time.hour + 1):
@@ -212,6 +221,7 @@ class StatsManager:
             top_user_results=user_results_counts,
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
+            blacklisted_results_removed_daily=blacklisted_results_removed_daily,
             **index_stats,
         )
 
@@ -262,6 +272,18 @@ class StatsManager:
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
+
+    def record_blacklisted_removed(self, num_results: int) -> None:
+        """Record documents removed from the index by the background blacklist purge.
+
+        This is the only visibility we have on the purge loop: retrieval filters
+        blacklisted domains out of results whether or not the removal ever happens, so
+        a count that stays at zero while queries are being filtered means the loop is
+        broken.
+        """
+        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
+        self.redis.incrby(blacklisted_removed_count_key, num_results)
+        self.redis.expire(blacklisted_removed_count_key, LONG_EXPIRE_SECONDS)
 
     def record_dataset(self, hashed_dataset) -> None:
         """Record dataset statistics from a dataset submission."""
