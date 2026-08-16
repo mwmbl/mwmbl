@@ -42,6 +42,7 @@ import numpy as np
 import redis
 from django.conf import settings
 
+from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.blacklist_providers import (
     BlacklistProvider,
     BuiltInRulesBlacklistProvider,
@@ -89,6 +90,10 @@ def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
     get_default_blacklist_provider() without knowing how it is composed. Providers that
     are not remote lists (the built-in rules) have no enumerable domain set and are
     skipped - they are evaluated locally instead, see the module docstring.
+
+    A failed fetch propagates rather than contributing an empty set: the union of the
+    lists is what gets published, so one list silently returning nothing would replace
+    every worker's snapshot with one missing hundreds of thousands of domains.
     """
     if isinstance(provider, CombinedBlacklistProvider):
         domains = set()
@@ -103,7 +108,8 @@ def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
 def build_snapshot(provider: BlacklistProvider) -> bytes:
     """Download/parse the remote lists and return the sorted hash array as bytes."""
     domains = collect_remote_domains(provider)
-    hashes = np.unique(hash_domains(domains))  # np.unique sorts, which is what we need
+    all_hashes = hash_domains(domains)
+    hashes = np.unique(all_hashes)  # np.unique sorts, which is what we need
     logger.info("Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB",
                 len(domains), len(hashes), hashes.nbytes / 1e6)
     return hashes.astype(HASH_DTYPE).tobytes()
@@ -127,9 +133,9 @@ def publish_snapshot(blob: bytes, redis_client: Optional[redis.Redis] = None) ->
 def refresh_snapshot(provider: Optional[BlacklistProvider] = None,
                      redis_client: Optional[redis.Redis] = None) -> str:
     if provider is None:
-        from mwmbl.indexer.blacklist import get_default_blacklist_provider
         provider = get_default_blacklist_provider()
-    return publish_snapshot(build_snapshot(provider), redis_client)
+    blob = build_snapshot(provider)
+    return publish_snapshot(blob, redis_client)
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +207,7 @@ class SnapshotBlacklist:
 
     def _maybe_refresh(self):
         """Kick off a refresh in the background if it has been long enough."""
-        interval = getattr(settings, "BLACKLIST_SNAPSHOT_CHECK_SECONDS", 300)
+        interval = settings.BLACKLIST_SNAPSHOT_CHECK_SECONDS
         if time.monotonic() - self._last_checked < interval:
             return
 

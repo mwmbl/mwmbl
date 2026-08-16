@@ -60,7 +60,7 @@ def blacklist(redis_client):
 @pytest.fixture
 def ranker(blacklist, redis_client, request):
     documents = getattr(request, "param", [BAD, GOOD])
-    with patch("mwmbl.indexer.blacklist_snapshot.get_snapshot_blacklist", return_value=blacklist), \
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
             patch.object(purge_queue, "get_redis", return_value=redis_client):
         yield HeuristicRanker(FakeIndex(documents), FakeCompleter())
 
@@ -133,7 +133,7 @@ def test_curated_blacklisted_documents_are_dropped(blacklist, redis_client):
                        extract="bananas", score=1.0, term="bananas",
                        state=DocumentState.ORGANIC_APPROVED)
 
-    with patch("mwmbl.indexer.blacklist_snapshot.get_snapshot_blacklist", return_value=blacklist), \
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
             patch.object(purge_queue, "get_redis", return_value=redis_client):
         ranker = HeuristicRanker(FakeIndex([curated, GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [])]
@@ -148,7 +148,7 @@ def test_additional_results_are_filtered_but_not_queued(blacklist, redis_client)
     additional = Document(title="Bananas", url=f"https://{BLACKLISTED_DOMAIN}/from-google",
                           extract="bananas", score=1.0, state=DocumentState.FROM_GOOGLE)
 
-    with patch("mwmbl.indexer.blacklist_snapshot.get_snapshot_blacklist", return_value=blacklist), \
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
             patch.object(purge_queue, "get_redis", return_value=redis_client):
         ranker = HeuristicRanker(FakeIndex([GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [additional])]
@@ -171,7 +171,7 @@ def test_a_redis_failure_does_not_break_search(blacklist):
         def scard(self, key):
             raise ConnectionError("redis is down")
 
-    with patch("mwmbl.indexer.blacklist_snapshot.get_snapshot_blacklist", return_value=blacklist), \
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
             patch.object(purge_queue, "get_redis", return_value=BrokenRedis()):
         ranker = HeuristicRanker(FakeIndex([BAD, GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [])]

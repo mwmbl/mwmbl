@@ -21,9 +21,13 @@ from django.core.cache import cache
 from mwmbl import pricing
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
+from mwmbl.indexer.purge_blacklisted import purge_documents
+from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
 from mwmbl.models import OldIndex, UsageBucket
 from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 from mwmbl.tinysearchengine.copy_index import copy_pages
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 NUM_PAGES_TO_COPY = 1024
 
@@ -148,8 +152,6 @@ def refresh_blacklist_snapshot():
     parsed. Search workers only ever read the ~11 MB hash array this publishes to Redis,
     so no query ever waits on a blocklist fetch. See mwmbl.indexer.blacklist_snapshot.
     """
-    from mwmbl.indexer.blacklist_snapshot import refresh_snapshot
-
     refresh_snapshot()
 
 
@@ -162,11 +164,6 @@ def purge_blacklisted_from_queue():
     documents are not re-filtered on every future query. The queue is best-effort, and
     that is fine: anything lost is re-queued the next time a query surfaces it.
     """
-    from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
-    from mwmbl.indexer.purge_blacklisted import purge_documents
-    from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
-    from mwmbl.tinysearchengine.indexer import Document, TinyIndex
-
     documents = drain_purge_queue(settings.BLACKLIST_PURGE_BATCH_SIZE)
     if not documents:
         return

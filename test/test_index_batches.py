@@ -2,9 +2,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import fakeredis
 import pytest
 
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
+from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import (
     sort_documents, combine_documents, _merge_user_ids, MAX_USER_IDS,
     index_results_against_query, index_documents,
@@ -216,7 +218,19 @@ def test_combine_documents_propagates_user_ids_to_winner():
 # blacklisted domain, they don't stop a submitted batch that already contains one of its
 # pages, so indexing needs its own blacklist check.
 
-PATCH_TARGET = "mwmbl.indexer.index_batches.get_default_blacklist_provider"
+PATCH_TARGET = "mwmbl.indexer.index_batches.get_snapshot_blacklist"
+
+
+def snapshot_blacklist(domains: set[str]) -> SnapshotBlacklist:
+    """A blacklist backed by the given domains alone.
+
+    index_documents() reads the published snapshot rather than constructing the remote
+    providers, so the double it gets has to be a SnapshotBlacklist. Supplying the domains
+    as its built-in rules keeps these tests off the snapshot machinery, which
+    test_blacklist_snapshot.py covers.
+    """
+    return SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(domains),
+                             redis_client=fakeredis.FakeRedis())
 
 
 @pytest.fixture
@@ -240,7 +254,7 @@ def test_index_documents_skips_blacklisted_domain(index_path):
         Document(title="Good", url="https://example.com/y", extract="a good page"),
     ]
 
-    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider({"fineartteens.com"})):
+    with patch(PATCH_TARGET, return_value=snapshot_blacklist({"fineartteens.com"})):
         index_documents(documents, index_path)
 
     urls = _all_urls(index_path)
@@ -251,7 +265,7 @@ def test_index_documents_skips_blacklisted_domain(index_path):
 def test_index_documents_keeps_everything_when_nothing_blacklisted(index_path):
     documents = [Document(title="Good", url="https://example.com/y", extract="a good page")]
 
-    with patch(PATCH_TARGET, return_value=StaticBlacklistProvider(set())):
+    with patch(PATCH_TARGET, return_value=snapshot_blacklist(set())):
         index_documents(documents, index_path)
 
     assert "https://example.com/y" in _all_urls(index_path)

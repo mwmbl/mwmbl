@@ -20,6 +20,8 @@ from requests.exceptions import RetryError
 
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
+from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
@@ -224,8 +226,6 @@ def find_blacklisted_urls(documents: list[Document]) -> set[str]:
 
     Cost is ~94us for a typical query's ~200 distinct domains - see blacklist_snapshot.
     """
-    from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
-
     domains_to_urls = defaultdict(set)
     for document in documents:
         try:
@@ -371,7 +371,7 @@ class Ranker:
         a Wikipedia or Super Search result, and nothing to purge for the caller-supplied
         additional_results either.
         """
-        if not getattr(settings, "BLACKLIST_FILTER_AT_RETRIEVAL", True):
+        if not settings.BLACKLIST_FILTER_AT_RETRIEVAL:
             return candidates, curated_items
 
         blacklisted_urls = find_blacklisted_urls(candidates + curated_items)
@@ -380,7 +380,6 @@ class Ranker:
 
         logger.info("Filtered %d blacklisted documents from results", len(blacklisted_urls))
 
-        from mwmbl.indexer.purge_queue import enqueue_for_purge
         enqueue_for_purge([d for d in index_items if d.url in blacklisted_urls])
 
         return ([d for d in candidates if d.url not in blacklisted_urls],

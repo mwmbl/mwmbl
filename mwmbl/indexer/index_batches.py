@@ -13,7 +13,7 @@ from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.indexer.blacklist import get_default_blacklist_provider
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
 from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
@@ -77,7 +77,12 @@ def index_documents(documents, index_path):
     a submitted batch or a direct /results submission can contain a blacklisted domain's
     pages regardless of whether that domain was ever handed out to be crawled (e.g. a
     browser-extension user organically visiting the site), so indexing needs its own check
-    rather than relying on those upstream gates."""
+    rather than relying on those upstream gates.
+
+    The check reads the published snapshot rather than constructing the remote providers.
+    POST /crawler/results calls this from a gunicorn worker, and the providers download
+    tens of megabytes and hold ~156 MB of domain strings for the process's life - see
+    blacklist_snapshot."""
     documents = filter_blacklisted_documents(documents)
     page_documents = preprocess_documents(documents, index_path)
     new_page_doc_counts = index_pages(index_path, page_documents)
@@ -86,15 +91,19 @@ def index_documents(documents, index_path):
 
 
 def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
-    blacklist_provider = get_default_blacklist_provider()
-    kept = []
+    domains_by_url = {}
     for document in documents:
         try:
-            domain = get_domain(document.url)
+            domains_by_url[document.url] = get_domain(document.url)
         except ValueError:
-            kept.append(document)
+            # Unparseable URL - keep it, matching rank.find_blacklisted_urls.
             continue
-        if blacklist_provider.is_domain_blacklisted(domain):
+
+    blacklisted_domains = get_snapshot_blacklist().filter_blacklisted(domains_by_url.values())
+    kept = []
+    for document in documents:
+        domain = domains_by_url.get(document.url)
+        if domain in blacklisted_domains:
             logger.info(f"Skipping indexing for blacklisted domain {domain}: {document.url}")
             continue
         kept.append(document)

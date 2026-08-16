@@ -5,16 +5,9 @@ This module provides different ways to check if domains should be blacklisted,
 making the system more flexible and testable.
 """
 
-import time
 from abc import ABC, abstractmethod
-from typing import Set
+from typing import Optional, Set
 import requests
-
-# Parsed remote lists (~950k+ lines) are expensive to re-parse, and get_default_blacklist_provider()
-# is now called on every index_documents() call (indexing needs to check the blacklist too, not just
-# crawling), so the parsed result is cached here at module level - shared across every
-# RemoteListBlacklistProvider instance, however many get constructed - keyed by URL.
-_parsed_domains_cache: dict[str, tuple[float, Set[str]]] = {}
 
 
 class BlacklistProvider(ABC):
@@ -76,22 +69,37 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
 
 
 class RemoteListBlacklistProvider(BlacklistProvider):
-    """Provider that fetches a remote newline-delimited domain list, with caching.
+    """Provider that fetches a remote newline-delimited domain list.
 
     Handles both plain domain-per-line lists and hosts-file format
     (``0.0.0.0 domain.com``), which is what most public blocklists use.
+
+    Downloading and parsing one of these lists costs tens of megabytes of transfer and
+    ~100 MB of resident domain strings, so an instance is deliberately expensive to
+    construct-and-use and the caller owns how long that cost is amortised over. There is
+    no cache behind this module: an earlier version kept the parsed set in a module-level
+    dict keyed by URL, which made `get_default_blacklist_provider()` look cheap enough to
+    call from anywhere - including a request handler, where the first call blocks on the
+    download and the worker then holds the domain strings for its lifetime. Instead, the
+    fetch happens once per instance, and the only long-lived instance lives in the
+    background snapshot task. Everything on the search and indexing paths reads the
+    published snapshot (mwmbl.indexer.blacklist_snapshot) instead of coming here.
     """
 
-    def __init__(self, url: str, cache_expire_days: int = 1):
+    def __init__(self, url: str):
         self.url = url
-        self.cache_expire_days = cache_expire_days
+        self._domains: Optional[Set[str]] = None
 
     def _get_blacklisted_domains(self) -> Set[str]:
-        cached = _parsed_domains_cache.get(self.url)
-        if cached is not None:
-            fetched_at, domains = cached
-            if time.monotonic() - fetched_at < self.cache_expire_days * 86400:
-                return domains
+        """The parsed domain set, fetched on first use and held for this instance's life.
+
+        Raises requests.RequestException if the list cannot be fetched. Callers must not
+        turn that into an empty set: a silently empty list is indistinguishable from a
+        list that blacklists nothing, and build_snapshot() would publish the result as
+        though it were complete.
+        """
+        if self._domains is not None:
+            return self._domains
 
         # Deliberately NOT using mwmbl.utils.request_cache here. That is a *filesystem*
         # cache rooted at settings.REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache" - the
@@ -100,29 +108,21 @@ class RemoteListBlacklistProvider(BlacklistProvider):
         # *every* user of request_cache breaks - including get_wiki_results(), which runs
         # on the normal search path and then retries a live fetch 4 times per uncached
         # query (WIKI_RETRY, 5s timeout each) until the worker is killed. A big periodic
-        # download has no business in a shared small-response cache on the index volume;
-        # the module-level parsed cache above already gives us reuse without touching disk.
-        try:
-            response = requests.get(self.url, timeout=60)
-            response.raise_for_status()
+        # download has no business in a shared small-response cache on the index volume.
+        response = requests.get(self.url, timeout=60)
+        response.raise_for_status()
 
-            domains = set()
-            for line in response.text.split('\n'):
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
-                parts = line.split()
-                domains.add(parts[1] if len(parts) == 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
+        domains = set()
+        for line in response.text.split('\n'):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
+            parts = line.split()
+            domains.add(parts[1] if len(parts) >= 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
 
-            _parsed_domains_cache[self.url] = (time.monotonic(), domains)
-            return domains
-        except requests.RequestException as e:
-            # Log the error but don't fail. Fall back to the last known-good parsed set
-            # rather than caching an empty one - a transient fetch error shouldn't silently
-            # disable this provider's coverage until the next successful fetch.
-            print(f"Warning: Failed to fetch blacklist from {self.url}: {e}")
-            return cached[1] if cached is not None else set()
+        self._domains = domains
+        return domains
 
     def is_domain_blacklisted(self, domain: str) -> bool:
         domains = self._get_blacklisted_domains()
@@ -162,11 +162,11 @@ class HaGeZiBlacklistProvider(RemoteListBlacklistProvider):
         'tif_mini': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt',
     }
 
-    def __init__(self, list_type: str = 'tif_medium', cache_expire_days: int = 1):
+    def __init__(self, list_type: str = 'tif_medium'):
         if list_type not in self.HAGEZI_URLS:
             raise ValueError(f"Invalid list_type. Must be one of: {list(self.HAGEZI_URLS.keys())}")
 
-        super().__init__(self.HAGEZI_URLS[list_type], cache_expire_days)
+        super().__init__(self.HAGEZI_URLS[list_type])
 
 
 class AdultContentBlacklistProvider(RemoteListBlacklistProvider):
@@ -179,8 +179,8 @@ class AdultContentBlacklistProvider(RemoteListBlacklistProvider):
 
     URL = 'https://raw.githubusercontent.com/blocklistproject/Lists/master/porn.txt'
 
-    def __init__(self, cache_expire_days: int = 7):
-        super().__init__(self.URL, cache_expire_days)
+    def __init__(self):
+        super().__init__(self.URL)
 
 
 class CombinedBlacklistProvider(BlacklistProvider):

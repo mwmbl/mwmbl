@@ -6,7 +6,6 @@ import pytest
 import requests
 from unittest.mock import patch, MagicMock
 
-from mwmbl.indexer import blacklist_providers
 from mwmbl.indexer.blacklist_providers import (
     StaticBlacklistProvider,
     HaGeZiBlacklistProvider,
@@ -14,17 +13,6 @@ from mwmbl.indexer.blacklist_providers import (
     CombinedBlacklistProvider
 )
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
-
-
-@pytest.fixture(autouse=True)
-def clear_shared_domains_cache():
-    """_parsed_domains_cache is a module-level dict shared across every
-    RemoteListBlacklistProvider instance (see blacklist_providers.py) so that
-    index_documents() can call get_default_blacklist_provider() cheaply on every call.
-    Clear it around each test so a mocked response in one test can't leak into another."""
-    blacklist_providers._parsed_domains_cache.clear()
-    yield
-    blacklist_providers._parsed_domains_cache.clear()
 
 
 def test_static_blacklist_provider():
@@ -156,18 +144,44 @@ def test_remote_lists_do_not_use_the_shared_filesystem_request_cache():
         assert mock_get.called
 
 
-def test_fetch_failure_falls_back_to_last_good_list():
-    """A transient fetch failure must not silently blank out the provider's coverage."""
+def test_fetch_failure_propagates():
+    """A failed fetch must not look like a list that blacklists nothing.
+
+    build_snapshot() publishes the union of these lists to every search worker, so a
+    provider that swallowed the error and returned an empty set would replace a good
+    snapshot with one missing its entire contribution."""
+    provider = HaGeZiBlacklistProvider('light')
+    with patch('mwmbl.indexer.blacklist_providers.requests.get',
+               side_effect=requests.RequestException("boom")):
+        with pytest.raises(requests.RequestException):
+            provider.is_domain_blacklisted('spam.com')
+
+
+def test_the_list_is_fetched_once_per_instance():
+    """The cost of a remote list is owned by whoever holds the provider.
+
+    There is no cache behind the module - that made get_default_blacklist_provider() look
+    cheap enough to call from a request handler. Reuse comes from holding the instance."""
     with patch('mwmbl.indexer.blacklist_providers.requests.get') as mock_get:
         mock_response = MagicMock()
         mock_response.text = "spam.com\n"
         mock_get.return_value = mock_response
+
         provider = HaGeZiBlacklistProvider('light')
         assert provider.is_domain_blacklisted('spam.com') is True
+        assert provider.is_domain_blacklisted('other.com') is False
+        assert mock_get.call_count == 1
 
-    # Expire the module-level cache so the next call refetches, and make that fetch fail.
-    blacklist_providers._parsed_domains_cache[provider.url] = (
-        -10**9, blacklist_providers._parsed_domains_cache[provider.url][1])
-    with patch('mwmbl.indexer.blacklist_providers.requests.get',
-               side_effect=requests.RequestException("boom")):
-        assert provider.is_domain_blacklisted('spam.com') is True  # still covered
+        # A second instance is a second download - nothing is shared between them.
+        assert HaGeZiBlacklistProvider('light').is_domain_blacklisted('spam.com') is True
+        assert mock_get.call_count == 2
+
+
+def test_hosts_lines_with_trailing_comments_keep_the_domain():
+    with patch('mwmbl.indexer.blacklist_providers.requests.get') as mock_get:
+        mock_response = MagicMock()
+        mock_response.text = "0.0.0.0 spam.com # added 2026-01-01\n# a comment line\nplain.com\n"
+        mock_get.return_value = mock_response
+
+        provider = AdultContentBlacklistProvider()
+        assert provider._get_blacklisted_domains() == {'spam.com', 'plain.com'}
