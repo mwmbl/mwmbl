@@ -22,6 +22,7 @@ from django.shortcuts import render
 from redis import RedisError
 
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
+from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
 from mwmbl.indexer.blacklist_snapshot import (
     HASH_DTYPE, SNAPSHOT_KEY, SNAPSHOT_VERSION_KEY, get_snapshot_blacklist,
@@ -100,6 +101,23 @@ def _removed_counts(days: int) -> list[dict]:
     return [{"date": date, "count": int(count) if count else 0} for date, count in zip(dates, counts)]
 
 
+def _curated_status() -> dict:
+    """Approved domains, and whether any of them are still being filtered out.
+
+    Curated domains are subtracted from the remote lists when the snapshot is built, so
+    "still blacklisted" is normally zero. Anything listed here is either waiting for the
+    next rebuild, or blocked by a local rule curation does not override - EXCLUDED_DOMAINS
+    or DOMAIN_BLACKLIST_REGEX - which is otherwise invisible.
+    """
+    curated_domains = get_curated_domains()
+    still_blacklisted = get_snapshot_blacklist().filter_blacklisted(curated_domains)
+    return {
+        "count": len(curated_domains),
+        "still_blacklisted": sorted(still_blacklisted),
+        "approval_delay_seconds": settings.BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS,
+    }
+
+
 def _task_status() -> list[dict]:
     """The two background tasks that maintain the state above.
 
@@ -137,6 +155,7 @@ def blacklist_status_view(request):
     # handler covers the lot.
     try:
         context["snapshot"] = _snapshot_status()
+        context["curated"] = _curated_status()
         context["queue"] = _queue_status()
         context["removed_counts"] = _removed_counts(REMOVED_COUNT_DAYS)
     except RedisError as e:
