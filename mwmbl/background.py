@@ -3,6 +3,7 @@ Script that updates data in a background process.
 
 Also contains Django Background Tasks for periodic maintenance:
   - sync_search_counts: syncs Redis monthly counters → DB once per hour
+  - report_usage_to_polar: reports billable usage overage to Polar once per hour
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
 """
@@ -17,6 +18,7 @@ from background_task import background
 from django.conf import settings
 from django.core.cache import cache
 
+from mwmbl import pricing
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.models import OldIndex, UsageBucket
@@ -178,3 +180,49 @@ def purge_blacklisted_from_queue():
                 sum(removed_by_domain.values()), len(removed_by_domain), queue_size())
 
 
+@background(schedule=0)
+def report_usage_to_polar():
+    """
+    Reports each user's billable overage (requests beyond the free 2,000/month)
+    to Polar as usage events, once per hour.
+
+    Only the delta since the last report is sent (UsageBucket.reported_overage
+    tracks how much has already been ingested), so re-runs are idempotent and a
+    failed batch simply gets resent (larger) on the next run rather than risking
+    double-counting.
+    """
+    from polar_sdk import Polar
+
+    now = datetime.now(timezone.utc)
+
+    events = []
+    buckets_to_update = []
+    for bucket in UsageBucket.objects.filter(year=now.year, month=now.month).select_related("user__billing"):
+        billing = getattr(bucket.user, "billing", None)
+        if not billing or not billing.polar_customer_id:
+            continue  # no Polar customer yet — nothing to report
+
+        total_overage = pricing.billable_overage(bucket.count)
+        delta = total_overage - bucket.reported_overage
+        if delta <= 0:
+            continue
+
+        events.append({
+            "name": "search_request",
+            "external_customer_id": str(bucket.user.id),
+            "metadata": {"quantity": delta},
+        })
+        bucket.reported_overage = total_overage
+        buckets_to_update.append(bucket)
+
+    if not events:
+        return
+
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            polar.events.ingest(request={"events": events})
+    except Exception:
+        logger.exception("Error reporting usage to Polar")
+        return
+
+    UsageBucket.objects.bulk_update(buckets_to_update, ["reported_overage"])

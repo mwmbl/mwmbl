@@ -11,17 +11,18 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel, CustomerSubscriptionUpdateProduct
+from polar_sdk.models import SubscriptionCancel
 from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
+from mwmbl import pricing
 from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
     VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
     CreateApiKeyRequest, ApiKeyCreatedResponse, ApiKeyListItem,
-    UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse, ChangePlanRequest,
+    UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse, UpdateSpendLimitRequest,
     ForgotPasswordRequest, ResetPasswordRequest,
     AgreementAcceptRequest, AgreementResponse,
     MarketingConsentRequest, MarketingConsentResponse, MarketingConsentListResponse,
@@ -672,17 +673,19 @@ def delete_api_key(request, key_id: int):
     auth=JWTAuth(),
     response=UserProfileResponse,
     summary="Get current user profile",
-    description="Returns the authenticated user's username, email, plan tier, and email confirmation status.",
+    description="Returns the authenticated user's username, email, plan, and email confirmation status.",
     tags=["Users"],
 )
 def get_current_user(request):
     check_email_verified(request)
     user = request.user
+    billing = getattr(user, "billing", None)
+    spend_cents = billing.max_monthly_spend_cents if billing else 0
     email_address = user.emailaddress_set.first()
     return UserProfileResponse(
         username=user.username,
         email=user.email,
-        plan=user.tier,
+        plan="free" if spend_cents == 0 else "pay-as-you-go",
         email_confirmed=email_address.verified if email_address else False,
     )
 
@@ -691,34 +694,41 @@ def get_current_user(request):
 # Billing
 # ---------------------------------------------------------------------------
 
+def _subscription_response(user, billing, status: str) -> SubscriptionResponse:
+    from mwmbl.quota import get_monthly_count
+    spend_cents = billing.max_monthly_spend_cents if billing else 0
+    usage = get_monthly_count(user.id)
+    return SubscriptionResponse(
+        status=status,
+        max_monthly_spend_cents=spend_cents,
+        monthly_limit=pricing.effective_monthly_request_cap(spend_cents),
+        monthly_usage=usage,
+        estimated_cost_cents=pricing.estimated_cost_cents(usage),
+        current_period_end=billing.current_period_end if billing else None,
+        polar_customer_id=billing.polar_customer_id if billing else None,
+    )
+
+
 @router.get(
     "/billing/subscription",
     auth=JWTAuth(),
     response=SubscriptionResponse,
     summary="Get current subscription",
-    description="Returns the user's active plan, quota, and current-period usage.",
+    description="Returns the user's spend limit, quota, and current-period usage.",
     tags=["Billing"],
 )
 def get_subscription(request):
-    from mwmbl.quota import get_monthly_count
     check_email_verified(request)
     user = request.user
     billing = getattr(user, "billing", None)
-    usage = get_monthly_count(user.id)
-    if user.tier == MwmblUser.Tier.FREE:
+    spend_cents = billing.max_monthly_spend_cents if billing else 0
+    if spend_cents == 0:
         status = "free"
     elif billing and billing.cancel_at_period_end:
         status = "canceling"
     else:
         status = "active"
-    return SubscriptionResponse(
-        plan=user.tier,
-        status=status,
-        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[user.tier],
-        monthly_usage=usage,
-        current_period_end=billing.current_period_end if billing else None,
-        polar_customer_id=billing.polar_customer_id if billing else None,
-    )
+    return _subscription_response(user, billing, status)
 
 
 @router.post(
@@ -731,20 +741,14 @@ def get_subscription(request):
 )
 def create_checkout(request, body: CheckoutRequest):
     check_email_verified(request)
-    product_map = {
-        "starter": settings.POLAR_PRODUCT_ID_STARTER,
-        "pro": settings.POLAR_PRODUCT_ID_PRO,
-    }
-    product_id = product_map[body.plan]
+    product_id = settings.POLAR_PRODUCT_ID_USAGE
     if not product_id:
-        raise InvalidRequest(f"Plan '{body.plan}' is not configured. Contact support.", status=503)
-    billing = getattr(request.user, "billing", None)
+        raise InvalidRequest("Billing is not configured. Contact support.", status=503)
     checkout_params = {
         "products": [product_id],
+        "external_customer_id": str(request.user.id),
         "metadata": {"user_id": str(request.user.id)},
     }
-    if billing and billing.polar_customer_id:
-        checkout_params["external_customer_id"] = billing.polar_customer_id
     if body.success_url:
         checkout_params["success_url"] = body.success_url
     if body.embed_origin:
@@ -763,7 +767,6 @@ def create_checkout(request, body: CheckoutRequest):
     tags=["Billing"],
 )
 def uncancel_subscription(request):
-    from mwmbl.quota import get_monthly_count
     check_email_verified(request)
     billing = getattr(request.user, "billing", None)
     if not billing or not billing.polar_subscription_id:
@@ -778,15 +781,7 @@ def uncancel_subscription(request):
     billing.current_period_end = result.current_period_end
     billing.cancel_at_period_end = False
     billing.save()
-    usage = get_monthly_count(request.user.id)
-    return SubscriptionResponse(
-        plan=request.user.tier,
-        status="active",
-        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[request.user.tier],
-        monthly_usage=usage,
-        current_period_end=billing.current_period_end,
-        polar_customer_id=billing.polar_customer_id,
-    )
+    return _subscription_response(request.user, billing, "active")
 
 
 @router.post(
@@ -795,11 +790,10 @@ def uncancel_subscription(request):
     response=SubscriptionResponse,
     summary="Cancel subscription at period end",
     description="Schedules the subscription to cancel at the end of the current billing period. "
-                "The plan remains active until then.",
+                "The spend limit remains active until then.",
     tags=["Billing"],
 )
 def cancel_subscription(request):
-    from mwmbl.quota import get_monthly_count
     check_email_verified(request)
     billing = getattr(request.user, "billing", None)
     if not billing or not billing.polar_subscription_id:
@@ -815,68 +809,49 @@ def cancel_subscription(request):
     billing.current_period_end = result.current_period_end
     billing.cancel_at_period_end = True
     billing.save()
-    usage = get_monthly_count(request.user.id)
-    return SubscriptionResponse(
-        plan=request.user.tier,
-        status="canceling",
-        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[request.user.tier],
-        monthly_usage=usage,
-        current_period_end=billing.current_period_end,
-        polar_customer_id=billing.polar_customer_id,
-    )
+    return _subscription_response(request.user, billing, "canceling")
 
 
 @router.post(
-    "/billing/change-plan",
+    "/billing/spend-limit",
     auth=JWTAuth(),
     response=SubscriptionResponse,
-    summary="Change subscription plan",
-    description="Upgrades or downgrades to a different paid plan. Takes effect immediately "
-                "with proration applied to the next invoice. The tier shown in the response "
-                "reflects the current state; the new tier arrives via webhook.",
+    summary="Set monthly spend limit",
+    description=(
+        "Sets the maximum amount (in cents) the account may be billed per month "
+        "for metered API usage beyond the free 2,000 requests. Set to 0 to stay "
+        "free-tier-only (hard-capped at 2,000 requests/month). Requires an active "
+        "Polar subscription if raising above 0 for the first time — "
+        "call POST /billing/checkout first if no subscription exists."
+    ),
     tags=["Billing"],
 )
-def change_plan(request, body: ChangePlanRequest):
-    from mwmbl.quota import get_monthly_count
+def update_spend_limit(request, body: UpdateSpendLimitRequest):
     check_email_verified(request)
     billing = getattr(request.user, "billing", None)
-    if not billing or not billing.polar_subscription_id:
-        raise InvalidRequest("No active subscription found.", status=404)
-    product_map = {
-        "starter": settings.POLAR_PRODUCT_ID_STARTER,
-        "pro": settings.POLAR_PRODUCT_ID_PRO,
-    }
-    product_id = product_map[body.plan]
-    if not product_id:
-        raise InvalidRequest(f"Plan '{body.plan}' is not configured. Contact support.", status=503)
-    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
-        result = polar.subscriptions.update(
-            id=billing.polar_subscription_id,
-            subscription_update=CustomerSubscriptionUpdateProduct(product_id=product_id),
+    if body.max_monthly_spend_cents > 0 and (not billing or not billing.polar_subscription_id):
+        raise InvalidRequest(
+            "An active billing subscription is required before raising your spend limit "
+            "above $0. Call POST /billing/checkout first.",
+            status=409,
         )
-    billing.current_period_end = result.current_period_end
+    if billing is None:
+        billing = UserBilling.objects.create(user=request.user)
+    billing.max_monthly_spend_cents = body.max_monthly_spend_cents
     billing.save()
-    usage = get_monthly_count(request.user.id)
-    if request.user.tier == MwmblUser.Tier.FREE:
+    if billing.max_monthly_spend_cents == 0:
         status = "free"
     elif billing.cancel_at_period_end:
         status = "canceling"
     else:
         status = "active"
-    return SubscriptionResponse(
-        plan=request.user.tier,
-        status=status,
-        monthly_limit=MwmblUser.TIER_MONTHLY_LIMITS[request.user.tier],
-        monthly_usage=usage,
-        current_period_end=billing.current_period_end,
-        polar_customer_id=billing.polar_customer_id,
-    )
+    return _subscription_response(request.user, billing, status)
 
 
 @router.post(
     "/billing/webhook",
     summary="Polar webhook receiver",
-    description="Receives signed webhook events from Polar and updates the user's plan.",
+    description="Receives signed webhook events from Polar and keeps the user's billing state in sync.",
     tags=["Billing"],
 )
 def polar_webhook(request):
@@ -892,12 +867,7 @@ def polar_webhook(request):
         raise InvalidRequest("Invalid signature", status=400)
 
     event_type = event.TYPE
-    logger.info("Polar webhook event type=%s product_id=%s", event_type, getattr(event.data, "product_id", None))
-
-    product_tier = {
-        settings.POLAR_PRODUCT_ID_STARTER: MwmblUser.Tier.STARTER,
-        settings.POLAR_PRODUCT_ID_PRO: MwmblUser.Tier.PRO,
-    }
+    logger.info("Polar webhook event type=%s", event_type)
 
     if event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
         user_id = event.data.metadata.get("user_id")
@@ -906,13 +876,6 @@ def polar_webhook(request):
         if user is None:
             logger.warning("Polar webhook: no user found for user_id=%s", user_id)
         else:
-            tier = product_tier.get(event.data.product_id, MwmblUser.Tier.FREE)
-            logger.info("Polar webhook: setting user %s (id=%s) tier to %s (product_id=%s)", user.email, user_id, tier, event.data.product_id)
-            if tier == MwmblUser.Tier.FREE:
-                logger.warning("Polar webhook: product_id=%s not found in product_tier map, defaulting to FREE", event.data.product_id)
-            user.tier = tier
-            user.save()
-            invalidate_user_api_key_cache(user.id)
             billing, created = UserBilling.objects.get_or_create(user=user)
             logger.info("Polar webhook: UserBilling %s for user %s customer_id=%s subscription_id=%s", "created" if created else "updated", user.email, event.data.customer_id, event.data.id)
             billing.polar_customer_id = event.data.customer_id or billing.polar_customer_id
@@ -934,13 +897,11 @@ def polar_webhook(request):
                 billing.save()
             logger.info("Polar webhook: user %s (id=%s) subscription scheduled to cancel at period end", user.email, user_id)
         else:
-            logger.info("Polar webhook: immediate cancellation for user %s (id=%s), reverting to FREE", user.email, user_id)
-            user.tier = MwmblUser.Tier.FREE
-            user.save()
-            invalidate_user_api_key_cache(user.id)
+            logger.info("Polar webhook: immediate cancellation for user %s (id=%s), resetting spend limit to $0", user.email, user_id)
             billing = getattr(user, "billing", None)
             if billing:
                 billing.cancel_at_period_end = False
+                billing.max_monthly_spend_cents = 0
                 billing.save()
     elif event_type == "subscription.revoked":
         user_id = event.data.metadata.get("user_id")
@@ -949,13 +910,11 @@ def polar_webhook(request):
         if user is None:
             logger.warning("Polar webhook: no user found for user_id=%s", user_id)
         else:
-            logger.info("Polar webhook: reverting user %s (id=%s) to FREE", user.email, user_id)
-            user.tier = MwmblUser.Tier.FREE
-            user.save()
-            invalidate_user_api_key_cache(user.id)
+            logger.info("Polar webhook: resetting user %s (id=%s) spend limit to $0", user.email, user_id)
             billing = getattr(user, "billing", None)
             if billing:
                 billing.cancel_at_period_end = False
+                billing.max_monthly_spend_cents = 0
                 billing.save()
     else:
         logger.info("Polar webhook: unhandled event type=%s, ignoring", event_type)

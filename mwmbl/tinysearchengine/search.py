@@ -5,6 +5,7 @@ from typing import Optional
 from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
+from mwmbl import pricing
 from mwmbl.format import format_result, format_result_v2
 from mwmbl.models import ApiKey, MwmblUser
 from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
@@ -194,15 +195,16 @@ _COMPLETE_RESPONSE_SCHEMA = {
 # Upgrade message helper
 # ---------------------------------------------------------------------------
 
-def _upgrade_message(tier: str) -> str:
-    if tier == MwmblUser.Tier.FREE:
+def _upgrade_message(max_monthly_spend_cents: int) -> str:
+    if max_monthly_spend_cents <= 0:
         return (
-            "Upgrade to Starter (10,000 requests/month) or Pro (50,000 requests/month) "
-            "at https://mwmbl.org/pricing."
+            "Increase your monthly spend limit at https://mwmbl.org/pricing to continue "
+            "past the free 2,000 requests/month (billed at $5.00 per 1,000 additional queries)."
         )
-    if tier == MwmblUser.Tier.STARTER:
-        return "Upgrade to Pro (50,000 requests/month) at https://mwmbl.org/pricing."
-    return ""  # Pro — no upgrade available
+    return (
+        "Increase your monthly spend limit at https://mwmbl.org/pricing to allow more "
+        "requests this month."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +299,9 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
         if api_key is not None:
             user: MwmblUser = api_key.user
-            monthly_limit = MwmblUser.TIER_MONTHLY_LIMITS[user.tier]
+            billing = getattr(user, "billing", None)
+            spend_cents = billing.max_monthly_spend_cents if billing else 0
+            monthly_limit = pricing.effective_monthly_request_cap(spend_cents)
 
             if not check_rate_limit(user.id):
                 raise HttpError(
@@ -307,13 +311,11 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
             current_count = get_monthly_count(user.id)
             if current_count >= monthly_limit:
-                upgrade_msg = _upgrade_message(user.tier)
                 msg = (
-                    f"Monthly quota exceeded: your {user.get_tier_display()} plan allows "
-                    f"{monthly_limit:,} requests per month and you have used {current_count:,}."
+                    f"Monthly quota exceeded: your account allows {monthly_limit:,} requests "
+                    f"per month at your current spend limit and you have used {current_count:,}. "
+                    f"{_upgrade_message(spend_cents)}"
                 )
-                if upgrade_msg:
-                    msg += f" {upgrade_msg}"
                 raise HttpError(429, msg)
 
             monthly_usage = increment_monthly(user.id)

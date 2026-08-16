@@ -44,6 +44,11 @@ class MwmblConfig(AppConfig):
             create_index_db()
             self._schedule_background_tasks()
 
+    # Cache key guarding the scheduling critical section below. Held just long
+    # enough to cover a single deploy's worker-startup burst.
+    _SCHEDULE_LOCK_KEY = "mwmbl:schedule_background_tasks_lock"
+    _SCHEDULE_LOCK_TIMEOUT = 60
+
     @staticmethod
     def _schedule_background_tasks():
         """
@@ -65,19 +70,40 @@ class MwmblConfig(AppConfig):
         except RuntimeError:
             pass
 
+        # The gunicorn server runs multiple worker processes, each of which calls
+        # this method independently on startup. The "does a Task row already
+        # exist?" checks below are plain reads with no transaction or unique
+        # constraint backing them, so without this lock, workers starting at the
+        # same time (every deploy/restart) can race past the check before any of
+        # them commits its Task row, each creating its own duplicate periodic
+        # task. cache.add() is atomic (same pattern as the rate limiter in
+        # mwmbl.quota), so only the first worker to reach this point proceeds;
+        # the rest skip immediately, and the lock's TTL simply bounds how long
+        # a crashed winner blocks a retry by a later-starting worker.
+        from django.core.cache import cache
+        if not cache.add(MwmblConfig._SCHEDULE_LOCK_KEY, "1", timeout=MwmblConfig._SCHEDULE_LOCK_TIMEOUT):
+            log.info("Skipping background task scheduling: another worker is already handling it.")
+            return
+
         try:
             from background_task.models import Task
             from mwmbl.background import (
-                purge_blacklisted_from_queue, refresh_blacklist_snapshot, sync_search_counts,
+                purge_blacklisted_from_queue, refresh_blacklist_snapshot, report_usage_to_polar,
+                sync_search_counts,
             )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
+            POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
                 sync_search_counts(repeat=3600, repeat_until=None)
+
+            # Report billable usage overage to Polar once per hour (3600 seconds)
+            if not Task.objects.filter(task_name=POLAR_REPORT_TASK).exists():
+                report_usage_to_polar(repeat=3600, repeat_until=None)
 
             # Rebuild the blacklist snapshot the search path filters against. schedule=0
             # on the task means the first run happens immediately rather than one full
@@ -95,3 +121,11 @@ class MwmblConfig(AppConfig):
         except Exception:
             # Don't prevent startup if background task scheduling fails
             log.exception("Failed to schedule background tasks")
+        finally:
+            # Release promptly rather than holding it for the full TTL: by the
+            # time we get here the Task rows (if created) are already committed,
+            # so a worker that acquires the lock next will see them via the
+            # exists() checks above and correctly skip creating duplicates. The
+            # TTL above is only a safety net for a process that dies before
+            # reaching this point.
+            cache.delete(MwmblConfig._SCHEDULE_LOCK_KEY)
