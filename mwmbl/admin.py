@@ -65,3 +65,7 @@ class UserBillingAdmin(ModelAdmin):
 admin.site.register(ApiKey, ApiKeyAdmin)
 admin.site.register(MarketingConsent, MarketingConsentAdmin)
 admin.site.register(UserBilling, UserBillingAdmin)
+
+# Adds the "Status" panel linking to the blacklist status page (mwmbl.admin_views) to the
+# admin front page.
+admin.site.index_template = "admin/mwmbl_index.html"

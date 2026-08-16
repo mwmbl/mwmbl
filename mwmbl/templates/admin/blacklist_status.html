@@ -1,0 +1,211 @@
+{% extends "admin/base_site.html" %}
+{% load humanbytes %}
+
+{% block title %}Blacklist status | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Blacklist status
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .blacklist-status table { width: 100%; margin-bottom: 10px; }
+    .blacklist-status td.key { width: 30%; font-weight: bold; }
+    .blacklist-status .ok { color: #417690; font-weight: bold; }
+    .blacklist-status .bad { color: #ba2121; font-weight: bold; }
+    .blacklist-status .url { word-break: break-all; }
+    .blacklist-status .note { color: #666; font-size: 0.9em; }
+  </style>
+
+  <div id="content-main" class="blacklist-status">
+
+    {% if redis_error %}
+      <div class="module">
+        <h2>Redis unreachable</h2>
+        <p class="bad">{{ redis_error }}</p>
+        <p class="note">
+          Everything below the background tasks comes from Redis. With Redis down, search
+          workers filter on the built-in rules only and nothing is queued for purging.
+        </p>
+      </div>
+    {% else %}
+
+      <div class="module">
+        <h2>Snapshot</h2>
+        <table>
+          <tr>
+            <td class="key">Blob present</td>
+            <td>
+              {% if snapshot.blob_present %}
+                <span class="ok">yes</span>
+              {% else %}
+                <span class="bad">no</span> &mdash; retrieval is filtering on the built-in
+                rules only (the regex, EXCLUDED_DOMAINS and the numeric-subdomain
+                heuristic). The remote blocklists are not being applied.
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="key">Blob size</td>
+            <td>
+              {{ snapshot.blob_size|human_bytes }} ({{ snapshot.blob_size }} bytes)
+              {% if not snapshot.blob_size_valid %}
+                <span class="bad">&mdash; not a whole number of hashes, so workers will
+                refuse to load it</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="key">Domains in blob</td>
+            <td>{{ snapshot.blob_domains }}</td>
+          </tr>
+          <tr>
+            <td class="key">Published version</td>
+            <td>
+              {% if snapshot.published_version %}
+                {# Truncated to the same 12 characters the publish/load log lines use, so
+                   the page and the logs can be matched up by eye. #}
+                <code title="{{ snapshot.published_version }}">{{ snapshot.published_version|slice:":12" }}</code>
+                {% if not snapshot.blob_present %}
+                  <span class="bad">&mdash; version present but blob missing; it was
+                  probably evicted (Redis runs allkeys-lru). Workers keep the copy they
+                  already loaded until the refresh task republishes.</span>
+                {% endif %}
+              {% else %}
+                <span class="bad">never published</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="key">Loaded by this worker</td>
+            <td>
+              {% if snapshot.loaded_version %}
+                <code title="{{ snapshot.loaded_version }}">{{ snapshot.loaded_version|slice:":12" }}</code>
+                &mdash; {{ snapshot.loaded_domains }} domains,
+                {% if snapshot.up_to_date %}
+                  <span class="ok">up to date</span>
+                {% else %}
+                  <span class="bad">out of date</span>
+                {% endif %}
+              {% else %}
+                <span class="bad">nothing loaded</span>
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+        <p class="note">
+          This is worker pid {{ worker_pid }} only &mdash; each gunicorn worker loads the
+          snapshot independently and re-checks every {{ snapshot.check_seconds }}s, so for
+          a few minutes after a publish some workers legitimately show as out of date.
+          Reload to land on another worker. The snapshot is rebuilt every
+          {{ snapshot.refresh_seconds }}s.
+        </p>
+      </div>
+
+      <div class="module">
+        <h2>Purge queue</h2>
+        <table>
+          <tr>
+            <td class="key">Queued documents</td>
+            <td>
+              {{ queue.size }} of {{ queue.max_size }} max
+              {% if queue.full %}
+                <span class="bad">&mdash; full; further documents are being dropped rather
+                than queued</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="key">Drain rate</td>
+            <td>{{ queue.batch_size }} documents every {{ queue.interval_seconds }}s</td>
+          </tr>
+        </table>
+        <p class="note">
+          Queued by retrieval when it filters a blacklisted document out of results, and
+          drained by the purge task, which removes them from the index. A queue that grows
+          while the removals below stay at zero means the loop is broken. Results are
+          filtered either way, so this backlog does not affect what users see.
+        </p>
+
+        <h3>Sample of {{ queue.sample|length }} queued document{{ queue.sample|pluralize }}</h3>
+        {% if queue.sample %}
+          <table>
+            <thead>
+              <tr><th>URL</th><th>Title</th><th>Filed under term</th></tr>
+            </thead>
+            <tbody>
+              {% for document in queue.sample %}
+                <tr>
+                  <td class="url">{{ document.url }}</td>
+                  <td>{{ document.title }}</td>
+                  <td>{% if document.term %}{{ document.term }}{% else %}<span class="note">own tokens</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="note">
+            A random sample &mdash; the queue is a Redis SET and has no order. Reading it
+            here does not consume it.
+          </p>
+        {% else %}
+          <p class="note">The queue is empty.</p>
+        {% endif %}
+      </div>
+
+      <div class="module">
+        <h2>Documents removed from the index</h2>
+        <table>
+          <thead><tr><th>Date (UTC)</th><th>Removed</th></tr></thead>
+          <tbody>
+            {% for day in removed_counts %}
+              <tr><td>{{ day.date }}</td><td>{{ day.count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    {% endif %}
+
+    <div class="module">
+      <h2>Background tasks</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Next run</th><th>Attempts</th><th>Last completed</th><th>Last error</th></tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+            <tr>
+              <td><code>{{ task.name }}</code></td>
+              <td>
+                {% if task.task %}
+                  {{ task.task.run_at }}
+                  {% if task.task.locked_by %}<br><span class="note">running on {{ task.task.locked_by }}</span>{% endif %}
+                {% else %}
+                  <span class="bad">not scheduled</span>
+                {% endif %}
+              </td>
+              <td>{% if task.task %}{{ task.task.attempts }}{% endif %}</td>
+              <td>
+                {% if task.last_completed %}
+                  {{ task.last_completed.run_at }}
+                {% else %}
+                  <span class="bad">never</span>
+                {% endif %}
+              </td>
+              <td>{% if task.task.last_error %}<span class="bad">{{ task.task.last_error|truncatechars:200 }}</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="note">
+        Both tasks only run under a <code>manage.py process_tasks</code> worker. A worker
+        running an image that predates these tasks skips them silently by name, which shows
+        up here as a next run in the past that never completes.
+      </p>
+    </div>
+
+  </div>
+{% endblock %}

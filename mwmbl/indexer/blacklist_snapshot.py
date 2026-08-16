@@ -166,6 +166,17 @@ class SnapshotBlacklist:
     def loaded(self) -> bool:
         return self._array is not None
 
+    @property
+    def loaded_version(self) -> Optional[str]:
+        """The version of the snapshot this process is filtering against, if any."""
+        return self._version
+
+    @property
+    def num_domains(self) -> int:
+        """How many domain hashes this process has loaded."""
+        array = self._array
+        return 0 if array is None else len(array)
+
     def _get_redis(self) -> redis.Redis:
         return self._redis if self._redis is not None else get_redis()
 

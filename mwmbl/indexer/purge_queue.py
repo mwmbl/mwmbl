@@ -123,11 +123,7 @@ def enqueue_for_purge(documents: Iterable[Document], redis_client: Optional[redi
     return added
 
 
-def drain_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) -> list[Document]:
-    """Remove and return up to `limit` queued documents."""
-    client = redis_client if redis_client is not None else get_redis()
-    payloads = client.spop(PURGE_QUEUE_KEY, limit) or []
-
+def _documents_from_payloads(payloads: Iterable[str]) -> list[Document]:
     documents = []
     for payload in payloads:
         try:
@@ -140,6 +136,25 @@ def drain_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) ->
         except (ValueError, KeyError, TypeError):
             logger.warning("Discarding unreadable purge queue entry: %r", payload)
     return documents
+
+
+def drain_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) -> list[Document]:
+    """Remove and return up to `limit` queued documents."""
+    client = redis_client if redis_client is not None else get_redis()
+    payloads = client.spop(PURGE_QUEUE_KEY, limit) or []
+    return _documents_from_payloads(payloads)
+
+
+def peek_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) -> list[Document]:
+    """Up to `limit` queued documents, left on the queue.
+
+    SRANDMEMBER rather than SPOP: this exists for the admin status view, where reading the
+    queue must not consume it. The queue is a SET and has no order, so this is a sample of
+    what is waiting rather than the entries the next purge run will take.
+    """
+    client = redis_client if redis_client is not None else get_redis()
+    payloads = client.srandmember(PURGE_QUEUE_KEY, limit) or []
+    return _documents_from_payloads(payloads)
 
 
 def queue_size(redis_client: Optional[redis.Redis] = None) -> int:
