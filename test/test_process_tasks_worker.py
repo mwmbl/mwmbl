@@ -75,14 +75,105 @@ def recorded_commands(monkeypatch):
     return calls
 
 
-def test_process_tasks_app_runs_the_queue(recorded_commands, monkeypatch):
-    monkeypatch.setenv("MWMBL_APP", "process_tasks")
+class StopLoop(Exception):
+    """Breaks run_background_tasks' otherwise infinite restart loop."""
+
+
+@pytest.fixture
+def stop_after_two_runs(monkeypatch, recorded_commands):
+    def fake_sleep(seconds):
+        assert seconds == main.TASK_QUEUE_RESTART_SECONDS
+        if recorded_commands.count("process_tasks") >= 2:
+            raise StopLoop
+    monkeypatch.setattr(main, "sleep", fake_sleep)
+
+
+def test_the_queue_is_restarted_if_it_ever_exits(recorded_commands, stop_after_two_runs):
+    """process_tasks with --duration 0 loops forever and, on Linux, does not even handle
+    SIGTERM - its SignalManager only binds that on Windows. So returning means something
+    went wrong, and the queue has to come back: the failure being guarded against is the
+    tasks silently stopping, which is how they came to be months out of date."""
+    with pytest.raises(StopLoop):
+        main.run_background_tasks()
+
+    assert recorded_commands == ["process_tasks", "process_tasks"]
+
+
+class FakeGunicorn:
+    """Stands in for BaseApplication so the server branch does not start a real server."""
+    runs = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def run(self):
+        FakeGunicorn.runs += 1
+
+
+@pytest.fixture
+def fake_server(monkeypatch):
+    FakeGunicorn.runs = 0
+    monkeypatch.setattr(main, "BaseApplication", FakeGunicorn)
+
+    spawned = []
+    monkeypatch.setattr(main.multiprocessing, "get_context",
+                        lambda method: _FakeContext(method, spawned))
+    monkeypatch.setenv("MWMBL_APP", "server")
+    return spawned
+
+
+class _FakeContext:
+    def __init__(self, method, spawned):
+        self.method = method
+        self.spawned = spawned
+
+    def Process(self, target, name, daemon):
+        self.spawned.append({"method": self.method, "target": target, "name": name, "daemon": daemon})
+        return _FakeProcess()
+
+
+class _FakeProcess:
+    pid = 4242
+
+    def start(self):
+        pass
+
+
+def test_server_starts_the_queue_when_enabled(settings, fake_server, recorded_commands):
+    settings.RUN_BACKGROUND_TASKS = True
 
     main.run()
 
-    assert "process_tasks" in recorded_commands
+    assert len(fake_server) == 1
+    started = fake_server[0]
+    assert started["target"] is main.run_background_tasks
+    # Spawn, not fork: a forked child would inherit the parent's Postgres and Redis
+    # sockets. Daemonic so it dies with the container rather than outliving it.
+    assert started["method"] == "spawn"
+    assert started["daemon"]
+    assert FakeGunicorn.runs == 1
+
+
+def test_server_does_not_start_the_queue_by_default(settings, fake_server, recorded_commands):
+    # Off unless opted in, because beta shares a database and index with production and
+    # only one deployment should be running the tasks.
+    settings.RUN_BACKGROUND_TASKS = False
+
+    main.run()
+
+    assert fake_server == []
+    assert FakeGunicorn.runs == 1
+
+
+def test_process_tasks_app_runs_the_queue(recorded_commands, stop_after_two_runs, monkeypatch):
+    monkeypatch.setenv("MWMBL_APP", "process_tasks")
+
+    with pytest.raises(StopLoop):
+        main.run()
+
     # Migrations run first, as they do for every other MWMBL_APP.
-    assert recorded_commands.index("migrate") < recorded_commands.index("process_tasks")
+    assert recorded_commands[0] == "migrate"
+    assert "process_tasks" in recorded_commands
 
 
 def test_unknown_app_still_raises(recorded_commands, monkeypatch):

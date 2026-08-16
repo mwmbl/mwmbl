@@ -199,6 +199,17 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 # Gates database initialisation and background task scheduling; False for the crawler and tests.
 HAS_DATABASE = True
 
+# Whether this container runs the django-background-tasks queue (see mwmbl.main). Note the
+# distinction from HAS_DATABASE above: that gates *scheduling* the tasks, this gates
+# *running* them.
+#
+# Opt-in rather than on by default because beta shares its database, index and Redis with
+# production. Exactly one deployment should run the queue, and it should be production:
+# the tasks report billable usage to Polar and write to the index, so a beta container
+# picking up the same rows would do both against production. Turn it on with
+# `dokku config:set <app> RUN_BACKGROUND_TASKS=true`.
+RUN_BACKGROUND_TASKS = os.environ.get("RUN_BACKGROUND_TASKS", "false").lower() == "true"
+
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
 
