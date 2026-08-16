@@ -2,15 +2,19 @@
 Tests for blacklist providers and the abstraction system.
 """
 
+import re
+
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
 
 from mwmbl.indexer.blacklist_providers import (
+    BuiltInRulesBlacklistProvider,
     StaticBlacklistProvider,
     HaGeZiBlacklistProvider,
     AdultContentBlacklistProvider,
-    CombinedBlacklistProvider
+    CombinedBlacklistProvider,
+    domain_and_parents,
 )
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
 
@@ -185,3 +189,39 @@ def test_hosts_lines_with_trailing_comments_keep_the_domain():
 
         provider = AdultContentBlacklistProvider()
         assert provider._get_blacklisted_domains() == {'spam.com', 'plain.com'}
+
+
+def test_domain_and_parents():
+    assert domain_and_parents("nyou.booru.org") == ["nyou.booru.org", "booru.org"]
+    assert domain_and_parents("booru.org") == ["booru.org"]
+    # Never down to a bare TLD, which would take out everything under it.
+    assert "org" not in domain_and_parents("a.b.c.org")
+    assert domain_and_parents("localhost") == ["localhost"]
+
+
+def test_a_remote_list_entry_covers_subdomains():
+    """The lists are apex rules, so www.spam.com must be caught by an entry for spam.com."""
+    with patch('mwmbl.indexer.blacklist_providers.requests.get') as mock_get:
+        mock_response = MagicMock()
+        mock_response.text = "spam.com\n"
+        mock_get.return_value = mock_response
+
+        provider = HaGeZiBlacklistProvider('light')
+        assert provider.is_domain_blacklisted('spam.com') is True
+        assert provider.is_domain_blacklisted('www.spam.com') is True
+        assert provider.is_domain_blacklisted('cdn.images.spam.com') is True
+        assert provider.is_domain_blacklisted('notspam.com') is False
+        assert provider.is_domain_blacklisted('spam.com.example.org') is False
+
+
+def test_excluded_domains_cover_subdomains():
+    """EXCLUDED_DOMAINS entries are written apex-first; the www. form must still match."""
+    with patch.object(BuiltInRulesBlacklistProvider, '__init__', lambda self: None):
+        provider = BuiltInRulesBlacklistProvider()
+        provider.excluded_domains = {'fineartteens.com'}
+        provider.blacklist_regex = re.compile(r"^$")
+        provider.trusted_domains = set()
+
+        assert provider.is_domain_blacklisted('fineartteens.com') is True
+        assert provider.is_domain_blacklisted('www.fineartteens.com') is True
+        assert provider.is_domain_blacklisted('otherfineartteens.com') is False

@@ -17,9 +17,13 @@ Two properties matter:
     the same popular blacklisted document surfacing on a thousand queries is one entry -
     and MAX_QUEUE_SIZE caps the pathological case where the purge task is not running.
 
-The payload carries exactly the four fields tokenize_document() needs to work out which
-index pages a document is filed under. They are read straight out of the index, so the
+The payload carries the four fields tokenize_document() needs to work out which index
+pages a document is filed under, plus the term it was filed under if it has one - see
+purge_blacklisted.pages_for_document. They are read straight out of the index, so the
 serialised JSON is byte-identical between retrievals and SET dedupe works on it.
+
+The same URL under two different terms is two entries, which is correct: they are two
+copies on two pages, and each needs its own removal.
 """
 import json
 import threading
@@ -51,8 +55,8 @@ _recently_enqueued: "OrderedDict[str, float]" = OrderedDict()
 _recently_enqueued_lock = threading.Lock()
 
 
-def _take_unqueued(payloads: list[str]) -> list[str]:
-    """Filter out payloads this process queued recently, and record the rest."""
+def _unqueued(payloads: list[str]) -> list[str]:
+    """The payloads this process has not queued recently, dropping expired records."""
     now = time.monotonic()
     with _recently_enqueued_lock:
         while _recently_enqueued:
@@ -61,12 +65,17 @@ def _take_unqueued(payloads: list[str]) -> list[str]:
                 break
             _recently_enqueued.popitem(last=False)
 
-        fresh = [p for p in payloads if p not in _recently_enqueued]
-        for payload in fresh:
+        return [p for p in payloads if p not in _recently_enqueued]
+
+
+def _record_enqueued(payloads: list[str]) -> None:
+    """Remember that these payloads made it onto the queue."""
+    now = time.monotonic()
+    with _recently_enqueued_lock:
+        for payload in payloads:
             _recently_enqueued[payload] = now
         while len(_recently_enqueued) > _MAX_RECENTLY_ENQUEUED:
             _recently_enqueued.popitem(last=False)
-    return fresh
 
 
 _redis: Optional[redis.Redis] = None
@@ -85,13 +94,14 @@ def _payload(document: Document) -> str:
         "title": document.title,
         "extract": document.extract,
         "score": document.score,
+        "term": document.term,
     }, sort_keys=True)
 
 
 def enqueue_for_purge(documents: Iterable[Document], redis_client: Optional[redis.Redis] = None) -> int:
     """Queue these documents for removal from the index. Returns the number of *new*
     entries added (already-queued duplicates do not count). Never raises."""
-    payloads = _take_unqueued([_payload(document) for document in documents])
+    payloads = _unqueued(list(dict.fromkeys(_payload(document) for document in documents)))
     if not payloads:
         return 0
 
@@ -101,10 +111,16 @@ def enqueue_for_purge(documents: Iterable[Document], redis_client: Optional[redi
             logger.warning("Blacklist purge queue is full (%d); dropping %d documents",
                            MAX_QUEUE_SIZE, len(payloads))
             return 0
-        return client.sadd(PURGE_QUEUE_KEY, *payloads)
+        added = client.sadd(PURGE_QUEUE_KEY, *payloads)
     except Exception:
         logger.warning("Could not enqueue %d documents for purging", len(payloads), exc_info=True)
         return 0
+
+    # Only now, with the write done. Recording before it would suppress these documents
+    # for the whole TTL on the strength of a queueing attempt that never landed, so a
+    # Redis blip or a full queue would quietly stall the purge for them.
+    _record_enqueued(payloads)
+    return added
 
 
 def drain_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) -> list[Document]:
@@ -116,8 +132,11 @@ def drain_purge_queue(limit: int, redis_client: Optional[redis.Redis] = None) ->
     for payload in payloads:
         try:
             fields = json.loads(payload)
+            # "term" is fetched with .get because entries queued before it joined the
+            # payload are still in Redis; those purge by token pages alone, as they did.
             documents.append(Document(title=fields["title"], url=fields["url"],
-                                      extract=fields["extract"], score=fields["score"]))
+                                      extract=fields["extract"], score=fields["score"],
+                                      term=fields.get("term")))
         except (ValueError, KeyError, TypeError):
             logger.warning("Discarding unreadable purge queue entry: %r", payload)
     return documents

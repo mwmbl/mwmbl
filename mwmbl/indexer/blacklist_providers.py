@@ -10,6 +10,28 @@ from typing import Optional, Set
 import requests
 
 
+def domain_and_parents(domain: str) -> list[str]:
+    """The domain itself followed by each of its parent domains, most specific first.
+
+    The remote lists are apex rules, not host rules - HaGeZi's file header says
+    "Syntax: Domains (without subdomains)" and it lives under wildcard/ - so an entry for
+    example.com is meant to cover www.example.com and every other subdomain. get_domain()
+    hands us the full host, so testing only that host would let every subdomain of a
+    blacklisted domain through, starting with the www. form that most sites actually
+    serve. Blacklisting is therefore membership of *any* of these.
+
+    The last candidate has two labels: a single-label candidate is a bare TLD, and
+    blacklisting one would take out every domain under it.
+
+        >>> domain_and_parents("nyou.booru.org")
+        ['nyou.booru.org', 'booru.org']
+    """
+    parts = domain.split('.')
+    if len(parts) < 2:
+        return [domain]
+    return ['.'.join(parts[i:]) for i in range(len(parts) - 1)]
+
+
 class BlacklistProvider(ABC):
     """Abstract base class for blacklist providers."""
     
@@ -44,8 +66,10 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
     
     def is_domain_blacklisted(self, domain: str) -> bool:
         """Check if domain should be blacklisted based on built-in rules."""
-        # Check excluded domains
-        if domain in self.excluded_domains:
+        # Check excluded domains. Matched as a suffix, so an apex entry covers its
+        # subdomains - the entries written with an explicit www. prefix still only match
+        # that host and below, which is what they were added for.
+        if any(candidate in self.excluded_domains for candidate in domain_and_parents(domain)):
             return True
         
         # Check regex patterns (adult/spam content)
@@ -57,6 +81,13 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
             return False
 
         # Spam detection heuristics for SEO spam domains
+        #
+        # There used to be a second rule here matching any .com host whose first label was
+        # 6 or 8 characters long (aimed at brofqpxj.uelinc.com, gzsmjc.fba01.com). It was
+        # dropped deliberately: label length says nothing about spam, and it took out
+        # groups.google.com, images.example.com and every other three-label .com site with
+        # a 6- or 8-character subdomain. Generated-hostname spam is better handled by the
+        # threat feed than by guessing at label lengths.
         domain_parts = domain.split('.')
 
         # Domains with all-numeric generated-looking subdomains, e.g. 59648.etnomurcia.com.
@@ -126,7 +157,7 @@ class RemoteListBlacklistProvider(BlacklistProvider):
 
     def is_domain_blacklisted(self, domain: str) -> bool:
         domains = self._get_blacklisted_domains()
-        return domain in domains
+        return any(candidate in domains for candidate in domain_and_parents(domain))
 
 
 class HaGeZiBlacklistProvider(RemoteListBlacklistProvider):

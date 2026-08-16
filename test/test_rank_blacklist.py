@@ -178,3 +178,38 @@ def test_a_redis_failure_does_not_break_search(blacklist):
 
     assert BAD.url not in urls
     assert GOOD.url in urls
+
+
+def test_a_failed_enqueue_is_retried_rather_than_suppressed(blacklist, redis_client):
+    """The recently-queued record exists to stop re-queueing what is already on the queue.
+    Recording a document before the Redis write lands would suppress it for the whole TTL
+    on the strength of an attempt that failed, stalling the purge for it."""
+    class BrokenRedis:
+        def scard(self, key):
+            raise ConnectionError("redis is down")
+
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist):
+        with patch.object(purge_queue, "get_redis", return_value=BrokenRedis()):
+            ranker = HeuristicRanker(FakeIndex([BAD, GOOD]), FakeCompleter())
+            ranker.search("bananas", [])
+
+        # Redis is back. The next query must queue the document rather than skip it.
+        with patch.object(purge_queue, "get_redis", return_value=redis_client):
+            ranker.search("bananas", [])
+
+    assert [d.url for d in drain_purge_queue(10, redis_client)] == [BAD.url]
+
+
+def test_a_full_queue_does_not_suppress_the_next_attempt(blacklist, redis_client):
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
+            patch.object(purge_queue, "get_redis", return_value=redis_client), \
+            patch.object(purge_queue, "MAX_QUEUE_SIZE", 0):
+        ranker = HeuristicRanker(FakeIndex([BAD, GOOD]), FakeCompleter())
+        ranker.search("bananas", [])
+        assert redis_client.scard(PURGE_QUEUE_KEY) == 0
+
+    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
+            patch.object(purge_queue, "get_redis", return_value=redis_client):
+        ranker.search("bananas", [])
+
+    assert [d.url for d in drain_purge_queue(10, redis_client)] == [BAD.url]

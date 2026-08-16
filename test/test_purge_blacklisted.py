@@ -1,7 +1,7 @@
 import pytest
 
 from mwmbl.indexer.index import tokenize_document
-from mwmbl.indexer.index_batches import index_pages, preprocess_documents
+from mwmbl.indexer.index_batches import index_pages, index_results_against_query, preprocess_documents
 from mwmbl.indexer.purge_blacklisted import pages_for_document, purge_documents
 from mwmbl.tinysearchengine.indexer import Document, PAGE_SIZE, TinyIndex
 
@@ -37,13 +37,9 @@ def test_purge_removes_a_document_from_every_page_it_is_filed_under(index_path):
         assert len(pages_for_document(tiny_index, BAD)) > 1
         removed = purge_documents(tiny_index, [BAD])
 
-    assert removed == {"badsite.test": len(pages_for_document_count(index_path, BAD))}
+    # One document removed, however many pages it took to do it.
+    assert removed == {"badsite.test": 1}
     assert "https://badsite.test/apples" not in urls_in_index(index_path)
-
-
-def pages_for_document_count(index_path, document):
-    with TinyIndex(Document, index_path, 'r') as tiny_index:
-        return pages_for_document(tiny_index, document)
 
 
 def test_purge_leaves_other_documents_on_shared_pages_alone(index_path):
@@ -104,3 +100,65 @@ def test_pages_for_document_matches_the_indexer(index_path):
         tokens = tokenize_document(BAD.url, BAD.title, BAD.extract, BAD.score).tokens
         expected = {tiny_index.get_key_page_index(token) for token in tokens}
         assert pages_for_document(tiny_index, BAD) == expected
+
+
+# ---------------------------------------------------------------------------
+# Copies filed under a term rather than under the document's own tokens
+# ---------------------------------------------------------------------------
+#
+# index_results_against_query files a document under the *query's* terms, and curation
+# files it under the curated term. Those terms are arbitrary, so recomputing
+# tokenize_document() does not find those pages: without the term on the document, the
+# purge removes nothing and the next query re-queues it, forever.
+
+def test_purge_removes_the_copy_filed_under_a_query_term(index_path):
+    # index_results_against_query matches a query term against the document's *full* token
+    # set, but a document is filed under only the first 10 tokens (plus bigrams). "zebra"
+    # is past that cut, so it names a page that recomputing tokenize_document never finds.
+    wordy = Document(title="Bad page about apples", url="https://badsite.test/apples",
+                     extract="apples and oranges and bananas here are many more words "
+                             "including zebra", score=1.0)
+    assert "zebra" not in tokenize_document(wordy.url, wordy.title, wordy.extract, wordy.score).tokens
+
+    index_results_against_query([wordy], "zebra", index_path)
+
+    with TinyIndex(Document, index_path, 'r') as tiny_index:
+        term_page = tiny_index.get_key_page_index("zebra")
+        assert [d.url for d in tiny_index.get_page(term_page)] == [wordy.url]
+
+    queued = Document(title=wordy.title, url=wordy.url, extract=wordy.extract,
+                      score=wordy.score, term="zebra")
+    with TinyIndex(Document, index_path, 'w') as tiny_index:
+        assert purge_documents(tiny_index, [queued]) == {"badsite.test": 1}
+
+    assert wordy.url not in urls_in_index(index_path)
+
+
+def test_a_document_with_no_term_still_purges_by_its_tokens(index_path):
+    index(index_path, [BAD, GOOD])
+
+    with TinyIndex(Document, index_path, 'w') as tiny_index:
+        assert purge_documents(tiny_index, [BAD]) == {"badsite.test": 1}
+
+    assert BAD.url not in urls_in_index(index_path)
+
+
+def test_removal_counts_are_per_url_not_per_page(index_path):
+    """A document lives on a dozen or more pages; counting each removal would report an
+    order of magnitude more documents purged than there were."""
+    index(index_path, [BAD])
+
+    with TinyIndex(Document, index_path, 'w') as tiny_index:
+        assert len(pages_for_document(tiny_index, BAD)) > 1
+        assert purge_documents(tiny_index, [BAD]) == {"badsite.test": 1}
+
+
+def test_pages_for_document_includes_the_term_page(index_path):
+    with TinyIndex(Document, index_path, 'r') as tiny_index:
+        without_term = pages_for_document(tiny_index, BAD)
+        with_term = pages_for_document(
+            tiny_index,
+            Document(title=BAD.title, url=BAD.url, extract=BAD.extract, score=BAD.score,
+                     term="wibble"))
+
+        assert with_term == without_term | {tiny_index.get_key_page_index("wibble")}

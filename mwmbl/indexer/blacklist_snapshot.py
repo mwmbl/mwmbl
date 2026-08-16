@@ -48,6 +48,7 @@ from mwmbl.indexer.blacklist_providers import (
     BuiltInRulesBlacklistProvider,
     CombinedBlacklistProvider,
     RemoteListBlacklistProvider,
+    domain_and_parents,
 )
 
 logger = getLogger(__name__)
@@ -199,6 +200,14 @@ class SnapshotBlacklist:
             logger.warning("Blacklist snapshot version %s present but blob is missing", version[:12])
             return False
 
+        if len(blob) % HASH_DTYPE.itemsize != 0:
+            # np.frombuffer would raise, and this runs at import time via search_setup, so
+            # a truncated blob would stop every web worker from starting. The published
+            # snapshot is always a whole number of hashes, so this means a bad write.
+            logger.error("Blacklist snapshot version %s is %d bytes, not a multiple of %d; ignoring it",
+                         version[:12], len(blob), HASH_DTYPE.itemsize)
+            return False
+
         array = np.frombuffer(blob, dtype=HASH_DTYPE)
         self._array = array
         self._version = version
@@ -228,7 +237,14 @@ class SnapshotBlacklist:
             finally:
                 self._loading = False
 
-        threading.Thread(target=load, name="blacklist-snapshot-refresh", daemon=True).start()
+        try:
+            threading.Thread(target=load, name="blacklist-snapshot-refresh", daemon=True).start()
+        except RuntimeError:
+            # The thread never ran, so nothing will clear _loading, and _maybe_refresh
+            # would then return early for the life of the process - this worker would
+            # keep filtering against whatever snapshot it last managed to load.
+            self._loading = False
+            logger.exception("Could not start the blacklist snapshot refresh thread")
 
     def filter_blacklisted(self, domains: Iterable[str]) -> set[str]:
         """Return the subset of these domains that are blacklisted."""
@@ -248,7 +264,18 @@ class SnapshotBlacklist:
         if not remaining:
             return blacklisted
 
-        hashes = hash_domains(remaining)
+        # The lists hold apex rules, so a domain is blacklisted if it *or any parent* is
+        # listed - see domain_and_parents. Every candidate goes into one flat array so
+        # this stays a single vectorised search; candidate_domains maps each hit back to
+        # the domain that was asked about. A typical host contributes 2-3 candidates.
+        candidates = []
+        candidate_domains = []
+        for domain in remaining:
+            for candidate in domain_and_parents(domain):
+                candidates.append(candidate)
+                candidate_domains.append(domain)
+
+        hashes = hash_domains(candidates)
         positions = np.searchsorted(array, hashes)
         # searchsorted can return len(array) for a hash above every entry; clamp so the
         # lookup below stays in bounds. Index 0 is always a safe stand-in because the
@@ -256,7 +283,7 @@ class SnapshotBlacklist:
         positions[positions >= len(array)] = 0
         found = array[positions] == hashes
 
-        blacklisted.update(domain for domain, hit in zip(remaining, found) if hit)
+        blacklisted.update(domain for domain, hit in zip(candidate_domains, found) if hit)
         return blacklisted
 
     def is_domain_blacklisted(self, domain: str) -> bool:

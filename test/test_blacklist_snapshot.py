@@ -161,3 +161,66 @@ def test_hashes_above_every_entry_do_not_index_out_of_bounds(redis_client):
     # Try enough domains that at least one hashes above and one below the single entry.
     candidates = [f"candidate{i}.test" for i in range(100)]
     assert blacklist.filter_blacklisted(candidates) == set()
+
+
+# ---------------------------------------------------------------------------
+# Subdomain matching
+# ---------------------------------------------------------------------------
+#
+# The remote lists are apex rules - HaGeZi's file header says "Syntax: Domains (without
+# subdomains)" - so an entry has to cover the subdomains of that domain too, starting
+# with the www. form most sites actually serve.
+
+@pytest.fixture
+def apex_blacklist(redis_client):
+    refresh_snapshot(CombinedBlacklistProvider([FakeRemoteProvider({"badsite.test"})]), redis_client)
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()),
+                                  redis_client=redis_client)
+    blacklist.load_now()
+    return blacklist
+
+
+@pytest.mark.parametrize("domain", [
+    "badsite.test",
+    "www.badsite.test",
+    "images.badsite.test",
+    "a.deeply.nested.badsite.test",
+])
+def test_an_apex_entry_covers_its_subdomains(apex_blacklist, domain):
+    assert apex_blacklist.is_domain_blacklisted(domain) is True
+
+
+@pytest.mark.parametrize("domain", [
+    "badsite.test.example.com",   # the entry is a prefix, not a suffix
+    "notbadsite.test",            # suffix of the string, but not a parent domain
+    "example.test",               # shares only the TLD
+])
+def test_an_apex_entry_does_not_cover_unrelated_domains(apex_blacklist, domain):
+    assert apex_blacklist.is_domain_blacklisted(domain) is False
+
+
+def test_a_tld_is_never_a_candidate(redis_client):
+    """Matching down to a bare TLD would take out every domain under it."""
+    refresh_snapshot(CombinedBlacklistProvider([FakeRemoteProvider({"test"})]), redis_client)
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()),
+                                  redis_client=redis_client)
+    blacklist.load_now()
+
+    assert blacklist.is_domain_blacklisted("innocent.test") is False
+
+
+def test_a_truncated_blob_is_ignored_rather_than_raising(provider, redis_client):
+    """load_now() runs at import time via search_setup, so raising here would stop every
+    web worker from starting."""
+    refresh_snapshot(provider, redis_client)
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()),
+                                  redis_client=redis_client)
+    blacklist.load_now()
+    assert blacklist.is_domain_blacklisted("badsite.test") is True
+
+    redis_client.set(SNAPSHOT_KEY, redis_client.get(SNAPSHOT_KEY)[:-3])
+    redis_client.set(SNAPSHOT_VERSION_KEY, "a-new-version")
+
+    assert blacklist.load_now() is False
+    # The good array it already had is kept rather than being replaced by a bad one.
+    assert blacklist.is_domain_blacklisted("badsite.test") is True

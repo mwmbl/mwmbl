@@ -9,6 +9,15 @@ token hashes to one page - so a document typically lives on a dozen or more page
 removing it from just the page you happened to find it on leaves it retrievable by every
 other term. tokenize_document() is a pure function of the url/title/extract/score stored
 in the index, so recomputing it recovers that full token set exactly.
+
+Not every copy of a document comes from its own tokens, though. index_results_against_query
+files documents under the *query's* unigrams and bigrams, and curation files them under the
+curated term; those terms are arbitrary and unrecoverable from the document's text. Each
+such copy carries the term it was filed under, so the copy that retrieval surfaced is
+removed along with the token pages. Other copies of the same URL under other terms are left
+for the queries that surface them, which is what makes the loop converge: every purge
+removes at least the copy that was queued, so no document can churn through the queue
+forever.
 """
 from collections import defaultdict
 from logging import getLogger
@@ -22,9 +31,16 @@ logger = getLogger(__name__)
 
 
 def pages_for_document(index: TinyIndex, document: Document) -> set[int]:
-    """Every page this document is filed under."""
+    """Every page this copy of the document is filed under.
+
+    The document's own tokens, plus the term it was filed under if it has one - a query
+    term or a curated term, neither of which is derivable from the document's text.
+    """
     tokenized = tokenize_document(document.url, document.title, document.extract, document.score)
-    return {index.get_key_page_index(token) for token in tokenized.tokens}
+    pages = {index.get_key_page_index(token) for token in tokenized.tokens}
+    if document.term:
+        pages.add(index.get_key_page_index(document.term))
+    return pages
 
 
 def purge_documents(index: TinyIndex, documents: Iterable[Document],
@@ -59,7 +75,9 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
         for page_index in pages_for_document(index, document):
             pages_to_urls[page_index].add(document.url)
 
-    removed_by_domain: dict[str, int] = defaultdict(int)
+    # Counted by URL, not by (page, document): one document occupies a dozen or more
+    # pages, so counting each removal would report an order of magnitude too many.
+    removed_urls_by_domain: dict[str, set[str]] = defaultdict(set)
     for page_index, urls in pages_to_urls.items():
         page = index.get_page(page_index)
         kept = [d for d in page if d.url not in urls]
@@ -69,12 +87,13 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
         for document in page:
             if document.url in urls:
                 try:
-                    removed_by_domain[get_domain(document.url)] += 1
+                    removed_urls_by_domain[get_domain(document.url)].add(document.url)
                 except ValueError:
-                    removed_by_domain[document.url] += 1
+                    removed_urls_by_domain[document.url].add(document.url)
         index.store_in_page(page_index, kept)
 
+    removed_by_domain = {domain: len(urls) for domain, urls in removed_urls_by_domain.items()}
     if removed_by_domain:
         logger.info("Purged %d documents across %d pages from %d URLs",
                     sum(removed_by_domain.values()), len(pages_to_urls), len(target_urls))
-    return dict(removed_by_domain)
+    return removed_by_domain
