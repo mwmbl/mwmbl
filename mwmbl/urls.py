@@ -20,6 +20,7 @@ from django.views.generic import RedirectView
 from debug_toolbar.toolbar import debug_toolbar_urls
 
 import mwmbl.crawler.app as crawler
+from mwmbl.admin_views import blacklist_status_view
 from mwmbl.api import api as v1_api, v2_api, register_routers
 from mwmbl.search_setup import queued_batches, ranker, batch_cache
 from mwmbl.tinysearchengine import search
@@ -37,6 +38,9 @@ def trigger_error(request):
 
 
 urlpatterns = [
+    # Before admin.site.urls so the admin catch-all does not shadow it. Access is gated by
+    # staff_member_required on the view, matching the rest of the admin.
+    path('admin/blacklist-status/', blacklist_status_view, name="blacklist_status"),
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
 

@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -622,3 +623,109 @@ def test_super_search_module_has_no_blocking_imports():
     source = path.read_text()
     assert "\nimport requests" not in source and "\nfrom requests " not in source
     assert "time.sleep" not in source
+
+
+# ---------------------------------------------------------------------------
+# Blacklist
+# ---------------------------------------------------------------------------
+#
+# Super Search bypasses both of the filters that cover normal search: it indexes via
+# index_results_against_query rather than index_documents, and it emits its own result
+# frames rather than going through Ranker.get_results.
+
+def _stub_blacklist(monkeypatch, domains: set[str]):
+    import mwmbl.tinysearchengine.super_search as ss
+
+    def fake_find(documents):
+        return {d.url for d in documents if urlparse(d.url).netloc in domains}
+
+    monkeypatch.setattr(ss, "find_blacklisted_urls", fake_find)
+
+
+@pytest.mark.django_db
+def test_blacklisted_source_results_are_not_shown(client, api_key, monkeypatch):
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Bad", url="https://badsite.test/x", extract="bad"),
+            Document(title="Good", url="https://good.test/x", extract="good"),
+        ],
+    })
+    _stub_scoring(monkeypatch, [0.9, 0.5] + [0.0] * 20)
+    _stub_blacklist(monkeypatch, {"badsite.test"})
+    monkeypatch.setattr(
+        "mwmbl.tinysearchengine.super_search.crawl_url",
+        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None})
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    events = _parse_sse(_read_stream(response))
+
+    urls = [d["url"] for t, d in events if t == "result_promoted"]
+    for _, data in events:
+        if data and "results" in data:
+            urls.extend(r["url"] for r in data["results"])
+
+    assert "https://badsite.test/x" not in urls
+    assert "https://good.test/x" in urls
+
+
+@pytest.mark.django_db
+def test_blacklisted_results_are_not_indexed(client, api_key, monkeypatch):
+    """_index_results calls index_results_against_query directly, so the index-time
+    filter in index_documents never sees these documents."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [
+            Document(title="Bad", url="https://badsite.test/x", extract="bad"),
+            Document(title="Good", url="https://good.test/x", extract="good"),
+        ],
+    })
+    _stub_scoring(monkeypatch, [0.9, 0.5] + [0.0] * 20)
+    _stub_blacklist(monkeypatch, {"badsite.test"})
+    monkeypatch.setattr(
+        "mwmbl.tinysearchengine.super_search.crawl_url",
+        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None})
+
+    indexed = []
+
+    def fake_index(docs, query, path):
+        indexed.extend(d.url for d in docs)
+        return len(docs)
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.index_results_against_query", fake_index)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    _read_stream(response)
+
+    assert indexed == ["https://good.test/x"]
+
+
+@pytest.mark.django_db
+def test_blacklisted_links_are_not_crawled(client, api_key, monkeypatch):
+    """Links are filtered before the crawl, so a blacklisted page is never fetched."""
+    cache.delete(_super_search_monthly_key(api_key.user.id))
+    _stub_sources(monkeypatch, {
+        "hn": [Document(title="Parent", url="https://good.test/", extract="parent")],
+    })
+    _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
+    _stub_blacklist(monkeypatch, {"badsite.test"})
+
+    crawled = []
+
+    def fake_crawl(url, redis):
+        crawled.append(url)
+        if url == "https://good.test/":
+            return {"url": url, "status": 200, "timestamp": 0, "error": None,
+                    "content": {"title": "Parent", "extract": "parent",
+                                "links": ["https://badsite.test/x", "https://other.test/y"],
+                                "extra_links": []}}
+        return {"url": url, "status": 200, "timestamp": 0, "error": None,
+                "content": {"title": "Child", "extract": "child", "links": [], "extra_links": []}}
+
+    monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
+
+    response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
+    _read_stream(response)
+
+    assert "https://badsite.test/x" not in crawled
+    assert "https://other.test/y" in crawled

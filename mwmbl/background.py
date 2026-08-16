@@ -1,9 +1,11 @@
 """
 Script that updates data in a background process.
 
-Also contains Django Background Tasks for periodic quota maintenance:
+Also contains Django Background Tasks for periodic maintenance:
   - sync_search_counts: syncs Redis monthly counters → DB once per hour
   - report_usage_to_polar: reports billable usage overage to Polar once per hour
+  - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
+  - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
 """
 import logging
 import sys
@@ -15,19 +17,27 @@ from time import sleep
 from background_task import background
 from django.conf import settings
 from django.core.cache import cache
+from redis import Redis
 
 from mwmbl import pricing
+from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer import index_batches, historical
 from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
+from mwmbl.indexer.purge_blacklisted import purge_documents
+from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
 from mwmbl.models import OldIndex, UsageBucket
 from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 from mwmbl.tinysearchengine.copy_index import copy_pages
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 NUM_PAGES_TO_COPY = 1024
 
 
 basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
+
+stats_manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
 
 
 def run(data_path: str):
@@ -131,6 +141,47 @@ def sync_search_counts():
             )
         except Exception:
             logger.exception("Error syncing search count for key %s", key)
+
+
+# ---------------------------------------------------------------------------
+# Blacklisted-domain maintenance (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+@background(schedule=0)
+def refresh_blacklist_snapshot():
+    """
+    Rebuild the blacklist snapshot that the search workers filter against.
+
+    This is the only place the multi-megabyte remote blocklists are downloaded and
+    parsed. Search workers only ever read the ~11 MB hash array this publishes to Redis,
+    so no query ever waits on a blocklist fetch. See mwmbl.indexer.blacklist_snapshot.
+    """
+    refresh_snapshot()
+
+
+@background(schedule=0)
+def purge_blacklisted_from_queue():
+    """
+    Remove the documents that retrieval filtered out from the index itself.
+
+    Retrieval already guarantees these are never shown; this closes the loop so the same
+    documents are not re-filtered on every future query. The queue is best-effort, and
+    that is fine: anything lost is re-queued the next time a query surfaces it.
+    """
+    documents = drain_purge_queue(settings.BLACKLIST_PURGE_BATCH_SIZE)
+    if not documents:
+        return
+
+    blacklist = get_snapshot_blacklist()
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    with TinyIndex(Document, str(index_path), 'w') as index:
+        removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
+
+    num_removed = sum(removed_by_domain.values())
+    stats_manager.record_blacklisted_removed(num_removed)
+
+    logger.info("Purged %d documents from the index across %d domains; %d still queued",
+                num_removed, len(removed_by_domain), queue_size())
 
 
 @background(schedule=0)

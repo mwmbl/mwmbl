@@ -14,15 +14,18 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+from django.conf import settings
 from requests.adapters import HTTPAdapter, Retry
 from requests.exceptions import RetryError
 
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
+from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import request_cache
+from mwmbl.utils import get_domain, request_cache
 
 
 logger = getLogger(__name__)
@@ -210,6 +213,32 @@ def get_wiki_score(url):
     return WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
 
 
+def find_blacklisted_urls(documents: list[Document]) -> set[str]:
+    """URLs among these documents whose domain is blacklisted.
+
+    Enforcing the blacklist here, on the read path, is what actually guarantees a
+    blacklisted domain is never shown. The write-path checks (crawl assignment, link
+    discovery, index_documents) only stop *new* content: they do nothing about the
+    documents already in the index from before a domain was blacklisted, and the index is
+    far too large to sweep on demand. Filtering at retrieval makes a newly blacklisted
+    domain disappear from results immediately, and the purge queue then cleans up the
+    index in the background so the work is not repeated forever.
+
+    Cost is ~94us for a typical query's ~200 distinct domains - see blacklist_snapshot.
+    """
+    domains_to_urls = defaultdict(set)
+    for document in documents:
+        try:
+            domain = get_domain(document.url)
+        except ValueError:
+            # Unparseable URL - keep it, matching index_batches.filter_blacklisted_documents.
+            continue
+        domains_to_urls[domain].add(document.url)
+
+    blacklisted_domains = get_snapshot_blacklist().filter_blacklisted(domains_to_urls)
+    return {url for domain in blacklisted_domains for url in domains_to_urls[domain]}
+
+
 def deduplicate(results, seen_titles):
     deduplicated_results = []
     for result in results:
@@ -321,10 +350,40 @@ class Ranker:
                 pages += items
 
         external_search_items = self.external_search(q) if use_external_search else []
-        ordered_results = self.order_results(terms, pages + additional_results + external_search_items, is_complete)
+        candidates = pages + additional_results + external_search_items
+        candidates, curated_items = self._remove_blacklisted(candidates, curated_items, index_items=pages)
+
+        ordered_results = self.order_results(terms, candidates, is_complete)
         deduplicated_results = deduplicate(curated_items + ordered_results, set())
         state_fixed = [fix_document_state(result) for result in deduplicated_results]
         return state_fixed, terms, completions
+
+    @staticmethod
+    def _remove_blacklisted(candidates: list[Document], curated_items: list[Document],
+                            index_items: list[Document]) -> tuple[list[Document], list[Document]]:
+        """Drop blacklisted documents from a result set and queue the indexed ones for purging.
+
+        Curated items are filtered separately because they bypass order_results entirely -
+        they are prepended straight into deduplicate() - so filtering only `candidates`
+        would leave a hole for any blacklisted domain that had been curated for a term.
+
+        Only index-sourced documents go on the purge queue: there is nothing to purge for
+        a Wikipedia or Super Search result, and nothing to purge for the caller-supplied
+        additional_results either.
+        """
+        if not settings.BLACKLIST_FILTER_AT_RETRIEVAL:
+            return candidates, curated_items
+
+        blacklisted_urls = find_blacklisted_urls(candidates + curated_items)
+        if not blacklisted_urls:
+            return candidates, curated_items
+
+        logger.info("Filtered %d blacklisted documents from results", len(blacklisted_urls))
+
+        enqueue_for_purge([d for d in index_items if d.url in blacklisted_urls])
+
+        return ([d for d in candidates if d.url not in blacklisted_urls],
+                [d for d in curated_items if d.url not in blacklisted_urls])
 
     def external_search(self, q: str):
         return []
@@ -332,7 +391,11 @@ class Ranker:
     def get_raw_results(self, query: str):
         tokens = tokenize(query)
         term = ' '.join(tokens)
-        return self.tiny_index.retrieve(term)
+        results = self.tiny_index.retrieve(term)
+        # /raw bypasses get_results(), so it needs its own filter or it is a way to read
+        # blacklisted documents straight out of the index.
+        filtered, _ = self._remove_blacklisted(results, [], index_items=results)
+        return filtered
 
 
 class HeuristicRanker(Ranker):

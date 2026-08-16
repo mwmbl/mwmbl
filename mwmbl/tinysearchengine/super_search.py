@@ -43,7 +43,7 @@ from mwmbl.search_setup import index_path, ltr_model
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
-from mwmbl.tinysearchengine.rank import score_result_whole
+from mwmbl.tinysearchengine.rank import find_blacklisted_urls, score_result_whole
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
 from mwmbl.tokenizer import tokenize
 
@@ -294,6 +294,27 @@ def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
     return matches > len(terms) / 2
 
 
+def _drop_blacklisted(docs: list[Document]) -> list[Document]:
+    """Documents on blacklisted domains, dropped before they are shown, crawled or indexed.
+
+    Super Search sits outside both of the filters that cover normal search. It reaches the
+    index by its own route - _index_results calls index_results_against_query rather than
+    index_documents - and it emits its own result frames rather than going through
+    Ranker.get_results, so neither the write-path nor the read-path check sees these
+    documents. Filtering here is what makes the two guarantees hold for this path too.
+
+    Nothing is queued for purging: these documents come from external search APIs and
+    crawls, so there is nothing in the index yet to purge. Dropping them at the point they
+    arrive is what keeps it that way.
+    """
+    blacklisted_urls = find_blacklisted_urls(docs)
+    if not blacklisted_urls:
+        return docs
+
+    logger.info("Dropped %d blacklisted documents from super search", len(blacklisted_urls))
+    return [doc for doc in docs if doc.url not in blacklisted_urls]
+
+
 def _heuristic_score_docs(query: str, docs: list[Document]) -> list[float]:
     terms = tokenize(query)
     if not terms:
@@ -376,7 +397,9 @@ async def _follow_links(
         return
 
     terms = tokenize(query)
-    proxy_docs = [Document(title=_title_from_url(u), url=u, extract="") for u in raw_links]
+    # Filtered before the crawl below, so a blacklisted link is never even fetched.
+    proxy_docs = _drop_blacklisted(
+        [Document(title=_title_from_url(u), url=u, extract="") for u in raw_links])
     proxy_scores = [_url_term_score(d.url, terms) for d in proxy_docs]
 
     ranked = sorted(zip(proxy_docs, proxy_scores), key=lambda x: -x[1])[:max_links]
@@ -516,6 +539,7 @@ async def _run_pipeline(
             if error is not None:
                 await emit("source_failed", SourceFailedEvent(source=name, error=error))
                 continue
+            docs = _drop_blacklisted(docs)
             await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
             if not docs:
                 continue

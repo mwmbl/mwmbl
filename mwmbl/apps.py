@@ -87,10 +87,15 @@ class MwmblConfig(AppConfig):
 
         try:
             from background_task.models import Task
-            from mwmbl.background import sync_search_counts, report_usage_to_polar
+            from mwmbl.background import (
+                purge_blacklisted_from_queue, refresh_blacklist_snapshot, report_usage_to_polar,
+                sync_search_counts,
+            )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
             POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
+            BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
+            BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -99,6 +104,19 @@ class MwmblConfig(AppConfig):
             # Report billable usage overage to Polar once per hour (3600 seconds)
             if not Task.objects.filter(task_name=POLAR_REPORT_TASK).exists():
                 report_usage_to_polar(repeat=3600, repeat_until=None)
+
+            # Rebuild the blacklist snapshot the search path filters against. schedule=0
+            # on the task means the first run happens immediately rather than one full
+            # refresh interval after deploy, which matters because until it lands the
+            # search workers have only the built-in rules to go on.
+            if not Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK).exists():
+                refresh_blacklist_snapshot(
+                    repeat=settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS, repeat_until=None)
+
+            # Drain the queue of blacklisted documents that retrieval has filtered out
+            if not Task.objects.filter(task_name=BLACKLIST_PURGE_TASK).exists():
+                purge_blacklisted_from_queue(
+                    repeat=settings.BLACKLIST_PURGE_INTERVAL_SECONDS, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
