@@ -70,8 +70,8 @@ def _reset_wiki_circuit():
 
 
 def _get_wiki_results_with_session(session):
-    with patch.object(rank, "request_cache") as mock_request_cache:
-        mock_request_cache.return_value.__enter__.return_value = session
+    with patch("mwmbl.tinysearchengine.rank.requests.Session") as mock_session:
+        mock_session.return_value.__enter__.return_value = session
         return get_wiki_results("query", 5)
 
 
@@ -109,10 +109,10 @@ def test_wiki_query_text_containing_429_is_not_mistaken_for_rate_limit():
 def test_open_wiki_circuit_short_circuits_without_calling_wikipedia():
     rank._trip_wiki_circuit()
 
-    with patch.object(rank, "request_cache") as mock_request_cache:
+    with patch("mwmbl.tinysearchengine.rank.requests.Session") as mock_session:
         results = get_wiki_results("query", 5)
 
-    mock_request_cache.assert_not_called()
+    mock_session.assert_not_called()
     assert results == []
 
 

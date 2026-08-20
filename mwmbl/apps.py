@@ -88,14 +88,15 @@ class MwmblConfig(AppConfig):
         try:
             from background_task.models import Task
             from mwmbl.background import (
-                purge_blacklisted_from_queue, refresh_blacklist_snapshot, report_usage_to_polar,
-                sync_search_counts,
+                index_wiki_results_from_queue, purge_blacklisted_from_queue,
+                refresh_blacklist_snapshot, report_usage_to_polar, sync_search_counts,
             )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
             POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
+            WIKI_INDEX_TASK = "mwmbl.background.index_wiki_results_from_queue"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -117,6 +118,12 @@ class MwmblConfig(AppConfig):
             if not Task.objects.filter(task_name=BLACKLIST_PURGE_TASK).exists():
                 purge_blacklisted_from_queue(
                     repeat=settings.BLACKLIST_PURGE_INTERVAL_SECONDS, repeat_until=None)
+
+            # Write the Wikipedia results searches have found into the index. Until this
+            # runs, a repeated query re-fetches from Wikipedia, so the interval is short.
+            if not Task.objects.filter(task_name=WIKI_INDEX_TASK).exists():
+                index_wiki_results_from_queue(
+                    repeat=settings.WIKI_CACHE_INDEX_INTERVAL_SECONDS, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

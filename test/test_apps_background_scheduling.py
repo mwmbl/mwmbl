@@ -21,8 +21,10 @@ SYNC_TASK = "mwmbl.background.sync_search_counts"
 POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
 BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
 BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
+WIKI_INDEX_TASK = "mwmbl.background.index_wiki_results_from_queue"
 
-ALL_TASKS = {SYNC_TASK, POLAR_REPORT_TASK, BLACKLIST_SNAPSHOT_TASK, BLACKLIST_PURGE_TASK}
+ALL_TASKS = {SYNC_TASK, POLAR_REPORT_TASK, BLACKLIST_SNAPSHOT_TASK, BLACKLIST_PURGE_TASK,
+             WIKI_INDEX_TASK}
 
 
 @pytest.fixture(autouse=True)
@@ -83,3 +85,12 @@ def test_blacklist_tasks_repeat_at_the_configured_intervals():
 
     assert snapshot.repeat == settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS
     assert purge.repeat == settings.BLACKLIST_PURGE_INTERVAL_SECONDS
+
+
+@pytest.mark.django_db
+def test_wiki_index_task_repeats_at_the_configured_interval():
+    MwmblConfig._schedule_background_tasks()
+
+    wiki_index = Task.objects.get(task_name=WIKI_INDEX_TASK)
+
+    assert wiki_index.repeat == settings.WIKI_CACHE_INDEX_INTERVAL_SECONDS

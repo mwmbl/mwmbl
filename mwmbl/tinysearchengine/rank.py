@@ -7,13 +7,13 @@ import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
-from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+import requests
 from django.conf import settings
 from requests.adapters import HTTPAdapter, Retry
 from requests.exceptions import RetryError
@@ -22,10 +22,13 @@ from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.purge_queue import enqueue_for_purge
+from mwmbl.indexer.wiki_cache import (
+    WIKI_CACHE_TERM_PREFIX, enqueue_wiki_results, get_cached_wiki_results,
+)
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import get_domain, request_cache
+from mwmbl.utils import get_domain
 
 
 logger = getLogger(__name__)
@@ -51,7 +54,11 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
         'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
 
-    if features[f'match_terms'] <= len(terms) / 2 and result.state is None:
+    # A curated document is exempt from the minimum-term-match rule: a curator put it
+    # there deliberately. FROM_WIKI is not curation - it is crawled-equivalent content,
+    # now stored in the index like any other document - so it gets no exemption, either
+    # at query time or in the write-time page ordering in sort_documents.
+    if features[f'match_terms'] <= len(terms) / 2 and result.state in (None, DocumentState.FROM_WIKI):
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
@@ -269,6 +276,11 @@ def remove_curate_state(state: DocumentState):
 
 
 class Ranker:
+    # Whether Wikipedia results are cached in the index. Off for rankers that read a
+    # remote index - there a lookup is an HTTP round trip to /raw, which does not serve
+    # cache terms anyway - or that fetch Wikipedia themselves.
+    cache_wiki_results = True
+
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
         self.completer = completer
@@ -322,16 +334,28 @@ class Ranker:
             completions = []
             retrieval_terms = set(terms)
 
-        # Check for curation
+        # Check for curation. A query that happens to look like a cache term is not one:
+        # see lookup_terms below.
         curation_term = " ".join(terms)
-        curation_items = self.tiny_index.retrieve(curation_term)
-        curated_items = [d for d in curation_items if d.state is not None
+        curation_items = ([] if curation_term.startswith(WIKI_CACHE_TERM_PREFIX)
+                          else self.tiny_index.retrieve(curation_term))
+        # FROM_WIKI is the one non-None state that nobody curated: it is stamped on
+        # Wikipedia results stored automatically by the cache, which for a one- or two-word
+        # query land under exactly this term. Treating those as curated would pin them above
+        # everything and skip ranking entirely. FROM_WIKI_APPROVED is real curation and stays.
+        curated_items = [d for d in curation_items
+                         if d.state is not None and d.state != DocumentState.FROM_WIKI
                          and d.term == curation_term]
 
         bigrams = set(get_bigrams(len(terms), terms))
 
+        # A user's own query must never be usable as a cache lookup, or searching for a
+        # literal "#wiki-0123456789abcdef" would read whatever query hashes to it.
+        lookup_terms = {term for term in retrieval_terms | bigrams
+                        if not term.startswith(WIKI_CACHE_TERM_PREFIX)}
+
         pages = []
-        for term in retrieval_terms | bigrams:
+        for term in lookup_terms:
             # An optimisation - we have already retrieved this, so make use of it
             if term == curation_term:
                 items = curation_items
@@ -349,9 +373,25 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        external_search_items = self.external_search(q) if use_external_search else []
+        # Wikipedia results are cached in the index, under a term derived from the query by
+        # keyed hash. A hit means we neither call Wikipedia nor write anything; a miss
+        # fetches live and queues the results for a background write - see wiki_cache.
+        use_cache = use_external_search and self.cache_wiki_results
+        cached_wiki = get_cached_wiki_results(self.tiny_index, q) if use_cache else []
+        if cached_wiki:
+            external_search_items = cached_wiki
+        elif use_external_search:
+            external_search_items = self.external_search(q)
+            if use_cache:
+                enqueue_wiki_results(q, external_search_items)
+        else:
+            external_search_items = []
+
         candidates = pages + additional_results + external_search_items
-        candidates, curated_items = self._remove_blacklisted(candidates, curated_items, index_items=pages)
+        # Cached wiki results count as index items: unlike a live Wikipedia lookup they are
+        # in the index, so a blacklisted one has something to purge.
+        candidates, curated_items = self._remove_blacklisted(
+            candidates, curated_items, index_items=pages + cached_wiki)
 
         ordered_results = self.order_results(terms, candidates, is_complete)
         deduplicated_results = deduplicate(curated_items + ordered_results, set())
@@ -391,6 +431,9 @@ class Ranker:
     def get_raw_results(self, query: str):
         tokens = tokenize(query)
         term = ' '.join(tokens)
+        if term.startswith(WIKI_CACHE_TERM_PREFIX):
+            # /raw is not a way to read the Wikipedia cache either - see get_results.
+            return []
         results = self.tiny_index.retrieve(term)
         # /raw bypasses get_results(), so it needs its own filter or it is a way to read
         # blacklisted documents straight out of the index.
@@ -421,6 +464,7 @@ class HeuristicRanker(Ranker):
         return filtered_results
 
 
+WIKI_USER_AGENT = 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)'
 WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 
@@ -428,7 +472,9 @@ WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for weeks (see request_cache).
+# normal operation. Successful responses are cached in the index for weeks - see
+# mwmbl.indexer.wiki_cache, which replaced a filesystem HTTP cache that grew
+# without bound on the same volume as the index.
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
@@ -481,11 +527,9 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         return []
 
     escaped_query = urllib.parse.quote(s, safe='')
-    headers = {
-        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
-    }
+    headers = {'User-Agent': WIKI_USER_AGENT}
     try:
-        with request_cache(timedelta(weeks=10)) as session:
+        with requests.Session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
@@ -517,7 +561,55 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     return wiki_results
 
 
+WIKI_EXTRACTS_API_URL = ("https://en.wikipedia.org/w/api.php?action=query&prop=extracts"
+                         "&exintro&explaintext&redirects=1&format=json&titles={titles}")
+
+
+def get_wiki_intro_extracts(titles: list[str]) -> dict[str, str]:
+    """The intro paragraph of each of these articles, keyed by title.
+
+    The extract on a search result is the snippet Wikipedia chose *because* it matched the
+    query. That is exactly right for a cache entry, but as permanent index content it is
+    arbitrary - and tokenize_document tokenizes the extract, so it also decides which pages
+    the document ends up filed under. The intro is query-independent, which is both better
+    index content and what leaves the generally indexed copies with nothing whatsoever
+    derived from a user's query.
+
+    Unlike get_wiki_results this runs in the background task, never on the search path.
+    Returns whatever it managed to fetch; the caller keeps the snippet for the rest.
+    """
+    if not titles or _wiki_circuit_open():
+        return {}
+
+    escaped_titles = urllib.parse.quote("|".join(titles), safe='|')
+    headers = {'User-Agent': WIKI_USER_AGENT}
+    try:
+        with requests.Session() as session:
+            session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
+            response = session.get(WIKI_EXTRACTS_API_URL.format(titles=escaped_titles),
+                                   headers=headers, timeout=10)
+            wiki_response = response.json()
+    except RetryError as e:
+        if _is_wiki_rate_limited(e):
+            _trip_wiki_circuit()
+        logger.warning("Failed to fetch Wikipedia intros: %s", type(e).__name__)
+        return {}
+    except Exception as e:
+        logger.warning("Failed to fetch Wikipedia intros: %s", type(e).__name__)
+        return {}
+
+    pages = wiki_response.get('query', {}).get('pages', {})
+    return {page['title']: page['extract'].strip()
+            for page in pages.values()
+            if page.get('title') and page.get('extract', '').strip()}
+
+
 class HeuristicAndWikiRanker(HeuristicRanker):
+    # This ranker fetches Wikipedia itself in search() rather than through
+    # external_search(), and every caller in the tree hands it a RemoteIndex, so the index
+    # cache is both unusable and unreachable here - see Ranker.cache_wiki_results.
+    cache_wiki_results = False
+
     def __init__(
             self,
             tiny_index: TinyIndex,
