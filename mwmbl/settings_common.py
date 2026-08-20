@@ -332,3 +332,21 @@ BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300     # how often a worker checks Redis for
 BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60   # how often the snapshot is rebuilt from the remote lists
 BLACKLIST_PURGE_INTERVAL_SECONDS = 300     # how often the purge queue is drained
 BLACKLIST_PURGE_BATCH_SIZE = 1000          # documents removed from the index per purge run
+
+# Wikipedia result caching in the index. Results used to be cached by requests-cache in a
+# filesystem backend under REQUEST_CACHE_PATH, which sits on the same volume as the index,
+# grew without bound (one file per response, no LRU, nothing calling delete(expired=True))
+# and wrote the raw user query to disk. They now live in the index itself, which is a
+# fixed-size preallocated file, so caching costs no additional disk at all.
+WIKI_CACHE_ENABLED = os.environ.get("WIKI_CACHE_ENABLED", "true").lower() != "false"
+WIKI_CACHE_TTL_SECONDS = 10 * 7 * 24 * 60 * 60   # matches the old request_cache expiry
+WIKI_CACHE_MAX_ORGANIC_TERM_TOKENS = 2   # queries up to this length can take real query terms
+WIKI_CACHE_INDEX_INTERVAL_SECONDS = 60   # how often the queue of results to index is drained
+WIKI_CACHE_INDEX_BATCH_SIZE = 1000       # queued term-copies written per run
+WIKI_CACHE_MAX_QUEUE_SIZE = 100_000
+# Wikipedia pages we have not seen before also go through the standard indexing path, filed
+# under their own tokens, so they are discoverable generally and not only for the query that
+# surfaced them. That is ~57 pages per document, so it is capped per run.
+WIKI_CACHE_GENERAL_INDEX = os.environ.get("WIKI_CACHE_GENERAL_INDEX", "true").lower() != "false"
+WIKI_CACHE_GENERAL_BATCH_SIZE = 100      # distinct new URLs generally indexed per run
+WIKI_INTRO_BATCH_SIZE = 20               # titles per prop=extracts call

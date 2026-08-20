@@ -6,9 +6,11 @@ Also contains Django Background Tasks for periodic maintenance:
   - report_usage_to_polar: reports billable usage overage to Polar once per hour
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
+  - index_wiki_results_from_queue: writes searches' Wikipedia results into the index
 """
 import logging
 import sys
+from collections import defaultdict
 from datetime import datetime, timezone
 from logging import getLogger, basicConfig
 from pathlib import Path
@@ -26,10 +28,13 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
+from mwmbl.indexer.wiki_cache import drain_wiki_queue, unseen_wiki_urls, wiki_queue_size
 from mwmbl.models import OldIndex, UsageBucket
 from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 from mwmbl.tinysearchengine.copy_index import copy_pages
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.rank import get_wiki_intro_extracts
+from mwmbl.utils import batch
 
 NUM_PAGES_TO_COPY = 1024
 
@@ -182,6 +187,99 @@ def purge_blacklisted_from_queue():
 
     logger.info("Purged %d documents from the index across %d domains; %d still queued",
                 num_removed, len(removed_by_domain), queue_size())
+
+
+# ---------------------------------------------------------------------------
+# Wikipedia results (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+def _index_wiki_term_copies(documents: list[Document], index_path: str) -> None:
+    """Write the queued per-term copies: the cache entry, plus any real query terms."""
+    page_documents = defaultdict(list)
+    with TinyIndex(Document, index_path, 'r') as index:
+        for document in documents:
+            page_documents[index.get_key_page_index(document.term)].append(document)
+
+    # Highest score first. Under the query-hash term sort_documents scores every document
+    # against a term none of them can match, so they all tie and it keeps whatever order
+    # they arrived in - and the queue is a SET drained with SPOP, so that order is
+    # arbitrary. Sorting here means a page too full to take all of a query's results keeps
+    # Wikipedia's top ones rather than three at random.
+    for documents_for_page in page_documents.values():
+        documents_for_page.sort(key=lambda document: -(document.score or 0.0))
+
+    index_batches.index_pages(index_path, page_documents)
+
+
+def _with_intro_extracts(documents: list[Document]) -> list[Document]:
+    """The same documents with the query-chosen snippet replaced by the article intro.
+
+    A search result's extract is the snippet Wikipedia picked because it matched the query.
+    For a document about to be filed under its own tokens that is doubly wrong: it is
+    arbitrary as index content, and tokenize_document tokenizes the extract, so it decides
+    which pages the document lands on. Anything we could not fetch keeps its snippet.
+
+    The term is dropped: these are going through preprocess_documents, which files them
+    under their own tokens, so a query term has no business travelling with them.
+    """
+    extracts = {}
+    titles = [document.title for document in documents]
+    for title_batch in batch(titles, settings.WIKI_INTRO_BATCH_SIZE):
+        extracts.update(get_wiki_intro_extracts(title_batch))
+
+    return [Document(title=document.title,
+                     url=document.url,
+                     extract=extracts.get(document.title, document.extract),
+                     score=document.score,
+                     state=document.state,
+                     last_crawled=document.last_crawled)
+            for document in documents]
+
+
+def _index_unseen_wiki_pages(documents: list[Document], index_path: str) -> int:
+    """Send Wikipedia pages we have not seen before through the standard indexing path."""
+    if not settings.WIKI_CACHE_GENERAL_INDEX:
+        return 0
+
+    unseen = unseen_wiki_urls(documents, settings.WIKI_CACHE_GENERAL_BATCH_SIZE)
+    if not unseen:
+        return 0
+
+    index_batches.index_documents(_with_intro_extracts(unseen), index_path)
+    return len(unseen)
+
+
+@background(schedule=0)
+def index_wiki_results_from_queue():
+    """
+    Write the Wikipedia results that searches have found into the index.
+
+    Search workers only enqueue. An index page write is a read-modify-write, and doing it
+    from every gunicorn worker on a large fraction of searches would have them fighting
+    over the same 4 KB pages, so it is serialised here - the same arrangement as the
+    blacklist purge.
+
+    Each batch does two things: writes the queued per-term copies (the cache entry under
+    the query hash, plus real query terms for the results that passed the anonymisation
+    gate), and sends any URL we have not seen before through the standard indexing path so
+    the page is discoverable generally and not only for the query that surfaced it.
+    """
+    documents = drain_wiki_queue(settings.WIKI_CACHE_INDEX_BATCH_SIZE)
+    if not documents:
+        return
+
+    index_path = str(Path(settings.DATA_PATH) / settings.INDEX_NAME)
+    # General indexing first, term copies second. combine_documents dedupes by URL across a
+    # whole page, not per term, so when a document's own tokens put it on the same page as
+    # one of its term copies, one of the two is dropped - and whichever is written last
+    # wins. The term copies are the ones a search looks up by, so they go last: losing one
+    # of ~57 general copies costs a little discoverability, while losing the cache entry
+    # would mean re-fetching from Wikipedia on every repeat of the query.
+    num_indexed = _index_unseen_wiki_pages(documents, index_path)
+    _index_wiki_term_copies(documents, index_path)
+
+    logger.info("Wrote %d Wikipedia term copies and generally indexed %d new pages; "
+                "%d entries still queued", len(documents), num_indexed, wiki_queue_size())
 
 
 @background(schedule=0)

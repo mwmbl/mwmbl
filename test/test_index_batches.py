@@ -1,16 +1,19 @@
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import fakeredis
 import pytest
+from django.conf import settings
 
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import (
     sort_documents, combine_documents, _merge_user_ids, MAX_USER_IDS,
-    index_results_against_query, index_documents,
+    index_results_against_query, index_documents, index_pages, preprocess_documents,
 )
+from mwmbl.indexer.wiki_cache import wiki_cache_term
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, PAGE_SIZE, TinyIndex
 
 
@@ -269,3 +272,44 @@ def test_index_documents_keeps_everything_when_nothing_blacklisted(index_path):
         index_documents(documents, index_path)
 
     assert "https://example.com/y" in _all_urls(index_path)
+
+
+# ---------------------------------------------------------------------------
+# Wikipedia cache entries on a page being rewritten
+# ---------------------------------------------------------------------------
+
+def test_preprocess_documents_carries_the_state_onto_the_term_copies(index_path):
+    """A Wikipedia page indexed the standard way has to keep reporting source
+    `wikipedia`, so the per-token copies need its state."""
+    document = Document(title="Bananas", url="https://example.com/bananas", extract="fruit",
+                        state=DocumentState.FROM_WIKI)
+
+    page_documents = preprocess_documents([document], index_path)
+
+    copies = [copy for copies in page_documents.values() for copy in copies]
+    assert copies
+    assert {copy.state for copy in copies} == {DocumentState.FROM_WIKI}
+
+
+def test_index_pages_drops_expired_cache_entries_from_a_page_it_rewrites(index_path):
+    """Pages truncate their tail, so cache entries would otherwise pile up on whatever page
+    they landed on and never leave. index_pages is where a page gets rewritten anyway."""
+    cache_term = wiki_cache_term("bananas")
+    stale = Document(title="Stale", url="https://stale.test", extract="", term=cache_term,
+                     state=DocumentState.FROM_WIKI,
+                     last_crawled=int(time.time()) - settings.WIKI_CACHE_TTL_SECONDS - 1)
+
+    with TinyIndex(Document, index_path, 'r') as index:
+        page = index.get_key_page_index(cache_term)
+    index_pages(index_path, {page: [stale]})
+    with TinyIndex(Document, index_path, 'r') as index:
+        assert [d.url for d in index.get_page(page)] == [stale.url]
+
+    # Any later write to that page clears it out.
+    index_pages(index_path, {page: [Document(title="New", url="https://new.test",
+                                             extract="", term=cache_term,
+                                             state=DocumentState.FROM_WIKI,
+                                             last_crawled=int(time.time()))]})
+
+    with TinyIndex(Document, index_path, 'r') as index:
+        assert [d.url for d in index.get_page(page)] == ["https://new.test"]

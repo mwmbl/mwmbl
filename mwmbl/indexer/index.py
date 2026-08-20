@@ -4,7 +4,7 @@ Create a search index
 from typing import Iterable
 from urllib.parse import unquote
 
-from mwmbl.tinysearchengine.indexer import TokenizedDocument
+from mwmbl.tinysearchengine.indexer import Document, TokenizedDocument
 from mwmbl.tokenizer import tokenize, get_bigrams
 
 DEFAULT_SCORE = 0
@@ -64,3 +64,16 @@ def tokenize_document(url, title_cleaned, extract, score):
     # print("High scoring", len(high_scoring_tokens), token_scores, doc)
     document = TokenizedDocument(tokens=list(tokens), url=url, title=title_cleaned, extract=extract, score=score)
     return document
+
+
+def document_token_set(document: Document) -> set[str]:
+    """Unigram tokens of a document's title, URL and extract (no bigrams).
+
+    Lives here rather than next to its callers in index_batches because
+    mwmbl.indexer.wiki_cache needs it too, and index_batches imports
+    mwmbl.tinysearchengine.rank, which imports wiki_cache.
+    """
+    prepared_url = prepare_url_for_tokenizing(unquote(document.url))
+    return (set(tokenize(document.title))
+            | set(tokenize(prepared_url))
+            | set(tokenize(document.extract)))
