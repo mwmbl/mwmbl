@@ -94,3 +94,17 @@ def test_wiki_index_task_repeats_at_the_configured_interval():
     wiki_index = Task.objects.get(task_name=WIKI_INDEX_TASK)
 
     assert wiki_index.repeat == settings.WIKI_CACHE_INDEX_INTERVAL_SECONDS
+
+
+@pytest.mark.django_db
+def test_a_one_off_snapshot_rebuild_does_not_suppress_the_periodic_one():
+    """Approving a domain submission schedules a one-off rebuild under the same task name
+    (mwmbl.signals). One of those sitting in the queue at deploy time must not stop the
+    six-hourly task being registered - that would silently leave the snapshot to whatever
+    approvals happened to trigger."""
+    from mwmbl.background import refresh_blacklist_snapshot
+    refresh_blacklist_snapshot(schedule=600)
+
+    MwmblConfig._schedule_background_tasks()
+
+    assert Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK, repeat__gt=0).count() == 1

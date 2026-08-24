@@ -41,7 +41,9 @@ def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
     start = datetime.utcnow()
-    blacklist_provider = get_default_blacklist_provider()
+    # Take the approved domains from the queue rather than the database: the standalone
+    # crawler is the live caller of this, and it fetches them over HTTP.
+    blacklist_provider = get_default_blacklist_provider(new_item_queue.get_curated_domains_function)
     blacklist_retrieval_time = datetime.utcnow() - start
     logger.info(f"Recording URLs in database for {len(batches)} batches, blacklist provider ready "
                 f"in {blacklist_retrieval_time.total_seconds()} seconds")

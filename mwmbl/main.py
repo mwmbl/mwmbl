@@ -48,7 +48,7 @@ def run():
     from mwmbl.redis_url_queue import RedisURLQueue
     from mwmbl.count_urls import count_urls_continuously
     from mwmbl.indexer.update_urls import update_urls_continuously
-    from mwmbl.search_setup import get_curated_domains
+    from mwmbl.curated_domains import get_curated_domains
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")

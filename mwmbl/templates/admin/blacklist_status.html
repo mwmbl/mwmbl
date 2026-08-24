@@ -106,6 +106,39 @@
       </div>
 
       <div class="module">
+        <h2>Curated domains</h2>
+        <table>
+          <tr>
+            <td class="key">Approved domains</td>
+            <td>{{ curated.count }}</td>
+          </tr>
+          <tr>
+            <td class="key">Still blacklisted</td>
+            <td>
+              {% if curated.still_blacklisted %}
+                <span class="bad">{{ curated.still_blacklisted|length }}</span>
+                &mdash;
+                {% for domain in curated.still_blacklisted %}
+                  <code>{{ domain }}</code>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+              {% else %}
+                <span class="ok">none</span>
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+        <p class="note">
+          Approved domain submissions are subtracted from the remote blocklists when the
+          snapshot is built, so approving a domain is how a false positive gets unblocked.
+          An approval schedules a rebuild {{ curated.approval_delay_seconds }}s later, which
+          collapses a batch of approvals into one rebuild. Domains listed above as still
+          blacklisted are either waiting for that rebuild, or blocked by a local rule that
+          curation does not override &mdash; EXCLUDED_DOMAINS or DOMAIN_BLACKLIST_REGEX in
+          mwmbl/settings.py.
+        </p>
+      </div>
+
+      <div class="module">
         <h2>Purge queue</h2>
         <table>
           <tr>

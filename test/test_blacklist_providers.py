@@ -15,6 +15,7 @@ from mwmbl.indexer.blacklist_providers import (
     AdultContentBlacklistProvider,
     CombinedBlacklistProvider,
     domain_and_parents,
+    domains_to_unblock,
 )
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
 
@@ -225,3 +226,68 @@ def test_excluded_domains_cover_subdomains():
         assert provider.is_domain_blacklisted('fineartteens.com') is True
         assert provider.is_domain_blacklisted('www.fineartteens.com') is True
         assert provider.is_domain_blacklisted('otherfineartteens.com') is False
+
+
+def test_domains_to_unblock_adds_the_apex_for_www_submissions():
+    """Submissions store whatever netloc was submitted, but the lists hold the apex."""
+    assert domains_to_unblock({"www.contactmusic.com"}) == {"www.contactmusic.com", "contactmusic.com"}
+    assert domains_to_unblock({"pudding.cool"}) == {"pudding.cool"}
+    # Only the www. label is stripped: clearing en-academic.com off the strength of an
+    # approved subdomain would unblock every other subdomain too.
+    assert domains_to_unblock({"blog.example.com"}) == {"blog.example.com"}
+
+
+def test_curated_domains_override_the_providers():
+    provider = CombinedBlacklistProvider(
+        [StaticBlacklistProvider({"pudding.cool", "reallybad.example"})],
+        get_exempt_domains=lambda: {"pudding.cool"},
+    )
+
+    assert provider.is_domain_blacklisted('pudding.cool') is False
+    assert provider.is_domain_blacklisted('reallybad.example') is True
+
+
+def test_curated_domains_override_the_built_in_rules():
+    """A moderator's approval beats the adult-content regex, which is what makes the
+    approval flow usable for domains the lists get wrong."""
+    provider = CombinedBlacklistProvider(
+        [BuiltInRulesBlacklistProvider()],
+        get_exempt_domains=lambda: {"adultswim.example"},
+    )
+
+    assert provider.is_domain_blacklisted('adultswim.example') is False
+    assert provider.is_domain_blacklisted('otheradult.example') is True
+
+
+def test_curated_domains_match_either_www_form():
+    provider = CombinedBlacklistProvider(
+        [StaticBlacklistProvider({"contactmusic.com", "www.queer.example"})],
+        get_exempt_domains=lambda: {"www.contactmusic.com", "queer.example"},
+    )
+
+    assert provider.is_domain_blacklisted('contactmusic.com') is False
+    assert provider.is_domain_blacklisted('www.queer.example') is False
+
+
+def test_exempt_domains_are_resolved_once():
+    """Resolving costs a database query or an HTTP fetch, so it happens once per provider,
+    like the remote lists themselves."""
+    calls = []
+
+    def get_exempt_domains():
+        calls.append(1)
+        return {"pudding.cool"}
+
+    provider = CombinedBlacklistProvider(
+        [StaticBlacklistProvider({"pudding.cool"})], get_exempt_domains=get_exempt_domains)
+
+    for _ in range(5):
+        provider.is_domain_blacklisted('pudding.cool')
+
+    assert len(calls) == 1
+
+
+def test_default_provider_takes_the_curated_domains_it_is_given():
+    provider = get_default_blacklist_provider(lambda: {"badsite.example"})
+
+    assert provider.get_exempt_domains() == {"badsite.example"}

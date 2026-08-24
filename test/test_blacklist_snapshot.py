@@ -224,3 +224,48 @@ def test_a_truncated_blob_is_ignored_rather_than_raising(provider, redis_client)
     assert blacklist.load_now() is False
     # The good array it already had is kept rather than being replaced by a bad one.
     assert blacklist.is_domain_blacklisted("badsite.test") is True
+
+
+def test_build_snapshot_omits_curated_domains(monkeypatch):
+    """An approved domain is removed from the lists when the snapshot is built, so no
+    worker ever has to consult the curated set on the query path."""
+    monkeypatch.setattr(blacklist_snapshot, "get_curated_domains", lambda: {"evil.test"})
+    provider = CombinedBlacklistProvider([FakeRemoteProvider({"badsite.test", "evil.test"})])
+
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()))
+    blacklist._array = np.frombuffer(build_snapshot(provider), dtype=blacklist_snapshot.HASH_DTYPE)
+
+    assert blacklist.filter_blacklisted(["badsite.test", "evil.test"]) == {"badsite.test"}
+
+
+def test_build_snapshot_clears_the_apex_for_a_www_approval(monkeypatch):
+    """DomainSubmissionForm stores the submitted netloc, so an approval for
+    www.contactmusic.com has to clear the apex entry the blocklist actually holds."""
+    monkeypatch.setattr(blacklist_snapshot, "get_curated_domains", lambda: {"www.contactmusic.test"})
+    provider = CombinedBlacklistProvider([FakeRemoteProvider({"contactmusic.test"})])
+
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()))
+    blacklist._array = np.frombuffer(build_snapshot(provider), dtype=blacklist_snapshot.HASH_DTYPE)
+
+    assert blacklist.filter_blacklisted(["contactmusic.test", "www.contactmusic.test"]) == set()
+
+
+def test_build_snapshot_keeps_a_listed_parent_of_a_curated_subdomain(monkeypatch):
+    """A flat hash set cannot express "this subdomain only", so curating a subdomain does
+    not clear its listed parent - approving the apex is what unblocks it."""
+    monkeypatch.setattr(blacklist_snapshot, "get_curated_domains", lambda: {"blog.evil.test"})
+    provider = CombinedBlacklistProvider([FakeRemoteProvider({"evil.test"})])
+
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()))
+    blacklist._array = np.frombuffer(build_snapshot(provider), dtype=blacklist_snapshot.HASH_DTYPE)
+
+    assert blacklist.filter_blacklisted(["blog.evil.test"]) == {"blog.evil.test"}
+
+
+def test_filter_blacklisted_handles_an_empty_snapshot():
+    """A snapshot with every entry cleared is empty, not absent, and the vectorised search
+    below needs an index 0 to clamp to."""
+    blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()))
+    blacklist._array = np.array([], dtype=blacklist_snapshot.HASH_DTYPE)
+
+    assert blacklist.filter_blacklisted(["anything.test"]) == set()

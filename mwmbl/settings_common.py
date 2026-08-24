@@ -332,6 +332,10 @@ BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300     # how often a worker checks Redis for
 BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60   # how often the snapshot is rebuilt from the remote lists
 BLACKLIST_PURGE_INTERVAL_SECONDS = 300     # how often the purge queue is drained
 BLACKLIST_PURGE_BATCH_SIZE = 1000          # documents removed from the index per purge run
+# How far ahead approving a domain submission schedules a snapshot rebuild. Approvers work
+# through submissions in batches, so the delay collapses a batch into one rebuild rather
+# than one per approval - see mwmbl.signals.
+BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS = 600
 
 # Wikipedia result caching in the index. Results used to be cached by requests-cache in a
 # filesystem backend under REQUEST_CACHE_PATH, which sits on the same volume as the index,
