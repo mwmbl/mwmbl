@@ -45,3 +45,20 @@ def test_normalize_domain_leaves_bare_domain_alone():
 
 def test_normalize_domain_strips_path_without_scheme():
     assert normalize_domain("www.example.com/some/path") == "www.example.com"
+
+
+def test_normalize_domain_strips_query_and_fragment_without_scheme():
+    assert normalize_domain("www.example.com?q=1") == "www.example.com"
+    assert normalize_domain("www.example.com#fragment") == "www.example.com"
+
+
+def test_normalize_domain_lowercases():
+    assert normalize_domain("https://WWW.Example.COM/") == "www.example.com"
+    assert normalize_domain("Example.COM") == "example.com"
+
+
+def test_validate_domain_rejects_url_without_a_domain():
+    with pytest.raises(ValidationError):
+        validate_domain("http://")
+    with pytest.raises(ValidationError):
+        validate_domain("https:///some/path")

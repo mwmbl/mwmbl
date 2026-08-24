@@ -156,7 +156,9 @@ def delete_user(request, username: str):
 )
 @paginate
 def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmissionSchema]:
-    return DomainSubmission.objects.filter(name=domain).all()
+    # Submissions are stored under the normalized domain, so look them up the same way, otherwise a
+    # client cannot find back a submission it made using the URL it submitted.
+    return DomainSubmission.objects.filter(name=normalize_domain(domain)).all()
 
 
 @router.get(

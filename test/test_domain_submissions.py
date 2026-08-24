@@ -13,8 +13,9 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import DomainSubmission, MwmblUser
 
-migration_module = importlib.import_module("mwmbl.migrations.0032_normalize_domain_submission_names")
-normalize_names = migration_module.normalize_names
+normalize_names = importlib.import_module(
+    "mwmbl.migrations.0032_normalize_domain_submission_names").normalize_names
+fix_names = importlib.import_module("mwmbl.migrations.0033_fix_domain_submission_names").fix_names
 
 
 @pytest.fixture
@@ -75,6 +76,50 @@ def test_api_stores_bare_domain(client, access_token):
 
     assert response.status_code == 200
     assert DomainSubmission.objects.get().name == "www.idolbronze.com"
+
+
+@pytest.mark.django_db
+def test_fix_migration_lowercases_names(user):
+    submission = DomainSubmission.objects.create(name="WWW.IdolBronze.com", submitted_by=user)
+
+    fix_names(django_apps, None)
+
+    submission.refresh_from_db()
+    assert submission.name == "www.idolbronze.com"
+
+
+@pytest.mark.django_db
+def test_fix_migration_deletes_names_that_are_not_domains(user):
+    DomainSubmission.objects.create(name="http://", submitted_by=user)
+    DomainSubmission.objects.create(name="https:///some/path", submitted_by=user)
+    kept = DomainSubmission.objects.create(name="example.com", submitted_by=user)
+
+    fix_names(django_apps, None)
+
+    assert list(DomainSubmission.objects.all()) == [kept]
+
+
+@pytest.mark.django_db
+def test_submission_list_renders_after_fix_migration(client, user):
+    DomainSubmission.objects.create(name="http://", submitted_by=user)
+
+    fix_names(django_apps, None)
+
+    response = client.get(reverse("domain_submissions"))
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_api_finds_submission_whatever_the_case(client, access_token):
+    client.post(
+        "/api/v1/platform/domain-submissions/?domain=https://WWW.IdolBronze.com/",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+
+    response = client.get("/api/v1/platform/domain-submissions/domains/WWW.IdolBronze.com")
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["www.idolbronze.com"]
 
 
 @pytest.mark.django_db

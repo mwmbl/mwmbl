@@ -76,15 +76,21 @@ def parse_url(url: str) -> ParsedUrl:
 
 VALID_DOMAIN_REGEX = re.compile(r"^[\w-]{1,63}(\.[\w-]{1,63})+$")
 
+# Everything from the first of these characters onwards is a path, query string or fragment.
+DOMAIN_END_REGEX = re.compile(r"[/?#]")
+
 
 def normalize_domain(domain_or_url: str) -> str:
     """
-    Extract the domain from a URL. A bare domain is returned unchanged, and any path is stripped.
+    Extract the domain from a URL. A bare domain is returned unchanged, and any path, query string
+    or fragment is stripped. The domain is lowercased so that a domain has a single representation
+    however it was typed: domains are compared as strings elsewhere, e.g. against the curated
+    domains when deciding how many URLs to queue for a domain.
     """
     netloc = parse_url(domain_or_url).netloc
-    if netloc is not None:
-        return netloc
-    return domain_or_url.split("/")[0]
+    if not netloc:
+        netloc = DOMAIN_END_REGEX.split(domain_or_url, maxsplit=1)[0]
+    return netloc.lower()
 
 
 def validate_domain(domain_or_url: str):
