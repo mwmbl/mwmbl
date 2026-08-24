@@ -28,3 +28,8 @@ DOMAIN_LINKS_BLOOM_FILTER_PATH = "/tmp/test_links_{domain_group}.bloom"
 NUM_DOMAINS_IN_BLOOM_FILTER = 1000
 
 REQUEST_CACHE_PATH = "/tmp/test_request_cache"
+
+# The front end is not built when running the tests, so there is no Vite manifest to resolve assets
+# against. In dev mode django-vite points at the dev server instead of reading the manifest, which
+# lets views that render the base template be tested.
+DJANGO_VITE_DEV_MODE = True

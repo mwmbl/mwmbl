@@ -5,6 +5,7 @@ from allauth.account.models import EmailConfirmationHMAC
 from allauth.account.utils import setup_user_email, send_email_confirmation
 from django.conf import settings
 from django.core import signing
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from ninja import Router
 from ninja.pagination import paginate
@@ -16,6 +17,7 @@ from polar_sdk.webhooks import validate_event, WebhookVerificationError
 
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
+from mwmbl.utils import normalize_domain, validate_domain
 from mwmbl import pricing
 from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
 from mwmbl.platform.schemas import (
@@ -154,7 +156,9 @@ def delete_user(request, username: str):
 )
 @paginate
 def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmissionSchema]:
-    return DomainSubmission.objects.filter(name=domain).all()
+    # Submissions are stored under the normalized domain, so look them up the same way, otherwise a
+    # client cannot find back a submission it made using the URL it submitted.
+    return DomainSubmission.objects.filter(name=normalize_domain(domain)).all()
 
 
 @router.get(
@@ -183,7 +187,12 @@ def get_domain_submissions(request) -> list[DomainSubmission]:
 )
 def submit_domain(request, domain: str):
     check_email_verified(request)
-    submission = DomainSubmission(name=domain, submitted_by=request.user)
+    try:
+        validate_domain(domain)
+    except ValidationError:
+        raise InvalidRequest(f"Invalid domain: {domain}")
+
+    submission = DomainSubmission(name=normalize_domain(domain), submitted_by=request.user)
     submission.save()
     return {"status": "ok", "message": "Domain submitted for review."}
 
