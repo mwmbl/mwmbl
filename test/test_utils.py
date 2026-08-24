@@ -1,7 +1,7 @@
 import pytest
 from django.core.exceptions import ValidationError
 
-from mwmbl.utils import parse_url, validate_domain
+from mwmbl.utils import normalize_domain, parse_url, validate_domain
 
 
 def test_parse_url():
@@ -32,3 +32,16 @@ def test_validate_url_domain_invalid():
 def test_validate_with_url():
     validate_domain("https://www.google.com")
     validate_domain("http://www.google.com")
+
+
+def test_normalize_domain_from_url():
+    assert normalize_domain("https://www.idolbronze.com/") == "www.idolbronze.com"
+    assert normalize_domain("http://example.com/some/path?q=1#f") == "example.com"
+
+
+def test_normalize_domain_leaves_bare_domain_alone():
+    assert normalize_domain("example.com") == "example.com"
+
+
+def test_normalize_domain_strips_path_without_scheme():
+    assert normalize_domain("www.example.com/some/path") == "www.example.com"

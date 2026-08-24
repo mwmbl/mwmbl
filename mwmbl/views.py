@@ -31,7 +31,7 @@ from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.tinysearchengine.rank import fix_document_state
 from mwmbl.tokenizer import tokenize
-from mwmbl.utils import add_term_infos, parse_url, validate_domain, float_or_none
+from mwmbl.utils import add_term_infos, normalize_domain, parse_url, validate_domain, float_or_none
 
 MAX_CURATED_SCORE = 1_111_111.0
 
@@ -184,14 +184,7 @@ class DomainSubmissionForm(ModelForm):
         """
         Domain names or URLs are allowed. If a URL is submitted, just extract the domain.
         """
-        original_name = self.cleaned_data["name"]
-        try:
-            domain = parse_url(original_name).netloc
-            if domain is not None:
-                return domain
-        except ValueError:
-            pass
-        return original_name
+        return normalize_domain(self.cleaned_data["name"])
 
 
 class DomainSubmissionApprovalForm(ModelForm):
