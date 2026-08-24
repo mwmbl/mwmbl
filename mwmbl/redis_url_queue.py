@@ -55,7 +55,10 @@ class RedisURLQueue:
     def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]], blacklist_provider=None) -> None:
         self.redis = redis
         self.get_curated_domains_function = get_curated_domains_function
-        self.blacklist_provider = blacklist_provider or get_default_blacklist_provider()
+        # Curated domains override the blacklist, and the queue already knows where to get
+        # them - over HTTP in the standalone crawler, which has no database.
+        self.blacklist_provider = blacklist_provider or get_default_blacklist_provider(
+            get_curated_domains_function)
 
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()

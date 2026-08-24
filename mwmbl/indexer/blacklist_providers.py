@@ -6,7 +6,7 @@ making the system more flexible and testable.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Set
+from typing import Callable, Optional, Set
 import requests
 
 
@@ -30,6 +30,19 @@ def domain_and_parents(domain: str) -> list[str]:
     if len(parts) < 2:
         return [domain]
     return ['.'.join(parts[i:]) for i in range(len(parts) - 1)]
+
+
+def domains_to_unblock(curated_domains: Set[str]) -> Set[str]:
+    """The blocklist entries these curated domains should clear.
+
+    DomainSubmissionForm.clean_name stores whatever netloc was submitted, so an approval can
+    arrive as www.contactmusic.com while the blocklist holds the apex contactmusic.com.
+    Stripping the www. covers that; nothing deeper is stripped, because clearing an apex
+    entry on the strength of an approved subdomain would unblock every one of its siblings.
+    """
+    unblocked = set(curated_domains)
+    unblocked.update(domain[len("www."):] for domain in curated_domains if domain.startswith("www."))
+    return unblocked
 
 
 class BlacklistProvider(ABC):
@@ -215,13 +228,33 @@ class AdultContentBlacklistProvider(RemoteListBlacklistProvider):
 
 
 class CombinedBlacklistProvider(BlacklistProvider):
-    """Provider that combines multiple blacklist providers."""
-    
-    def __init__(self, providers: list[BlacklistProvider]):
+    """Provider that combines multiple blacklist providers.
+
+    `get_exempt_domains` supplies the domains a moderator has approved, which override every
+    sub-provider. It is a callable rather than a set because the caller decides where the
+    approved names come from - the database in the server, an HTTP fetch in the standalone
+    crawler - and the result is resolved once and held, like the remote lists themselves.
+    """
+
+    def __init__(self, providers: list[BlacklistProvider],
+                 get_exempt_domains: Optional[Callable[[], Set[str]]] = None):
         self.providers = providers
-    
+        self.get_exempt_domains = get_exempt_domains
+        self._exempt_domains: Optional[Set[str]] = None
+
+    def _is_exempt(self, domain: str) -> bool:
+        if self.get_exempt_domains is None:
+            return False
+        if self._exempt_domains is None:
+            self._exempt_domains = domains_to_unblock(self.get_exempt_domains())
+        apex = domain[len("www."):] if domain.startswith("www.") else domain
+        return domain in self._exempt_domains or apex in self._exempt_domains
+
     def is_domain_blacklisted(self, domain: str) -> bool:
         """Check if domain is blacklisted by any provider."""
+        if self._is_exempt(domain):
+            return False
+
         for provider in self.providers:
             try:
                 if provider.is_domain_blacklisted(domain):

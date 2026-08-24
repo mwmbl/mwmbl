@@ -255,7 +255,7 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         ),
     )
     def get_curated_domains_endpoint(request) -> CuratedDomainsResponse:
-        from mwmbl.search_setup import get_curated_domains
+        from mwmbl.curated_domains import get_curated_domains
         return CuratedDomainsResponse(
             domains=[CuratedDomain(name=d) for d in sorted(get_curated_domains())]
         )

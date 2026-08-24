@@ -42,6 +42,7 @@ class MwmblConfig(AppConfig):
         create_index()
         if settings.HAS_DATABASE:
             create_index_db()
+            import mwmbl.signals  # noqa: F401 - connects the post_save receivers
             self._schedule_background_tasks()
 
     # Cache key guarding the scheduling critical section below. Held just long
@@ -109,7 +110,11 @@ class MwmblConfig(AppConfig):
             # on the task means the first run happens immediately rather than one full
             # refresh interval after deploy, which matters because until it lands the
             # search workers have only the built-in rules to go on.
-            if not Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK).exists():
+            #
+            # Only the *repeating* row counts here: approving a domain submission schedules
+            # a one-off rebuild under the same task name (mwmbl.signals), and one of those
+            # sitting in the queue at deploy time must not suppress the periodic task.
+            if not Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK, repeat__gt=0).exists():
                 refresh_blacklist_snapshot(
                     repeat=settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS, repeat_until=None)
 

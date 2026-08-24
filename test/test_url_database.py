@@ -95,3 +95,12 @@ def test_crawled_url_is_not_requeued(clean_bloom_filters):
 
     assert url_queue.get_domain_count("crawled.example") == 0
     assert url_queue.get_domain_count("discovered.example") == 1
+
+
+def test_url_queue_gives_its_curated_domains_to_the_default_blacklist():
+    """The standalone crawler has no database and fetches approved domains over HTTP, so
+    the queue's own source of curated domains is what has to reach the blacklist."""
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    url_queue = RedisURLQueue(redis, lambda: {"pudding.cool"})
+
+    assert url_queue.blacklist_provider.get_exempt_domains() == {"pudding.cool"}
