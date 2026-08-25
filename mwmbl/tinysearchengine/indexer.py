@@ -183,12 +183,13 @@ def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T
 
 
 def _get_page_data(page_size: int, items: list[T]):
+    """The padded page bytes, and how many of `items` actually fit on it."""
     compressor = ZstdCompressor()
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
     compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
     assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
-    return _pad_to_page_size(compressed_data, page_size)
+    return _pad_to_page_size(compressed_data, page_size), num_fitting
 
 
 def _pad_to_page_size(data: bytes, page_size: int):
@@ -198,6 +199,24 @@ def _pad_to_page_size(data: bytes, page_size: int):
     padding = b'\x00' * (page_size - page_length)
     page_data = data + padding
     return page_data
+
+
+class _OpenPage(Generic[T]):
+    """One page of the index, open for a read-modify-write. See TinyIndex.page."""
+
+    def __init__(self, index: 'TinyIndex[T]', page_index: int):
+        self._index = index
+        self._page_index = page_index
+        self.documents: List[T] = index.get_page(page_index)
+
+    def store(self, values: List[T]) -> int:
+        """Write these values to the page, returning how many of them actually fit.
+
+        A page holds a fixed number of bytes and the tail that does not fit is dropped, so
+        pass them best-first. It is store() rather than an assignment to `documents`
+        precisely because what you pass is not necessarily what ends up stored.
+        """
+        return self._index.store_in_page(self._page_index, values)
 
 
 class TinyIndex(Generic[T]):
@@ -237,7 +256,13 @@ class TinyIndex(Generic[T]):
     def retrieve(self, key: str) -> List[T]:
         index = self.get_key_page_index(key)
         logger.debug(f"Retrieving index {index}")
-        page = self.get_page(index)
+        try:
+            page = self.get_page(index)
+        except PageError:
+            # One unreadable page costs this query the results for one term, and the next
+            # read of it will very likely succeed. Writers do not swallow this.
+            logger.exception("Could not read index page %d", index)
+            return []
         return [item for item in page if item.term is None or item.term == key]
 
     def get_key_page_index(self, key) -> int:
@@ -257,7 +282,7 @@ class TinyIndex(Generic[T]):
         the wiki index cache writes from the request path, on a large fraction of searches
         and from every gunicorn worker, that stops being hypothetical.
 
-        Private: every read-modify-write on the index goes through update_page, so no
+        Private: every read-modify-write on the index goes through page(), so no
         caller has to know this exists. Readers deliberately do not take it - search would
         pay a syscall per retrieve on the hot path, and a torn read costs a reader only one
         query's results for one term, which the next read fixes.
@@ -315,56 +340,66 @@ class TinyIndex(Generic[T]):
         return items
 
     def _get_page_tuples(self, i):
+        """The raw tuples on page i. Raises PageError if the page will not decode.
+
+        It deliberately does not fall back to an empty page. A page that fails to
+        decompress is either corrupt or caught mid-write, and treating that as "no
+        documents here" is how a writer comes to merge onto nothing and store its result
+        over everything that was on the page. Readers that would rather have no results
+        than an error catch this - see retrieve.
+        """
         page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
         decompressor = ZstdDecompressor()
         try:
             decompressed_data = decompressor.decompress(page_data)
         except ZstdError as e:
-            logger.exception(f"Error decompressing page {i}: {e}")
-            return []
+            raise PageError(f"Could not decompress page {i}: {e}") from e
         return json.loads(decompressed_data.decode('utf8'))
 
-    def store_in_page(self, page_index: int, values: list[T]):
-        """Overwrite a page. To change a page based on what it already holds, use
-        update_page instead, which does the read and the write under one lock."""
+    def store_in_page(self, page_index: int, values: list[T]) -> int:
+        """Overwrite a page, returning how many of `values` actually fit on it.
+
+        A page holds a fixed number of bytes and the tail that does not fit is dropped, so
+        pass the values best-first. To change a page based on what it already holds, use
+        page() instead, which does the read and the write under one lock."""
         value_tuples = [value.as_tuple() for value in values]
-        self._write_page(value_tuples, page_index)
+        return self._write_page(value_tuples, page_index)
 
-    def update_page(self, i: int, merge: Callable[[List[T]], Optional[List[T]]]) -> List[T]:
-        """Read page i, hand its contents to `merge`, and store what comes back.
-
-        Changing a page is read -> merge -> write, and the three have to be atomic together.
-        _write_page copies ~4 KB into the mmap; a reader catching it half-written gets a
-        ZstdError, which _get_page_tuples turns into an empty page - so a writer that reads
-        empty, merges and stores wipes out everything else on that page. Permanent loss in a
-        400 GB index, not a transient blip.
-
-        Locking lives here rather than in the callers because "hold a lock across your read
-        and your write" is the kind of rule that is quietly forgotten. There is one way to
-        change a page and it is already correct.
-
-        `merge` returning None means nothing needs writing, which avoids re-storing a page
-        that has not changed. Returns whatever was stored, or the page as it was found.
-        """
-        with self._locked_page(i):
-            existing = self.get_page(i)
-            merged = merge(existing)
-            if merged is None:
-                return existing
-            self.store_in_page(i, merged)
-            return merged
-
-    def _write_page(self, data, i: int):
+    def _write_page(self, data, i: int) -> int:
         """
         Serialise the data using JSON, compress it and store it at index i.
-        If the data is too big, it will store the first items in the list and discard the rest.
+        If the data is too big, it will store the first items in the list and discard the
+        rest; the number actually stored is returned.
         """
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data = _get_page_data(self.page_size, data)
+        page_data, num_stored = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
         self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        return num_stored
+
+    @contextmanager
+    def page(self, i: int):
+        """Open page i for a read-modify-write, holding its lock throughout.
+
+        Changing a page is read -> merge -> write, and the three have to be atomic
+        together. _write_page copies ~4 KB into the mmap; a reader catching it half-written
+        gets a page that will not decompress, and a writer that took that for an empty page
+        would store its result over everything else there.
+
+        Locking lives here rather than in the callers because "hold a lock across your read
+        and your write" is the kind of rule that gets quietly forgotten. There is one way to
+        change a page and it is already correct::
+
+            with index.page(page_index) as page:
+                page.store(merge(page.documents))
+
+        Not calling store() writes nothing, which is what a caller that finds nothing to
+        change should do.
+        """
+        with self._locked_page(i):
+            yield _OpenPage(self, i)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):
@@ -375,7 +410,7 @@ class TinyIndex(Generic[T]):
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
-        page_bytes = _get_page_data(page_size, [])
+        page_bytes, _ = _get_page_data(page_size, [])
 
         with open(index_path, 'wb') as index_file:
             index_file.write(metadata_padded)
