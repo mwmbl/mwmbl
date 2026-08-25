@@ -1,6 +1,7 @@
 import fcntl
 import json
 import os
+import struct
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
@@ -20,6 +21,27 @@ PAGE_SIZE = 4096
 
 
 logger = getLogger(__name__)
+
+
+# Open File Description locks (Linux 3.15+). Byte-range like POSIX record locks, but owned
+# by the open file description like flock - which is the property that matters here.
+# Ordinary fcntl/lockf record locks are owned by the *process* and are dropped as soon as
+# any fd on the file is closed, and index_results_against_query opens and closes a read
+# handle on the index on every store, so in a threaded worker a plain lockf would be
+# released out from under whoever held it. Verified: with lockf, closing an unrelated fd
+# lets another process take the "held" lock; with OFD locks it does not.
+F_OFD_SETLKW = 38
+# struct flock { short l_type; short l_whence; off_t l_start; off_t l_len; pid_t l_pid; }
+# Padded to the native 32 bytes so nothing past our buffer is read. l_pid must be 0 for OFD.
+_FLOCK_STRUCT = "hhqqi4x"
+
+# Set False the first time locking turns out to be unsupported here - see locked_page.
+_page_locking_supported = True
+
+
+def _set_page_lock(fileno: int, lock_type: int, start: int, length: int):
+    fcntl.fcntl(fileno, F_OFD_SETLKW,
+                struct.pack(_FLOCK_STRUCT, lock_type, os.SEEK_SET, start, length, 0))
 
 
 class DocumentState(IntEnum):
@@ -235,20 +257,42 @@ class TinyIndex(Generic[T]):
         the wiki index cache writes from the request path, on a large fraction of searches
         and from every gunicorn worker, that stops being hypothetical.
 
-        A POSIX record lock over just this page's bytes serialises writers of the same page
-        and nothing else. Readers deliberately do not take it: search would pay a syscall
-        per retrieve on the hot path, and a torn read costs a reader only one query's
-        results for one term, which the next read fixes.
+        Readers deliberately do not take this: search would pay a syscall per retrieve on
+        the hot path, and a torn read costs a reader only one query's results for one term,
+        which the next read fixes.
+
+        If the kernel or filesystem will not do this kind of lock, carry on without one and
+        say so once. Every indexing path here - batch indexing, curation, POST
+        /crawler/results, copy_index, purge - ran with no lock at all before this existed,
+        so turning an environment's lack of support into a hard failure of all of them
+        would be a much worse regression than the race it is guarding.
         """
+        global _page_locking_supported
         if self.mode != 'w':
             raise UnsupportedOperation("The file is open in read mode, you cannot lock a page")
+
         start = i * self.page_size + METADATA_SIZE
         fileno = self.index_file.fileno()
-        fcntl.lockf(fileno, fcntl.LOCK_EX, self.page_size, start, os.SEEK_SET)
+        locked = False
+        if _page_locking_supported:
+            try:
+                _set_page_lock(fileno, fcntl.F_WRLCK, start, self.page_size)
+                locked = True
+            except OSError as e:
+                _page_locking_supported = False
+                logger.warning(
+                    "Index page locking is not available here (%s); index writes will race "
+                    "as they did before it was added. Concurrent writers to one page can "
+                    "lose documents.", e)
         try:
             yield
         finally:
-            fcntl.lockf(fileno, fcntl.LOCK_UN, self.page_size, start, os.SEEK_SET)
+            if locked:
+                try:
+                    _set_page_lock(fileno, fcntl.F_UNLCK, start, self.page_size)
+                except OSError:
+                    # Dropped on close anyway; failing here would mask the caller's own error.
+                    logger.warning("Could not release the lock on index page %d", i)
 
     def get_page(self, i) -> list[T]:
         """

@@ -174,6 +174,62 @@ valid — which is why every table above reports Δ against a baseline run at th
 - **The real repeat rate.** The Zipf stream is synthetic. Production query-frequency data
   would replace it and turn the ratio above into an actual expected saving.
 
+## Confirmation at 1790 queries: the zero did not replicate
+
+The zero-loss result above rested on 9 fired queries out of 596. Re-run at three times the
+sample, same harness, same seed:
+
+| arm | NDCG@10 | Δ | fired | Δ on fired | wiki@10 | calls |
+|---|---|---|---|---|---|---|
+| live-wiki | 0.3026 ± 0.0100 | — | — | — | 1.24 | 1790/1790 |
+| indexed-nogate | 0.3021 ± 0.0100 | −0.0005 | — | — | 1.31 | 1790/1790 |
+| indexed-from_wiki_only-t1 | 0.2806 ± 0.0098 | −0.0220 | 182 | −0.2163 | 1.24 | 1608/1790 |
+| indexed-term_coverage-t1 | 0.2972 ± 0.0099 | −0.0054 | 35 | **−0.1927** | 1.30 | 1755/1790 |
+
+`term_coverage = 1.0` went from +0.0000 to −0.0054 overall, and on the 35 queries it fired
+on it loses −0.1927 - in line with every other gate. **There is no gate that avoids calls
+without paying on the queries it fires on.** The overall figure stays small only because it
+fires on 2% of queries; "small because it rarely acts" is not "free".
+
+### Storing is not free once the index is dense
+
+`indexed-nogate` makes every API call and still loses 0.0210 on the repeat stream. It is
+not the gate - it is the storing. Wikipedia's share of the top 10 goes from 1.24 to 1.31,
+displacing non-wiki gold results.
+
+| arm | Δ on repeats | wiki@10 |
+|---|---|---|
+| indexed-nogate (calls every time) | −0.0210 | 1.31 |
+| indexed-term_coverage-t1 | −0.0314 | 1.30 |
+
+The effect is invisible on the gold set (−0.0005) and appears on the repeat stream. The
+difference is index **density**: 2,000 positions over 596 queries stores far more per term.
+Production density only increases. (Not paired-tested; treat as a strong signal, not a
+settled number.) The earlier claim that storing is free was true of a sparse index only.
+
+## What the gate is actually doing
+
+Tracing which earlier query stored the documents that let a later query skip its call
+(no network; replayed from the cached responses):
+
+- On the repeat-weighted stream, of 797 firings **794 were the same query asked again and
+  3 were a different query.** The rule is an exact-query cache implemented via terms.
+- On the gold set, where nothing repeats, it fires on 7/596 = 1.2%. Six of the seven are
+  single-word queries whose word was stored by a longer query containing it
+  (`connections` <- `connections hint september 14`, `jobs` <- `shunter jobs near me`).
+  The only multi-word case, `rachel reeves`, worked because `rachel reeves news` had stored
+  the bigram.
+- It catches **794 of 1,597 repeat positions - 49.7%**. A repeated query still needs *every*
+  term covered, and the stored documents often do not contain all of them. Misses by query
+  length: 2-token 436, 3-token 232, 4-token 80. The bigram is what fails, and 2-token
+  queries are the most common length in the gold set.
+
+Cross-query matching does not scale: requiring all unigrams *and* bigrams makes bigrams the
+bottleneck, and distinct bigrams grow nearly linearly with volume. Gold-set fire rate by
+decile is flat noise (0%, 2%, 0%, 2%, 0%, 2%, 2%, 0%, 0%, 5%). Repeat matching does grow
+and then saturates (22% -> 47% by decile), at a ceiling set by how repetitive the traffic
+is - a property of the traffic, not of the dataset size.
+
 ## Recommendation
 
 The proposal splits into two halves with different verdicts, and the gate splits again.
@@ -189,17 +245,17 @@ Wikipedia is needed. Queries where the crawled index looks richest in Wikipedia 
 are queries where live Wikipedia does especially well (live-wiki scores 0.65 on the
 t3-fired subset versus 0.30 overall).
 
-**3. `from_wiki_only` is the one to pursue.** Counting only documents a previous call
-stored makes it an approximate exact-query cache rather than an inference, and it behaves
-like one: ~50% of calls avoided on repeat-weighted traffic for −0.0117 NDCG on repeats,
-with the cost essentially flat as the savings grow.
+**3. An exact-query cache is the target, not a count or a coverage rule.** Every gate
+degraded as the sample grew, each looking best at the size where it fired least. What has
+held across every run is the diagnosis: the useful signal is "I have this query's own
+stored results", and every rule here is an awkward proxy for it. A query-keyed cache
+catches all 1,597 repeats rather than 794, cannot fire on the wrong query, and - because a
+hash-keyed entry never enters the candidate pool for other queries - sidesteps the density
+problem in the section above. That is the approach on branch `wiki-results-in-index`
+(`b39e9f8`).
 
-It is still only *approximate* — it fires on term overlap too, and on the gold set those
-24 firings cost −0.2872 on the fired subset. The exact version keys on the query itself and
-so cannot fire on overlap at all: that is the query-hash cache term on branch
-`wiki-results-in-index` (`b39e9f8`), which by construction cannot produce those losses.
+Suggested next step: build the exact-query cache and measure it head-to-head against
+`term_coverage = 1.0` on the same repeat-weighted stream. The prediction from these numbers
+is roughly double the savings with no ranking risk.
 
-Suggested next step: evaluate the exact-query cache against `from_wiki_only` on the
-repeat-weighted stream. The prediction from these numbers is that it captures the same
-~50% saving with the residual −0.0117 removed. If that holds, ship the exact cache and
-drop the count-based gate entirely.
+Do not enable `WIKI_INDEX_CACHE_ENABLED` on the strength of the 596-query numbers.

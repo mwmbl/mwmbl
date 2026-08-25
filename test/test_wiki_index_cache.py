@@ -420,47 +420,102 @@ def _hold_page_lock(index_path: str, page: int, acquired, release):
             release.wait(timeout=30)
 
 
+def _try_lock_in_child(index_path: str, page: int, queue):
+    """Child process: report whether the page lock is free."""
+    from mwmbl.tinysearchengine.indexer import F_OFD_SETLKW, _FLOCK_STRUCT
+    import struct
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        start = page * indexer.page_size + METADATA_SIZE
+        try:
+            fcntl.fcntl(indexer.index_file.fileno(), F_OFD_SETLKW - 1,  # F_OFD_SETLK
+                        struct.pack(_FLOCK_STRUCT, fcntl.F_WRLCK, os.SEEK_SET,
+                                    start, indexer.page_size, 0))
+            queue.put(True)
+        except OSError:
+            queue.put(False)
+
+
 def test_locked_page_excludes_another_process(index_path):
     """The page lock must exclude across processes, which is the only case that matters.
 
     Storing a page is read-merge-write with no atomicity. _write_page copies ~4 KB into the
     mmap; a reader catching it half-written gets a ZstdError, which _get_page_tuples turns
     into an empty page - so an unlocked writer can read empty, merge, and store its own
-    documents over everything else on that page. That is permanent loss, and the wiki index
-    cache writes from the request path in every gunicorn worker.
+    documents over everything else on that page.
 
     This asserts the exclusion property directly rather than trying to win the race: the
     window is a single memcpy, so a racing test passes with the lock removed and guards
-    nothing. POSIX record locks are per-process, so the holder has to be a real child.
+    nothing.
     """
     import multiprocessing
 
     context = multiprocessing.get_context("fork")
-    acquired, release = context.Event(), context.Event()
     with TinyIndex(Document, index_path, 'r') as indexer:
         page = indexer.get_key_page_index("zebra")
 
-    holder = context.Process(target=_hold_page_lock, args=(index_path, page, acquired, release))
-    holder.start()
-    try:
-        assert acquired.wait(timeout=30), "the child never took the lock"
+    def child_can_lock():
+        queue = context.Queue()
+        child = context.Process(target=_try_lock_in_child, args=(index_path, page, queue))
+        child.start()
+        child.join(timeout=30)
+        return queue.get(timeout=5)
 
-        with TinyIndex(Document, index_path, 'w') as indexer:
-            start = page * indexer.page_size + METADATA_SIZE
-            with pytest.raises(BlockingIOError):
-                fcntl.lockf(indexer.index_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB,
-                            indexer.page_size, start, os.SEEK_SET)
-    finally:
-        release.set()
-        holder.join(timeout=30)
-
-    # Released once the holder is done, so the next writer gets through.
     with TinyIndex(Document, index_path, 'w') as indexer:
-        start = page * indexer.page_size + METADATA_SIZE
-        fcntl.lockf(indexer.index_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB,
-                    indexer.page_size, start, os.SEEK_SET)
-        fcntl.lockf(indexer.index_file.fileno(), fcntl.LOCK_UN,
-                    indexer.page_size, start, os.SEEK_SET)
+        with indexer.locked_page(page):
+            assert not child_can_lock(), "another process took a lock we were holding"
+
+            # An ordinary POSIX record lock is owned by the *process* and is dropped the
+            # moment any fd on the file is closed - and index_results_against_query opens
+            # and closes a read handle on every store, so in a threaded worker that would
+            # silently release the lock mid-write. OFD locks are owned by the open file
+            # description and survive it.
+            with TinyIndex(Document, index_path, 'r'):
+                pass
+            assert not child_can_lock(), \
+                "closing an unrelated fd released the lock - this needs an OFD lock"
+
+        assert child_can_lock(), "the lock was not released"
+
+
+def test_locked_page_does_not_serialise_different_pages(index_path):
+    """Per-page granularity: writers of unrelated pages must not block each other."""
+    import multiprocessing
+
+    context = multiprocessing.get_context("fork")
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        page = indexer.get_key_page_index("zebra")
+        other_page = (page + 1) % indexer.num_pages
+
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        with indexer.locked_page(page):
+            queue = context.Queue()
+            child = context.Process(target=_try_lock_in_child,
+                                    args=(index_path, other_page, queue))
+            child.start()
+            child.join(timeout=30)
+            assert queue.get(timeout=5), "a different page was blocked"
+
+
+def test_writes_continue_when_page_locking_is_unsupported(index_path, monkeypatch):
+    """A filesystem without record locks must not break indexing.
+
+    Every path through index_pages ran with no lock at all before this existed, so an
+    environment that cannot lock should degrade to that, not fail.
+    """
+    from mwmbl.tinysearchengine import indexer as indexer_module
+
+    monkeypatch.setattr(indexer_module, "_page_locking_supported", True)
+    monkeypatch.setattr(indexer_module, "_set_page_lock",
+                        lambda *args: (_ for _ in ()).throw(OSError("no locks available")))
+
+    document = Document("Zebra", "https://en.wikipedia.org/wiki/Zebra", "", 3.0, None,
+                        state=DocumentState.FROM_WIKI)
+    assert index_results_against_query([document], "zebra", index_path,
+                                       state=DocumentState.FROM_WIKI) == 1
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        assert {d.url for d in indexer.retrieve("zebra")} == {document.url}
+    assert indexer_module._page_locking_supported is False
 
 
 def test_locked_page_needs_write_mode(index_path):
