@@ -336,3 +336,52 @@ BLACKLIST_PURGE_BATCH_SIZE = 1000          # documents removed from the index pe
 # through submissions in batches, so the delay collapses a batch into one rebuild rather
 # than one per approval - see mwmbl.signals.
 BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS = 600
+
+# Wikipedia results in the index, instead of the filesystem HTTP cache.
+#
+# get_wiki_results() used to cache through mwmbl.utils.request_cache, a requests-cache
+# *filesystem* session rooted at REQUEST_CACHE_PATH - the same volume as the index - with
+# no LRU, no size cap and nothing ever calling delete(expired=True), so it grew without
+# bound; and because the stored JSON holds the whole request, it wrote the raw user query
+# to disk for ten weeks. It also never removed the call: a miss was still a blocking HTTP
+# round trip on the search path.
+#
+# Instead, results found by a search are written into the index under the query's unigrams
+# and bigrams, and a later search skips the API call altogether when the index already
+# returned enough Wikipedia results. Off by default so this can be turned on per
+# environment; results and the reasoning are in rankeval/WIKI_INDEX_CACHE_FINDINGS.md.
+WIKI_INDEX_CACHE_ENABLED = os.environ.get("WIKI_INDEX_CACHE_ENABLED", "false").lower() == "true"
+
+# What "enough Wikipedia results already" means. See wiki_index_cache.GATES.
+#   from_wiki_only - only documents a previous API call stored, ranked, in the top N
+#   ranked_top_n   - rank the index-only candidates, count any wiki URL in the top N
+#   raw_candidates - count any wiki URL among the unranked index candidates
+#   term_coverage / mean_max_ltr / min_max_ltr / max_max_ltr / mean_max_stored
+#                  - reduce a per-term profile of how well the index covers each query term
+# The threshold is a float: a document count for the counting gates, a score or a fraction
+# for the rest.
+#
+# The default is the rule the evaluation picked: skip the call only when *every* one of the
+# query's unigrams and bigrams already has a stored Wikipedia result. Counting documents
+# cannot tell "three good wiki results" from "three wiki pages that mention this word", and
+# every count-based threshold lost NDCG; demanding full term coverage was the cheapest rule
+# with no measurable loss, at ~40% of calls avoided on repeat-weighted traffic. It also
+# needs no ranking and no model call, so the gate itself is nearly free.
+# See rankeval/WIKI_INDEX_CACHE_FINDINGS.md.
+WIKI_INDEX_GATE = os.environ.get("WIKI_INDEX_GATE", "term_coverage")
+WIKI_INDEX_GATE_THRESHOLD = float(os.environ.get("WIKI_INDEX_GATE_THRESHOLD", "1.0"))
+WIKI_INDEX_GATE_TOP_N = 10
+
+# Privacy limits on what a stored result may be filed under. A term is only written when
+# the document contains every one of its words, so the term is derivable from the document
+# itself; the token cap means the query as a whole is never a term.
+WIKI_INDEX_MAX_TERM_TOKENS = 2
+# A Wikipedia result's score is its rank in Wikipedia's own results, and the LTR model
+# reads score as a feature. Without this a result served from the index scores 0.0 where
+# the identical result fetched live scores 3/2/1, so the cached copy is handicapped
+# against the thing it is standing in for.
+WIKI_INDEX_KEEP_SCORE = os.environ.get("WIKI_INDEX_KEEP_SCORE", "true").lower() != "false"
+# Stricter still: only file a result under a term the index already has documents for, so
+# nothing is ever written that the corpus did not already contain.
+WIKI_INDEX_REQUIRE_EXISTING_TERM = os.environ.get(
+    "WIKI_INDEX_REQUIRE_EXISTING_TERM", "false").lower() == "true"

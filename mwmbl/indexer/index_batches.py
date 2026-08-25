@@ -6,7 +6,7 @@ from collections import defaultdict, Counter
 from datetime import datetime
 from functools import reduce
 from logging import getLogger
-from typing import Collection, Iterable, Optional
+from typing import Callable, Collection, Iterable, Optional
 from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
@@ -115,10 +115,14 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
-            existing_documents = indexer.get_page(page)
-            combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
-            logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
-            indexer.store_in_page(page, combined_documents)
+            # Read-merge-write under an exclusive lock on this page. Without it a writer can
+            # read a page another writer is halfway through storing, get an empty page back,
+            # and store its own documents over everything that was there - see locked_page.
+            with indexer.locked_page(page):
+                existing_documents = indexer.get_page(page)
+                combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
+                logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
+                indexer.store_in_page(page, combined_documents)
 
             term_new_doc_counts.update(document.term for document in combined_documents
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
@@ -133,7 +137,12 @@ def _document_token_set(doc: Document) -> set[str]:
             | set(tokenize(doc.extract)))
 
 
-def index_results_against_query(documents: list[Document], query: str, index_path: str) -> int:
+def index_results_against_query(documents: list[Document], query: str, index_path: str,
+                                max_term_tokens: Optional[int] = None,
+                                require_existing_term: bool = False,
+                                term_exists: Optional[Callable[[str], bool]] = None,
+                                state: Optional[DocumentState] = None,
+                                keep_score: bool = False) -> int:
     """Index each document against the query unigrams/bigrams it matches.
 
     A query term matches a document when all of the term's words are present in
@@ -141,6 +150,28 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     order). Matching docs are stored against that term via index_pages(), which
     applies the normal combine/prioritise path. Returns the number of distinct
     URLs newly added to the index.
+
+    The containment rule is what makes this safe to run on user queries: a document
+    only takes a term whose words it already contains, so the term -> document link is
+    derivable from the document itself and says nothing about the query that produced
+    it. `max_term_tokens` caps how many words a stored term may have (so a long query is
+    never written as one phrase), and `require_existing_term` restricts writes to terms
+    the index already holds documents for, so nothing is stored that the corpus did not
+    already contain - by default asking the index being written to, or `term_exists` when
+    the corpus the caller means is larger than that (the evaluation's overlay index).
+    All of these default to off, which is the behaviour Super Search has always had;
+    mwmbl.tinysearchengine.wiki_index_cache passes them from settings.
+
+    `keep_score` carries the incoming document's score onto the stored copies. It is off
+    by default because a Super Search document's score is not comparable across sources,
+    but a Wikipedia result's score *is* its rank in Wikipedia's own results - and the LTR
+    model reads `score` as a feature, so dropping it makes every copy served from the
+    index look worse to the ranker than the identical result fetched live.
+
+    `state` is stamped on the stored copies. Wikipedia results keep FROM_WIKI so they are
+    recognisable later - as the source shown to the user, and as the thing the
+    from_wiki_only gate counts. It is never taken from the incoming document, whose
+    `term` is the raw user query; every stored copy is rebuilt with a derived term.
 
     The count is computed in the read pass, before combine/store, so a candidate
     later dropped by URL/title dedup or by the full-page trim is still counted;
@@ -154,12 +185,31 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     query_terms: dict[str, frozenset[str]] = {t: frozenset((t,)) for t in tokens}
     for bigram in get_bigrams(len(tokens), tokens):
         query_terms[bigram] = frozenset(bigram.split())
+    if max_term_tokens is not None:
+        query_terms = {term: words for term, words in query_terms.items()
+                       if len(words) <= max_term_tokens}
+    if not query_terms:
+        return 0
 
     # Read pass: build per-page candidates and track which (term, url) are new.
     page_documents: dict[int, list[Document]] = defaultdict(list)
     new_urls: set[str] = set()
     with TinyIndex(Document, index_path, 'r') as indexer:
         existing_keys: dict[int, set[tuple]] = {}
+
+        def keys_for_page(page: int) -> set[tuple]:
+            if page not in existing_keys:
+                existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
+            return existing_keys[page]
+
+        if require_existing_term:
+            def in_this_index(term: str) -> bool:
+                page = indexer.get_key_page_index(term)
+                return any(t == term for t, _ in keys_for_page(page))
+
+            check = term_exists if term_exists is not None else in_this_index
+            query_terms = {term: words for term, words in query_terms.items() if check(term)}
+
         for doc in documents:
             if not (doc.url and doc.title):
                 continue
@@ -170,11 +220,10 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
                 page = indexer.get_key_page_index(term)
                 page_documents[page].append(Document(
                     doc.title, doc.url, doc.extract,
-                    term=term, last_crawled=doc.last_crawled,
+                    score=doc.score if keep_score else None,
+                    term=term, state=state, last_crawled=doc.last_crawled,
                 ))
-                if page not in existing_keys:
-                    existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
-                if (term, doc.url) not in existing_keys[page]:
+                if (term, doc.url) not in keys_for_page(page):
                     new_urls.add(doc.url)
 
     if page_documents:

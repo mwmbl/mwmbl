@@ -1,5 +1,7 @@
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
@@ -219,6 +221,34 @@ class TinyIndex(Generic[T]):
     def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
         return key_hash % self.num_pages
+
+    @contextmanager
+    def locked_page(self, i: int):
+        """Hold an exclusive lock on page i for a read-modify-write.
+
+        Storing a page is read -> merge -> write, with no atomicity of its own. Two writers
+        on the same page lose one writer's documents, which for a cache is tolerable. The
+        serious case is a *torn* read: _write_page copies ~4 KB into the mmap, and a reader
+        that catches it half-written gets a ZstdError, which _get_page_tuples turns into an
+        empty page. A writer that reads empty then merges and stores wipes out everything
+        else on that page - permanent loss in a 400 GB index, not a transient blip. Since
+        the wiki index cache writes from the request path, on a large fraction of searches
+        and from every gunicorn worker, that stops being hypothetical.
+
+        A POSIX record lock over just this page's bytes serialises writers of the same page
+        and nothing else. Readers deliberately do not take it: search would pay a syscall
+        per retrieve on the hot path, and a torn read costs a reader only one query's
+        results for one term, which the next read fixes.
+        """
+        if self.mode != 'w':
+            raise UnsupportedOperation("The file is open in read mode, you cannot lock a page")
+        start = i * self.page_size + METADATA_SIZE
+        fileno = self.index_file.fileno()
+        fcntl.lockf(fileno, fcntl.LOCK_EX, self.page_size, start, os.SEEK_SET)
+        try:
+            yield
+        finally:
+            fcntl.lockf(fileno, fcntl.LOCK_UN, self.page_size, start, os.SEEK_SET)
 
     def get_page(self, i) -> list[T]:
         """

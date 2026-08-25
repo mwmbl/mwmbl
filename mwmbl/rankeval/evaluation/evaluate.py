@@ -29,6 +29,34 @@ class RankingModel(ABC):
         pass
 
 
+def query_ndcg(predicted_urls: list[str], gold_scores: dict[str, float]) -> float:
+    """NDCG@10 of a predicted ranking against gold, matching ``evaluate`` below.
+
+    ``gold_scores`` maps each gold URL to its click-proportion relevance weight. Lives
+    here so the harnesses that run several arms over a shared query sample - and so need
+    per-query scores rather than ``evaluate``'s aggregate - score identically to it.
+    """
+    top_urls = predicted_urls[:NUM_RESULTS_FOR_EVAL]
+    y_true = [gold_scores.get(url, 0.0) for url in top_urls] + [0.0] * (10 - len(top_urls))
+    y_predicted = list(range(NUM_RESULTS_FOR_EVAL, 0, -1))
+    return ndcg_score([y_true], [y_predicted])
+
+
+def gold_scores_for(rankings) -> dict[str, float]:
+    """The gold URL -> click-weight map for one query's rows of the rankings dataset."""
+    top_ranked = rankings[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
+    top_ranked["score"] = CLICK_PROPORTIONS[:len(top_ranked)]
+    return top_ranked.set_index("url")["score"].to_dict()
+
+
+def mean_sem(values: list[float], places: int = 4) -> str:
+    if not values:
+        return "n/a"
+    if len(values) == 1:
+        return f"{np.mean(values):.{places}f}"
+    return f"{np.mean(values):.{places}f} ± {sem(values):.{places}f}"
+
+
 def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False):
     # TODO:
     #  - output feature importances from XGBoost
@@ -57,9 +85,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
         if query not in random_queries:
             continue
 
-        top_ranked = rankings[['url']].iloc[:NUM_RESULTS_FOR_EVAL]
-        top_ranked['score'] = CLICK_PROPORTIONS[:len(top_ranked)]
-        scores = top_ranked.set_index('url')['score'].to_dict()
+        scores = gold_scores_for(rankings)
         print(f"Query: '{query}'", scores)
 
         start_time = time.perf_counter()
