@@ -412,14 +412,6 @@ def test_value_gates_do_not_rank():
 # Concurrent writes from the request path
 # ---------------------------------------------------------------------------
 
-def _hold_page_lock(index_path: str, page: int, acquired, release):
-    """Child process: take the page lock, say so, and hold it until told to let go."""
-    with TinyIndex(Document, index_path, 'w') as indexer:
-        with indexer.locked_page(page):
-            acquired.set()
-            release.wait(timeout=30)
-
-
 def _try_lock_in_child(index_path: str, page: int, queue):
     """Child process: report whether the page lock is free."""
     from mwmbl.tinysearchengine.indexer import F_OFD_SETLKW, _FLOCK_STRUCT
@@ -435,15 +427,15 @@ def _try_lock_in_child(index_path: str, page: int, queue):
             queue.put(False)
 
 
-def test_locked_page_excludes_another_process(index_path):
-    """The page lock must exclude across processes, which is the only case that matters.
+def test_update_page_holds_the_lock_across_the_read_and_the_write(index_path):
+    """Changing a page must be atomic, and callers must not have to arrange that.
 
-    Storing a page is read-merge-write with no atomicity. _write_page copies ~4 KB into the
-    mmap; a reader catching it half-written gets a ZstdError, which _get_page_tuples turns
-    into an empty page - so an unlocked writer can read empty, merge, and store its own
-    documents over everything else on that page.
+    _write_page copies ~4 KB into the mmap; a reader catching it half-written gets a
+    ZstdError, which _get_page_tuples turns into an empty page - so a writer that reads
+    empty, merges and stores wipes out everything else on that page. update_page owns the
+    whole read-merge-write, so this checks the lock is held for the duration of `merge`.
 
-    This asserts the exclusion property directly rather than trying to win the race: the
+    It asserts the exclusion property directly rather than trying to win the race: the
     window is a single memcpy, so a racing test passes with the lock removed and guards
     nothing.
     """
@@ -453,47 +445,58 @@ def test_locked_page_excludes_another_process(index_path):
     with TinyIndex(Document, index_path, 'r') as indexer:
         page = indexer.get_key_page_index("zebra")
 
-    def child_can_lock():
+    def child_can_lock(target_page=page):
         queue = context.Queue()
-        child = context.Process(target=_try_lock_in_child, args=(index_path, page, queue))
+        child = context.Process(target=_try_lock_in_child, args=(index_path, target_page, queue))
         child.start()
         child.join(timeout=30)
         return queue.get(timeout=5)
 
+    observed = {}
+
+    def merge(existing):
+        observed["locked_during_merge"] = not child_can_lock()
+
+        # An ordinary POSIX record lock is owned by the *process* and is dropped the moment
+        # any fd on the file is closed - and index_results_against_query opens and closes a
+        # read handle on every store, so in a threaded worker that would silently release
+        # the lock mid-write. OFD locks survive it.
+        with TinyIndex(Document, index_path, 'r'):
+            pass
+        observed["locked_after_unrelated_close"] = not child_can_lock()
+
+        # A different page must not contend.
+        observed["other_page_free"] = child_can_lock((page + 1) % 64)
+        return None
+
     with TinyIndex(Document, index_path, 'w') as indexer:
-        with indexer.locked_page(page):
-            assert not child_can_lock(), "another process took a lock we were holding"
+        indexer.update_page(page, merge)
 
-            # An ordinary POSIX record lock is owned by the *process* and is dropped the
-            # moment any fd on the file is closed - and index_results_against_query opens
-            # and closes a read handle on every store, so in a threaded worker that would
-            # silently release the lock mid-write. OFD locks are owned by the open file
-            # description and survive it.
-            with TinyIndex(Document, index_path, 'r'):
-                pass
-            assert not child_can_lock(), \
-                "closing an unrelated fd released the lock - this needs an OFD lock"
-
-        assert child_can_lock(), "the lock was not released"
+    assert observed["locked_during_merge"], "another process took a lock we were holding"
+    assert observed["locked_after_unrelated_close"], \
+        "closing an unrelated fd released the lock - this needs an OFD lock"
+    assert observed["other_page_free"], "a different page was blocked"
+    assert child_can_lock(), "the lock was not released"
 
 
-def test_locked_page_does_not_serialise_different_pages(index_path):
-    """Per-page granularity: writers of unrelated pages must not block each other."""
-    import multiprocessing
-
-    context = multiprocessing.get_context("fork")
-    with TinyIndex(Document, index_path, 'r') as indexer:
+def test_update_page_writes_nothing_when_merge_returns_none(index_path):
+    seeded = [Document("Zebra", "https://en.wikipedia.org/wiki/Zebra", "", 3.0, "zebra",
+                       state=DocumentState.FROM_WIKI)]
+    with TinyIndex(Document, index_path, 'w') as indexer:
         page = indexer.get_key_page_index("zebra")
-        other_page = (page + 1) % indexer.num_pages
+        indexer.store_in_page(page, seeded)
 
-    with TinyIndex(Document, index_path, 'w') as indexer:
-        with indexer.locked_page(page):
-            queue = context.Queue()
-            child = context.Process(target=_try_lock_in_child,
-                                    args=(index_path, other_page, queue))
-            child.start()
-            child.join(timeout=30)
-            assert queue.get(timeout=5), "a different page was blocked"
+        unchanged = indexer.update_page(page, lambda existing: None)
+        assert [d.url for d in unchanged] == [seeded[0].url]
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        assert [d.url for d in indexer.get_page(page)] == [seeded[0].url]
+
+
+def test_update_page_needs_write_mode(index_path):
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        with pytest.raises(UnsupportedOperation):
+            indexer.update_page(0, lambda existing: existing)
 
 
 def test_writes_continue_when_page_locking_is_unsupported(index_path, monkeypatch):
@@ -516,13 +519,6 @@ def test_writes_continue_when_page_locking_is_unsupported(index_path, monkeypatc
     with TinyIndex(Document, index_path, 'r') as indexer:
         assert {d.url for d in indexer.retrieve("zebra")} == {document.url}
     assert indexer_module._page_locking_supported is False
-
-
-def test_locked_page_needs_write_mode(index_path):
-    with TinyIndex(Document, index_path, 'r') as indexer:
-        with pytest.raises(UnsupportedOperation):
-            with indexer.locked_page(0):
-                pass
 
 
 def _store_repeatedly(index_path: str, term: str, url_prefix: str, count: int):

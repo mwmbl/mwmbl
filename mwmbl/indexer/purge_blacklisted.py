@@ -79,18 +79,20 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
     # pages, so counting each removal would report an order of magnitude too many.
     removed_urls_by_domain: dict[str, set[str]] = defaultdict(set)
     for page_index, urls in pages_to_urls.items():
-        page = index.get_page(page_index)
-        kept = [d for d in page if d.url not in urls]
-        if len(kept) == len(page):
-            continue
+        def drop_blacklisted(page, urls=urls):
+            kept = [d for d in page if d.url not in urls]
+            if len(kept) == len(page):
+                return None  # nothing to remove here, so leave the page alone
 
-        for document in page:
-            if document.url in urls:
-                try:
-                    removed_urls_by_domain[get_domain(document.url)].add(document.url)
-                except ValueError:
-                    removed_urls_by_domain[document.url].add(document.url)
-        index.store_in_page(page_index, kept)
+            for document in page:
+                if document.url in urls:
+                    try:
+                        removed_urls_by_domain[get_domain(document.url)].add(document.url)
+                    except ValueError:
+                        removed_urls_by_domain[document.url].add(document.url)
+            return kept
+
+        index.update_page(page_index, drop_blacklisted)
 
     removed_by_domain = {domain: len(urls) for domain, urls in removed_urls_by_domain.items()}
     if removed_by_domain:

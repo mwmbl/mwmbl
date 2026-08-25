@@ -35,7 +35,8 @@ The write happens in the request, not in a background task. Two reasons that is 
     so they are already warm.
   * Correctness. An index page write is a read-modify-write, and an unlocked writer that
     catches another mid-store reads an empty page and stores over everything on it. That is
-    now serialised by a POSIX record lock over the page's bytes - see TinyIndex.locked_page.
+    now serialised inside TinyIndex.update_page, which every read-modify-write goes
+    through, so no caller has to know locking exists.
 """
 from logging import getLogger
 from pathlib import Path

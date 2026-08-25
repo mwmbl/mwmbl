@@ -115,15 +115,13 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
-            # Read-merge-write under an exclusive lock on this page. Without it a writer can
-            # read a page another writer is halfway through storing, get an empty page back,
-            # and store its own documents over everything that was there - see locked_page.
-            with indexer.locked_page(page):
-                existing_documents = indexer.get_page(page)
-                combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
-                logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
-                indexer.store_in_page(page, combined_documents)
+            def merge(existing_documents, documents=documents, page=page):
+                combined = combine_documents(existing_documents, documents, mark_synced, ranker)
+                logger.info(f"Storing {len(combined)} documents for page {page}, "
+                            f"originally {len(existing_documents)}")
+                return combined
 
+            combined_documents = indexer.update_page(page, merge)
             term_new_doc_counts.update(document.term for document in combined_documents
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
     return term_new_doc_counts

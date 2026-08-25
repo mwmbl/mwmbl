@@ -245,7 +245,7 @@ class TinyIndex(Generic[T]):
         return key_hash % self.num_pages
 
     @contextmanager
-    def locked_page(self, i: int):
+    def _locked_page(self, i: int):
         """Hold an exclusive lock on page i for a read-modify-write.
 
         Storing a page is read -> merge -> write, with no atomicity of its own. Two writers
@@ -257,9 +257,10 @@ class TinyIndex(Generic[T]):
         the wiki index cache writes from the request path, on a large fraction of searches
         and from every gunicorn worker, that stops being hypothetical.
 
-        Readers deliberately do not take this: search would pay a syscall per retrieve on
-        the hot path, and a torn read costs a reader only one query's results for one term,
-        which the next read fixes.
+        Private: every read-modify-write on the index goes through update_page, so no
+        caller has to know this exists. Readers deliberately do not take it - search would
+        pay a syscall per retrieve on the hot path, and a torn read costs a reader only one
+        query's results for one term, which the next read fixes.
 
         If the kernel or filesystem will not do this kind of lock, carry on without one and
         say so once. Every indexing path here - batch indexing, curation, POST
@@ -324,8 +325,34 @@ class TinyIndex(Generic[T]):
         return json.loads(decompressed_data.decode('utf8'))
 
     def store_in_page(self, page_index: int, values: list[T]):
+        """Overwrite a page. To change a page based on what it already holds, use
+        update_page instead, which does the read and the write under one lock."""
         value_tuples = [value.as_tuple() for value in values]
         self._write_page(value_tuples, page_index)
+
+    def update_page(self, i: int, merge: Callable[[List[T]], Optional[List[T]]]) -> List[T]:
+        """Read page i, hand its contents to `merge`, and store what comes back.
+
+        Changing a page is read -> merge -> write, and the three have to be atomic together.
+        _write_page copies ~4 KB into the mmap; a reader catching it half-written gets a
+        ZstdError, which _get_page_tuples turns into an empty page - so a writer that reads
+        empty, merges and stores wipes out everything else on that page. Permanent loss in a
+        400 GB index, not a transient blip.
+
+        Locking lives here rather than in the callers because "hold a lock across your read
+        and your write" is the kind of rule that is quietly forgotten. There is one way to
+        change a page and it is already correct.
+
+        `merge` returning None means nothing needs writing, which avoids re-storing a page
+        that has not changed. Returns whatever was stored, or the page as it was found.
+        """
+        with self._locked_page(i):
+            existing = self.get_page(i)
+            merged = merge(existing)
+            if merged is None:
+                return existing
+            self.store_in_page(i, merged)
+            return merged
 
     def _write_page(self, data, i: int):
         """
