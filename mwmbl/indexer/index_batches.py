@@ -134,12 +134,47 @@ def _document_token_set(doc: Document) -> set[str]:
             | set(tokenize(doc.extract)))
 
 
+SCORE_TERMS_CHOICES = ("none", "all", "specific", "exact")
+
+
+def _takes_score(score_terms: str, tokens: list[str]) -> Callable[[frozenset[str]], bool]:
+    """Which of a query's terms a stored copy is allowed to carry its score under.
+
+    A Wikipedia result's score is the rank Wikipedia gave it *for the whole query*, and
+    nothing in the index records what that query was. Filing it under a bare unigram
+    therefore claims a ranking the word never earned on its own: `connections hint
+    september 14` writes rank 3 under `connections`, and the next person searching
+    `connections` gets that number fed to the model as a feature.
+
+      none      no stored copy carries a score. What Super Search has always done - its
+                documents' scores are not comparable across sources.
+      all       every term carries it.
+      specific  bigrams only, unless the query is a single token - in which case the
+                unigram *is* the query and the score is honestly its own.
+      exact     only a term equal to the whole query, so the score is never read for any
+                query but the one that produced it. Stores nothing for a 3+ token query.
+    """
+    if score_terms == "none":
+        return lambda words: False
+    if score_terms == "all":
+        return lambda words: True
+    if score_terms == "specific":
+        if len(tokens) == 1:
+            return lambda words: True
+        return lambda words: len(words) > 1
+    if score_terms == "exact":
+        whole_query = frozenset(tokens)
+        return lambda words: words == whole_query
+    raise ValueError(f"Unknown score_terms {score_terms!r}, expected one of {SCORE_TERMS_CHOICES}")
+
+
 def index_results_against_query(documents: list[Document], query: str, index_path: str,
                                 max_term_tokens: Optional[int] = None,
                                 require_existing_term: bool = False,
                                 term_exists: Optional[Callable[[str], bool]] = None,
                                 state: Optional[DocumentState] = None,
-                                keep_score: bool = False) -> int:
+                                score_terms: str = "none",
+                                score_ema_alpha: float = 1.0) -> int:
     """Index each document against the query unigrams/bigrams it matches.
 
     A query term matches a document when all of the term's words are present in
@@ -159,11 +194,18 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     All of these default to off, which is the behaviour Super Search has always had;
     mwmbl.tinysearchengine.wiki_index_cache passes them from settings.
 
-    `keep_score` carries the incoming document's score onto the stored copies. It is off
-    by default because a Super Search document's score is not comparable across sources,
-    but a Wikipedia result's score *is* its rank in Wikipedia's own results - and the LTR
-    model reads `score` as a feature, so dropping it makes every copy served from the
-    index look worse to the ranker than the identical result fetched live.
+    `score_terms` decides which stored copies carry the incoming document's score - see
+    _takes_score. The LTR model reads `score` as a feature, so dropping it entirely makes
+    a copy served from the index look worse to the ranker than the identical result
+    fetched live, while carrying it under every term lets one query's ranking leak into
+    another's.
+
+    `score_ema_alpha` blends a score being written over a previous one for the same
+    (term, url): `alpha * new + (1 - alpha) * previous`. 1.0, the default, overwrites.
+    Below 1.0 a term's score becomes an average of the evidence from every query that
+    filed the document there, rather than whatever the last one happened to say. Only
+    copies stored with this same `state` are blended with - a curated document on the
+    same page carries ~1.1e6 and a crawled one carries None.
 
     `state` is stamped on the stored copies. Wikipedia results keep FROM_WIKI so they are
     recognisable later - as the source shown to the user, and as the thing the
@@ -177,6 +219,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     tokens = tokenize(query)
     if not tokens or not documents:
         return 0
+    takes_score = _takes_score(score_terms, tokens)
 
     # term string -> the set of words that must all be present to match.
     query_terms: dict[str, frozenset[str]] = {t: frozenset((t,)) for t in tokens}
@@ -191,13 +234,28 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     # Read pass: build per-page candidates and track which (term, url) are new.
     page_documents: dict[int, list[Document]] = defaultdict(list)
     new_urls: set[str] = set()
+    blending = score_ema_alpha < 1.0 and score_terms != "none"
+    num_blended = 0
     with TinyIndex(Document, index_path, 'r') as indexer:
         existing_keys: dict[int, set[tuple]] = {}
+        existing_scores: dict[int, dict[tuple, float]] = {}
+
+        def read_page(page: int) -> None:
+            """One read per page, feeding both the is-it-new check and the EMA."""
+            if page in existing_keys:
+                return
+            documents_on_page = indexer.get_page(page)
+            existing_keys[page] = {(d.term, d.url) for d in documents_on_page}
+            existing_scores[page] = {(d.term, d.url): d.score for d in documents_on_page
+                                     if d.state == state and d.score is not None} if blending else {}
 
         def keys_for_page(page: int) -> set[tuple]:
-            if page not in existing_keys:
-                existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
+            read_page(page)
             return existing_keys[page]
+
+        def previous_score(page: int, key: tuple) -> Optional[float]:
+            read_page(page)
+            return existing_scores[page].get(key)
 
         if require_existing_term:
             def in_this_index(term: str) -> bool:
@@ -215,14 +273,22 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
                 if not (words <= doc_tokens):
                     continue
                 page = indexer.get_key_page_index(term)
+                key = (term, doc.url)
+                score = doc.score if takes_score(words) else None
+                if blending and score is not None:
+                    previous = previous_score(page, key)
+                    if previous is not None:
+                        score = score_ema_alpha * score + (1 - score_ema_alpha) * previous
+                        num_blended += 1
                 page_documents[page].append(Document(
                     doc.title, doc.url, doc.extract,
-                    score=doc.score if keep_score else None,
-                    term=term, state=state, last_crawled=doc.last_crawled,
+                    score=score, term=term, state=state, last_crawled=doc.last_crawled,
                 ))
-                if (term, doc.url) not in keys_for_page(page):
+                if key not in keys_for_page(page):
                     new_urls.add(doc.url)
 
+    if num_blended:
+        logger.info(f"Blended {num_blended} scores into existing stored copies")
     if page_documents:
         index_pages(index_path, page_documents)  # reuse the existing write path
     return len(new_urls)

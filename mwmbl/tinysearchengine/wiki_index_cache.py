@@ -240,7 +240,8 @@ def store_wiki_results(query: str, documents: list[Document], index_path: str = 
             require_existing_term=settings.WIKI_INDEX_REQUIRE_EXISTING_TERM,
             term_exists=term_exists,
             state=DocumentState.FROM_WIKI,
-            keep_score=settings.WIKI_INDEX_KEEP_SCORE,
+            score_terms=settings.WIKI_INDEX_SCORE_TERMS,
+            score_ema_alpha=settings.WIKI_INDEX_SCORE_EMA_ALPHA,
         )
     except Exception:
         logger.warning("Could not store %d Wikipedia results in the index",

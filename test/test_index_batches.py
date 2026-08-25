@@ -269,3 +269,143 @@ def test_index_documents_keeps_everything_when_nothing_blacklisted(index_path):
         index_documents(documents, index_path)
 
     assert "https://example.com/y" in _all_urls(index_path)
+
+
+# ---------------------------------------------------------------------------
+# score_terms and the score EMA
+# ---------------------------------------------------------------------------
+
+def _make_index(temp_dir, num_pages=64):
+    index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+    with TinyIndex.create(Document, index_path, num_pages=num_pages, page_size=4096):
+        pass
+    return index_path
+
+
+def _scores_by_term(index_path, terms):
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        return {term: {d.url: d.score for d in indexer.retrieve(term)} for term in terms}
+
+
+def test_score_terms_specific_scores_bigrams_only():
+    # The score is the rank the source gave the document for the *whole* query, so on a
+    # multi-token query only the bigrams may carry it - a bare unigram would claim a
+    # ranking that word never earned on its own.
+    doc = Document(title="Rust async programming", url="http://a.example/rust",
+                   extract="async programming in rust", score=3.0)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        index_results_against_query([doc], "rust async programming", index_path,
+                                    max_term_tokens=2, score_terms="specific")
+
+        scores = _scores_by_term(index_path, ["rust", "async", "programming",
+                                              "rust async", "async programming"])
+
+    assert scores["rust"] == {doc.url: None}
+    assert scores["async"] == {doc.url: None}
+    assert scores["programming"] == {doc.url: None}
+    assert scores["rust async"] == {doc.url: 3.0}
+    assert scores["async programming"] == {doc.url: 3.0}
+
+
+def test_score_terms_specific_scores_the_unigram_of_a_one_word_query():
+    # A one-token query *is* its unigram, so the score is honestly that term's own.
+    doc = Document(title="Kitsas dictionary", url="https://en.wiktionary.org/wiki/kitsas",
+                   extract="", score=2.0)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        index_results_against_query([doc], "kitsas", index_path, score_terms="specific")
+        scores = _scores_by_term(index_path, ["kitsas"])
+
+    assert scores["kitsas"] == {doc.url: 2.0}
+
+
+def test_score_terms_exact_scores_nothing_for_a_long_query():
+    # No term equals the whole query once terms are capped at two words, so nothing may
+    # carry a score that only the full query earned.
+    doc = Document(title="Rust async programming", url="http://a.example/rust",
+                   extract="async programming in rust", score=3.0)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        index_results_against_query([doc], "rust async programming", index_path,
+                                    max_term_tokens=2, score_terms="exact")
+        scores = _scores_by_term(index_path, ["rust", "rust async", "async programming"])
+
+    assert all(url_scores == {doc.url: None} for url_scores in scores.values())
+
+
+def test_score_terms_none_is_the_default():
+    doc = Document(title="Rust guide", url="http://a.example/rust", extract="rust", score=3.0)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        index_results_against_query([doc], "rust", index_path)
+        assert _scores_by_term(index_path, ["rust"])["rust"] == {doc.url: None}
+
+
+def test_score_ema_blends_with_the_previous_stored_score():
+    url = "http://a.example/rust"
+    first = Document(title="Rust guide", url=url, extract="rust", score=3.0,
+                     state=DocumentState.FROM_WIKI)
+    second = Document(title="Rust guide", url=url, extract="rust", score=1.0,
+                      state=DocumentState.FROM_WIKI)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        index_results_against_query([first], "rust", index_path, score_terms="all",
+                                    state=DocumentState.FROM_WIKI, score_ema_alpha=0.5)
+        assert _scores_by_term(index_path, ["rust"])["rust"] == {url: 3.0}
+
+        index_results_against_query([second], "rust", index_path, score_terms="all",
+                                    state=DocumentState.FROM_WIKI, score_ema_alpha=0.5)
+        # 0.5 * 1.0 + 0.5 * 3.0
+        assert _scores_by_term(index_path, ["rust"])["rust"] == {url: 2.0}
+
+
+def test_score_ema_alpha_one_overwrites():
+    url = "http://a.example/rust"
+    docs = [Document(title="Rust guide", url=url, extract="rust", score=score,
+                     state=DocumentState.FROM_WIKI) for score in (3.0, 1.0)]
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        for doc in docs:
+            index_results_against_query([doc], "rust", index_path, score_terms="all",
+                                        state=DocumentState.FROM_WIKI)
+        assert _scores_by_term(index_path, ["rust"])["rust"] == {url: 1.0}
+
+
+def test_score_ema_ignores_documents_stored_with_another_state():
+    # Scores are only comparable within one source: a curated document carries ~1.1e6, a
+    # crawled one carries None. Blending across states would mix scales, so a document
+    # filed here under a different state is not a previous value.
+    url = "http://a.example/rust"
+    from_elsewhere = Document(title="Rust guide", url=url, extract="rust", score=100.0,
+                              term="rust", state=DocumentState.FROM_GOOGLE)
+    incoming = Document(title="Rust guide", url=url, extract="rust", score=3.0,
+                        state=DocumentState.FROM_WIKI)
+
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        with TinyIndex(Document, index_path, 'w') as indexer:
+            page_index = indexer.get_key_page_index("rust")
+            with indexer.page(page_index) as page:
+                page.store([from_elsewhere])
+
+        index_results_against_query([incoming], "rust", index_path, score_terms="all",
+                                    state=DocumentState.FROM_WIKI, score_ema_alpha=0.5)
+
+        scores = _scores_by_term(index_path, ["rust"])
+    # Unblended: 0.5 * 3.0 + 0.5 * 100.0 would be 51.5.
+    assert scores["rust"] == {url: 3.0}
+
+
+def test_unknown_score_terms_is_rejected():
+    doc = Document(title="Rust guide", url="http://a.example/rust", extract="rust")
+    with TemporaryDirectory() as temp_dir:
+        index_path = _make_index(temp_dir)
+        with pytest.raises(ValueError):
+            index_results_against_query([doc], "rust", index_path, score_terms="bogus")

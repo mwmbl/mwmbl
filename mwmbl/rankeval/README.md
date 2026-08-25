@@ -66,3 +66,16 @@ DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
   called at most once per distinct query ever — responses are cached in
   `devdata/wiki-index-eval-cache`, while the *count* of calls each policy would
   make is tracked exactly. Results in `WIKI_INDEX_CACHE_FINDINGS.md`.
+
+  `--arm-set scores` asks the other question: with Wikipedia called on *every*
+  query so nothing is skipped, does storing its results help or hurt the queries
+  that later retrieve them? The arms vary only which query term a stored result's
+  score is filed under (`none` / `all` / `specific` / `exact`) and whether
+  re-storing overwrites or averages, and the report is a paired per-query Δ on the
+  queries that actually retrieved another query's stored documents.
+
+```bash
+DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+    uv run python -m mwmbl.rankeval.evaluation.evaluate_wiki_index \
+      --arm-set scores --fraction 0.3
+```

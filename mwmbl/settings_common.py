@@ -377,10 +377,17 @@ WIKI_INDEX_GATE_TOP_N = 10
 # itself; the token cap means the query as a whole is never a term.
 WIKI_INDEX_MAX_TERM_TOKENS = 2
 # A Wikipedia result's score is its rank in Wikipedia's own results, and the LTR model
-# reads score as a feature. Without this a result served from the index scores 0.0 where
-# the identical result fetched live scores 3/2/1, so the cached copy is handicapped
-# against the thing it is standing in for.
-WIKI_INDEX_KEEP_SCORE = os.environ.get("WIKI_INDEX_KEEP_SCORE", "true").lower() != "false"
+# reads score as a feature. Store no score and a result served from the index scores 0.0
+# where the identical result fetched live scores 3/2/1, so the stored copy is handicapped
+# against the thing it is standing in for. Store it under every term and the rank
+# Wikipedia gave a document for one whole query is what the model reads for every other
+# query sharing a word with it. See index_batches._takes_score for the options
+# (none / all / specific / exact).
+WIKI_INDEX_SCORE_TERMS = os.environ.get("WIKI_INDEX_SCORE_TERMS", "all")
+# Blend a score being written over the previous one for the same (term, url) rather than
+# overwriting it: alpha * new + (1 - alpha) * previous. 1.0 overwrites, which is what the
+# index has always done.
+WIKI_INDEX_SCORE_EMA_ALPHA = float(os.environ.get("WIKI_INDEX_SCORE_EMA_ALPHA", "1.0"))
 # Stricter still: only file a result under a term the index already has documents for, so
 # nothing is ever written that the corpus did not already contain.
 WIKI_INDEX_REQUIRE_EXISTING_TERM = os.environ.get(

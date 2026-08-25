@@ -24,6 +24,24 @@ Two pieces make a realistic measurement possible:
     SUPER_SEARCH_EVAL_FINDINGS.md finding #6 records silently losing 36% of wiki results.
     We *count* the calls; we do not *make* them repeatedly.
 
+Two questions, two arm sets (``--arm-set``):
+
+``gates``
+    The original one: which rule for skipping the API call preserves NDCG. Every firing
+    is both "a call was skipped" and "stored documents were served", so the two effects
+    are inseparable.
+
+``scores``
+    Wikipedia is called on *every* query and the results are stored, so nothing is ever
+    skipped and the only thing that varies is what a stored document looks like to the
+    ranker when a *different* query retrieves it. This is the "does storing help in
+    general" question, and it is reported on the **affected subset**: the queries whose
+    candidate pool held documents an earlier, different query stored. The overlay's local
+    half contains only what the run stored and storing happens after retrieval, so on a
+    gold set with no repeats a local-half hit *is* a cross-query hit - see
+    ``OverlayIndex.retrieve``. That subset is hundreds of queries where the gates' fired
+    subsets were 9 and 35, and it is compared paired, per query, against ``live-wiki``.
+
 Three limits on what the numbers mean, none of them incidental:
 
   * **The gold set has no repeat queries** - 5,969 unique queries in the test split, each
@@ -77,6 +95,7 @@ from mwmbl.tinysearchengine.mmr_rank import MMRRanker  # noqa: E402
 from mwmbl.tinysearchengine.rank import get_wiki_results  # noqa: E402
 from mwmbl.tinysearchengine.wiki_index_cache import (  # noqa: E402
     COUNTING_GATES, VALUE_GATES, store_wiki_results)
+from mwmbl.tokenizer import tokenize  # noqa: E402
 
 
 # Roughly 6k queries * ~3 storable terms each is well under 20k distinct terms, so 64k
@@ -156,9 +175,18 @@ class OverlayIndex:
         # immediately - the same arrangement production relies on (see search_setup).
         self.local = TinyIndex(item_factory=Document, index_path=str(local_path))
         self.local.__enter__()
+        # Set to a fresh set() before a query to collect the stored (term, url) pairs that
+        # query retrieved. Everything in the local half was stored by an *earlier* query -
+        # external_search, which does the storing, runs after retrieval, and the gold set
+        # has no repeats - so a non-empty trace is exactly "this query saw another query's
+        # stored documents", with no provenance bookkeeping needed.
+        self.trace: set[tuple[str, str]] | None = None
 
     def retrieve(self, term: str) -> list[Document]:
-        return self.remote.retrieve(term) + self.local.retrieve(term)
+        local = self.local.retrieve(term)
+        if self.trace is not None:
+            self.trace.update((document.term, document.url) for document in local)
+        return self.remote.retrieve(term) + local
 
     def has_term(self, term: str) -> bool:
         """Whether the corpus - both halves - already holds documents under this term."""
@@ -179,7 +207,8 @@ class Arm:
     threshold: int = 2
     require_existing_term: bool = False
     max_term_tokens: int = 2
-    keep_score: bool = True
+    score_terms: str = "all"
+    score_ema_alpha: float = 1.0
 
 
 @dataclass
@@ -190,6 +219,8 @@ class ArmResult:
     wiki_in_top: dict = field(default_factory=dict)
     called_wiki: dict = field(default_factory=dict)
     stored: dict = field(default_factory=dict)
+    carried: dict = field(default_factory=dict)
+    carried_in_top: dict = field(default_factory=dict)
     duration: dict = field(default_factory=dict)
     order: list = field(default_factory=list)
 
@@ -201,6 +232,17 @@ class ArmResult:
     def fired(self) -> list:
         """Queries where the gate suppressed a call it would otherwise have made."""
         return [q for q, called in self.called_wiki.items() if not called]
+
+    @property
+    def affected(self) -> list:
+        """Queries whose candidate pool held documents an earlier, different query stored.
+
+        The population this feature is supposed to help. Unlike `fired` it exists with the
+        gate off, and it is a term-overlap event rather than a repeated query - so it is
+        the subset that answers whether storing Wikipedia results makes the index better
+        in general rather than only caching.
+        """
+        return [q for q, count in self.carried.items() if count]
 
 
 # The per-term gates live on wildly different scales, so one shared sweep cannot serve
@@ -242,11 +284,38 @@ def build_arms(gates: list[str], thresholds: list[float],
                  for t in sweep]
     arms += [
         Arm("indexed-unigrams-only", max_term_tokens=1),
-        Arm("indexed-noscore", gate="from_wiki_only", threshold=1, keep_score=False),
+        Arm("indexed-noscore", gate="from_wiki_only", threshold=1, score_terms="none"),
         Arm("indexed-safe", require_existing_term=True),
         Arm("never-call", gate="always"),
     ]
     return arms
+
+
+def build_score_arms() -> list[Arm]:
+    """Arms that isolate the *ranking* effect of stored results from the caching effect.
+
+    Every one runs gate="never": Wikipedia is called on every query and the results are
+    stored, so no call is ever skipped and the only thing that varies is what a stored
+    document looks like to the ranker when some *other* query retrieves it. That is the
+    question the gate sweep could never answer, because a gate firing and a stored
+    document being served were the same event.
+
+    live-wiki stores nothing at all and is the baseline. The rest differ only in which
+    term carries the Wikipedia rank, and whether re-storing overwrites or averages - so
+    they all store the same (term, url) pairs and the affected subset is identical across
+    them, which keeps the comparison paired.
+    """
+    return [
+        Arm("live-wiki", cache_enabled=False),
+        Arm("stored-score-none", gate="never", score_terms="none"),
+        Arm("stored-score-all", gate="never", score_terms="all"),
+        Arm("stored-score-specific", gate="never", score_terms="specific"),
+        Arm("stored-score-exact", gate="never", score_terms="exact"),
+        Arm("stored-score-specific-ema0_5", gate="never", score_terms="specific",
+            score_ema_alpha=0.5),
+        Arm("stored-score-specific-ema0_25", gate="never", score_terms="specific",
+            score_ema_alpha=0.25),
+    ]
 
 
 def build_stack(arm: Arm, overlay: Path, overlay_pages: int, model):
@@ -269,7 +338,8 @@ def arm_settings(arm: Arm):
         WIKI_INDEX_GATE_THRESHOLD=arm.threshold,
         WIKI_INDEX_REQUIRE_EXISTING_TERM=arm.require_existing_term,
         WIKI_INDEX_MAX_TERM_TOKENS=arm.max_term_tokens,
-        WIKI_INDEX_KEEP_SCORE=arm.keep_score,
+        WIKI_INDEX_SCORE_TERMS=arm.score_terms,
+        WIKI_INDEX_SCORE_EMA_ALPHA=arm.score_ema_alpha,
     )
 
 
@@ -282,16 +352,20 @@ def run_arm(arm: Arm, queries: list[str], gold: dict, overlay_pages: int,
         with arm_settings(arm):
             for i, query in enumerate(queries):
                 calls_before, stored_before = fetcher.calls, store.urls_stored
+                index.trace = set()
                 start = time.perf_counter()
                 urls = ranking_model.predict(query)
                 result.duration[query] = time.perf_counter() - start
 
                 top = urls[:NUM_RESULTS_FOR_EVAL]
+                carried_urls = {url for _, url in index.trace}
                 result.ndcg[query] = query_ndcg(urls, gold[query])
                 result.proportion[query] = len(set(top) & gold[query].keys()) / NUM_RESULTS_FOR_EVAL
                 result.wiki_in_top[query] = sum(1 for url in top if "en.wikipedia.org" in url)
                 result.called_wiki[query] = fetcher.calls > calls_before
                 result.stored[query] = store.urls_stored - stored_before
+                result.carried[query] = len(index.trace)
+                result.carried_in_top[query] = sum(1 for url in top if url in carried_urls)
 
                 if (i + 1) % 100 == 0:
                     print(f"  {arm.name}: {i + 1}/{len(queries)} queries, "
@@ -344,14 +418,19 @@ def run_zipf(arm: Arm, queries: list[str], gold: dict, stream_length: int,
 
 
 def report_zipf(records_by_arm: dict, baseline_name: str = "live-wiki"):
+    """Every arm replays the same stream from the same seed, so position i is the same
+    query in all of them and the Δ can be paired the way report_affected's is."""
     baseline = records_by_arm.get(baseline_name)
 
     def mean_over(records, predicate):
         return [r["ndcg"] for r in records if predicate(r)]
 
+    def paired_over(records, predicate):
+        return [r["ndcg"] - b["ndcg"] for r, b in zip(records, baseline) if predicate(r)]
+
     print(f"\n{'arm':<30} {'calls':>13} {'NDCG on repeats':>20} "
-          f"{'NDCG first-seen':>20} {'Δ vs live on repeats':>21}")
-    print("-" * 104)
+          f"{'NDCG first-seen':>20} {'Δ paired on repeats':>22}")
+    print("-" * 110)
     for name, records in records_by_arm.items():
         calls = sum(1 for r in records if r["called"])
         repeats = mean_over(records, lambda r: r["repeat"])
@@ -359,10 +438,66 @@ def report_zipf(records_by_arm: dict, baseline_name: str = "live-wiki"):
         if baseline is None or name == baseline_name:
             delta = "n/a"
         else:
-            base_repeats = mean_over(baseline, lambda r: r["repeat"])
-            delta = f"{np.mean(repeats) - np.mean(base_repeats):+.4f}"
+            delta = mean_sem(paired_over(records, lambda r: r["repeat"]))
         print(f"{name:<30} {calls:>5}/{len(records):<7} {mean_sem(repeats):>20} "
-              f"{mean_sem(first):>20} {delta:>21}")
+              f"{mean_sem(first):>20} {delta:>22}")
+
+
+def paired_deltas(result: ArmResult, baseline: ArmResult, queries: list) -> list[float]:
+    """Per-query NDCG differences against the baseline on the same queries.
+
+    Paired, unlike the difference of two independent means the main table prints: both
+    arms answered the identical query against the identical remote index, so the query's
+    own difficulty cancels and the error bar shrinks to the variance of the *effect*.
+    That matters here because the interesting subsets are small.
+    """
+    return [result.ndcg[query] - baseline.ndcg[query] for query in queries]
+
+
+def report_affected(results: list[ArmResult], reference_name: str,
+                    baseline_name: str = "live-wiki"):
+    """What happens to a query that retrieves a document some other query stored.
+
+    The subset is taken from one reference arm and applied to all of them: the score arms
+    store the same (term, url) pairs and differ only in the score written, so they share a
+    subset, and using one keeps every arm scored on identical queries. The baseline stores
+    nothing, so it has no subset of its own - it is what the subset is measured against.
+    """
+    baseline = next((r for r in results if r.arm.name == baseline_name), None)
+    reference = next((r for r in results if r.arm.name == reference_name), None)
+    if baseline is None or reference is None:
+        return
+
+    affected = [q for q in reference.order if reference.carried[q]]
+    if not affected:
+        print(f"\nNo query retrieved another query's stored documents in {reference_name}.")
+        return
+
+    short = [q for q in affected if len(tokenize(q)) == 1]
+    longer = [q for q in affected if len(tokenize(q)) > 1]
+    print(f"\nQueries that retrieved documents an earlier, different query stored "
+          f"({len(affected)}/{len(reference.order)}, from {reference_name}):")
+    print(f"  {len(short)} one-token, {len(longer)} multi-token. Paired NDCG against "
+          f"{baseline_name} on the same queries.")
+    print(f"\n{'arm':<30} {'Δ paired (affected)':>24} {'Δ 1-token':>24} "
+          f"{'Δ 2+ token':>24} {'carried@10':>11}")
+    print("-" * 118)
+    for result in results:
+        if result.arm.name == baseline_name:
+            continue
+        carried_top = np.mean([result.carried_in_top[q] for q in affected])
+        print(f"{result.arm.name:<30} "
+              f"{mean_sem(paired_deltas(result, baseline, affected)):>24} "
+              f"{mean_sem(paired_deltas(result, baseline, short)):>24} "
+              f"{mean_sem(paired_deltas(result, baseline, longer)):>24} "
+              f"{carried_top:>11.2f}")
+
+    print(f"\nPaired Δ over all {len(reference.order)} queries, for comparison:")
+    for result in results:
+        if result.arm.name == baseline_name:
+            continue
+        print(f"  {result.arm.name:<30} "
+              f"{mean_sem(paired_deltas(result, baseline, reference.order)):>24}")
 
 
 def _second_half(result: ArmResult, values: dict) -> list:
@@ -378,10 +513,10 @@ def report(results: list[ArmResult], header: str = "",
     if header:
         print(f"\n{header}")
 
-    print(f"\n{'=' * 118}")
+    print(f"\n{'=' * 132}")
     print(f"{'arm':<30} {'NDCG@10':>18} {'ΔNDCG':>9} {'proportion':>18} "
-          f"{'wiki@10':>7} {'calls':>12} {'stored':>8}")
-    print(f"{'-' * 118}")
+          f"{'wiki@10':>7} {'calls':>12} {'stored':>8} {'affected':>9} {'carried@10':>11}")
+    print(f"{'-' * 132}")
     for result in results:
         ndcg = list(result.ndcg.values())
         delta = (f"{np.mean(ndcg) - np.mean(list(baseline.ndcg.values())):+.4f}"
@@ -389,8 +524,10 @@ def report(results: list[ArmResult], header: str = "",
         print(f"{result.arm.name:<30} {mean_sem(ndcg):>18} {delta:>9} "
               f"{mean_sem(list(result.proportion.values())):>18} "
               f"{np.mean(list(result.wiki_in_top.values())):>7.2f} "
-              f"{result.calls:>5}/{n:<6} {sum(result.stored.values()):>8}")
-    print(f"{'=' * 118}")
+              f"{result.calls:>5}/{n:<6} {sum(result.stored.values()):>8} "
+              f"{len(result.affected):>9} "
+              f"{np.mean(list(result.carried_in_top.values())):>11.2f}")
+    print(f"{'=' * 132}")
 
     print("\nSteady state (second half of the stream, index already warm):")
     print(f"{'arm':<30} {'NDCG@10':>18} {'calls avoided':>15}")
@@ -438,7 +575,12 @@ def run():
     parser.add_argument("--train", action="store_true",
                         help="Evaluate on the train split instead of test.")
     parser.add_argument("--arms", nargs="+", default=None,
-                        help="Only run these arms by name (default: the standard set).")
+                        help="Only run these arms by name (default: the whole set).")
+    parser.add_argument("--arm-set", choices=["gates", "scores"], default="gates",
+                        help="gates: sweep the skip-the-call rules. scores: call Wikipedia "
+                             "every time and vary only which term carries a stored "
+                             "result's score, to measure the ranking effect on other "
+                             "queries in isolation.")
     parser.add_argument("--gates", nargs="+",
                         default=list(COUNTING_GATES) + list(VALUE_GATES),
                         help="Gate definitions to sweep.")
@@ -494,7 +636,10 @@ def run():
         np.random.default_rng(42).shuffle(queries)
     print(f"Num queries {len(queries)} ({args.order} order)")
 
-    arms = build_arms(args.gates, args.thresholds, args.value_thresholds)
+    if args.arm_set == "scores":
+        arms = build_score_arms()
+    else:
+        arms = build_arms(args.gates, args.thresholds, args.value_thresholds)
     if args.arms:
         by_name = {arm.name: arm for arm in arms}
         unknown = [name for name in args.arms if name not in by_name]
@@ -516,6 +661,11 @@ def run():
         report(results, header=f"{len(queries)} queries, {args.order} order, "
                               f"{'train' if args.train else 'test'} split, "
                               f"fraction={args.fraction}, overlay_pages={args.overlay_pages}")
+
+        reference = next((r.arm.name for r in results
+                          if r.arm.cache_enabled and r.arm.include_wiki), None)
+        if reference is not None:
+            report_affected(results, reference_name=reference)
 
         if args.zipf:
             print(f"\nRepeat-weighted stream: {args.zipf} positions, Zipf over the same "

@@ -17,6 +17,17 @@ DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
 596 queries, shuffled order, test split, over the **remote production index** unioned with
 a fresh local index holding everything the run stored.
 
+> **Every absolute NDCG below predates two evaluation fixes and is not comparable with
+> anything measured after them.** (1) `gold_scores_for` took a query's first ten rows, but
+> 1,135 of the 5,969 test queries were scraped on several dates and their rows sit
+> consecutively, so those queries' "top ten" mixed dates and a URL appearing in two scrapes
+> kept the *worse* rank's weight; the gold ranking is now the latest scrape only.
+> (2) The gate arms were decided on the *fired* subset - 9 queries at 596, 35 at 1,790 -
+> and compared as a difference of two independent means. The subset that answers whether
+> storing helps at all is the queries that retrieved another query's stored documents, and
+> it is now compared paired. Within-run comparisons in the tables below still hold; the
+> levels do not.
+
 ## Headline: storing is free, skipping is expensive
 
 | arm | NDCG@10 | Δ | wiki calls | stored URLs |
@@ -229,6 +240,112 @@ bottleneck, and distinct bigrams grow nearly linearly with volume. Gold-set fire
 decile is flat noise (0%, 2%, 0%, 2%, 0%, 2%, 2%, 0%, 0%, 5%). Repeat matching does grow
 and then saturates (22% -> 47% by decile), at a ceiling set by how repetitive the traffic
 is - a property of the traffic, not of the dataset size.
+
+## Storing on its own, with nothing skipped: where the score should be filed
+
+Every table above conflates two things, because a gate firing and a stored document being
+served were the same event. `--arm-set scores` separates them: Wikipedia is called on
+**every** query and the results are stored, so no call is ever avoided and the only thing
+that varies is what a stored document looks like to the ranker when a *different* query
+retrieves it.
+
+The subset it is read on is new too. `fired` was 9 queries at 596 and 35 at 1,790. The
+population that actually matters is the queries whose candidate pool held documents an
+earlier, different query stored - **957 of 1,790**. The overlay's local half holds only
+what the run stored and storing happens after retrieval, so on a repeat-free gold set a
+local-half hit *is* a cross-query hit; no provenance bookkeeping is needed. Every arm is
+compared **paired**, per query, against `live-wiki`.
+
+`score_terms` decides which of a query's terms a stored copy carries the Wikipedia rank
+under: `all` (every term), `specific` (bigrams only, unless the query is one token),
+`exact` (only a term equal to the whole query), `none`.
+
+1,790 queries, test split, paired Δ NDCG against `live-wiki`:
+
+| arm | Δ affected (n=957) | Δ 1-token (n=18) | Δ 2+ token (n=939) | carried@10 |
+|---|---|---|---|---|
+| stored-score-none | −0.0012 ± 0.0017 | +0.0573 ± 0.0555 | −0.0023 ± 0.0014 | 0.17 |
+| stored-score-all | −0.0002 ± 0.0020 | +0.1128 ± 0.0761 | −0.0023 ± 0.0014 | 0.24 |
+| stored-score-specific | −0.0004 ± 0.0016 | +0.0573 ± 0.0555 | −0.0015 ± 0.0013 | 0.19 |
+| **stored-score-exact** | **+0.0010 ± 0.0011** | +0.0573 ± 0.0555 | **−0.0001 ± 0.0005** | 0.17 |
+
+**1. Storing is not what cost the −0.19.** With nothing skipped, the worst arm is −0.0012
+on the subset it acts on. The damage every gate paid was the *skipping*, and this is the
+first measurement that separates the two rather than inferring it.
+
+**2. The multi-token column is monotone in how narrowly the score is attributed.**
+all/none −0.0023 -> specific −0.0015 -> exact −0.0001. The direction is the hypothesis:
+a score filed under a bare unigram is the rank Wikipedia gave a document for a *whole*
+query, and the next query using that word reads it as if it were the word's own. But every
+one of these is within about 1.5 SEM of zero, so the ordering is a direction, not a
+result. What is not marginal is the **variance**: exact's error bar is a third of the
+others' (±0.0005 vs ±0.0014). Attributing the score to the originating query alone stops
+stored documents perturbing other queries' rankings at all - which is what its carried@10
+of 0.17, level with storing no score, says directly.
+
+**3. Removing the score is worse than mis-attributing it.** `none` is the *worst* arm on
+the affected subset (−0.0012 vs `all`'s −0.0002). This is the `WIKI_INDEX_KEEP_SCORE`
+finding again from the other side: a stored copy with no score is handicapped in a feature
+the model reads, against the identical result fetched live.
+
+**4. One-token queries are helped, if by anything.** All four arms are positive there
+(+0.057, +0.113 for `all`), which is a longer query's stored documents answering a shorter
+one - `connections` <- `connections hint september 14`. n=18 and the error bars are larger
+than the effects, so this is a lead, not a finding.
+
+**5. The exponential moving average had almost nothing to average.** Blending a score
+being written over the previous one for the same `(term, url)` (`WIKI_INDEX_SCORE_EMA_ALPHA`)
+produced results identical to plain `specific` at both 0.5 and 0.25, to four decimal
+places in every column. Counting the write events over the same 1,790 queries says why:
+
+| score_terms | scored writes | writes with a previous score to blend |
+|---|---|---|
+| all | 10,749 | 269 (2.5%) |
+| specific | 3,524 | **46 (1.3%)** |
+| exact | 1,691 | **0** |
+
+The arms ran `specific`, so the EMA acted 46 times in the whole run - 0.03 per query.
+It is **untested, not disproved**: a gold set with no repeated queries barely ever files
+the same document under the same term twice. Under `exact` it can never fire at all by
+construction, since the term is the query. Measuring it needs the repeat-weighted stream,
+where re-storing is the norm rather than the exception.
+
+### At repeat-stream density, `specific` and `all` come apart
+
+The gold set is sparse: 596 queries store 1,530 URLs and most terms are written once. A
+Zipf-weighted stream of 3,000 positions over the same 596 queries stores far more per
+term, which is the direction production goes. Every arm calls Wikipedia every time, so
+again nothing is skipped; the Δ is paired position by position (every arm replays the same
+seed, so position *i* is the same query in all of them).
+
+| arm | NDCG on repeats | Δ paired on repeats |
+|---|---|---|
+| live-wiki | 0.2372 ± 0.0073 | — |
+| stored-score-all | 0.2352 ± 0.0072 | **−0.0020 ± 0.0006** |
+| stored-score-specific | 0.2393 ± 0.0073 | +0.0021 ± 0.0025 |
+| stored-score-exact | 0.2393 ± 0.0073 | +0.0021 ± 0.0025 |
+| stored-score-specific-ema0_5 | 0.2393 ± 0.0073 | +0.0021 ± 0.0025 |
+
+`all` is negative at 3.3 SEM - small, but the clearest signal in this whole document that
+storing *can* hurt, and it appears only once the index is dense. `specific` is positive
+though within its own error bar. The two do not overlap: the gap between them is about
+0.004, six times `all`'s SEM. Note the shape of the error bars - `all` moves a lot of
+queries a little way down (tight SEM), `specific` moves few queries further.
+
+This also revises the earlier "storing is not free once the index is dense" figure of
+−0.0210 for `indexed-nogate`, which is the same score policy as `all`. Paired, and with the
+gold-set fix, the same effect measures −0.0020.
+
+### The EMA is a no-op in every configuration measured, for two different reasons
+
+On the gold set it has nothing to blend (46 chances in 1,790 queries under `specific`, 0
+under `exact`). On the repeat stream, where re-storing is the norm, it has plenty of
+chances and still changes nothing - because a repeated query re-stores the *identical*
+Wikipedia rank, and blending 3.0 with 3.0 is 3.0. The EMA can only bite where two
+**different** queries file the same (term, url) with **different** ranks, and under
+`exact` that combination cannot exist by construction. In production a third case exists
+that this harness cannot see - Wikipedia's own ranking drifting over weeks - but a single
+run has no time axis, so nothing here speaks to it.
 
 ## Recommendation
 
