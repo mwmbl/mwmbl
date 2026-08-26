@@ -53,7 +53,7 @@ django.setup()
 
 import mwmbl.rankeval.evaluation.evaluate_super_search as ss_module  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import (  # noqa: E402
-    CLICK_PROPORTIONS, NUM_RESULTS_FOR_EVAL, RankingModel)
+    NUM_RESULTS_FOR_EVAL, RankingModel, gold_scores_for)
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
@@ -166,9 +166,7 @@ def run():
     for query, rankings in dataset.groupby("query"):
         if query not in sampled:
             continue
-        top_ranked = rankings[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
-        top_ranked["score"] = CLICK_PROPORTIONS[:len(top_ranked)]
-        gold_scores = top_ranked.set_index("url")["score"].to_dict()
+        gold_scores = gold_scores_for(rankings)
 
         std_results = standard.predict(query)
         standard_count[query] = len(std_results)
