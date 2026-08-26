@@ -383,6 +383,10 @@ WIKI_INDEX_MAX_TERM_TOKENS = 2
 # Wikipedia gave a document for one whole query is what the model reads for every other
 # query sharing a word with it. See index_batches._takes_score for the options
 # (none / all / specific / exact).
+# "specific" only works with WIKI_INDEX_GATE="bigram_coverage". It leaves unigram copies
+# unscored, and term_coverage counts an unscored term as uncovered, so the two together
+# silently stop the gate firing for every multi-token query - measured at 690 firings ->
+# 227, all of them one-token queries.
 WIKI_INDEX_SCORE_TERMS = os.environ.get("WIKI_INDEX_SCORE_TERMS", "all")
 # Blend a score being written over the previous one for the same (term, url) rather than
 # overwriting it: alpha * new + (1 - alpha) * previous. 1.0 overwrites, which is what the

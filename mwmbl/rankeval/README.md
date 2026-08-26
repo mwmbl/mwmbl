@@ -79,3 +79,19 @@ DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
     uv run python -m mwmbl.rankeval.evaluation.evaluate_wiki_index \
       --arm-set scores --fraction 0.3
 ```
+
+- **How often a gate fires, cheaply** —
+  `mwmbl/rankeval/evaluation/simulate_wiki_gate_firing.py` answers the counting
+  half of the same question in about a minute, with no network and no remote
+  index, over *every* query whose Wikipedia response `evaluate_wiki_index` has
+  already cached rather than a sample of a few hundred. It can, because the gate
+  counts only documents a previous call stored, so a local index holding exactly
+  what the run stored is a faithful simulation of its input. It reports firings
+  split into genuine repeats and first-seen queries riding on some other query's
+  documents — the split that decides whether a gate is caching or guessing. It
+  says nothing about NDCG; read it alongside `evaluate_wiki_index`, not instead.
+
+```bash
+DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+    uv run python -m mwmbl.rankeval.evaluation.simulate_wiki_gate_firing
+```

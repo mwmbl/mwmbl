@@ -255,6 +255,7 @@ DEFAULT_VALUE_THRESHOLDS = {
     "min_max_ltr": [0.0002, 0.0005, 0.001, 0.002, 0.005],
     "max_max_ltr": [0.001, 0.0025, 0.005, 0.01, 0.02],
     "term_coverage": [0.25, 0.5, 0.75, 1.0],
+    "bigram_coverage": [0.5, 0.75, 1.0],
     "mean_max_stored": [0.75, 1.5, 2.25, 3.0],
 }
 
@@ -288,7 +289,38 @@ def build_arms(gates: list[str], thresholds: list[float],
         Arm("indexed-safe", require_existing_term=True),
         Arm("never-call", gate="always"),
     ]
+    arms += build_coverage_arms()
     return arms
+
+
+def build_coverage_arms() -> list[Arm]:
+    """The 2x2 of coverage denominator against score policy.
+
+    The sweep above runs every gate at the default score_terms="all", where the two
+    denominators are provably the same condition (see query_bigrams) - so the gate on its
+    own measures nothing and has to be paired with the score policy explicitly. Offline
+    replay of a 3,000-position repeat-weighted stream over 2,347 cached queries gives the
+    firing counts; what these arms add is what those firings cost in NDCG.
+
+        denominator / scores      fired   repeats   first-seen
+        terms       / all           690       672           18
+        terms       / specific      227       227            0   <- gate dies
+        bigrams     / all           690       672           18   <- identical to row 1
+        bigrams     / specific      677       672            5   <- same savings, fewer
+                                                                    wrong-query firings
+
+    Threshold is pinned at 1.0. Anything lower fires when only some of a query's bigrams
+    are covered, which is the partial-match case every gate in this harness has paid
+    around -0.19 for; the sweep in DEFAULT_VALUE_THRESHOLDS is there to confirm that, not
+    because a lower setting is a candidate.
+    """
+    return [
+        Arm("indexed-bigram_coverage-all-t1", gate="bigram_coverage", threshold=1.0),
+        Arm("indexed-bigram_coverage-specific-t1", gate="bigram_coverage", threshold=1.0,
+            score_terms="specific"),
+        Arm("indexed-term_coverage-specific-t1", gate="term_coverage", threshold=1.0,
+            score_terms="specific"),
+    ]
 
 
 def build_score_arms() -> list[Arm]:
@@ -428,7 +460,7 @@ def report_zipf(records_by_arm: dict, baseline_name: str = "live-wiki"):
     def paired_over(records, predicate):
         return [r["ndcg"] - b["ndcg"] for r, b in zip(records, baseline) if predicate(r)]
 
-    print(f"\n{'arm':<30} {'calls':>13} {'NDCG on repeats':>20} "
+    print(f"\n{'arm':<36} {'calls':>13} {'NDCG on repeats':>20} "
           f"{'NDCG first-seen':>20} {'Δ paired on repeats':>22}")
     print("-" * 110)
     for name, records in records_by_arm.items():
@@ -439,7 +471,7 @@ def report_zipf(records_by_arm: dict, baseline_name: str = "live-wiki"):
             delta = "n/a"
         else:
             delta = mean_sem(paired_over(records, lambda r: r["repeat"]))
-        print(f"{name:<30} {calls:>5}/{len(records):<7} {mean_sem(repeats):>20} "
+        print(f"{name:<36} {calls:>5}/{len(records):<7} {mean_sem(repeats):>20} "
               f"{mean_sem(first):>20} {delta:>22}")
 
 
@@ -479,14 +511,14 @@ def report_affected(results: list[ArmResult], reference_name: str,
           f"({len(affected)}/{len(reference.order)}, from {reference_name}):")
     print(f"  {len(short)} one-token, {len(longer)} multi-token. Paired NDCG against "
           f"{baseline_name} on the same queries.")
-    print(f"\n{'arm':<30} {'Δ paired (affected)':>24} {'Δ 1-token':>24} "
+    print(f"\n{'arm':<36} {'Δ paired (affected)':>24} {'Δ 1-token':>24} "
           f"{'Δ 2+ token':>24} {'carried@10':>11}")
     print("-" * 118)
     for result in results:
         if result.arm.name == baseline_name:
             continue
         carried_top = np.mean([result.carried_in_top[q] for q in affected])
-        print(f"{result.arm.name:<30} "
+        print(f"{result.arm.name:<36} "
               f"{mean_sem(paired_deltas(result, baseline, affected)):>24} "
               f"{mean_sem(paired_deltas(result, baseline, short)):>24} "
               f"{mean_sem(paired_deltas(result, baseline, longer)):>24} "
@@ -496,7 +528,7 @@ def report_affected(results: list[ArmResult], reference_name: str,
     for result in results:
         if result.arm.name == baseline_name:
             continue
-        print(f"  {result.arm.name:<30} "
+        print(f"  {result.arm.name:<36} "
               f"{mean_sem(paired_deltas(result, baseline, reference.order)):>24}")
 
 
@@ -514,14 +546,14 @@ def report(results: list[ArmResult], header: str = "",
         print(f"\n{header}")
 
     print(f"\n{'=' * 132}")
-    print(f"{'arm':<30} {'NDCG@10':>18} {'ΔNDCG':>9} {'proportion':>18} "
+    print(f"{'arm':<36} {'NDCG@10':>18} {'ΔNDCG':>9} {'proportion':>18} "
           f"{'wiki@10':>7} {'calls':>12} {'stored':>8} {'affected':>9} {'carried@10':>11}")
     print(f"{'-' * 132}")
     for result in results:
         ndcg = list(result.ndcg.values())
         delta = (f"{np.mean(ndcg) - np.mean(list(baseline.ndcg.values())):+.4f}"
                  if baseline else "n/a")
-        print(f"{result.arm.name:<30} {mean_sem(ndcg):>18} {delta:>9} "
+        print(f"{result.arm.name:<36} {mean_sem(ndcg):>18} {delta:>9} "
               f"{mean_sem(list(result.proportion.values())):>18} "
               f"{np.mean(list(result.wiki_in_top.values())):>7.2f} "
               f"{result.calls:>5}/{n:<6} {sum(result.stored.values()):>8} "
@@ -530,24 +562,24 @@ def report(results: list[ArmResult], header: str = "",
     print(f"{'=' * 132}")
 
     print("\nSteady state (second half of the stream, index already warm):")
-    print(f"{'arm':<30} {'NDCG@10':>18} {'calls avoided':>15}")
+    print(f"{'arm':<36} {'NDCG@10':>18} {'calls avoided':>15}")
     for result in results:
         tail = result.order[len(result.order) // 2:]
         avoided = sum(1 for q in tail if not result.called_wiki[q])
-        print(f"{result.arm.name:<30} {mean_sem(_second_half(result, result.ndcg)):>18} "
+        print(f"{result.arm.name:<36} {mean_sem(_second_half(result, result.ndcg)):>18} "
               f"{avoided:>6}/{len(tail):<8}")
 
     if baseline is None:
         return
     print("\nOn the queries where the gate fired - the subset the feature is decided on:")
-    print(f"{'arm':<30} {'fired':>13} {'NDCG (arm)':>18} {'NDCG (live-wiki)':>18} {'Δ':>9}")
+    print(f"{'arm':<36} {'fired':>13} {'NDCG (arm)':>18} {'NDCG (live-wiki)':>18} {'Δ':>9}")
     for result in results:
         fired = result.fired
         if not fired or result.arm.name == baseline_name or not result.arm.include_wiki:
             continue
         arm_ndcg = [result.ndcg[q] for q in fired]
         base_ndcg = [baseline.ndcg[q] for q in fired]
-        print(f"{result.arm.name:<30} {len(fired):>5}/{n:<7} {mean_sem(arm_ndcg):>18} "
+        print(f"{result.arm.name:<36} {len(fired):>5}/{n:<7} {mean_sem(arm_ndcg):>18} "
               f"{mean_sem(base_ndcg):>18} {np.mean(arm_ndcg) - np.mean(base_ndcg):>+9.4f}")
 
     stored_nothing = [r for r in results if r.arm.cache_enabled and r.arm.include_wiki]
@@ -558,14 +590,14 @@ def report(results: list[ArmResult], header: str = "",
             fetched = [q for q, called in result.called_wiki.items() if called]
             empty = [q for q in fetched if result.stored[q] == 0]
             if fetched:
-                print(f"  {result.arm.name:<30} {len(empty):>5}/{len(fetched):<6} "
+                print(f"  {result.arm.name:<36} {len(empty):>5}/{len(fetched):<6} "
                       f"({100 * len(empty) / len(fetched):.1f}% of fetches)")
 
     print("\nNOTE: wall-clock timings from this harness are not production latency - the "
           "remote\nindex makes one HTTP call per query term and the wiki fetch is disk-cached. "
           "Mean\nper-query predict time, for reference only:")
     for result in results:
-        print(f"  {result.arm.name:<30} {np.mean(list(result.duration.values())):.3f}s")
+        print(f"  {result.arm.name:<36} {np.mean(list(result.duration.values())):.3f}s")
 
 
 def run():
@@ -581,8 +613,12 @@ def run():
                              "every time and vary only which term carries a stored "
                              "result's score, to measure the ranking effect on other "
                              "queries in isolation.")
+    # bigram_coverage is left out of the default sweep because build_coverage_arms
+    # already runs it at the only threshold worth running, paired with both score
+    # policies. Pass it explicitly to sweep its thresholds.
     parser.add_argument("--gates", nargs="+",
-                        default=list(COUNTING_GATES) + list(VALUE_GATES),
+                        default=[g for g in list(COUNTING_GATES) + list(VALUE_GATES)
+                                 if g != "bigram_coverage"],
                         help="Gate definitions to sweep.")
     parser.add_argument("--thresholds", type=float, nargs="+", default=[1, 2, 3],
                         help="Counting gates: wiki results needed to skip the call.")

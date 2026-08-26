@@ -347,6 +347,88 @@ Wikipedia rank, and blending 3.0 with 3.0 is 3.0. The EMA can only bite where tw
 that this harness cannot see - Wikipedia's own ranking drifting over weeks - but a single
 run has no time axis, so nothing here speaks to it.
 
+## Gating on bigram coverage: the denominator is not the point, the score policy is
+
+Every gate above counts coverage over the query's unigrams *and* bigrams. The proposal
+tested here narrows the denominator to bigrams alone, on the reasoning that a bigram is
+what identifies the query rather than the words in it.
+
+Measured with `mwmbl/rankeval/evaluation/simulate_wiki_gate_firing.py`, which replays a
+repeat-weighted stream over every query whose Wikipedia response is already on disk and
+counts firings only. It needs no remote index and no model, because the gate counts only
+documents a previous call stored - so a local index holding exactly what the run stored is
+a faithful simulation of its input. 2,347 cached queries, 3,000 positions, 2,149 repeats,
+threshold 1.0:
+
+| denominator / scores | fired | on repeats | on first-seen | repeats caught |
+|---|---|---|---|---|
+| terms / all (today's default) | 690 | 672 | 18 | 31.3% |
+| terms / specific | 227 | 227 | 0 | 10.6% |
+| bigrams / all | 690 | 672 | 18 | 31.3% |
+| **bigrams / specific** | **677** | **672** | **5** | **31.3%** |
+
+**1. The denominator change on its own is a no-op, and provably so.** Rows 1 and 3 are
+identical in every cell. A document only takes a term whose words it all contains
+(`words <= doc_tokens`), so a copy filed under the bigram `"a b"` is filed under `"a"` and
+`"b"` in the same write, and every unigram of a query appears in one of its consecutive
+bigrams. "Every bigram covered" and "every term covered" are the same condition. Pinned by
+`test_the_two_denominators_agree_when_every_term_is_scored`.
+
+**2. What it enables is `specific` scoring, which cannot be gated on without it.** Row 2
+is the combination that ships today if `WIKI_INDEX_SCORE_TERMS=specific` is set with the
+default gate: `specific` leaves unigram copies unscored, `term_coverage` reads an unscored
+term as uncovered, and full coverage becomes unreachable for every multi-token query. The
+gate does not error - it just stops firing on 96% of traffic, and every survivor is a
+one-token query. Pinned by
+`test_term_coverage_cannot_fire_for_a_multi_token_query_under_specific_scoring`.
+
+**3. Together they keep every repeat and drop 72% of the wrong-query firings.** Repeat
+catch is unchanged at 672/672. First-seen firings fall 18 -> 5, and the 13 that disappear
+are all the same shape:
+
+```
+eliminated:  1-token 'aircraft' 'amazon' 'argos' 'betfair' 'bundesliga' 'bus' ...
+surviving:   2-token 'angelina jolie' 'council tax' 'post office' 'premier league'
+             3-token 'champions league fixtures'
+```
+
+That is exactly the case `_takes_score` was written for - `connections` answered from
+`connections hint september 14` - now blocked at the gate as well as at the score. The
+survivors are the mild version: a bigram query answered by a longer query that contains
+it, where Wikipedia's ranking for `angelina jolie news` is unlikely to be far from
+`angelina jolie`.
+
+**What this does not measure is NDCG.** Firing counts are not cost; what a firing costs
+depends on the whole candidate pool. `build_coverage_arms` in `evaluate_wiki_index` runs
+the same 2x2 through the full stack for that. The prediction from the numbers above is
+that `bigrams/specific` matches `terms/all` on savings and loses less, but that is a
+prediction.
+
+**Threshold stays at 1.0.** Below it the gate fires on a query whose bigrams are only
+partly covered - `rachel reeves budget news` answered from whatever stored `rachel reeves`
+- which is the partial-match case every gate in this document has paid around -0.19 for.
+`DEFAULT_VALUE_THRESHOLDS` sweeps 0.5 and 0.75 to confirm that, not because either is a
+candidate.
+
+### What the privacy rule actually delivers
+
+Worth stating plainly, because the module docstring claims more than the code does.
+
+- **61% of queries are already stored whole.** 15.0% of test queries are one token and
+  46.2% are two, and `WIKI_INDEX_MAX_TERM_TOKENS = 2` files bigrams - so for a two-token
+  query the entire query is an index term stamped `FROM_WIKI`. Neither this proposal nor
+  today's code changes that.
+- **A 3+ token query is reconstructable from its bigram chain.** All consecutive bigrams
+  are filed against the same URL in one write, so `"a b"` + `"b c"` + `"c d"` recovers
+  `"a b c d"`. Containment is unordered set membership, so bigram *adjacency* is not
+  derivable from the document - it is query-derived. Filing non-overlapping bigrams
+  (`"a b"`, `"c d"`) would break the chain at the cost of a smaller denominator, and is
+  untested.
+- **The score leaks nothing further.** Every stored copy already carries
+  `state=FROM_WIKI`, which marks it as query-derived whether or not it has a score. So
+  `specific` is privacy-neutral at worst, and narrows the set of terms carrying
+  query-derived numbers at best.
+
 ## Recommendation
 
 The proposal splits into two halves with different verdicts, and the gate splits again.
@@ -362,7 +444,12 @@ Wikipedia is needed. Queries where the crawled index looks richest in Wikipedia 
 are queries where live Wikipedia does especially well (live-wiki scores 0.65 on the
 t3-fired subset versus 0.30 overall).
 
-**3. An exact-query cache is the target, not a count or a coverage rule.** Every gate
+**3. Pair `bigram_coverage` with `score_terms="specific"`, or neither.** They are one
+change: the denominator alone is a no-op, and `specific` cannot be gated on without it.
+Together they hold savings flat and cut wrong-query firings by 72%. Never ship `specific`
+with `term_coverage` - that silently disables the gate for all multi-token queries.
+
+**4. An exact-query cache is still the target, not a count or a coverage rule.** Every gate
 degraded as the sample grew, each looking best at the size where it fired least. What has
 held across every run is the diagnosis: the useful signal is "I have this query's own
 stored results", and every rule here is an awkward proxy for it. A query-keyed cache

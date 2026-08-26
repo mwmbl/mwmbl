@@ -21,7 +21,7 @@ from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.tinysearchengine.wiki_index_cache import (
     count_stored_wiki_results, count_wiki_results, have_enough_wiki_results, per_term_best,
-    query_terms, store_wiki_results, wiki_documents_by_term,
+    query_bigrams, query_terms, store_wiki_results, wiki_documents_by_term,
 )
 from mwmbl.tokenizer import get_bigrams, tokenize
 
@@ -400,6 +400,99 @@ def test_term_coverage_gate_is_a_fraction_of_terms():
                                     gate="term_coverage", threshold=1 / 3)
     assert not have_enough_wiki_results("bitcoin blockchain", documents, identity_rank,
                                         gate="term_coverage", threshold=0.5)
+
+
+# ---------------------------------------------------------------------------
+# The bigram denominator, and the score policy it exists to serve
+# ---------------------------------------------------------------------------
+
+def test_query_bigrams_drops_the_unigrams():
+    assert query_bigrams("bitcoin blockchain ledger") == ["bitcoin blockchain",
+                                                          "blockchain ledger"]
+
+
+def test_a_one_token_query_stands_in_for_its_own_bigram():
+    # It has no bigram, and the token *is* the query - which is also the one case where
+    # score_terms="specific" files a score under a unigram, so the denominator and the
+    # scored terms stay aligned at every query length.
+    assert query_bigrams("bitcoin") == ["bitcoin"]
+
+
+def test_bigram_coverage_ignores_covered_unigrams():
+    # Both unigrams answered, the bigram not. term_coverage calls that 2/3 covered;
+    # bigram_coverage calls it 0/1, because a document holding both words in one place is
+    # the only evidence that this *query* was answered.
+    unigrams_only = [stored_under("bitcoin"), stored_under("blockchain", "Blockchain")]
+    assert have_enough_wiki_results("bitcoin blockchain", unigrams_only, identity_rank,
+                                    gate="term_coverage", threshold=2 / 3)
+    assert not have_enough_wiki_results("bitcoin blockchain", unigrams_only, identity_rank,
+                                        gate="bigram_coverage", threshold=1.0)
+
+    covered = unigrams_only + [stored_under("bitcoin blockchain", "Bitcoin blockchain")]
+    assert have_enough_wiki_results("bitcoin blockchain", covered, identity_rank,
+                                    gate="bigram_coverage", threshold=1.0)
+
+
+def test_bigram_coverage_does_not_fire_on_a_unigram_a_longer_query_stored(index_path):
+    # "connections" <- "connections hint september 14": the longer query files its results
+    # under the bare unigram too, and under score_terms="all" they carry the rank
+    # Wikipedia gave them for the whole query. term_coverage then answers the short query
+    # from them. With "specific" the unigram copy carries no score and it does not.
+    document = Document("Connections", "https://en.wikipedia.org/wiki/Connections",
+                        "connections hint september puzzle", 3.0, RAW_QUERY,
+                        state=DocumentState.FROM_WIKI)
+    stored = index_results_against_query(
+        [document], "connections hint september", index_path,
+        state=DocumentState.FROM_WIKI, score_terms="specific")
+    assert stored == 1
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        retrieved = indexer.retrieve("connections")
+    assert retrieved, "the unigram copy is still stored - it just has no score"
+    assert all(document.score is None for document in retrieved)
+
+    assert not have_enough_wiki_results("connections", retrieved, identity_rank,
+                                        gate="bigram_coverage", threshold=1.0)
+
+
+def test_term_coverage_cannot_fire_for_a_multi_token_query_under_specific_scoring():
+    # The reason bigram_coverage exists. "specific" leaves unigram copies unscored, and
+    # term_coverage reads an unscored term as uncovered, so every multi-token query is
+    # permanently below full coverage however much the index holds. Pinning it here so the
+    # combination cannot be shipped by accident - see WIKI_INDEX_SCORE_TERMS.
+    fully_stored = [stored_under("bitcoin blockchain", "Bitcoin blockchain"),
+                    Document("Bitcoin", "https://en.wikipedia.org/wiki/Bitcoin", "e",
+                             None, "bitcoin", state=DocumentState.FROM_WIKI),
+                    Document("Blockchain", "https://en.wikipedia.org/wiki/Blockchain", "e",
+                             None, "blockchain", state=DocumentState.FROM_WIKI)]
+
+    assert not have_enough_wiki_results("bitcoin blockchain", fully_stored, identity_rank,
+                                        gate="term_coverage", threshold=1.0)
+    assert have_enough_wiki_results("bitcoin blockchain", fully_stored, identity_rank,
+                                    gate="bigram_coverage", threshold=1.0)
+
+
+def test_the_two_denominators_agree_when_every_term_is_scored(index_path):
+    # Under score_terms="all" the denominator change is a no-op, and not by coincidence: a
+    # document only takes a term whose words it all contains, so a copy filed under the
+    # bigram "a b" is filed under "a" and "b" in the same write. "Every bigram covered" and
+    # "every term covered" are the same condition. Any measured difference between the two
+    # gates therefore comes from the score policy, never from the denominator.
+    document = Document("Bitcoin", "https://en.wikipedia.org/wiki/Bitcoin",
+                        "bitcoin is a blockchain ledger", 3.0, RAW_QUERY,
+                        state=DocumentState.FROM_WIKI)
+    index_results_against_query([document], "bitcoin blockchain ledger", index_path,
+                                state=DocumentState.FROM_WIKI, score_terms="all")
+
+    query = "bitcoin blockchain ledger"
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        retrieved = [d for term in query_terms(query) for d in indexer.retrieve(term)]
+
+    for threshold in (0.5, 1.0):
+        assert (have_enough_wiki_results(query, retrieved, identity_rank,
+                                         gate="term_coverage", threshold=threshold)
+                == have_enough_wiki_results(query, retrieved, identity_rank,
+                                            gate="bigram_coverage", threshold=threshold))
 
 
 def test_value_gates_do_not_rank():

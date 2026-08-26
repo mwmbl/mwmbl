@@ -74,15 +74,43 @@ def query_terms(query: str) -> list[str]:
     return tokens + get_bigrams(len(tokens), tokens)
 
 
+def query_bigrams(query: str) -> list[str]:
+    """The bigrams alone - a narrower denominator, and the one `specific` scoring needs.
+
+    Over `query_terms` this changes nothing on its own. A document only takes a term whose
+    words it all contains, so a copy filed under the bigram "a b" is filed under "a" and
+    "b" in the same write, and every unigram of a query appears in one of its consecutive
+    bigrams: "every bigram covered" and "every term covered" are the same condition. What
+    it changes is which *scores* the gate can see. Under WIKI_INDEX_SCORE_TERMS="specific"
+    only bigrams carry a score, so a denominator including unigrams can never reach full
+    coverage for a multi-token query and the gate dies; and a one-token query can no
+    longer fire on a bare unigram some longer query happened to store, which is the
+    "connections" <- "connections hint september 14" case that _takes_score exists to stop.
+
+    A one-token query has no bigram, and its token *is* the query, so the token stands in.
+    That is also the only case where `specific` files a score under a unigram, which keeps
+    the denominator and the scored terms aligned at every query length.
+    """
+    tokens = tokenize(query)
+    if len(tokens) < 2:
+        return tokens
+    return get_bigrams(len(tokens), tokens)
+
+
+DENOMINATORS = {"terms": query_terms, "bigrams": query_bigrams}
+
+
 def wiki_documents_by_term(query: str, index_results: list[Document],
-                           stored_only: bool = True) -> dict[str, list[Document]]:
+                           stored_only: bool = True,
+                           denominator: str = "terms") -> dict[str, list[Document]]:
     """Each query term mapped to the Wikipedia documents the index returned under it.
 
     Every term appears, including ones with nothing - a term the index cannot answer is
     exactly the signal a breadth-based gate needs, so it must count as a zero rather than
-    being dropped from the average.
+    being dropped from the average. `denominator` chooses which terms are in that
+    accounting - see query_bigrams.
     """
-    by_term: dict[str, list[Document]] = {term: [] for term in query_terms(query)}
+    by_term: dict[str, list[Document]] = {term: [] for term in DENOMINATORS[denominator](query)}
     for document in index_results:
         if document.term not in by_term or not is_wiki_document(document):
             continue
@@ -139,13 +167,15 @@ AGGREGATES = {
     "max_max": max,
 }
 
-# gate name -> (aggregate, whether to use the model's relevance score or the stored one)
+# gate name -> (aggregate, whether to use the model's relevance score or the stored one,
+#               which terms form the denominator)
 VALUE_GATES = {
-    "term_coverage": ("term_coverage", "stored"),
-    "mean_max_ltr": ("mean_max", "ltr"),
-    "min_max_ltr": ("min_max", "ltr"),
-    "max_max_ltr": ("max_max", "ltr"),
-    "mean_max_stored": ("mean_max", "stored"),
+    "term_coverage": ("term_coverage", "stored", "terms"),
+    "bigram_coverage": ("term_coverage", "stored", "bigrams"),
+    "mean_max_ltr": ("mean_max", "ltr", "terms"),
+    "min_max_ltr": ("min_max", "ltr", "terms"),
+    "max_max_ltr": ("max_max", "ltr", "terms"),
+    "mean_max_stored": ("mean_max", "stored", "terms"),
 }
 
 GATES = list(COUNTING_GATES) + list(VALUE_GATES) + ["never", "always"]
@@ -174,6 +204,9 @@ def have_enough_wiki_results(query: str, index_results: list[Document], rank: ca
     unigram and bigram, take the best stored Wikipedia result's score (0 if the term has
     none), then reduce:
       term_coverage   fraction of terms with any stored result at all.
+      bigram_coverage as term_coverage, but counting only the query's bigrams. Identical
+                      to term_coverage under score_terms="all"; the pairing that matters
+                      is with "specific", which scores bigrams only - see query_bigrams.
       mean_max_ltr    mean of the per-term bests, by model relevance. Rewards a query whose
                       terms are broadly well covered.
       min_max_ltr     the worst-covered term. Fires only if *every* term is answered.
@@ -196,8 +229,8 @@ def have_enough_wiki_results(query: str, index_results: list[Document], rank: ca
         return True
 
     if gate in VALUE_GATES:
-        aggregate, source = VALUE_GATES[gate]
-        by_term = wiki_documents_by_term(query, index_results)
+        aggregate, source, denominator = VALUE_GATES[gate]
+        by_term = wiki_documents_by_term(query, index_results, denominator=denominator)
         if not by_term:
             return False
         score_fn = stored_scores if source == "stored" else score
