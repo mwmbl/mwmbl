@@ -299,14 +299,9 @@ def _revert_curation(curation):
         term = " ".join(tokenize(curation.query))
         documents = [Document(**doc) for doc in curation.original_index_results]
 
-        page_index = indexer.get_key_page_index(term)
-        existing_documents = indexer.get_page(page_index)
-        other_term_documents = [doc for doc in existing_documents if doc.term != term]
-
-        # Replace all existing documents for the term with the original documents
-        all_documents = documents + other_term_documents
-
-        indexer.store_in_page(page_index, all_documents)
+        with indexer.page(indexer.get_key_page_index(term)) as page:
+            # Replace all existing documents for the term with the original documents
+            page.store(documents + [doc for doc in page.documents if doc.term != term])
 
 
 def _get_curation(request, query, documents, reranked_documents):
@@ -392,21 +387,22 @@ def _save_to_index(query: str, new_results: list[Document]):
         ]
 
         page_index = indexer.get_key_page_index(term)
-        existing_documents_no_terms = indexer.get_page(page_index)
-        existing_documents = add_term_infos(existing_documents_no_terms, indexer, page_index)
-        new_urls = {doc.url for doc in documents}
-        other_documents = [doc for doc in existing_documents if doc.url not in new_urls]
-        logger.info(f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
-                    f"with terms { {doc.term for doc in other_documents} }")
 
-        # Update state for other documents
-        states = {doc.url: doc.state for doc in new_results}
-        for doc in other_documents:
-            doc.state = states.get(doc.url, doc.state)
+        with indexer.page(page_index) as page:
+            existing_documents = add_term_infos(page.documents, indexer, page_index)
+            new_urls = {doc.url for doc in documents}
+            other_documents = [doc for doc in existing_documents if doc.url not in new_urls]
+            logger.info(f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
+                        f"with terms { {doc.term for doc in other_documents} }")
 
-        all_documents = documents + other_documents
-        logger.info(f"Storing {len(all_documents)} documents at page {page_index}")
-        indexer.store_in_page(page_index, all_documents)
+            # Update state for other documents
+            states = {doc.url: doc.state for doc in new_results}
+            for doc in other_documents:
+                doc.state = states.get(doc.url, doc.state)
+
+            all_documents = documents + other_documents
+            num_stored = page.store(all_documents)
+            logger.info(f"Stored {num_stored} of {len(all_documents)} documents at page {page_index}")
 
     return {"curation": "ok"}
 

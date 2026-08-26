@@ -114,13 +114,14 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
     term_new_doc_counts = Counter()
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
-        for page, documents in page_documents.items():
-            existing_documents = indexer.get_page(page)
-            combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
-            logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
-            indexer.store_in_page(page, combined_documents)
+        for page_index, documents in page_documents.items():
+            with indexer.page(page_index) as page:
+                combined_documents = combine_documents(page.documents, documents, mark_synced, ranker)
+                num_stored = page.store(combined_documents)
+                logger.info(f"Storing {num_stored} of {len(combined_documents)} documents for "
+                            f"page {page_index}, originally {len(page.documents)}")
 
-            term_new_doc_counts.update(document.term for document in combined_documents
+            term_new_doc_counts.update(document.term for document in combined_documents[:num_stored]
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
     return term_new_doc_counts
 
