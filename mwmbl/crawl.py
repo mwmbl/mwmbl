@@ -11,17 +11,13 @@ import requests
 from django.conf import settings
 from redis import Redis
 
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
-from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
-from mwmbl.redis_url_queue import RedisURLQueue
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import score_result
-from mwmbl.tokenizer import tokenize
-
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
+# The mwmbl imports below reach Django models, so the app registry has to be ready before
+# any of them run. The app registry creates the index on startup, so the data path has to
+# exist before that.
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
@@ -32,10 +28,16 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
-from mwmbl.indexer.update_urls import record_urls_in_database
-from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION, USER_AGENT
 from mwmbl.crawler.batch import HashedBatch, Result, Results
+from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
+from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION, USER_AGENT
 from mwmbl.indexer.index_batches import index_batches, index_pages
+from mwmbl.indexer.update_urls import record_urls_in_database
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
+from mwmbl.redis_url_queue import RedisURLQueue
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.rank import score_result
+from mwmbl.tokenizer import tokenize
 
 BATCH_QUEUE_KEY = "batch-queue"
 REMOTE_SERVER = "https://api.mwmbl.org"
