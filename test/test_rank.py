@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
+from requests_cache import CachedSession
 from requests.exceptions import RetryError
 from urllib3.exceptions import MaxRetryError, ResponseError
 
@@ -35,7 +37,7 @@ class _TrackingRanker(HeuristicRanker):
         super().__init__(tiny_index, completer)
         self.external_search_calls = []
 
-    def external_search(self, q):
+    def external_search(self, q, index_results):
         self.external_search_calls.append(q)
         return []
 
@@ -70,8 +72,8 @@ def _reset_wiki_circuit():
 
 
 def _get_wiki_results_with_session(session):
-    with patch.object(rank, "request_cache") as mock_request_cache:
-        mock_request_cache.return_value.__enter__.return_value = session
+    with patch.object(rank, "wiki_session") as mock_wiki_session:
+        mock_wiki_session.return_value.__enter__.return_value = session
         return get_wiki_results("query", 5)
 
 
@@ -109,10 +111,10 @@ def test_wiki_query_text_containing_429_is_not_mistaken_for_rate_limit():
 def test_open_wiki_circuit_short_circuits_without_calling_wikipedia():
     rank._trip_wiki_circuit()
 
-    with patch.object(rank, "request_cache") as mock_request_cache:
+    with patch.object(rank, "wiki_session") as mock_wiki_session:
         results = get_wiki_results("query", 5)
 
-    mock_request_cache.assert_not_called()
+    mock_wiki_session.assert_not_called()
     assert results == []
 
 
@@ -122,3 +124,12 @@ def test_is_wiki_rate_limited_detects_429_reason():
 
 def test_is_wiki_rate_limited_ignores_non_429_reason():
     assert not rank._is_wiki_rate_limited(_make_retry_error(503))
+
+
+def test_wiki_session_keeps_the_disk_cache_until_the_index_cache_is_on():
+    # With neither cache every search would call Wikipedia, so the disk cache is retired by
+    # turning WIKI_INDEX_CACHE_ENABLED on, not by this change landing.
+    with override_settings(WIKI_INDEX_CACHE_ENABLED=False):
+        assert isinstance(rank.wiki_session(), CachedSession)
+    with override_settings(WIKI_INDEX_CACHE_ENABLED=True):
+        assert not isinstance(rank.wiki_session(), CachedSession)

@@ -45,15 +45,13 @@ from argparse import ArgumentParser
 import django
 import numpy as np
 import pandas as pd
-from scipy.stats import sem
-from sklearn.metrics import ndcg_score
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 django.setup()
 
 import mwmbl.rankeval.evaluation.evaluate_super_search as ss_module  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import (  # noqa: E402
-    CLICK_PROPORTIONS, NUM_RESULTS_FOR_EVAL, RankingModel)
+    RankingModel, gold_scores_for, mean_sem as _mean_sem, query_ndcg)
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
@@ -96,23 +94,6 @@ class FallbackRankingModel(RankingModel):
         if len(primary_results) <= self.threshold:
             return self.fallback.predict(query)
         return primary_results
-
-
-def query_ndcg(predicted_urls: list[str], gold_scores: dict[str, float]) -> float:
-    """NDCG@10 of a predicted ranking against gold, matching ``evaluate.evaluate``.
-
-    ``gold_scores`` maps each gold URL to its click-proportion relevance weight.
-    """
-    top_urls = predicted_urls[:NUM_RESULTS_FOR_EVAL]
-    y_true = [gold_scores.get(url, 0.0) for url in top_urls] + [0.0] * (10 - len(top_urls))
-    y_predicted = list(range(NUM_RESULTS_FOR_EVAL, 0, -1))
-    return ndcg_score([y_true], [y_predicted])
-
-
-def _mean_sem(values: list[float]) -> str:
-    if not values:
-        return "    n/a"
-    return f"{np.mean(values):.4f} ± {sem(values):.4f}" if len(values) > 1 else f"{np.mean(values):.4f}"
 
 
 def run():
@@ -166,9 +147,7 @@ def run():
     for query, rankings in dataset.groupby("query"):
         if query not in sampled:
             continue
-        top_ranked = rankings[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
-        top_ranked["score"] = CLICK_PROPORTIONS[:len(top_ranked)]
-        gold_scores = top_ranked.set_index("url")["score"].to_dict()
+        gold_scores = gold_scores_for(rankings)
 
         std_results = standard.predict(query)
         standard_count[query] = len(std_results)

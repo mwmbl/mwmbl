@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+import requests
 from django.conf import settings
 from requests.adapters import HTTPAdapter, Retry
 from requests.exceptions import RetryError
@@ -51,7 +52,11 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
         'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
 
-    if features[f'match_terms'] <= len(terms) / 2 and result.state is None:
+    # A curated document is exempt from the minimum-term-match rule: a curator put it
+    # there deliberately. FROM_WIKI is not curation - it is crawled-equivalent content
+    # that the wiki index cache stores like any other document - so it gets no exemption,
+    # either at query time or in sort_documents' write-time page ordering.
+    if features[f'match_terms'] <= len(terms) / 2 and result.state in (None, DocumentState.FROM_WIKI):
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
@@ -325,7 +330,12 @@ class Ranker:
         # Check for curation
         curation_term = " ".join(terms)
         curation_items = self.tiny_index.retrieve(curation_term)
-        curated_items = [d for d in curation_items if d.state is not None
+        # FROM_WIKI is the one non-None state nobody curated: it is stamped on Wikipedia
+        # results the wiki index cache stores automatically, which for a one- or two-word
+        # query land under exactly this term. Treating those as curated would pin them above
+        # everything and skip ranking entirely. FROM_WIKI_APPROVED is real curation and stays.
+        curated_items = [d for d in curation_items
+                         if d.state is not None and d.state != DocumentState.FROM_WIKI
                          and d.term == curation_term]
 
         bigrams = set(get_bigrams(len(terms), terms))
@@ -349,7 +359,7 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        external_search_items = self.external_search(q) if use_external_search else []
+        external_search_items = self.external_search(q, pages) if use_external_search else []
         candidates = pages + additional_results + external_search_items
         candidates, curated_items = self._remove_blacklisted(candidates, curated_items, index_items=pages)
 
@@ -385,7 +395,9 @@ class Ranker:
         return ([d for d in candidates if d.url not in blacklisted_urls],
                 [d for d in curated_items if d.url not in blacklisted_urls])
 
-    def external_search(self, q: str):
+    def external_search(self, q: str, index_results: list[Document]) -> list[Document]:
+        """Results from outside the index. `index_results` is what the index just returned,
+        so an implementation can decide whether it needs to go outside at all."""
         return []
 
     def get_raw_results(self, query: str):
@@ -421,6 +433,7 @@ class HeuristicRanker(Ranker):
         return filtered_results
 
 
+WIKI_USER_AGENT = 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)'
 WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 
@@ -428,7 +441,7 @@ WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for weeks (see request_cache).
+# normal operation. On where responses are cached, see wiki_session below.
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
@@ -476,16 +489,30 @@ def clean_html(s: str):
     return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
+def wiki_session():
+    """The HTTP session Wikipedia is queried through.
+
+    Responses used to be cached by mwmbl.utils.request_cache, a *filesystem* cache on the
+    same volume as the index, with no LRU and nothing ever deleting expired entries, which
+    also wrote the raw user query to disk inside the stored request URL. The index cache
+    replaces it - see mwmbl.tinysearchengine.wiki_index_cache - but only once it is on:
+    with neither cache, every single search would call Wikipedia. So flipping
+    WIKI_INDEX_CACHE_ENABLED is what retires the disk cache, and until then nothing about
+    today's behaviour changes.
+    """
+    if settings.WIKI_INDEX_CACHE_ENABLED:
+        return requests.Session()
+    return request_cache(timedelta(weeks=10))
+
+
 def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     if _wiki_circuit_open():
         return []
 
     escaped_query = urllib.parse.quote(s, safe='')
-    headers = {
-        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
-    }
+    headers = {'User-Agent': WIKI_USER_AGENT}
     try:
-        with request_cache(timedelta(weeks=10)) as session:
+        with wiki_session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
@@ -530,6 +557,8 @@ class HeuristicAndWikiRanker(HeuristicRanker):
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
         self.max_wiki_results = max_wiki_results
 
+    # Fetches Wikipedia here rather than through external_search(), and every caller in the
+    # tree hands it a RemoteIndex, so the wiki index cache is both unusable and unreachable.
     def search(self, s: str, additional_results: list[Document]) -> list[Document]:
         s_shortened = s[:MAX_QUERY_CHARS]
 

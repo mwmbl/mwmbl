@@ -45,3 +45,53 @@ uv run python -m mwmbl.rankeval.evaluation.evaluate_remote
 
 (A `RankingModel` wrapper around the Super Search pipeline, for comparing Super
 Search v2 against standard search, is added separately.)
+
+- **Wikipedia results from the index** —
+  `mwmbl/rankeval/evaluation/evaluate_wiki_index.py` measures what it costs in
+  NDCG to stop calling the Wikipedia search API on every query: results a call
+  returns are written into the index under the query's unigrams and bigrams, and
+  a later query that the index already answers with enough Wikipedia results
+  skips the call. It sweeps the gate definition and threshold as arms over one
+  shared query sample, and reports NDCG, calls avoided, and NDCG **on the subset
+  where the gate fired** — the number the feature is decided on.
+
+```bash
+DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+    uv run python -m mwmbl.rankeval.evaluation.evaluate_wiki_index --fraction 0.1
+```
+
+  Reads go through an `OverlayIndex`: the remote production index unioned with a
+  fresh local `TinyIndex` that everything written during the run goes into (the
+  local dev index is far too small for a gate to mean anything). Wikipedia is
+  called at most once per distinct query ever — responses are cached in
+  `devdata/wiki-index-eval-cache`, while the *count* of calls each policy would
+  make is tracked exactly. Results in `WIKI_INDEX_CACHE_FINDINGS.md`.
+
+  `--arm-set scores` asks the other question: with Wikipedia called on *every*
+  query so nothing is skipped, does storing its results help or hurt the queries
+  that later retrieve them? The arms vary only which query term a stored result's
+  score is filed under (`none` / `all` / `specific` / `exact`) and whether
+  re-storing overwrites or averages, and the report is a paired per-query Δ on the
+  queries that actually retrieved another query's stored documents.
+
+```bash
+DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+    uv run python -m mwmbl.rankeval.evaluation.evaluate_wiki_index \
+      --arm-set scores --fraction 0.3
+```
+
+- **How often a gate fires, cheaply** —
+  `mwmbl/rankeval/evaluation/simulate_wiki_gate_firing.py` answers the counting
+  half of the same question in about a minute, with no network and no remote
+  index, over *every* query whose Wikipedia response `evaluate_wiki_index` has
+  already cached rather than a sample of a few hundred. It can, because the gate
+  counts only documents a previous call stored, so a local index holding exactly
+  what the run stored is a faithful simulation of its input. It reports firings
+  split into genuine repeats and first-seen queries riding on some other query's
+  documents — the split that decides whether a gate is caching or guessing. It
+  says nothing about NDCG; read it alongside `evaluate_wiki_index`, not instead.
+
+```bash
+DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+    uv run python -m mwmbl.rankeval.evaluation.simulate_wiki_gate_firing
+```
