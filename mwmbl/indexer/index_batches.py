@@ -7,15 +7,15 @@ from datetime import datetime
 from functools import reduce
 from logging import getLogger
 from typing import Collection, Iterable, Optional
-from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
-from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
+from mwmbl.indexer.index import document_token_set, tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
+from mwmbl.indexer.wiki_cache import drop_expired_wiki_cache
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.tokenizer import tokenize, get_bigrams
@@ -115,7 +115,7 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page, documents in page_documents.items():
-            existing_documents = indexer.get_page(page)
+            existing_documents = drop_expired_wiki_cache(indexer.get_page(page))
             combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
             logger.info(f"Storing {len(combined_documents)} documents for page {page}, originally {len(existing_documents)}")
             indexer.store_in_page(page, combined_documents)
@@ -123,14 +123,6 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
             term_new_doc_counts.update(document.term for document in combined_documents
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
     return term_new_doc_counts
-
-
-def _document_token_set(doc: Document) -> set[str]:
-    """Unigram tokens of a document's title, URL and extract (no bigrams)."""
-    prepared_url = prepare_url_for_tokenizing(unquote(doc.url))
-    return (set(tokenize(doc.title))
-            | set(tokenize(prepared_url))
-            | set(tokenize(doc.extract)))
 
 
 def index_results_against_query(documents: list[Document], query: str, index_path: str) -> int:
@@ -163,7 +155,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
         for doc in documents:
             if not (doc.url and doc.title):
                 continue
-            doc_tokens = _document_token_set(doc)
+            doc_tokens = document_token_set(doc)
             for term, words in query_terms.items():
                 if not (words <= doc_tokens):
                     continue
@@ -249,6 +241,7 @@ def preprocess_documents(documents, index_path):
                 term_document = Document(
                     document.title, document.url, document.extract,
                     term=token,
+                    state=document.state,
                     user_ids=document.user_ids,
                     last_crawled=document.last_crawled,
                 )
