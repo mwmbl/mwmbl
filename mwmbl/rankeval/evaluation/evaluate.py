@@ -29,6 +29,32 @@ class RankingModel(ABC):
         pass
 
 
+def latest_ranking(rankings):
+    """The most recent scrape of one query's results, in rank order.
+
+    The rankings dataset holds several scrapes of the same query taken on different
+    dates - 1,135 of the 5,969 test queries, up to 16 dates each - and their rows sit
+    consecutively under the one query. Taking the first ten rows therefore mixes dates:
+    the ten are not one ranking, and a URL that appears in two scrapes appears twice at
+    two different ranks. Keeping only the latest date makes the gold set what it is meant
+    to be - one ranking per query.
+    """
+    latest = rankings["date_retrieved"].max()
+    return rankings[rankings["date_retrieved"] == latest].sort_values("rank")
+
+
+def gold_scores_for(rankings) -> dict[str, float]:
+    """The gold URL -> click-weight map for one query's rows of the rankings dataset.
+
+    Duplicate URLs are dropped keeping the best rank, because the map is keyed by URL:
+    left in, the *worse* rank's weight is the one that would survive.
+    """
+    ranking = latest_ranking(rankings).drop_duplicates(subset="url", keep="first")
+    top_ranked = ranking[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
+    top_ranked["score"] = CLICK_PROPORTIONS[:len(top_ranked)]
+    return top_ranked.set_index("url")["score"].to_dict()
+
+
 def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False):
     # TODO:
     #  - output feature importances from XGBoost
@@ -57,9 +83,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
         if query not in random_queries:
             continue
 
-        top_ranked = rankings[['url']].iloc[:NUM_RESULTS_FOR_EVAL]
-        top_ranked['score'] = CLICK_PROPORTIONS[:len(top_ranked)]
-        scores = top_ranked.set_index('url')['score'].to_dict()
+        scores = gold_scores_for(rankings)
         print(f"Query: '{query}'", scores)
 
         start_time = time.perf_counter()

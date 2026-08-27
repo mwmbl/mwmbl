@@ -63,8 +63,9 @@ def test_get_page_data_single_doc():
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmmed data, then it should be equal to the data we persist
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-    serialized_data = _get_page_data(page_size, items)
+    serialized_data, num_stored = _get_page_data(page_size, items)
     assert serialized_data == padded_trimmed_data
+    assert num_stored == num_fitting
     
 
 def test_get_page_data_many_docs_all_fit():
@@ -87,10 +88,11 @@ def test_get_page_data_many_docs_all_fit():
     
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmed data, then it should be equal to the data we persist
-    serialized_data = _get_page_data(page_size, items)
+    serialized_data, num_stored = _get_page_data(page_size, items)
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
     
     assert serialized_data == padded_trimmed_data
+    assert num_stored == num_fitting
 
 
 def test_get_page_data_many_docs_subset_fit():
@@ -114,10 +116,12 @@ def test_get_page_data_many_docs_subset_fit():
     
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmed data, then it should be equal to the data we persist
-    serialized_data = _get_page_data(page_size, items)
+    serialized_data, num_stored = _get_page_data(page_size, items)
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
     
     assert serialized_data == padded_trimmed_data
+    # The count is what store() reports back, so it has to match what was actually kept.
+    assert num_stored == num_fitting
 
 
 def test_constructing_document_removes_none():

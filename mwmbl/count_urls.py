@@ -10,7 +10,7 @@ from django.conf import settings
 from pydistinct.stats_estimators import smoothed_jackknife_estimator
 from redis import Redis
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
 from mwmbl.utils import parse_url
 
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
@@ -57,7 +57,14 @@ def count_urls():
         domain_counts = Counter()
         total_docs = 0
         for i in page_sample:
-            page = index.get_page(i)
+            try:
+                page = index.get_page(i)
+            except PageError:
+                # An unlocked read while the indexer is writing, so most of these are torn
+                # rather than damaged. Count the page as empty, as retrieve() does, rather
+                # than abandoning the sample.
+                logger.warning("Could not read index page %d while counting URLs", i)
+                continue
             url_counts.update({doc.url for doc in page})
             domains = [parse_url(doc.url).netloc for doc in page]
             domain_counts.update(domains)
