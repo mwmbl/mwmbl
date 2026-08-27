@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field
 from enum import IntEnum
 from io import UnsupportedOperation
+from json import JSONDecodeError
 from logging import getLogger
 from mmap import mmap, PROT_READ, PROT_WRITE
 from typing import TypeVar, Generic, Callable, List, Optional
@@ -34,6 +35,9 @@ logger = getLogger(__name__)
 F_OFD_SETLKW = 38
 # struct flock { short l_type; short l_whence; off_t l_start; off_t l_len; pid_t l_pid; }
 # Padded to the native 32 bytes so nothing past our buffer is read. l_pid must be 0 for OFD.
+# The q's assume a 64-bit off_t, i.e. an LP64 build - true of every platform this runs on.
+# On a 32-bit build the buffer would be the wrong shape and fcntl would answer EINVAL,
+# which UNSUPPORTED_LOCK_ERRNOS reads as "this kernel cannot lock" and latches locking off.
 _FLOCK_STRUCT = "hhqqi4x"
 
 # Errnos that mean this kernel or filesystem cannot do the lock at all, as opposed to a
@@ -212,10 +216,27 @@ def _pad_to_page_size(data: bytes, page_size: int):
 class _OpenPage(Generic[T]):
     """One page of the index, open for a read-modify-write. See TinyIndex.page."""
 
-    def __init__(self, index: 'TinyIndex[T]', page_index: int):
+    def __init__(self, index: 'TinyIndex[T]', page_index: int, locked: bool):
         self._index = index
         self._page_index = page_index
-        self.documents: List[T] = index.get_page(page_index)
+        self.reset = False
+        try:
+            self.documents: List[T] = index.get_page(page_index)
+        except PageError:
+            if not locked:
+                # Without the lock this could equally be another writer's memcpy in
+                # progress, and merging onto an empty list would store over whatever it
+                # is writing. Refuse; the caller skips this page.
+                raise
+            # Holding the page's exclusive lock, no other writer that takes the lock can
+            # be part-way through it, so this is real damage - a bad block, or a write
+            # from before locking existed - rather than a torn read. Nothing else will
+            # ever repair it, because every reader treats it as empty and every writer
+            # would refuse it, so this write resets the page. That costs whatever was on
+            # it, which is already unreadable.
+            logger.error("Index page %d is corrupt; resetting it", page_index)
+            self.documents = []
+            self.reset = True
 
     def store(self, values: List[T]) -> int:
         """Write these values to the page, returning how many of them actually fit.
@@ -325,7 +346,7 @@ class TinyIndex(Generic[T]):
                     logger.warning("Could not lock index page %d (%s); writing it unlocked",
                                    i, e)
         try:
-            yield
+            yield locked
         finally:
             if locked:
                 try:
@@ -366,9 +387,13 @@ class TinyIndex(Generic[T]):
         decompressor = ZstdDecompressor()
         try:
             decompressed_data = decompressor.decompress(page_data)
-        except ZstdError as e:
-            raise PageError(f"Could not decompress page {i}: {e}") from e
-        return json.loads(decompressed_data.decode('utf8'))
+            return json.loads(decompressed_data.decode('utf8'))
+        except (ZstdError, UnicodeDecodeError, JSONDecodeError) as e:
+            # Damage that gets past zstd's checksum lands on the decode or the parse
+            # instead, and it is the same kind of unreadable. Callers catch PageError and
+            # nothing else, so anything raised from here that is not one would escape
+            # them - retrieve() would 500 a search rather than degrading to no results.
+            raise PageError(f"Could not read page {i}: {e}") from e
 
     def store_in_page(self, page_index: int, values: list[T]) -> int:
         """Overwrite a page, returning how many of `values` actually fit on it.
@@ -411,9 +436,16 @@ class TinyIndex(Generic[T]):
 
         Not calling store() writes nothing, which is what a caller that finds nothing to
         change should do.
+
+        Raises PageError if the page will not decode and the lock was not taken, since a
+        page that is merely being written by someone else looks exactly the same and must
+        not be merged onto. A caller looping over pages should catch that and skip the
+        page rather than abandon the rest of them. Holding the lock, an unreadable page is
+        real damage instead, and the block runs with `documents` empty and `reset` set -
+        see _OpenPage.
         """
-        with self._locked_page(i):
-            yield _OpenPage(self, i)
+        with self._locked_page(i) as locked:
+            yield _OpenPage(self, i, locked)
 
     @staticmethod
     def create(item_factory: Callable[..., T], index_path: str, num_pages: int, page_size: int):

@@ -17,8 +17,10 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from mwmbl.indexer.index_batches import index_results_against_query
-from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, DocumentState, TinyIndex
+from mwmbl.indexer.index_batches import index_pages, index_results_against_query
+from mwmbl.indexer.purge_blacklisted import purge_documents
+from mwmbl.tinysearchengine.indexer import (
+    METADATA_SIZE, Document, DocumentState, PageError, TinyIndex)
 
 
 NUM_PAGES = 64
@@ -201,3 +203,113 @@ def test_concurrent_writers_leave_the_page_readable(index_path):
 
     assert page, "the page was left empty"
     assert all(document.title and document.url for document in page)
+
+
+# ---------------------------------------------------------------------------
+# A page that will not decode
+# ---------------------------------------------------------------------------
+
+def _doc(i: int, term: str) -> Document:
+    return Document(f"Title {i}", f"https://example.com/{i}", "extract", 1.0, term)
+
+
+def _corrupt(index_path: str, page_index: int):
+    """Damage a page that has real content on it.
+
+    It has to be written first: a freshly created page is a few bytes of compressed `[]`
+    followed by zero padding, so overwriting the padding with zeros changes nothing.
+    """
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        indexer.store_in_page(page_index, [_doc(i, "seeded") for i in range(5)])
+
+    with open(index_path, "r+b") as index_file:
+        index_file.seek(METADATA_SIZE + page_index * 4096 + 16)
+        index_file.write(b"\0" * 64)
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        with pytest.raises(PageError):
+            indexer.get_page(page_index)
+
+
+def test_one_unreadable_page_does_not_abandon_the_rest_of_the_batch(index_path):
+    """index_pages runs inside POST /crawler/results and the batch indexer.
+
+    Letting a single page propagate would 500 the submission, or leave a batch unmarked
+    and retried forever, and would skip every page after it in the same call.
+    """
+    _corrupt(index_path, 3)
+
+    counts = index_pages(index_path, {3: [_doc(1, "a")], 4: [_doc(2, "b")], 5: [_doc(3, "c")]})
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        assert len(indexer.get_page(4)) == 1, "a later page was skipped"
+        assert len(indexer.get_page(5)) == 1, "a later page was skipped"
+    assert counts["b"] == 1 and counts["c"] == 1
+
+
+def test_a_corrupt_page_is_reset_by_a_writer_holding_its_lock(index_path):
+    """Holding the page's exclusive lock, no other locked writer can be mid-write on it,
+    so an unreadable page is real damage rather than a torn read - and nothing else will
+    ever repair it, since readers treat it as empty and writers refuse it."""
+    _corrupt(index_path, 3)
+
+    index_pages(index_path, {3: [_doc(1, "a")]})
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        assert [d.url for d in indexer.get_page(3)] == ["https://example.com/1"]
+
+
+def test_an_unlocked_writer_refuses_a_page_it_could_not_read(index_path, monkeypatch):
+    """Without the lock, a page that will not decode is just as likely to be another
+    writer's memcpy in progress, and resetting it would store over what they are writing.
+    Skip it - and leave it for a writer that can take the lock."""
+    _corrupt(index_path, 3)
+    _fail_to_lock(monkeypatch, OSError(errno.ENOLCK, "no locks available"))
+
+    index_pages(index_path, {3: [_doc(1, "a")], 4: [_doc(2, "b")]})
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        assert len(indexer.get_page(4)) == 1, "a later page was skipped"
+        with pytest.raises(PageError):
+            indexer.get_page(3)  # left alone, not reset and not merged onto
+
+
+def test_purging_skips_a_page_it_cannot_read(index_path):
+    """purge_documents' caller has already drained these documents out of the purge queue,
+    so one propagating page would lose the whole batch on every run."""
+    blacklisted = Document("Spam", "https://spam.example.com/1", "extract", 1.0, None)
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        pages = {indexer.get_key_page_index(term)
+                 for term in ("spam", "extract", "spam example com")}
+    assert len(pages) > 1, "expected the document to be filed under several terms"
+
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        for page_index in pages:
+            indexer.store_in_page(page_index, [blacklisted])
+    _corrupt(index_path, sorted(pages)[0])
+
+    with TinyIndex(Document, index_path, 'w') as indexer:
+        removed = purge_documents(indexer, [blacklisted], lambda domain: True)
+
+    assert removed == {"spam.example.com": 1}, "the readable pages were not purged"
+
+
+def test_damage_that_gets_past_zstd_still_degrades_to_no_results(index_path):
+    """retrieve() catches PageError and nothing else, so a page that decompresses into
+    something that is not JSON has to arrive as one too - or it 500s a search."""
+    from zstandard import ZstdCompressor
+
+    from mwmbl.tinysearchengine.indexer import _pad_to_page_size
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        page_index = indexer.get_key_page_index("zebra")
+
+    payload = ZstdCompressor().compress(b"\xff\xfe definitely not json")
+    with open(index_path, "r+b") as index_file:
+        index_file.seek(METADATA_SIZE + page_index * 4096)
+        index_file.write(_pad_to_page_size(payload, 4096))
+
+    with TinyIndex(Document, index_path, 'r') as indexer:
+        with pytest.raises(PageError):
+            indexer.get_page(page_index)
+        assert indexer.retrieve("zebra") == []

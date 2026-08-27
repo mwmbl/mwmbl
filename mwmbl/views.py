@@ -299,9 +299,13 @@ def _revert_curation(curation):
         term = " ".join(tokenize(curation.query))
         documents = [Document(**doc) for doc in curation.original_index_results]
 
-        with indexer.page(indexer.get_key_page_index(term)) as page:
+        page_index = indexer.get_key_page_index(term)
+        with indexer.page(page_index) as page:
             # Replace all existing documents for the term with the original documents
-            page.store(documents + [doc for doc in page.documents if doc.term != term])
+            all_documents = documents + [doc for doc in page.documents if doc.term != term]
+            num_stored = page.store(all_documents)
+            logger.info(f"Reverted to {num_stored} of {len(all_documents)} documents "
+                        f"at page {page_index}")
 
 
 def _get_curation(request, query, documents, reranked_documents):

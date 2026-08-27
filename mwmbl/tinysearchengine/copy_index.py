@@ -5,7 +5,7 @@ from collections import defaultdict
 from logging import getLogger
 
 from mwmbl.indexer.index_batches import index_pages, get_url_score
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
 from mwmbl.utils import add_term_infos
 
 logger = getLogger(__name__)
@@ -25,7 +25,13 @@ def copy_pages(old_index_path: str, new_index_path: str, start_page: int, num_pa
                 if page_index >= old_index.num_pages:
                     break
 
-                documents = old_index.get_page(page_index)
+                try:
+                    documents = old_index.get_page(page_index)
+                except PageError:
+                    # A whole-index scan meets every damaged page there is. Losing one
+                    # page's documents is the cost of the copy finishing at all.
+                    logger.warning("Skipping unreadable page %d of %s", page_index, old_index_path)
+                    continue
                 documents_with_terms = add_term_infos(documents, old_index, page_index)
                 documents_with_scores = [Document(
                     document.title,

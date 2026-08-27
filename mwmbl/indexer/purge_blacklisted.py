@@ -24,7 +24,7 @@ from logging import getLogger
 from typing import Callable, Iterable, Optional
 
 from mwmbl.indexer.index import tokenize_document
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -79,19 +79,29 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
     # pages, so counting each removal would report an order of magnitude too many.
     removed_urls_by_domain: dict[str, set[str]] = defaultdict(set)
     for page_index, urls in pages_to_urls.items():
-        with index.page(page_index) as page:
-            kept = [d for d in page.documents if d.url not in urls]
-            if len(kept) == len(page.documents):
-                # Nothing to remove here, so leave the page alone rather than rewriting it.
-                continue
+        try:
+            with index.page(page_index) as page:
+                kept = [d for d in page.documents if d.url not in urls]
+                if len(kept) == len(page.documents):
+                    # Nothing to remove here, so leave the page alone rather than rewriting it.
+                    continue
 
-            for document in page.documents:
-                if document.url in urls:
-                    try:
-                        removed_urls_by_domain[get_domain(document.url)].add(document.url)
-                    except ValueError:
-                        removed_urls_by_domain[document.url].add(document.url)
-            page.store(kept)
+                for document in page.documents:
+                    if document.url in urls:
+                        try:
+                            removed_urls_by_domain[get_domain(document.url)].add(document.url)
+                        except ValueError:
+                            removed_urls_by_domain[document.url].add(document.url)
+                num_stored = page.store(kept)
+                if num_stored < len(kept):
+                    logger.warning("Page %d only held %d of %d documents kept after purging",
+                                   page_index, num_stored, len(kept))
+        except PageError:
+            # The caller has already drained these documents out of the purge queue, so
+            # letting one unreadable page propagate would lose the whole batch - including
+            # every page that purged cleanly - and it would do so on every run.
+            logger.exception("Skipping index page %d while purging", page_index)
+            continue
 
     removed_by_domain = {domain: len(urls) for domain, urls in removed_urls_by_domain.items()}
     if removed_by_domain:

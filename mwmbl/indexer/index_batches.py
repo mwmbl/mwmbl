@@ -16,7 +16,8 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex, DocumentState, CURATED_STATES
+from mwmbl.tinysearchengine.indexer import (
+    CURATED_STATES, Document, DocumentState, PageError, TinyIndex)
 from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.utils import add_term_infos, get_domain
@@ -115,11 +116,19 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
     with TinyIndex(Document, index_path, 'w') as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
         for page_index, documents in page_documents.items():
-            with indexer.page(page_index) as page:
-                combined_documents = combine_documents(page.documents, documents, mark_synced, ranker)
-                num_stored = page.store(combined_documents)
-                logger.info(f"Storing {num_stored} of {len(combined_documents)} documents for "
-                            f"page {page_index}, originally {len(page.documents)}")
+            try:
+                with indexer.page(page_index) as page:
+                    combined_documents = combine_documents(page.documents, documents, mark_synced, ranker)
+                    num_stored = page.store(combined_documents)
+                    logger.info(f"Storing {num_stored} of {len(combined_documents)} documents for "
+                                f"page {page_index}, originally {len(page.documents)}")
+            except PageError:
+                # One page we cannot safely write costs the documents bound for it, not the
+                # rest of the batch. Letting it propagate would abort every remaining page,
+                # and this runs inside POST /crawler/results and the batch indexer, where
+                # that means a 500 or a batch that is never marked done and retries forever.
+                logger.exception("Skipping index page %d", page_index)
+                continue
 
             term_new_doc_counts.update(document.term for document in combined_documents[:num_stored]
                                        if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
@@ -174,7 +183,14 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
                     term=term, last_crawled=doc.last_crawled,
                 ))
                 if page not in existing_keys:
-                    existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
+                    try:
+                        existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
+                    except PageError:
+                        # An unlocked read, so most likely another writer mid-store. It only
+                        # decides whether a URL counts as new; the write below takes the
+                        # page's lock and reads it properly.
+                        logger.warning("Could not read index page %d while counting new URLs", page)
+                        existing_keys[page] = set()
                 if (term, doc.url) not in existing_keys[page]:
                     new_urls.add(doc.url)
 
