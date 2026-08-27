@@ -4,10 +4,12 @@ domain, so that the submission list can reverse the "domain" URL for each one.
 """
 
 import importlib
+import json
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.apps import apps as django_apps
+from django.contrib.auth.models import Permission
 from django.urls import reverse
 from ninja_jwt.tokens import RefreshToken
 
@@ -131,3 +133,30 @@ def test_api_rejects_invalid_domain(client, access_token):
 
     assert response.status_code == 400
     assert DomainSubmission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_api_update_submission_status_grants_moderator_permission(client, verified_user, access_token):
+    """A user with the change_domain_submission_status permission can moderate via the API.
+
+    Regression test: the endpoint checked `has_perm("change_domain_submission_status")`
+    without the `mwmbl.` app label, which Django never matches (permissions are stored
+    as `app_label.codename`), so moderation always failed with 400.
+    """
+    submission = DomainSubmission.objects.create(name="example.com", submitted_by=verified_user)
+    permission = Permission.objects.get(
+        codename="change_domain_submission_status",
+        content_type__app_label="mwmbl",
+    )
+    verified_user.user_permissions.add(permission)
+
+    response = client.post(
+        f"/api/v1/platform/domain-submissions/ids/{submission.id}",
+        data=json.dumps({"status": "APPROVED", "rejection_reason": "", "rejection_detail": ""}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+
+    assert response.status_code == 200
+    submission.refresh_from_db()
+    assert submission.status == "APPROVED"

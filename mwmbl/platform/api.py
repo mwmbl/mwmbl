@@ -236,7 +236,7 @@ def update_submission_status(request, submission_id: int, update_submission: Upd
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 
-    if not request.user.has_perm("change_domain_submission_status"):
+    if not request.user.has_perm("mwmbl.change_domain_submission_status"):
         raise InvalidRequest("You do not have permission to update this submission.")
 
     submission.status = update_submission.status
