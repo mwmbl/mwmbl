@@ -7,13 +7,13 @@ import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
-from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+import requests
 from django.conf import settings
 from requests.adapters import HTTPAdapter, Retry
 from requests.exceptions import RetryError
@@ -22,10 +22,11 @@ from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.purge_queue import enqueue_for_purge
+from mwmbl.indexer.wiki_cache import get_cached_wiki_results, store_wiki_results
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import get_domain, request_cache
+from mwmbl.utils import get_domain
 
 
 logger = getLogger(__name__)
@@ -277,8 +278,12 @@ class Ranker:
     def order_results(self, terms: list[str], pages: list[Document], is_complete: bool):
         pass
 
-    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
-        results, terms, _ = self.get_results(s, additional_results)
+    def search(self, s: str, additional_results: list[Document],
+               use_external_search: bool = True) -> list[Document]:
+        # use_external_search=False is how the search-as-you-type path avoids a Wikipedia
+        # call per keystroke; get_results has taken the flag all along, but only complete()
+        # could reach it. See mwmbl.views.
+        results, terms, _ = self.get_results(s, additional_results, use_external_search)
 
         ranked_results = []
         seen_urls = set()
@@ -428,7 +433,7 @@ WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for weeks (see request_cache).
+# normal operation. Successful responses are cached for months (see mwmbl.indexer.wiki_cache).
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
@@ -477,15 +482,25 @@ def clean_html(s: str):
 
 
 def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
+    # MAX_QUERY_CHARS was only ever applied in HeuristicAndWikiRanker, which is the eval
+    # ranker - the production LTRRanker path sent the untruncated query straight out.
+    query = s[:MAX_QUERY_CHARS]
+
+    # Ahead of the circuit breaker deliberately: a cache hit costs Wikipedia nothing, so it
+    # should still be served while we are backing off from a rate limit.
+    cached = get_cached_wiki_results(query)
+    if cached is not None:
+        return cached[:max_wiki_results]
+
     if _wiki_circuit_open():
         return []
 
-    escaped_query = urllib.parse.quote(s, safe='')
+    escaped_query = urllib.parse.quote(query, safe='')
     headers = {
-        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
+        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)'
     }
     try:
-        with request_cache(timedelta(weeks=10)) as session:
+        with requests.Session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
             wiki_response = response.json()
@@ -512,8 +527,13 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         return []
 
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                             max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
+                             max_wiki_results + 1 - i, query, state=DocumentState.FROM_WIKI)
                     for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
+
+    # Only a well-formed answer is stored, including one with no results in it. Every path
+    # above returns [] without storing, so a transient failure is never remembered as
+    # "Wikipedia has nothing for this".
+    store_wiki_results(query, wiki_results)
     return wiki_results
 
 
@@ -530,10 +550,11 @@ class HeuristicAndWikiRanker(HeuristicRanker):
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
         self.max_wiki_results = max_wiki_results
 
-    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
+    def search(self, s: str, additional_results: list[Document],
+               use_external_search: bool = True) -> list[Document]:
         s_shortened = s[:MAX_QUERY_CHARS]
 
-        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results)
+        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results) if use_external_search else []
         results = super().search(s_shortened, additional_results=wiki_results)
 
         if len(results) == 0 and self.return_none_if_no_mwmbl_results:

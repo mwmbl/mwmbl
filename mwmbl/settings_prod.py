@@ -31,6 +31,11 @@ INDEX_NAME = 'index-v2-400G.tinysearch'
 # 400GB index
 NUM_PAGES = 102400000
 
+WIKI_CACHE_INDEX_NAME = 'wiki-cache.tinysearch'
+# 4GB. ~12 entries fit a 4KB page, but pages are hash-assigned, so keep the load factor
+# well under that: this holds a few million queries before collisions start evicting early.
+WIKI_CACHE_NUM_PAGES = 1_000_000
+
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls-{year}-{month}.bloom")
 URLS_BLOOM_FILTER_FALLBACK_PATH = str(Path(DATA_PATH) / "urls.bloom")
 NUM_URLS_IN_BLOOM_FILTER = 200_000_000

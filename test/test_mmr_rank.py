@@ -64,8 +64,8 @@ class _FakeRanker:
         self.completed = None
         self.raw_queried = None
 
-    def search(self, s, additional_results):
-        self.searched = (s, additional_results)
+    def search(self, s, additional_results, use_external_search=True):
+        self.searched = (s, additional_results, use_external_search)
         return self._results
 
     def complete(self, q):

@@ -11,6 +11,8 @@ HAS_DATABASE = False
 DATA_PATH = "/tmp/test_mwmbl_data"
 INDEX_NAME = "index-v2.tinysearch"
 NUM_PAGES = 10
+WIKI_CACHE_INDEX_NAME = "wiki-cache.tinysearch"
+WIKI_CACHE_NUM_PAGES = 10
 
 # Use fakeredis for cache so tests don't need a real Redis server
 CACHES = {

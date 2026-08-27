@@ -11,7 +11,7 @@
         "path": "/api/v1/search/?s=rydnik",
         "attempts": 1,
         "interval": 600,
-        "grace": 0,
+        "grace": 60,
         "timeout": 10
       }
     ]

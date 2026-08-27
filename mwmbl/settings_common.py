@@ -336,3 +336,13 @@ BLACKLIST_PURGE_BATCH_SIZE = 1000          # documents removed from the index pe
 # through submissions in batches, so the delay collapses a batch into one rebuild rather
 # than one per approval - see mwmbl.signals.
 BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS = 600
+
+# Wikipedia results are cached in a TinyIndex of their own (see mwmbl.indexer.wiki_cache).
+# A dedicated file rather than the search index because a cache entry competing with real
+# documents for a shared page evicts them - #359 measured that as a net NDCG loss - and
+# because a separate file never enters the candidate pool for anyone else's query.
+WIKI_CACHE_ENABLED = os.environ.get("WIKI_CACHE_ENABLED", "true").lower() != "false"
+WIKI_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60      # 6 months; the disk cache kept 10 weeks
+# A query Wikipedia has nothing for is worth remembering too, or it is re-fetched forever.
+# Shorter, because an article appearing is a likelier change than an existing one moving.
+WIKI_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60

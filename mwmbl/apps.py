@@ -8,23 +8,37 @@ from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase
 
 
-def create_index():
+def create_index(index_name, num_pages, rebuild_on_mismatch=False):
+    """Create the index file if it is missing, and check an existing one is the right shape.
+
+    rebuild_on_mismatch is for indexes whose contents are disposable. The search index is
+    not one of them - a size that disagrees with settings there means somebody changed
+    NUM_PAGES against a 400 GB file holding the only copy of the crawl, and refusing to
+    start is the right answer. The Wikipedia cache is the opposite case: resizing it should
+    be a config change, not a startup crash, and the cost of rebuilding is re-fetching.
+    """
     # Imports here to avoid AppRegistryNotReady exception
     from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    index_path = Path(settings.DATA_PATH) / index_name
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
         print("======================================")
         print(f"Found existing index at {index_path}")
         print("======================================")
-        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != settings.NUM_PAGES:
-            raise ValueError(f"Existing index page sizes ({existing_index.page_size}) or number of pages "
-                             f"({existing_index.num_pages}) do not match")
+        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != num_pages:
+            message = (f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+                       f"({existing_index.num_pages}) do not match")
+            if not rebuild_on_mismatch:
+                raise ValueError(message)
+            print(f"{message} - rebuilding {index_path}")
+            index_path.unlink()
+            TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
+                             page_size=PAGE_SIZE)
     except FileNotFoundError:
         print("======================================")
         print("Index not found - creating a new index")
         print("======================================")
-        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=settings.NUM_PAGES,
+        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
                          page_size=PAGE_SIZE)
 
 
@@ -39,7 +53,11 @@ class MwmblConfig(AppConfig):
     verbose_name = "Mwmbl Application"
 
     def ready(self):
-        create_index()
+        create_index(settings.INDEX_NAME, settings.NUM_PAGES)
+        # Note this writes num_pages * 4 KB page by page rather than sparsely, so the first
+        # boot after a size change pays for the whole file up front.
+        create_index(settings.WIKI_CACHE_INDEX_NAME, settings.WIKI_CACHE_NUM_PAGES,
+                     rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
             create_index_db()
             import mwmbl.signals  # noqa: F401 - connects the post_save receivers

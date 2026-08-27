@@ -78,7 +78,7 @@ def _prepare_results(results: Optional[list[Document]]) -> Optional[dict[str, li
 
 
 def index(request):
-    activity, query, results = _get_results_and_activity(request)
+    activity, query, results = _get_results_and_activity(request, use_external_search=True)
     return render(request, "index.html", {
         "results": _prepare_results(results),
         "query": query,
@@ -89,7 +89,12 @@ def index(request):
 
 
 def home_fragment(request):
-    activity, query, results = _get_results_and_activity(request)
+    # Two triggers reach this view. The one on every keystroke asks for index results only;
+    # a second, longer-debounced one passes external=1 once the query has settled, and that
+    # is the only one that may call Wikipedia. Without the split, typing a 15-character
+    # query cost us a dozen Wikipedia calls to answer one question - see mwmbl.templates.
+    use_external_search = request.GET.get("external") == "1"
+    activity, query, results = _get_results_and_activity(request, use_external_search)
     response = render(request, "home.html", {
         "results": _prepare_results(results),
         "query": query,
@@ -106,7 +111,7 @@ def home_fragment(request):
     return response
 
 
-def _get_results_and_activity(request):
+def _get_results_and_activity(request, use_external_search: bool):
     query = request.GET.get("q")
     if query:
         # There may be extra results in the request that we need to add in
@@ -124,7 +129,8 @@ def _get_results_and_activity(request):
             for i, (title, url, extract) in enumerate(zip(titles, urls, extracts))
         ]
 
-        results = ranker.search(query, additional_results=additional_results)
+        results = ranker.search(query, additional_results=additional_results,
+                                use_external_search=use_external_search)
         activity = None
     else:
         results = None

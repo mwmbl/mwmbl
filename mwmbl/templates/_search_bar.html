@@ -1,0 +1,53 @@
+{# The search bar, shared by index.html and base.html. It used to be duplicated between
+   them and had already drifted, so change it here only. #}
+<header class="search-menu compact">
+  <a href="/" class="branding">
+    <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
+    <span class="brand-title">Mwmbl</span>
+  </a>
+  <form class="search-bar">
+    <i class="ph-magnifying-glass-bold"></i>
+    {# Fires on every keystroke and renders index results only - no Wikipedia call. #}
+    <input
+      type='search'
+      name='q'
+      class='search-bar-input'
+      placeholder='Search on Mwmbl...'
+      title='Use "CTRL+K" or "/" to focus.'
+      autocomplete='off'
+      value='{{ query|default_if_none:"" }}'
+      hx-get="/app/home/"
+      hx-trigger="keyup changed delay:100ms"
+      hx-target=".main"
+      hx-sync="closest form:replace"
+    >
+    {# The same view again, once the query has settled, and this one may call Wikipedia.
+       Typing a 15-character query used to cost a Wikipedia call per keystroke to answer a
+       single question, and 92% of those prefixes are ones nobody ever searches for, so no
+       cache can absorb them.
+
+       It renders the whole fragment rather than injecting wiki results into the existing
+       list: result.html's hidden inputs are what hx-include=".result" serialises back to
+       _get_documents on a curate, so a partial swap would let an approve fire against a
+       truncated document list.
+
+       It lives here in the header rather than inside .main because .main's contents are
+       replaced on every keystroke, which would destroy and re-arm this element each time.
+       hx-sync on both keeps a slow response from landing on top of a newer fast one. #}
+    <span
+      class="external-search"
+      hx-get="/app/home/?external=1"
+      hx-trigger="keyup delay:800ms from:.search-bar-input"
+      hx-target=".main"
+      hx-include=".search-bar-input"
+      hx-sync="closest form:replace"
+    ></span>
+  </form>
+  {%  if user.is_authenticated %}
+    <p class="login-info">Logged in as {{ user.username }}</p>
+    <a class="button" href="/accounts/logout/">Log out</a>
+  {% else %}
+    <a class="button" href="/accounts/login/">Login</a>
+    <a class="button" href="/accounts/signup/">Sign up</a>
+  {% endif %}
+</header>
