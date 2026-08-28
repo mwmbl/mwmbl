@@ -14,8 +14,9 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     rebuild_on_mismatch is for indexes whose contents are disposable. The search index is
     not one of them - a size that disagrees with settings there means somebody changed
     NUM_PAGES against a 400 GB file holding the only copy of the crawl, and refusing to
-    start is the right answer. The Wikipedia cache is the opposite case: resizing it should
-    be a config change, not a startup crash, and the cost of rebuilding is re-fetching.
+    start is the right answer. The external results cache is the opposite case: resizing it
+    should be a config change, not a startup crash, and the cost of rebuilding is
+    re-fetching.
     """
     # Imports here to avoid AppRegistryNotReady exception
     from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
@@ -55,8 +56,10 @@ class MwmblConfig(AppConfig):
     def ready(self):
         create_index(settings.INDEX_NAME, settings.NUM_PAGES)
         # Note this writes num_pages * 4 KB page by page rather than sparsely, so the first
-        # boot after a size change pays for the whole file up front.
-        create_index(settings.WIKI_CACHE_INDEX_NAME, settings.WIKI_CACHE_NUM_PAGES,
+        # boot after a size change pays for the whole file up front - ~17s for the 15 GB
+        # production cache at the ~0.9 GB/s measured locally, which is what the healthcheck
+        # grace in app.json has to cover.
+        create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES,
                      rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
             create_index_db()

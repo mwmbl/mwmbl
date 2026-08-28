@@ -22,8 +22,8 @@ INDEX_NAME = 'index-v2.tinysearch'
 
 NUM_PAGES = 2560
 
-WIKI_CACHE_INDEX_NAME = 'wiki-cache.tinysearch'
-WIKI_CACHE_NUM_PAGES = 2560
+EXTERNAL_CACHE_INDEX_NAME = 'external-cache.tinysearch'
+EXTERNAL_CACHE_NUM_PAGES = 2560
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls-{year}-{month}.bloom")
 URLS_BLOOM_FILTER_FALLBACK_PATH = str(Path(DATA_PATH) / "urls.bloom")

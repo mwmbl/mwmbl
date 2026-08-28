@@ -31,10 +31,30 @@ INDEX_NAME = 'index-v2-400G.tinysearch'
 # 400GB index
 NUM_PAGES = 102400000
 
-WIKI_CACHE_INDEX_NAME = 'wiki-cache.tinysearch'
-# 4GB. ~12 entries fit a 4KB page, but pages are hash-assigned, so keep the load factor
-# well under that: this holds a few million queries before collisions start evicting early.
-WIKI_CACHE_NUM_PAGES = 1_000_000
+EXTERNAL_CACHE_INDEX_NAME = 'external-cache.tinysearch'
+# ~15 GB. Sized by page occupancy rather than by naive capacity, because pages are assigned
+# by hash: the queries per page are Poisson-distributed, not evenly spread, so the pages
+# that run over start truncating while empty ones sit unused.
+#
+# A 4 KB page holds ~13 cached queries - 37 documents at 3 results a query - measured by
+# packing the 11,693 real Wikipedia responses left in the old devdata/request_cache until
+# the page overflowed. That is in line with the live index, which averages 35.4 documents a
+# page, and it is worth stating how it was measured because a first pass using synthetic
+# random-vocabulary text got 8, 60% low: zstd exploits the redundancy in real prose and
+# there is a lot of it. Real extracts are ~154 characters.
+#
+# At an average load of L queries per page the fraction still resident is E[min(K, 13)] / L
+# for K ~ Poisson(L), which gives, for one provider:
+#
+#     L = 8.2   ->  99% retained  ->  30.9M distinct queries
+#     L = 10.9  ->  95% retained  ->  40.8M
+#     L = 12.7  ->  90% retained  ->  47.6M
+#     L = 13    ->  89% retained  ->  48.8M   (the naive number)
+#
+# A query cached from several providers holds one entry per provider, so divide by the
+# number of providers: with two, ~15M queries at 99% and ~24M at 90%. Longer extracts fit
+# fewer per page, so a provider more verbose than Wikipedia costs more than its share.
+EXTERNAL_CACHE_NUM_PAGES = 3_750_000
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls-{year}-{month}.bloom")
 URLS_BLOOM_FILTER_FALLBACK_PATH = str(Path(DATA_PATH) / "urls.bloom")

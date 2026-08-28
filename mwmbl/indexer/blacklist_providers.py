@@ -152,7 +152,7 @@ class RemoteListBlacklistProvider(BlacklistProvider):
         # *every* user of request_cache breaks - and it shares that volume with the index
         # itself. (get_wiki_results() used to be the worst of those, retrying a live fetch
         # 4 times per uncached query on the search path; it now has a cache of its own, see
-        # mwmbl.indexer.wiki_cache.) A big periodic download has no business in a shared
+        # mwmbl.indexer.external_cache.) A big periodic download has no business in a shared
         # small-response cache on the index volume.
         response = requests.get(self.url, timeout=60)
         response.raise_for_status()

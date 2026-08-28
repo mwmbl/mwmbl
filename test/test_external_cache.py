@@ -1,4 +1,4 @@
-"""Tests for the dedicated Wikipedia cache index (mwmbl.indexer.wiki_cache).
+"""Tests for the dedicated external results cache index (mwmbl.indexer.external_cache).
 
 Where these overlap with the tests on the #357 branch they are deliberately the same
 assertions - the term derivation and the freshness rule are carried over unchanged. What is
@@ -6,6 +6,7 @@ gone is everything that existed only because cache entries shared a file with re
 content: the anonymisation gate, the Redis queue, the general-indexing path, and the guards
 stopping a cache term reaching curation or /raw.
 """
+import json
 import random
 import string
 import time
@@ -15,35 +16,40 @@ import pytest
 from django.test import override_settings
 
 from mwmbl.apps import create_index
-from mwmbl.indexer.wiki_cache import (
-    WIKI_CACHE_EMPTY_URL,
-    WIKI_CACHE_TERM_PREFIX,
-    get_cached_wiki_results,
+from mwmbl.indexer.external_cache import (
+    EXTERNAL_CACHE_EMPTY_URL,
+    EXTERNAL_CACHE_TERM_PREFIX,
+    external_cache_path,
+    external_cache_term,
+    get_cached_external_results,
     is_fresh,
-    store_wiki_results,
-    wiki_cache_path,
-    wiki_cache_term,
+    store_external_results,
 )
 from mwmbl.tinysearchengine import rank
-from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentState, TinyIndex
+from mwmbl.tinysearchengine.indexer import (PAGE_SIZE, Document, DocumentSource, DocumentState,
+                                            TinyIndex)
 from mwmbl.tinysearchengine.rank import Ranker, get_wiki_results
 
 NUM_PAGES = 8
 
+# state and source are set because get_wiki_results sets them, and the cache preserves what
+# the provider produced rather than stamping its own.
 PYTHON = Document("Python (programming language)", "https://en.wikipedia.org/wiki/Python",
-                  "A high-level programming language.", 3.0)
+                  "A high-level programming language.", 3.0, state=DocumentState.FROM_WIKI,
+                  source=DocumentSource.WIKIPEDIA)
 MONTY = Document("Monty Python", "https://en.wikipedia.org/wiki/Monty_Python",
-                 "A British comedy troupe.", 2.0)
+                 "A British comedy troupe.", 2.0, state=DocumentState.FROM_WIKI,
+                 source=DocumentSource.WIKIPEDIA)
 
 
 @pytest.fixture
 def cache_index(tmp_path):
-    """A real, empty wiki cache index that the module-level helpers will pick up."""
-    with override_settings(DATA_PATH=str(tmp_path), WIKI_CACHE_INDEX_NAME="wiki-cache.tinysearch",
-                           WIKI_CACHE_NUM_PAGES=NUM_PAGES, WIKI_CACHE_ENABLED=True):
-        TinyIndex.create(item_factory=Document, index_path=str(wiki_cache_path()),
+    """A real, empty external results cache index that the module-level helpers pick up."""
+    with override_settings(DATA_PATH=str(tmp_path), EXTERNAL_CACHE_INDEX_NAME="external-cache.tinysearch",
+                           EXTERNAL_CACHE_NUM_PAGES=NUM_PAGES, EXTERNAL_CACHE_ENABLED=True):
+        TinyIndex.create(item_factory=Document, index_path=str(external_cache_path()),
                          num_pages=NUM_PAGES, page_size=PAGE_SIZE)
-        yield str(wiki_cache_path())
+        yield str(external_cache_path())
 
 
 def _wiki_api_response(*titles):
@@ -71,14 +77,14 @@ def _patched_wikipedia(response):
 def test_cache_term_is_stable_and_normalised():
     """Whitespace and case must not split one query across several entries. The disk cache
     keyed on the raw request URL, so " python " and "Python" missed each other."""
-    assert wiki_cache_term("python") == wiki_cache_term("  PYTHON  ")
-    assert wiki_cache_term("monty python") == wiki_cache_term("Monty   Python")
-    assert wiki_cache_term("python") != wiki_cache_term("monty python")
+    assert external_cache_term("python") == external_cache_term("  PYTHON  ")
+    assert external_cache_term("monty python") == external_cache_term("Monty   Python")
+    assert external_cache_term("python") != external_cache_term("monty python")
 
 
 def test_cache_term_does_not_contain_the_query():
-    term = wiki_cache_term("something private")
-    assert term.startswith(WIKI_CACHE_TERM_PREFIX)
+    term = external_cache_term("something private")
+    assert term.startswith(EXTERNAL_CACHE_TERM_PREFIX)
     assert "something" not in term
     assert "private" not in term
 
@@ -87,9 +93,9 @@ def test_cache_term_is_keyed_so_it_cannot_be_recomputed_without_the_secret():
     """A bare digest of a one-word query is brute-forceable from a wordlist; keyed on
     SECRET_KEY the term->query mapping is not reproducible without the key."""
     with override_settings(SECRET_KEY="one"):
-        first = wiki_cache_term("bananas")
+        first = external_cache_term("bananas")
     with override_settings(SECRET_KEY="two"):
-        second = wiki_cache_term("bananas")
+        second = external_cache_term("bananas")
 
     assert first != second
 
@@ -99,9 +105,9 @@ def test_cache_term_is_keyed_so_it_cannot_be_recomputed_without_the_secret():
 # ---------------------------------------------------------------------------
 
 def test_results_come_back_from_the_index(cache_index):
-    store_wiki_results("python", [PYTHON, MONTY])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON, MONTY])
 
-    cached = get_cached_wiki_results("python")
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
 
     assert [document.url for document in cached] == [PYTHON.url, MONTY.url]  # descending score
     assert [document.score for document in cached] == [3.0, 2.0]
@@ -111,32 +117,123 @@ def test_results_come_back_from_the_index(cache_index):
 def test_a_hit_is_indistinguishable_from_a_live_fetch(cache_index):
     """The hashed term is a storage detail. Handing it to the ranker would make a cached
     result differ from the identical one fetched live."""
-    store_wiki_results("python", [PYTHON])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
 
-    cached = get_cached_wiki_results("python")
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
 
     assert [document.term for document in cached] == ["python"]
 
 
 def test_a_normalised_variant_of_the_query_hits_the_same_entry(cache_index):
-    store_wiki_results("Monty Python", [MONTY])
+    store_external_results(DocumentSource.WIKIPEDIA, "Monty Python", [MONTY])
 
-    assert get_cached_wiki_results("  monty   python ") is not None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "  monty   python ") is not None
 
 
 def test_a_query_we_have_never_asked_about_is_a_miss(cache_index):
-    store_wiki_results("python", [PYTHON])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
 
-    assert get_cached_wiki_results("something else entirely") is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "something else entirely") is None
+
+
+def _all_stored_documents(index_path):
+    """Every document in the file, decompressed. Grepping the raw bytes proves little: the
+    pages are zstd-compressed, so plaintext would not show up there either way."""
+    with TinyIndex(Document, index_path, 'r') as index:
+        return [document for page in range(index.num_pages) for document in index.get_page(page)]
 
 
 def test_the_file_holds_no_query_text(cache_index):
-    store_wiki_results("something private", [PYTHON])
+    store_external_results(DocumentSource.WIKIPEDIA, "something private", [PYTHON])
 
-    with open(cache_index, "rb") as index_file:
-        raw = index_file.read()
+    stored = _all_stored_documents(cache_index)
 
-    assert b"something private" not in raw
+    assert stored, "nothing was written, so this would pass for the wrong reason"
+    written = json.dumps([document.as_tuple() for document in stored])
+    assert "something private" not in written
+    assert "private" not in written
+
+
+# ---------------------------------------------------------------------------
+# Several providers sharing the file
+# ---------------------------------------------------------------------------
+
+# The second provider is the whole reason the cache is keyed by source rather than by query
+# alone, so the tests below exercise it even though nothing fetches from it yet.
+OTHER_SOURCE = DocumentSource.STAAN
+
+STAAN_RESULT = Document("Python tutorial", "https://example.com/python",
+                        "Somewhere that is not Wikipedia.", 9.0, source=DocumentSource.STAAN)
+
+
+def test_two_providers_do_not_share_an_entry_for_the_same_query(cache_index):
+    """Providers share the term, and therefore the page, but not the entry: one provider
+    answering a query must not stop the other being asked, or answer on its behalf."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
+
+    assert get_cached_external_results(OTHER_SOURCE, "python") is None
+
+    store_external_results(OTHER_SOURCE, "python", [STAAN_RESULT])
+
+    assert [d.url for d in get_cached_external_results(DocumentSource.WIKIPEDIA, "python")] == [PYTHON.url]
+    assert [d.url for d in get_cached_external_results(OTHER_SOURCE, "python")] == [STAAN_RESULT.url]
+
+
+def test_an_entry_says_which_provider_it_came_from_but_not_which_query(cache_index):
+    """An entry has to be attributable to its provider - to count them, to drop one
+    provider's entries, or to give one its own TTL - which the query must never be. The
+    source is on the document; the query is not anywhere."""
+    store_external_results(DocumentSource.WIKIPEDIA, "something private", [PYTHON])
+
+    stored = _all_stored_documents(cache_index)
+
+    assert [document for document in stored if document.source == DocumentSource.WIKIPEDIA]
+    assert not any("private" in document.term for document in stored)
+
+
+def test_storing_one_provider_does_not_evict_another_for_the_same_query(cache_index):
+    """The trap in sharing a term. The write path replaces "this query's entries", and if
+    that means the term alone it wipes every other provider's results for the query - with
+    no error, just a silent extra fetch every time."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
+    store_external_results(OTHER_SOURCE, "python", [STAAN_RESULT])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [MONTY])
+
+    assert [d.url for d in get_cached_external_results(OTHER_SOURCE, "python")] == [STAAN_RESULT.url]
+    assert [d.url for d in get_cached_external_results(DocumentSource.WIKIPEDIA, "python")] == [MONTY.url]
+
+
+def test_both_providers_results_for_a_query_live_on_one_page(cache_index):
+    """The reason the term does not name the source: one page read serves every provider,
+    so asking the second costs no extra page fault."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
+    store_external_results(OTHER_SOURCE, "python", [STAAN_RESULT])
+
+    with TinyIndex(Document, cache_index, 'r') as index:
+        page = index.get_page(index.get_key_page_index(external_cache_term("python")))
+
+    assert {document.source for document in page} == {DocumentSource.WIKIPEDIA, DocumentSource.STAAN}
+
+
+def test_the_negative_sentinel_carries_its_source_too(cache_index):
+    """is_fresh reads document.source off a page's other entries, where the term tells it
+    nothing, so an entry with no results still has to say where it came from."""
+    store_external_results(DocumentSource.WIKIPEDIA, "nonsense query", [])
+
+    stored = _all_stored_documents(cache_index)
+
+    assert [document.source for document in stored] == [DocumentSource.WIKIPEDIA]
+
+
+def test_a_providers_state_and_source_survive_the_round_trip(cache_index):
+    """The cache preserves what the provider produced rather than stamping its own, so a
+    cached result stays attributable once there is a second provider."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
+
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
+
+    assert [document.state for document in cached] == [DocumentState.FROM_WIKI]
+    assert [document.source for document in cached] == [DocumentSource.WIKIPEDIA]
 
 
 # ---------------------------------------------------------------------------
@@ -145,10 +242,10 @@ def test_the_file_holds_no_query_text(cache_index):
 
 def test_a_stale_entry_is_not_a_cache_hit(cache_index):
     now = int(time.time())
-    store_wiki_results("python", [PYTHON], now=now)
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON], now=now)
 
-    fresh = get_cached_wiki_results("python", now=now + 60)
-    stale = get_cached_wiki_results("python", now=now + 27 * 7 * 24 * 60 * 60)
+    fresh = get_cached_external_results(DocumentSource.WIKIPEDIA, "python", now=now + 60)
+    stale = get_cached_external_results(DocumentSource.WIKIPEDIA, "python", now=now + 27 * 7 * 24 * 60 * 60)
 
     assert fresh is not None
     assert stale is None
@@ -165,13 +262,13 @@ def test_stale_entries_are_dropped_when_the_page_is_rewritten(cache_index):
     sweep to schedule and nothing accumulates on a page nobody writes to."""
     now = int(time.time())
     old_query, new_query = _colliding_queries(cache_index)
-    store_wiki_results(old_query, [PYTHON], now=now)
+    store_external_results(DocumentSource.WIKIPEDIA, old_query, [PYTHON], now=now)
 
     much_later = now + 27 * 7 * 24 * 60 * 60
-    store_wiki_results(new_query, [MONTY], now=much_later)
+    store_external_results(DocumentSource.WIKIPEDIA, new_query, [MONTY], now=much_later)
 
     with TinyIndex(Document, cache_index, 'r') as index:
-        page = index.get_page(index.get_key_page_index(wiki_cache_term(new_query)))
+        page = index.get_page(index.get_key_page_index(external_cache_term(new_query)))
 
     assert [document.url for document in page] == [MONTY.url]
 
@@ -180,39 +277,48 @@ def test_stale_entries_are_dropped_when_the_page_is_rewritten(cache_index):
 # Negative caching
 # ---------------------------------------------------------------------------
 
-def test_a_query_wikipedia_has_nothing_for_is_remembered(cache_index):
+def test_a_query_a_provider_has_nothing_for_is_remembered(cache_index):
     """Without this the query is re-fetched forever - #357 listed it as unfixable, because
     a sentinel in the search index would surface in /raw and in every candidate list."""
-    store_wiki_results("nonsense query", [])
+    store_external_results(DocumentSource.WIKIPEDIA, "nonsense query", [])
 
-    assert get_cached_wiki_results("nonsense query") == []
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "nonsense query") == []
 
 
 def test_an_empty_entry_is_not_returned_as_a_result(cache_index):
-    store_wiki_results("nonsense query", [])
+    store_external_results(DocumentSource.WIKIPEDIA, "nonsense query", [])
 
-    cached = get_cached_wiki_results("nonsense query")
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "nonsense query")
 
     assert [document.url for document in cached] == []
-    assert WIKI_CACHE_EMPTY_URL not in [document.url for document in cached]
+    assert EXTERNAL_CACHE_EMPTY_URL not in [document.url for document in cached]
+
+
+def test_one_providers_empty_result_is_not_anothers(cache_index):
+    """Sharing a page makes this worth pinning down: "Wikipedia has nothing" must not read
+    as "Staan has nothing", or the second provider is never asked."""
+    store_external_results(DocumentSource.WIKIPEDIA, "nonsense query", [])
+
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "nonsense query") == []
+    assert get_cached_external_results(OTHER_SOURCE, "nonsense query") is None
 
 
 def test_an_empty_entry_expires_sooner_than_a_real_one(cache_index):
     """An article appearing is a likelier change than an existing one moving."""
     now = int(time.time())
-    store_wiki_results("nonsense query", [], now=now)
-    store_wiki_results("python", [PYTHON], now=now)
+    store_external_results(DocumentSource.WIKIPEDIA, "nonsense query", [], now=now)
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON], now=now)
 
     later = now + 8 * 24 * 60 * 60  # past the negative TTL, well inside the positive one
 
-    assert get_cached_wiki_results("nonsense query", now=later) is None
-    assert get_cached_wiki_results("python", now=later) is not None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "nonsense query", now=later) is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python", now=later) is not None
 
 
 def test_documents_without_a_url_or_title_are_not_stored(cache_index):
-    store_wiki_results("python", [Document("", "", "", 1.0)])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [Document("", "", "", 1.0)])
 
-    assert get_cached_wiki_results("python") == []
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") == []
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +334,11 @@ def test_a_cache_miss_calls_wikipedia_and_stores_the_result(cache_index):
 
     assert session.get.call_count == 1
     assert [document.url for document in results] == ["https://en.wikipedia.org/wiki/Python_(programming_language)"]
-    assert get_cached_wiki_results("python") is not None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is not None
 
 
 def test_a_cache_hit_does_not_call_wikipedia(cache_index):
-    store_wiki_results("python", [PYTHON])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
 
     mock, session = _patched_wikipedia(_wiki_api_response("Python"))
     try:
@@ -247,7 +353,7 @@ def test_a_cache_hit_does_not_call_wikipedia(cache_index):
 def test_a_hit_is_served_while_the_circuit_breaker_is_open(cache_index):
     """A cached answer costs Wikipedia nothing, so backing off from a rate limit is no
     reason to withhold it."""
-    store_wiki_results("python", [PYTHON])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
     rank._trip_wiki_circuit()
     try:
         results = get_wiki_results("python", 3)
@@ -266,7 +372,7 @@ def test_a_failed_fetch_is_not_remembered_as_an_empty_result(cache_index):
     finally:
         mock.stop()
 
-    assert get_cached_wiki_results("python") is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
 
 def test_an_error_response_is_not_remembered_as_an_empty_result(cache_index):
@@ -276,7 +382,7 @@ def test_an_error_response_is_not_remembered_as_an_empty_result(cache_index):
     finally:
         mock.stop()
 
-    assert get_cached_wiki_results("python") is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
 
 def test_a_broken_cache_write_does_not_break_the_search(cache_index):
@@ -284,7 +390,7 @@ def test_a_broken_cache_write_does_not_break_the_search(cache_index):
     results."""
     mock, _ = _patched_wikipedia(_wiki_api_response("Python"))
     try:
-        with patch("mwmbl.indexer.wiki_cache.TinyIndex", side_effect=OSError("disk gone")):
+        with patch("mwmbl.indexer.external_cache.TinyIndex", side_effect=OSError("disk gone")):
             results = get_wiki_results("python", 3)
     finally:
         mock.stop()
@@ -311,17 +417,17 @@ def test_the_query_is_truncated_before_it_reaches_wikipedia(cache_index):
 # ---------------------------------------------------------------------------
 
 def test_the_kill_switch_stops_reads_and_writes(cache_index):
-    with override_settings(WIKI_CACHE_ENABLED=False):
-        store_wiki_results("python", [PYTHON])
-        assert get_cached_wiki_results("python") is None
+    with override_settings(EXTERNAL_CACHE_ENABLED=False):
+        store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
+        assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
-    assert get_cached_wiki_results("python") is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
 
 def test_a_missing_cache_file_is_a_miss_rather_than_an_error(tmp_path):
-    with override_settings(DATA_PATH=str(tmp_path), WIKI_CACHE_INDEX_NAME="absent.tinysearch",
-                           WIKI_CACHE_ENABLED=True):
-        assert get_cached_wiki_results("python") is None
+    with override_settings(DATA_PATH=str(tmp_path), EXTERNAL_CACHE_INDEX_NAME="absent.tinysearch",
+                           EXTERNAL_CACHE_ENABLED=True):
+        assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +438,10 @@ def _colliding_queries(index_path):
     """Two queries whose cache terms land on the same page."""
     with TinyIndex(Document, index_path, 'r') as index:
         first = "collide-0"
-        first_page = index.get_key_page_index(wiki_cache_term(first))
+        first_page = index.get_key_page_index(external_cache_term(first))
         for i in range(1, 10000):
             candidate = f"collide-{i}"
-            if index.get_key_page_index(wiki_cache_term(candidate)) == first_page:
+            if index.get_key_page_index(external_cache_term(candidate)) == first_page:
                 return first, candidate
     raise AssertionError("No colliding query found")
 
@@ -354,20 +460,20 @@ def test_the_newest_entry_survives_a_full_page_and_the_oldest_is_evicted(cache_i
     bulky = [Document(f"Title {i}", f"https://en.wikipedia.org/wiki/{i}", _filler(2000), 3.0)
              for i in range(4)]
 
-    store_wiki_results(old_query, bulky, now=now)
-    assert get_cached_wiki_results(old_query, now=now) is not None
+    store_external_results(DocumentSource.WIKIPEDIA, old_query, bulky, now=now)
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, old_query, now=now) is not None
 
-    store_wiki_results(new_query, bulky, now=now + 1)
+    store_external_results(DocumentSource.WIKIPEDIA, new_query, bulky, now=now + 1)
 
-    assert get_cached_wiki_results(new_query, now=now + 1) is not None
-    assert get_cached_wiki_results(old_query, now=now + 1) is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, new_query, now=now + 1) is not None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, old_query, now=now + 1) is None
 
 
 def test_an_entry_replaces_its_own_previous_results(cache_index):
-    store_wiki_results("python", [PYTHON, MONTY])
-    store_wiki_results("python", [MONTY])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON, MONTY])
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [MONTY])
 
-    assert [document.url for document in get_cached_wiki_results("python")] == [MONTY.url]
+    assert [document.url for document in get_cached_external_results(DocumentSource.WIKIPEDIA, "python")] == [MONTY.url]
 
 
 # ---------------------------------------------------------------------------
@@ -416,11 +522,11 @@ def test_search_calls_external_search_by_default(cache_index):
 def test_a_resized_cache_index_is_rebuilt_rather_than_crashing_startup(tmp_path):
     """Resizing a cache should be a config change, not a startup crash - the cost of
     rebuilding is re-fetching."""
-    path = tmp_path / "wiki-cache.tinysearch"
+    path = tmp_path / "external-cache.tinysearch"
     TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=4, page_size=PAGE_SIZE)
 
     with override_settings(DATA_PATH=str(tmp_path)):
-        create_index("wiki-cache.tinysearch", 16, rebuild_on_mismatch=True)
+        create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
 
     with TinyIndex(Document, str(path), 'r') as index:
         assert index.num_pages == 16

@@ -22,9 +22,9 @@ from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.purge_queue import enqueue_for_purge
-from mwmbl.indexer.wiki_cache import get_cached_wiki_results, store_wiki_results
+from mwmbl.indexer.external_cache import get_cached_external_results, store_external_results
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentSource, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
 from mwmbl.utils import get_domain
 
@@ -433,7 +433,7 @@ WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for months (see mwmbl.indexer.wiki_cache).
+# normal operation. Successful responses are cached for months (see mwmbl.indexer.external_cache).
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
@@ -488,7 +488,7 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
 
     # Ahead of the circuit breaker deliberately: a cache hit costs Wikipedia nothing, so it
     # should still be served while we are backing off from a rate limit.
-    cached = get_cached_wiki_results(query)
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, query)
     if cached is not None:
         return cached[:max_wiki_results]
 
@@ -527,13 +527,14 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         return []
 
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                             max_wiki_results + 1 - i, query, state=DocumentState.FROM_WIKI)
+                             max_wiki_results + 1 - i, query, state=DocumentState.FROM_WIKI,
+                             source=DocumentSource.WIKIPEDIA)
                     for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
 
     # Only a well-formed answer is stored, including one with no results in it. Every path
     # above returns [] without storing, so a transient failure is never remembered as
     # "Wikipedia has nothing for this".
-    store_wiki_results(query, wiki_results)
+    store_external_results(DocumentSource.WIKIPEDIA, query, wiki_results)
     return wiki_results
 
 
