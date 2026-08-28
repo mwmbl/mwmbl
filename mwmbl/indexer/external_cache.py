@@ -19,12 +19,14 @@ lets this module keep a negative-cache sentinel - see EXTERNAL_CACHE_EMPTY_URL.
 
 Entries are keyed by a keyed hash of the query alone and carry their source as an int in
 the document itself - a DocumentSource, exactly as the search index carries DocumentState.
+What an entry stores in place of a score is the *rank* the provider gave it, because a
+score belongs to whoever is ranking - see _entries_to_store.
 Every provider's results for one query therefore land on one page: the second provider's
 lookup reads a page the first one just warmed, rather than faulting in a second 4 KB page
 from a 15 GB file. So the file says which provider each entry came from, and nothing about
-which query. Be
-straight about what that does and does not do: it removes the query *text*, not the fact
-that somebody searched in that area, since an entry still holds the results that came back.
+which query. Be straight about what that does and does not do: it removes the query *text*,
+not the fact that somebody searched in that area, since an entry still holds the results
+that came back.
 That is strictly less than the disk cache gave away.
 """
 import hashlib
@@ -37,19 +39,20 @@ from typing import Optional
 from django.conf import settings
 
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
-from mwmbl.tokenizer import tokenize
 
 logger = getLogger(__name__)
 
-
-# Terms under this prefix are cache entries rather than words anybody searched for.
-EXTERNAL_CACHE_TERM_PREFIX = "#ext-"
 
 # A query a provider returned nothing for is stored as a single document under this URL, so
 # that "we asked and there was nothing" stays distinguishable from "we never asked".
 # Without it those queries are re-fetched forever. It is filtered out on read and never
 # leaves this module.
-EXTERNAL_CACHE_EMPTY_URL = "mwmbl:external-cache-empty"
+#
+# The empty string, because there will be a lot of these and an entry that holds no result
+# should cost as close to nothing as an entry can. Nothing real can be mistaken for it:
+# _entries_to_store drops any document without a url, so an empty url only ever means the
+# sentinel.
+EXTERNAL_CACHE_EMPTY_URL = ""
 
 
 def external_cache_path() -> Path:
@@ -75,9 +78,16 @@ def get_cache_index() -> TinyIndex:
     if _cache_index is None or _cache_index_path != path:
         if _cache_index is not None:
             _cache_index.__exit__(None, None, None)
-        _cache_index = TinyIndex(item_factory=Document, index_path=path)
-        _cache_index.__enter__()
-        _cache_index_path = path
+            _cache_index, _cache_index_path = None, None
+        # Both globals are assigned only once __enter__ has returned. Assigning the index
+        # first and the path after would, if __enter__ raised (the file removed between
+        # __init__ and open, EMFILE, a failed mmap), leave a half-open index behind that
+        # every later call would take the path-mismatch branch on and call __exit__ on -
+        # an AttributeError on its None mmap, swallowed as a cache miss, for the life of
+        # the worker. A failed open has to leave this exactly as it found it.
+        index = TinyIndex(item_factory=Document, index_path=path)
+        index.__enter__()
+        _cache_index, _cache_index_path = index, path
     return _cache_index
 
 
@@ -95,9 +105,23 @@ def external_cache_term(query: str) -> str:
     queries. Keyed, the mapping is not reproducible without the key. Rotating SECRET_KEY
     invalidates the cache, which is harmless - it is a cache.
 
-    The query is normalised through tokenize() first, so "Python" and " python " share an
-    entry. The disk cache keyed on the request URL built from the raw string, so they did
-    not.
+    Normalised on whitespace and case, so "Python" and " python " share an entry. The disk
+    cache keyed on the request URL built from the raw string, so they did not.
+
+    Deliberately not tokenize(): the document tokenizer is not a total function on queries.
+    It drops the last two tokens from anything ending in "…" and returns [] for a query
+    that is all whitespace, so "python asyncio…" and "python tutorial…" would both key on
+    "python" and serve each other's results, and every whitespace-only query would share
+    one entry. A key collision here is silent - one query is answered with another's
+    results - so the normalisation has to be one that cannot merge two distinct queries.
+    errors="ignore" on the encode keeps it total over strings the codec cannot represent
+    (a lone surrogate), which is what clean_unicode() gave us inside tokenize: this runs
+    outside the try in get_cached_external_results, so raising here would cost a search its
+    results rather than a cache lookup.
+
+    Bare, with no prefix on it: the file holds nothing but cache entries, so there is no
+    real term for a namespace to keep it apart from. The prefix was needed when this lived
+    in the search index, and every byte of it was stored on every entry.
 
     64 bits of digest is enough. Two distinct queries colliding here would serve one
     query's results for the other, so it is worth being explicit: at 30M live queries the
@@ -107,9 +131,10 @@ def external_cache_term(query: str) -> str:
     are page collisions, which are a different thing entirely; see EXTERNAL_CACHE_NUM_PAGES
     in settings_prod.
     """
-    normalised = " ".join(tokenize(query))
-    digest = hmac.new(settings.SECRET_KEY.encode("utf8"), normalised.encode("utf8"), hashlib.sha256)
-    return f"{EXTERNAL_CACHE_TERM_PREFIX}{digest.hexdigest()[:16]}"
+    normalised = " ".join(query.split()).casefold()
+    digest = hmac.new(settings.SECRET_KEY.encode("utf8"),
+                      normalised.encode("utf8", errors="ignore"), hashlib.sha256)
+    return digest.hexdigest()[:16]
 
 
 def is_fresh(document: Document, now: int) -> bool:
@@ -157,14 +182,17 @@ def get_cached_external_results(source: DocumentSource, query: str,
     if not entries:
         return None
 
-    # Handed back with term set to the query, and the provider's own state and source
-    # preserved, exactly as a live fetch builds them. The hashed term is how the entry is
-    # stored, not something the ranker should ever see.
-    results = [Document(title=document.title, url=document.url, extract=document.extract,
-                        score=document.score, term=query, state=document.state,
-                        source=document.source)
-               for document in entries if document.url != EXTERNAL_CACHE_EMPTY_URL]
-    return sorted(results, key=lambda document: -(document.score or 0.0))
+    # Handed back in the provider's own rank order, with term set to the query and the
+    # provider's state and source preserved, exactly as a live fetch builds them. The
+    # hashed term is how the entry is stored, not something the ranker should ever see.
+    #
+    # score comes back None. What is stored is the rank (see _entries_to_store), and a rank
+    # is not a score: turning one into the other needs the caller's scale, which the cache
+    # does not know and must not guess. Callers score by position - get_wiki_results does.
+    ranked = sorted(entries, key=lambda document: document.score or 0.0)
+    return [Document(title=document.title, url=document.url, extract=document.extract,
+                     score=None, term=query, state=document.state, source=document.source)
+            for document in ranked if document.url != EXTERNAL_CACHE_EMPTY_URL]
 
 
 def store_external_results(source: DocumentSource, query: str, documents: list[Document],
@@ -217,6 +245,15 @@ def _entries_to_store(source: DocumentSource, term: str, documents: list[Documen
     Every entry carries its source, the sentinel included - an entry has to say which
     provider it came from without the key, and is_fresh has nothing else to go on. `state`
     is carried through from whatever the provider produced rather than stamped here.
+
+    The score slot holds the document's *rank* in what the provider returned, not the score
+    it was handed in with. A caller's score is on the caller's scale - get_wiki_results
+    derives one from max_wiki_results - so storing it means an entry written by a caller
+    asking for five results answers a caller asking for three with the wrong numbers, and
+    that number is a feature of the LTR model. A rank is the provider's own statement about
+    the result and means the same thing to every caller. Storing it explicitly rather than
+    relying on list order also keeps the round trip from depending on the page preserving
+    the order entries were written in.
     """
     usable = [document for document in documents if document.url and document.title]
     if not usable:
@@ -224,6 +261,6 @@ def _entries_to_store(source: DocumentSource, term: str, documents: list[Documen
                          last_crawled=now, source=source)]
 
     return [Document(title=document.title, url=document.url, extract=document.extract,
-                     score=document.score, term=term, state=document.state, last_crawled=now,
+                     score=float(rank), term=term, state=document.state, last_crawled=now,
                      source=source)
-            for document in usable]
+            for rank, document in enumerate(usable)]

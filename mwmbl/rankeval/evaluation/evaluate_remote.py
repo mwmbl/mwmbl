@@ -36,7 +36,7 @@ def run():
     ranker = MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3))
     # ranker = LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3)  # MMR off
     # ranker = HeuristicRanker(RemoteIndex(), DummyCompleter())
-    # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter(), max_wiki_results=3)
+    # ranker = HeuristicAndWikiRanker(RemoteIndex(), DummyCompleter())
     model = MwmblRankingModel(ranker)
     evaluate(model, use_test=True)
 

@@ -1,3 +1,5 @@
+import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,7 +9,9 @@ from urllib3.exceptions import MaxRetryError, ResponseError
 
 from mwmbl.tinysearchengine import rank
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.rank import HeuristicRanker, get_wiki_results
+from mwmbl.tinysearchengine.ltr_rank import LTRRanker
+from mwmbl.tinysearchengine.rank import (NUM_WIKI_RESULTS, HeuristicAndWikiRanker,
+                                         HeuristicRanker, get_wiki_results, wiki_score)
 
 
 def test_order_result():
@@ -127,3 +131,41 @@ def test_is_wiki_rate_limited_detects_429_reason():
 
 def test_is_wiki_rate_limited_ignores_non_429_reason():
     assert not rank._is_wiki_rate_limited(_make_retry_error(503))
+
+
+# ---------------------------------------------------------------------------
+# Keeping the wiki results the model is served the ones it was trained on
+# ---------------------------------------------------------------------------
+
+def test_the_wiki_score_depends_on_rank_alone():
+    """`score` is a feature of the LTR model. It used to be max_wiki_results + 1 - i, so a
+    caller asking for a different number of results moved a feature value and with it the
+    ranking - training built its pools with five, serving asked for three."""
+    assert wiki_score(0) == 6.0
+    assert [wiki_score(rank) for rank in range(3)] == [6.0, 5.0, 4.0]
+
+
+def test_every_ranker_takes_its_wiki_result_count_from_one_place():
+    """The count the dataset is built with and the count production ranks with have to be
+    the same, and what keeps them the same is that there is only one number."""
+    assert LTRRanker.__init__.__defaults__[-1] == NUM_WIKI_RESULTS
+    assert HeuristicAndWikiRanker.__init__.__defaults__[-1] == NUM_WIKI_RESULTS
+    assert get_wiki_results.__defaults__[-1] == NUM_WIKI_RESULTS
+
+
+def test_no_call_site_passes_its_own_wiki_result_count():
+    """How they came apart in the first place: mwmbl/search_setup.py passed 3 while
+    mwmbl/rankeval/ltr/dataset.py trained on 5, and nothing connected the two literals. A
+    call site that needs a different number needs a retrained model, so it should have to
+    change NUM_WIKI_RESULTS to get one."""
+    root = Path(__file__).parent.parent
+    literal_count = re.compile(r"(?:num|max)_wiki_results(?:\s*:\s*int)?\s*=\s*\d")
+    offenders = [
+        f"{path.relative_to(root)}:{lineno}: {line.strip()}"
+        for path in sorted([*root.glob("mwmbl/**/*.py"), *root.glob("scripts/**/*.py")])
+        for lineno, line in enumerate(path.read_text().splitlines(), 1)
+        # Code only: the comments around here talk about the counts they are explaining.
+        if literal_count.search(line.split("#", 1)[0])
+    ]
+
+    assert offenders == []

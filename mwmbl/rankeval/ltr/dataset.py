@@ -27,7 +27,6 @@ def get_dataset(completer):
         completer,
         return_none_if_no_mwmbl_results=True,
         score_threshold=float('-inf'),
-        max_wiki_results=5,
     )
     gold_standard = pd.read_csv(RANKINGS_DATASET_TRAIN_PATH, index_col=0)
     dataset = []

@@ -23,24 +23,58 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     index_path = Path(settings.DATA_PATH) / index_name
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
-        print("======================================")
-        print(f"Found existing index at {index_path}")
-        print("======================================")
-        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != num_pages:
-            message = (f"Existing index page sizes ({existing_index.page_size}) or number of pages "
-                       f"({existing_index.num_pages}) do not match")
-            if not rebuild_on_mismatch:
-                raise ValueError(message)
-            print(f"{message} - rebuilding {index_path}")
-            index_path.unlink()
-            TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
-                             page_size=PAGE_SIZE)
     except FileNotFoundError:
         print("======================================")
         print("Index not found - creating a new index")
         print("======================================")
-        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
-                         page_size=PAGE_SIZE)
+        _create_index_file(index_path, num_pages)
+        return
+    except ValueError as e:
+        # A file that is there but does not parse as an index: TinyIndexMetadata.from_bytes
+        # rejects it before there is a page size to compare, so the size check below never
+        # sees it. For a disposable index that is the same situation as a size mismatch -
+        # unusable contents, cheap to rebuild - and crashing the boot on it would be the
+        # thing rebuild_on_mismatch exists to avoid.
+        if not rebuild_on_mismatch:
+            raise
+        print(f"{index_path} is not a readable index ({e}) - rebuilding")
+        _replace_index_file(index_path, num_pages)
+        return
+
+    print("======================================")
+    print(f"Found existing index at {index_path}")
+    print("======================================")
+    if existing_index.page_size == PAGE_SIZE and existing_index.num_pages == num_pages:
+        return
+
+    message = (f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+               f"({existing_index.num_pages}) do not match")
+    if not rebuild_on_mismatch:
+        raise ValueError(message)
+    print(f"{message} - rebuilding {index_path}")
+    _replace_index_file(index_path, num_pages)
+
+
+def _create_index_file(index_path, num_pages):
+    from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
+    TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
+                     page_size=PAGE_SIZE)
+
+
+def _replace_index_file(index_path, num_pages):
+    """Build the replacement alongside the old file and rename it into place.
+
+    unlink() and then create() is not one step. It leaves a window with no file there at
+    all, and on a deploy where the outgoing and incoming containers share /data the
+    outgoing one's open handles go on writing to the unlinked inode while the new file is
+    written beside it - two live indexes under one name, one of which nobody will ever read
+    again. A rename is atomic: every reader has either the whole old file or the whole new
+    one. Same directory, so it is a rename and not a copy.
+    """
+    temp_path = index_path.parent / f"{index_path.name}.rebuild"
+    temp_path.unlink(missing_ok=True)
+    _create_index_file(temp_path, num_pages)
+    temp_path.replace(index_path)
 
 
 def create_index_db():

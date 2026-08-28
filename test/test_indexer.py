@@ -3,8 +3,8 @@ from tempfile import TemporaryDirectory
 
 from zstandard import ZstdCompressor
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _binary_search_fitting_size, \
-    _trim_items_to_page, _pad_to_page_size, _get_page_data
+from mwmbl.tinysearchengine.indexer import STATE_INDEX, TinyIndex, Document, DocumentSource, \
+    DocumentState, _binary_search_fitting_size, _trim_items_to_page, _pad_to_page_size, _get_page_data
 
 
 def test_create_index():
@@ -157,3 +157,34 @@ def test_document_backward_compat_old_six_element_tuple():
     doc = Document(*old_tuple)
     assert doc.user_ids is None
     assert doc.last_crawled is None
+
+
+def test_state_index_matches_the_tuple_layout():
+    """get_page blanks the state by position, so the constant has to track as_tuple()."""
+    document = Document("Title", "https://example.com", "Extract", 1.0, "term",
+                        DocumentState.FROM_WIKI, None, 123, DocumentSource.WIKIPEDIA)
+
+    assert document.as_tuple()[STATE_INDEX] == DocumentState.FROM_WIKI.value
+
+
+def test_a_document_with_an_unreadable_state_keeps_its_other_values():
+    """State values are written to disk, so a page can hold one this build does not know.
+    Blanking it where it sits is what keeps the document: it is not the last value in the
+    tuple - source follows it on external cache entries - so stripping the tail would take
+    source off instead, leave the bad state in place, and drop the document on the retry."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        TinyIndex.create(Document, index_path, num_pages=2, page_size=4096)
+        # title, url, extract, score, term, state, user_ids, last_crawled, source
+        item = ["Title", "https://example.com", "Extract", 1.0, "term", 99, None, 123,
+                DocumentSource.WIKIPEDIA.value]
+        with TinyIndex(Document, index_path, 'w') as index:
+            index._write_page([item], 0)
+
+        with TinyIndex(Document, index_path, 'r') as index:
+            documents = index.get_page(0)
+
+    assert len(documents) == 1
+    assert documents[0].state is None
+    assert documents[0].source == DocumentSource.WIKIPEDIA
+    assert documents[0].last_crawled == 123

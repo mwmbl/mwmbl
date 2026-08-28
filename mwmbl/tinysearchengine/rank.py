@@ -426,8 +426,32 @@ class HeuristicRanker(Ranker):
         return filtered_results
 
 
-WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
+WIKI_SEARCH_API_URL = ("https://en.wikipedia.org/w/api.php?action=query&list=search"
+                       "&srsearch={query}&srlimit={limit}&format=json")
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
+
+# How many wiki results a caller gets unless it says otherwise, and the number the LTR
+# model was trained against - mwmbl.rankeval.ltr.dataset builds its training data through
+# HeuristicAndWikiRanker with this default. Serving used to pass 3 here while training used
+# 5, so the model was scoring production pools it had never seen the shape of. One constant,
+# used everywhere, is what keeps them from drifting apart again.
+NUM_WIKI_RESULTS = 5
+
+# What we ask Wikipedia for, and therefore what a cache entry holds. Fixed rather than the
+# caller's max_wiki_results so that one entry serves every caller: a cache warmed by a
+# caller wanting three must not be a short answer to a caller wanting five. Left unset the
+# API returns 10 by default, so this narrows the response as well.
+WIKI_FETCH_LIMIT = NUM_WIKI_RESULTS
+
+# The score a wiki result carries into the LTR model, top result first, counting down.
+#
+# A function of rank alone, deliberately. It used to be max_wiki_results + 1 - i, so the
+# same Wikipedia result scored 6 for a caller asking for five and 4 for a caller asking for
+# three - and `score` is a feature the model reads, so the number a caller passed for how
+# *many* results it wanted silently moved the ranking of the ones it got. Anchored at the
+# top instead, rank 0 is 6.0 for everybody, which is what the deployed model was trained
+# on (max_wiki_results=5 there). Changing it changes a trained-on feature: retrain.
+WIKI_TOP_SCORE = 6.0
 
 # Wikipedia rate-limits (HTTP 429, with a non-JSON body) bursts of search-API
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
@@ -481,7 +505,12 @@ def clean_html(s: str):
     return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
-def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
+def wiki_score(rank: int) -> float:
+    """The `score` feature for a wiki result at 0-based `rank`. See WIKI_TOP_SCORE."""
+    return WIKI_TOP_SCORE - rank
+
+
+def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[Document]:
     # MAX_QUERY_CHARS was only ever applied in HeuristicAndWikiRanker, which is the eval
     # ranker - the production LTRRanker path sent the untruncated query straight out.
     query = s[:MAX_QUERY_CHARS]
@@ -490,7 +519,13 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     # should still be served while we are backing off from a rate limit.
     cached = get_cached_external_results(DocumentSource.WIKIPEDIA, query)
     if cached is not None:
-        return cached[:max_wiki_results]
+        # The cache stores the rank Wikipedia gave, not a score - scoring is this function's
+        # to do, and doing it here rather than at write time is what makes an entry mean the
+        # same thing to every caller. The documents are ours; nothing else holds them.
+        wiki_results = cached[:max_wiki_results]
+        for rank, document in enumerate(wiki_results):
+            document.score = wiki_score(rank)
+        return wiki_results
 
     if _wiki_circuit_open():
         return []
@@ -502,7 +537,9 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
     try:
         with requests.Session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
-            response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
+            response = session.get(
+                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT),
+                headers=headers, timeout=5)
             wiki_response = response.json()
     except RetryError as e:
         if _is_wiki_rate_limited(e):
@@ -527,15 +564,19 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         return []
 
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                             max_wiki_results + 1 - i, query, state=DocumentState.FROM_WIKI,
+                             wiki_score(rank), query, state=DocumentState.FROM_WIKI,
                              source=DocumentSource.WIKIPEDIA)
-                    for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
+                    for rank, result in enumerate(wiki_response['query']['search'][:WIKI_FETCH_LIMIT])]
 
     # Only a well-formed answer is stored, including one with no results in it. Every path
     # above returns [] without storing, so a transient failure is never remembered as
     # "Wikipedia has nothing for this".
+    #
+    # The whole response is stored and the caller's cut taken afterwards, so that a caller
+    # wanting fewer than WIKI_FETCH_LIMIT does not leave a short entry behind for the next
+    # caller to be silently short-changed by.
     store_external_results(DocumentSource.WIKIPEDIA, query, wiki_results)
-    return wiki_results
+    return wiki_results[:max_wiki_results]
 
 
 class HeuristicAndWikiRanker(HeuristicRanker):
@@ -545,7 +586,7 @@ class HeuristicAndWikiRanker(HeuristicRanker):
             completer: Completer,
             return_none_if_no_mwmbl_results: bool = False,
             score_threshold: float = 0.0,
-            max_wiki_results: int = 5
+            max_wiki_results: int = NUM_WIKI_RESULTS
     ):
         super().__init__(tiny_index, completer, score_threshold)
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results

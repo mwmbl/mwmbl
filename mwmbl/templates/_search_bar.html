@@ -33,11 +33,20 @@
 
        It lives here in the header rather than inside .main because .main's contents are
        replaced on every keystroke, which would destroy and re-arm this element each time.
-       hx-sync on both keeps a slow response from landing on top of a newer fast one. #}
+       hx-sync on both keeps a slow response from landing on top of a newer fast one.
+
+       The trigger is `input`, not `keyup`: keyup fires for arrow keys, Shift, Ctrl and
+       Escape too, so every one of those scheduled a full search 800ms later against a
+       query that had not changed - a wasted search, and a swap of .main that can land on
+       top of a curate the user made in the meantime. `input` fires only when the value
+       actually changes. The `changed` modifier is not the fix here: htmx keeps lastValue
+       on the element being listened to, which for both triggers is the same
+       .search-bar-input, so the 100ms trigger above would consume the change and this one
+       would never fire at all. #}
     <span
       class="external-search"
       hx-get="/app/home/?external=1"
-      hx-trigger="keyup delay:800ms from:.search-bar-input"
+      hx-trigger="input delay:800ms from:.search-bar-input"
       hx-target=".main"
       hx-include=".search-bar-input"
       hx-sync="closest form:replace"

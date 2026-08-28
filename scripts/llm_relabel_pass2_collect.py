@@ -56,7 +56,6 @@ ALWAYS_ON = {name for name in SOURCES if get_meta(name).always_on}
 _std_ranker = HeuristicAndWikiRanker(
     RemoteIndex(), DummyCompleter(),
     return_none_if_no_mwmbl_results=True, score_threshold=float("-inf"),
-    max_wiki_results=5,
 )
 
 

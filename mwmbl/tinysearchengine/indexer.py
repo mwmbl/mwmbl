@@ -21,6 +21,10 @@ METADATA_SIZE = 4096
 
 PAGE_SIZE = 4096
 
+# Where `state` sits in Document.as_tuple(). get_page needs it to blank an unreadable state
+# without disturbing the values around it.
+STATE_INDEX = 5
+
 
 logger = getLogger(__name__)
 
@@ -386,8 +390,15 @@ class TinyIndex(Generic[T]):
                 items.append(self.item_factory(*item))
             except ValueError as e:
                 logger.error(f"Invalid item in index page {i}, fixing state to None: {e}. Item: {item}")
-                # The state value is the last element if present; strip it and retry with state=None
-                fixed_item = item[:-1] if len(item) > 3 else item
+                # state is at index 5 of Document.as_tuple's layout, and it is not the last
+                # element: source follows it on external cache entries. Blank it where it
+                # is rather than truncating - truncating would take source off a cache
+                # entry, leave the unknown state value in place, and lose the document to
+                # the same ValueError on the retry.
+                if len(item) <= STATE_INDEX:
+                    logger.error(f"Could not recover item in index page {i}, skipping. Item: {item}")
+                    continue
+                fixed_item = list(item[:STATE_INDEX]) + [None] + list(item[STATE_INDEX + 1:])
                 try:
                     items.append(self.item_factory(*fixed_item))
                 except Exception as e2:

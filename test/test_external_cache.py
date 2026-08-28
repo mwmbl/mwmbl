@@ -10,6 +10,7 @@ import json
 import random
 import string
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +19,6 @@ from django.test import override_settings
 from mwmbl.apps import create_index
 from mwmbl.indexer.external_cache import (
     EXTERNAL_CACHE_EMPTY_URL,
-    EXTERNAL_CACHE_TERM_PREFIX,
     external_cache_path,
     external_cache_term,
     get_cached_external_results,
@@ -28,12 +28,14 @@ from mwmbl.indexer.external_cache import (
 from mwmbl.tinysearchengine import rank
 from mwmbl.tinysearchengine.indexer import (PAGE_SIZE, Document, DocumentSource, DocumentState,
                                             TinyIndex)
-from mwmbl.tinysearchengine.rank import Ranker, get_wiki_results
+from mwmbl.tinysearchengine.rank import (WIKI_FETCH_LIMIT, Ranker, get_wiki_results,
+                                          wiki_score)
 
 NUM_PAGES = 8
 
 # state and source are set because get_wiki_results sets them, and the cache preserves what
-# the provider produced rather than stamping its own.
+# the provider produced rather than stamping its own. The scores are not preserved - what
+# an entry stores is the rank - and the tests below rely on that.
 PYTHON = Document("Python (programming language)", "https://en.wikipedia.org/wiki/Python",
                   "A high-level programming language.", 3.0, state=DocumentState.FROM_WIKI,
                   source=DocumentSource.WIKIPEDIA)
@@ -84,9 +86,23 @@ def test_cache_term_is_stable_and_normalised():
 
 def test_cache_term_does_not_contain_the_query():
     term = external_cache_term("something private")
-    assert term.startswith(EXTERNAL_CACHE_TERM_PREFIX)
     assert "something" not in term
     assert "private" not in term
+
+
+def test_distinct_queries_do_not_share_a_term():
+    """A term collision is silent - one query is answered with another's results - so the
+    normalisation must not merge two queries. tokenize() did: it drops the last two tokens
+    from anything ending in an ellipsis, and returns [] for whitespace."""
+    assert external_cache_term("python asyncio…") != external_cache_term("python tutorial…")
+    assert external_cache_term("python asyncio…") != external_cache_term("python")
+    assert external_cache_term("   ") != external_cache_term("\t\n x")
+
+
+def test_the_term_is_derived_from_anything_that_is_a_string():
+    """It runs outside the try in get_cached_external_results, so raising here costs a
+    search its results rather than a cache lookup."""
+    assert external_cache_term("\udce9 lone surrogate")
 
 
 def test_cache_term_is_keyed_so_it_cannot_be_recomputed_without_the_secret():
@@ -109,9 +125,29 @@ def test_results_come_back_from_the_index(cache_index):
 
     cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
 
-    assert [document.url for document in cached] == [PYTHON.url, MONTY.url]  # descending score
-    assert [document.score for document in cached] == [3.0, 2.0]
+    assert [document.url for document in cached] == [PYTHON.url, MONTY.url]
     assert all(document.state == DocumentState.FROM_WIKI for document in cached)
+
+
+def test_the_providers_order_is_what_comes_back(cache_index):
+    """The cache stores the rank the provider gave, not the score it was handed. Storing
+    the score would make an entry mean different things to callers asking for different
+    numbers of results - see wiki_score."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [MONTY, PYTHON])
+
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
+
+    assert [document.url for document in cached] == [MONTY.url, PYTHON.url]
+
+
+def test_a_cached_result_carries_no_score(cache_index):
+    """Scoring is the caller's: a rank is what the provider said, a score is on a scale the
+    cache does not know."""
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON, MONTY])
+
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
+
+    assert [document.score for document in cached] == [None, None]
 
 
 def test_a_hit_is_indistinguishable_from_a_live_fetch(cache_index):
@@ -348,6 +384,72 @@ def test_a_cache_hit_does_not_call_wikipedia(cache_index):
 
     assert session.get.call_count == 0
     assert [document.url for document in results] == [PYTHON.url]
+    assert [document.score for document in results] == [wiki_score(0)]
+
+
+def test_wikipedia_is_asked_for_a_fixed_number_of_results(cache_index):
+    """Not the caller's max: what comes back is what the entry holds, and an entry warmed
+    by a caller wanting three must not be a short answer for a caller wanting five."""
+    mock, session = _patched_wikipedia(_wiki_api_response("Python"))
+    try:
+        get_wiki_results("python", 2)
+    finally:
+        mock.stop()
+
+    assert f"srlimit={WIKI_FETCH_LIMIT}" in session.get.call_args[0][0]
+
+
+def test_a_short_request_does_not_leave_a_short_entry(cache_index):
+    """The whole response is stored and the caller's cut taken afterwards. Storing only
+    what the first caller wanted would silently short-change every later one for the length
+    of the TTL - a cache miss is visible, a truncated hit is not."""
+    titles = [f"Title {i}" for i in range(WIKI_FETCH_LIMIT)]
+    mock, _ = _patched_wikipedia(_wiki_api_response(*titles))
+    try:
+        assert len(get_wiki_results("python", 2)) == 2
+    finally:
+        mock.stop()
+
+    mock, session = _patched_wikipedia(_wiki_api_response(*titles))
+    try:
+        results = get_wiki_results("python", WIKI_FETCH_LIMIT)
+    finally:
+        mock.stop()
+
+    assert session.get.call_count == 0
+    assert len(results) == WIKI_FETCH_LIMIT
+
+
+def test_a_results_score_does_not_depend_on_how_many_were_asked_for(cache_index):
+    """`score` is a feature of the LTR model. When it was max_wiki_results + 1 - i the same
+    Wikipedia result scored 6 for a caller wanting five and 4 for a caller wanting three,
+    so how many results a caller asked for moved the ranking of the ones it got."""
+    titles = [f"Title {i}" for i in range(WIKI_FETCH_LIMIT)]
+    mock, _ = _patched_wikipedia(_wiki_api_response(*titles))
+    try:
+        three = get_wiki_results("python", 3)
+        five = get_wiki_results("python", 5)
+    finally:
+        mock.stop()
+
+    assert [document.score for document in three] == [wiki_score(0), wiki_score(1), wiki_score(2)]
+    assert [document.score for document in five[:3]] == [document.score for document in three]
+
+
+def test_a_cache_hit_scores_the_same_as_the_live_fetch_that_filled_it(cache_index):
+    """The scores are derived on the way out rather than stored, so this is the assertion
+    that keeps the derivation honest."""
+    titles = [f"Title {i}" for i in range(WIKI_FETCH_LIMIT)]
+    mock, _ = _patched_wikipedia(_wiki_api_response(*titles))
+    try:
+        live = get_wiki_results("python", 3)
+    finally:
+        mock.stop()
+
+    cached = get_wiki_results("python", 3)
+
+    assert [(document.url, document.score) for document in cached] == \
+           [(document.url, document.score) for document in live]
 
 
 def test_a_hit_is_served_while_the_circuit_breaker_is_open(cache_index):
@@ -540,3 +642,51 @@ def test_a_resized_search_index_still_refuses_to_start(tmp_path):
 
     with override_settings(DATA_PATH=str(tmp_path)), pytest.raises(ValueError):
         create_index("index.tinysearch", 16)
+
+
+def test_an_unreadable_cache_index_is_rebuilt_rather_than_crashing_startup(tmp_path):
+    """A file that does not parse as an index at all is rejected before there is a page
+    size to compare, so it never reaches the size check. For a disposable index it is the
+    same situation: unusable contents, cheap to rebuild."""
+    path = tmp_path / "external-cache.tinysearch"
+    path.write_bytes(b"not an index" + bytes(PAGE_SIZE))
+
+    with override_settings(DATA_PATH=str(tmp_path)):
+        create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
+
+    with TinyIndex(Document, str(path), 'r') as index:
+        assert index.num_pages == 16
+
+
+def test_an_unreadable_search_index_still_refuses_to_start(tmp_path):
+    path = tmp_path / "index.tinysearch"
+    path.write_bytes(b"not an index" + bytes(PAGE_SIZE))
+
+    with override_settings(DATA_PATH=str(tmp_path)), pytest.raises(ValueError):
+        create_index("index.tinysearch", 16)
+
+
+def test_a_rebuild_leaves_no_window_with_the_index_missing(tmp_path):
+    """The replacement is built alongside and renamed over the old file. unlink() then
+    create() leaves a gap where the path does not exist, and on a deploy sharing /data the
+    outgoing container goes on writing to the unlinked inode."""
+    path = tmp_path / "external-cache.tinysearch"
+    TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=4, page_size=PAGE_SIZE)
+    original_inode = path.stat().st_ino
+    seen = []
+
+    real_create = TinyIndex.create
+
+    def watched_create(*args, **kwargs):
+        seen.append((path.exists(), kwargs.get("index_path", args[1] if len(args) > 1 else None)))
+        return real_create(*args, **kwargs)
+
+    with override_settings(DATA_PATH=str(tmp_path)), \
+            patch.object(TinyIndex, "create", side_effect=watched_create):
+        create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
+
+    assert seen, "nothing was rebuilt, so this would pass for the wrong reason"
+    assert all(existed for existed, _ in seen), "the old index was removed before the new one existed"
+    assert all(Path(str(target)) != path for _, target in seen), "the new index was written over the old one in place"
+    assert path.stat().st_ino != original_inode
+    assert not list(tmp_path.glob("*.rebuild"))
