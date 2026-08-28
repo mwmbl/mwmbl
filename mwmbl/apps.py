@@ -8,24 +8,73 @@ from mwmbl.database import Database
 from mwmbl.indexer.indexdb import IndexDatabase
 
 
-def create_index():
+def create_index(index_name, num_pages, rebuild_on_mismatch=False):
+    """Create the index file if it is missing, and check an existing one is the right shape.
+
+    rebuild_on_mismatch is for indexes whose contents are disposable. The search index is
+    not one of them - a size that disagrees with settings there means somebody changed
+    NUM_PAGES against a 400 GB file holding the only copy of the crawl, and refusing to
+    start is the right answer. The external results cache is the opposite case: resizing it
+    should be a config change, not a startup crash, and the cost of rebuilding is
+    re-fetching.
+    """
     # Imports here to avoid AppRegistryNotReady exception
     from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    index_path = Path(settings.DATA_PATH) / index_name
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
-        print("======================================")
-        print(f"Found existing index at {index_path}")
-        print("======================================")
-        if existing_index.page_size != PAGE_SIZE or existing_index.num_pages != settings.NUM_PAGES:
-            raise ValueError(f"Existing index page sizes ({existing_index.page_size}) or number of pages "
-                             f"({existing_index.num_pages}) do not match")
     except FileNotFoundError:
         print("======================================")
         print("Index not found - creating a new index")
         print("======================================")
-        TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=settings.NUM_PAGES,
-                         page_size=PAGE_SIZE)
+        _create_index_file(index_path, num_pages)
+        return
+    except ValueError as e:
+        # A file that is there but does not parse as an index: TinyIndexMetadata.from_bytes
+        # rejects it before there is a page size to compare, so the size check below never
+        # sees it. For a disposable index that is the same situation as a size mismatch -
+        # unusable contents, cheap to rebuild - and crashing the boot on it would be the
+        # thing rebuild_on_mismatch exists to avoid.
+        if not rebuild_on_mismatch:
+            raise
+        print(f"{index_path} is not a readable index ({e}) - rebuilding")
+        _replace_index_file(index_path, num_pages)
+        return
+
+    print("======================================")
+    print(f"Found existing index at {index_path}")
+    print("======================================")
+    if existing_index.page_size == PAGE_SIZE and existing_index.num_pages == num_pages:
+        return
+
+    message = (f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+               f"({existing_index.num_pages}) do not match")
+    if not rebuild_on_mismatch:
+        raise ValueError(message)
+    print(f"{message} - rebuilding {index_path}")
+    _replace_index_file(index_path, num_pages)
+
+
+def _create_index_file(index_path, num_pages):
+    from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
+    TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
+                     page_size=PAGE_SIZE)
+
+
+def _replace_index_file(index_path, num_pages):
+    """Build the replacement alongside the old file and rename it into place.
+
+    unlink() and then create() is not one step. It leaves a window with no file there at
+    all, and on a deploy where the outgoing and incoming containers share /data the
+    outgoing one's open handles go on writing to the unlinked inode while the new file is
+    written beside it - two live indexes under one name, one of which nobody will ever read
+    again. A rename is atomic: every reader has either the whole old file or the whole new
+    one. Same directory, so it is a rename and not a copy.
+    """
+    temp_path = index_path.parent / f"{index_path.name}.rebuild"
+    temp_path.unlink(missing_ok=True)
+    _create_index_file(temp_path, num_pages)
+    temp_path.replace(index_path)
 
 
 def create_index_db():
@@ -39,7 +88,13 @@ class MwmblConfig(AppConfig):
     verbose_name = "Mwmbl Application"
 
     def ready(self):
-        create_index()
+        create_index(settings.INDEX_NAME, settings.NUM_PAGES)
+        # Note this writes num_pages * 4 KB page by page rather than sparsely, so the first
+        # boot after a size change pays for the whole file up front - ~17s for the 15 GB
+        # production cache at the ~0.9 GB/s measured locally, which is what the healthcheck
+        # grace in app.json has to cover.
+        create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES,
+                     rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
             create_index_db()
             import mwmbl.signals  # noqa: F401 - connects the post_save receivers

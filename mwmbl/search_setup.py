@@ -38,6 +38,9 @@ tiny_index.__enter__()
 ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # Diversity is applied by the wrapping MMRRanker, which demotes (rather than drops)
 # same-domain / near-duplicate results. Unwrap to disable diversity.
-ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True, num_wiki_results=3))
+# num_wiki_results is left at its default on purpose - see NUM_WIKI_RESULTS. Serving
+# passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
+# pool a size it had never been fitted to.
+ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
 
 batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)

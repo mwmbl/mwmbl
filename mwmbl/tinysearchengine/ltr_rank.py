@@ -10,7 +10,7 @@ from sklearn.base import BaseEstimator
 
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
-from mwmbl.tinysearchengine.rank import Ranker, get_wiki_results
+from mwmbl.tinysearchengine.rank import NUM_WIKI_RESULTS, Ranker, get_wiki_results
 
 
 class LTRRanker(Ranker):
@@ -37,7 +37,9 @@ class LTRRanker(Ranker):
     include_wiki : bool
         Whether to include Wikipedia results via external search.
     num_wiki_results : int
-        Maximum number of Wikipedia results to include.
+        Maximum number of Wikipedia results to include. Leave it alone unless you are
+        retraining: the LTR dataset is built with the same default, and a serving pool of a
+        different size to the trained one is what NUM_WIKI_RESULTS exists to prevent.
     """
 
     def __init__(
@@ -46,7 +48,7 @@ class LTRRanker(Ranker):
         completer: Completer,
         model,
         include_wiki: bool = True,
-        num_wiki_results: int = 5,
+        num_wiki_results: int = NUM_WIKI_RESULTS,
     ):
         super().__init__(tiny_index, completer)
         self.model = model

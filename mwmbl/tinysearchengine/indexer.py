@@ -21,6 +21,10 @@ METADATA_SIZE = 4096
 
 PAGE_SIZE = 4096
 
+# Where `state` sits in Document.as_tuple(). get_page needs it to blank an unreadable state
+# without disturbing the values around it.
+STATE_INDEX = 5
+
 
 logger = getLogger(__name__)
 
@@ -74,6 +78,22 @@ class DocumentState(IntEnum):
 CURATED_STATES = {state for state in DocumentState if state.value >= 7}
 
 
+class DocumentSource(IntEnum):
+    """Which external provider a document came from. None means our own crawl.
+
+    Only the external results cache sets this (see mwmbl.indexer.external_cache); documents
+    in the search index leave it None, and as_tuple truncates trailing Nones, so they cost
+    nothing for it. The values are written to disk, so they are append-only: never reuse a
+    number for a different provider, or a stale cache entry becomes a lie about where its
+    results came from.
+    """
+    WIKIPEDIA = 1
+    # Reserved, not yet wired up to a provider. The number is here rather than added later
+    # because it is the numbering registry: with only one member the source field cannot be
+    # told apart from "unset" and the cache's per-source behaviour cannot be tested at all.
+    STAAN = 2
+
+
 @dataclass
 class Document:
     title: str
@@ -84,6 +104,7 @@ class Document:
     state: Optional[int] = None
     user_ids: Optional[List[int]] = None
     last_crawled: Optional[int] = None
+    source: Optional[int] = None
 
     def __init__(
             self,
@@ -95,6 +116,7 @@ class Document:
             state: Optional[int | DocumentState] = None,
             user_ids: Optional[List[int]] = None,
             last_crawled: Optional[int] = None,
+            source: Optional[int | DocumentSource] = None,
     ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
@@ -106,6 +128,7 @@ class Document:
         self.state = None if state is None else DocumentState(state)
         self.user_ids = user_ids
         self.last_crawled = last_crawled
+        self.source = None if source is None else DocumentSource(source)
 
     def as_tuple(self):
         """
@@ -120,6 +143,7 @@ class Document:
             None if self.state is None else self.state.value,
             self.user_ids,
             self.last_crawled,
+            None if self.source is None else self.source.value,
         ]
         while values[-1] is None:
             values = values[:-1]
@@ -366,8 +390,15 @@ class TinyIndex(Generic[T]):
                 items.append(self.item_factory(*item))
             except ValueError as e:
                 logger.error(f"Invalid item in index page {i}, fixing state to None: {e}. Item: {item}")
-                # The state value is the last element if present; strip it and retry with state=None
-                fixed_item = item[:-1] if len(item) > 3 else item
+                # state is at index 5 of Document.as_tuple's layout, and it is not the last
+                # element: source follows it on external cache entries. Blank it where it
+                # is rather than truncating - truncating would take source off a cache
+                # entry, leave the unknown state value in place, and lose the document to
+                # the same ValueError on the retry.
+                if len(item) <= STATE_INDEX:
+                    logger.error(f"Could not recover item in index page {i}, skipping. Item: {item}")
+                    continue
+                fixed_item = list(item[:STATE_INDEX]) + [None] + list(item[STATE_INDEX + 1:])
                 try:
                     items.append(self.item_factory(*fixed_item))
                 except Exception as e2:

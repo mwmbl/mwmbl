@@ -149,10 +149,11 @@ class RemoteListBlacklistProvider(BlacklistProvider):
         # cache rooted at settings.REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache" - the
         # same volume that holds the multi-hundred-GB index. These blocklists are tens of
         # megabytes each, so caching them there fills that volume, and once it is full
-        # *every* user of request_cache breaks - including get_wiki_results(), which runs
-        # on the normal search path and then retries a live fetch 4 times per uncached
-        # query (WIKI_RETRY, 5s timeout each) until the worker is killed. A big periodic
-        # download has no business in a shared small-response cache on the index volume.
+        # *every* user of request_cache breaks - and it shares that volume with the index
+        # itself. (get_wiki_results() used to be the worst of those, retrying a live fetch
+        # 4 times per uncached query on the search path; it now has a cache of its own, see
+        # mwmbl.indexer.external_cache.) A big periodic download has no business in a shared
+        # small-response cache on the index volume.
         response = requests.get(self.url, timeout=60)
         response.raise_for_status()
 

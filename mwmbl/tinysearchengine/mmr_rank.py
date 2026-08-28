@@ -89,8 +89,9 @@ class MMRRanker:
     def __init__(self, ranker: Ranker):
         self.ranker = ranker
 
-    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
-        return mmr_rerank(self.ranker.search(s, additional_results))
+    def search(self, s: str, additional_results: list[Document],
+               use_external_search: bool = True) -> list[Document]:
+        return mmr_rerank(self.ranker.search(s, additional_results, use_external_search))
 
     def complete(self, q: str):
         return self.ranker.complete(q)

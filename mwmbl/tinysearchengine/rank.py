@@ -7,13 +7,13 @@ import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
-from datetime import timedelta
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
 from urllib.parse import urlparse
 
 import numpy as np
+import requests
 from django.conf import settings
 from requests.adapters import HTTPAdapter, Retry
 from requests.exceptions import RetryError
@@ -22,10 +22,11 @@ from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.purge_queue import enqueue_for_purge
+from mwmbl.indexer.external_cache import get_cached_external_results, store_external_results
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
+from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentSource, DocumentState
 from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import get_domain, request_cache
+from mwmbl.utils import get_domain
 
 
 logger = getLogger(__name__)
@@ -277,8 +278,12 @@ class Ranker:
     def order_results(self, terms: list[str], pages: list[Document], is_complete: bool):
         pass
 
-    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
-        results, terms, _ = self.get_results(s, additional_results)
+    def search(self, s: str, additional_results: list[Document],
+               use_external_search: bool = True) -> list[Document]:
+        # use_external_search=False is how the search-as-you-type path avoids a Wikipedia
+        # call per keystroke; get_results has taken the flag all along, but only complete()
+        # could reach it. See mwmbl.views.
+        results, terms, _ = self.get_results(s, additional_results, use_external_search)
 
         ranked_results = []
         seen_urls = set()
@@ -421,14 +426,38 @@ class HeuristicRanker(Ranker):
         return filtered_results
 
 
-WIKI_SEARCH_API_URL = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
+WIKI_SEARCH_API_URL = ("https://en.wikipedia.org/w/api.php?action=query&list=search"
+                       "&srsearch={query}&srlimit={limit}&format=json")
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
+
+# How many wiki results a caller gets unless it says otherwise, and the number the LTR
+# model was trained against - mwmbl.rankeval.ltr.dataset builds its training data through
+# HeuristicAndWikiRanker with this default. Serving used to pass 3 here while training used
+# 5, so the model was scoring production pools it had never seen the shape of. One constant,
+# used everywhere, is what keeps them from drifting apart again.
+NUM_WIKI_RESULTS = 5
+
+# What we ask Wikipedia for, and therefore what a cache entry holds. Fixed rather than the
+# caller's max_wiki_results so that one entry serves every caller: a cache warmed by a
+# caller wanting three must not be a short answer to a caller wanting five. Left unset the
+# API returns 10 by default, so this narrows the response as well.
+WIKI_FETCH_LIMIT = NUM_WIKI_RESULTS
+
+# The score a wiki result carries into the LTR model, top result first, counting down.
+#
+# A function of rank alone, deliberately. It used to be max_wiki_results + 1 - i, so the
+# same Wikipedia result scored 6 for a caller asking for five and 4 for a caller asking for
+# three - and `score` is a feature the model reads, so the number a caller passed for how
+# *many* results it wanted silently moved the ranking of the ones it got. Anchored at the
+# top instead, rank 0 is 6.0 for everybody, which is what the deployed model was trained
+# on (max_wiki_results=5 there). Changing it changes a trained-on feature: retrain.
+WIKI_TOP_SCORE = 6.0
 
 # Wikipedia rate-limits (HTTP 429, with a non-JSON body) bursts of search-API
 # calls — e.g. an evaluation run that queries it once per gold query. Retry with
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for weeks (see request_cache).
+# normal operation. Successful responses are cached for months (see mwmbl.indexer.external_cache).
 WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
                    allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
 
@@ -476,18 +505,41 @@ def clean_html(s: str):
     return html.unescape(HTML_TAG_REGEX.sub('', s))
 
 
-def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
+def wiki_score(rank: int) -> float:
+    """The `score` feature for a wiki result at 0-based `rank`. See WIKI_TOP_SCORE."""
+    return WIKI_TOP_SCORE - rank
+
+
+def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[Document]:
+    # MAX_QUERY_CHARS was only ever applied in HeuristicAndWikiRanker, which is the eval
+    # ranker - the production LTRRanker path sent the untruncated query straight out.
+    query = s[:MAX_QUERY_CHARS]
+
+    # Ahead of the circuit breaker deliberately: a cache hit costs Wikipedia nothing, so it
+    # should still be served while we are backing off from a rate limit.
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, query)
+    if cached is not None:
+        # The cache stores the rank Wikipedia gave, not a score - scoring is this function's
+        # to do, and doing it here rather than at write time is what makes an entry mean the
+        # same thing to every caller. The documents are ours; nothing else holds them.
+        wiki_results = cached[:max_wiki_results]
+        for rank, document in enumerate(wiki_results):
+            document.score = wiki_score(rank)
+        return wiki_results
+
     if _wiki_circuit_open():
         return []
 
-    escaped_query = urllib.parse.quote(s, safe='')
+    escaped_query = urllib.parse.quote(query, safe='')
     headers = {
-        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org) requests-cache'
+        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)'
     }
     try:
-        with request_cache(timedelta(weeks=10)) as session:
+        with requests.Session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
-            response = session.get(WIKI_SEARCH_API_URL.format(query=escaped_query), headers=headers, timeout=5)
+            response = session.get(
+                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT),
+                headers=headers, timeout=5)
             wiki_response = response.json()
     except RetryError as e:
         if _is_wiki_rate_limited(e):
@@ -512,9 +564,19 @@ def get_wiki_results(s: str, max_wiki_results: int) -> list[Document]:
         return []
 
     wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                             max_wiki_results + 1 - i, s, state=DocumentState.FROM_WIKI)
-                    for i, result in enumerate(wiki_response['query']['search'][:max_wiki_results])]
-    return wiki_results
+                             wiki_score(rank), query, state=DocumentState.FROM_WIKI,
+                             source=DocumentSource.WIKIPEDIA)
+                    for rank, result in enumerate(wiki_response['query']['search'][:WIKI_FETCH_LIMIT])]
+
+    # Only a well-formed answer is stored, including one with no results in it. Every path
+    # above returns [] without storing, so a transient failure is never remembered as
+    # "Wikipedia has nothing for this".
+    #
+    # The whole response is stored and the caller's cut taken afterwards, so that a caller
+    # wanting fewer than WIKI_FETCH_LIMIT does not leave a short entry behind for the next
+    # caller to be silently short-changed by.
+    store_external_results(DocumentSource.WIKIPEDIA, query, wiki_results)
+    return wiki_results[:max_wiki_results]
 
 
 class HeuristicAndWikiRanker(HeuristicRanker):
@@ -524,16 +586,17 @@ class HeuristicAndWikiRanker(HeuristicRanker):
             completer: Completer,
             return_none_if_no_mwmbl_results: bool = False,
             score_threshold: float = 0.0,
-            max_wiki_results: int = 5
+            max_wiki_results: int = NUM_WIKI_RESULTS
     ):
         super().__init__(tiny_index, completer, score_threshold)
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
         self.max_wiki_results = max_wiki_results
 
-    def search(self, s: str, additional_results: list[Document]) -> list[Document]:
+    def search(self, s: str, additional_results: list[Document],
+               use_external_search: bool = True) -> list[Document]:
         s_shortened = s[:MAX_QUERY_CHARS]
 
-        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results)
+        wiki_results = get_wiki_results(s_shortened, self.max_wiki_results) if use_external_search else []
         results = super().search(s_shortened, additional_results=wiki_results)
 
         if len(results) == 0 and self.return_none_if_no_mwmbl_results:

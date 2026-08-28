@@ -48,34 +48,7 @@
 <body>
   {% csrf_token %}
   <mwmbl-app></mwmbl-app>
-    <header class="search-menu compact">
-      <a href="/" class="branding">
-        <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
-        <span class="brand-title">Mwmbl</span>
-      </a>
-      <form class="search-bar">
-        <i class="ph-magnifying-glass-bold"></i>
-        <input
-          type='search'
-          name='q'
-          class='search-bar-input'
-          placeholder='Search on Mwmbl...'
-          title='Use "CTRL+K" or "/" to focus.'
-          autocomplete='off'
-          value='{{ query|default_if_none:"" }}'
-          hx-get="/app/home/"
-          hx-trigger="keyup changed delay:100ms"
-          hx-target=".main"
-        >
-      </form>
-      {%  if user.is_authenticated %}
-        <p class="login-info">Logged in as {{ user.username }}</p>
-        <a class="button" href="/accounts/logout/">Log out</a>
-      {% else %}
-        <a class="button" href="/accounts/login/">Login</a>
-        <a class="button" href="/accounts/signup/">Sign up</a>
-      {% endif %}
-    </header>
+    {% include "_search_bar.html" %}
     <main>
       <div class="main">
         {% block content %}{% endblock %}
