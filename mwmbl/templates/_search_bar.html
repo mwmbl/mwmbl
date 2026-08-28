@@ -1,5 +1,5 @@
-{# The search bar, shared by index.html and base.html. It used to be duplicated between
-   them and had already drifted, so change it here only. #}
+{% comment %} The search bar, shared by index.html and base.html. It used to be duplicated between
+   them and had already drifted, so change it here only. {% endcomment %}
 <header class="search-menu compact">
   <a href="/" class="branding">
     <img class="brand-icon" src="/static/images/logo.svg" width="40" height="40" alt="mwmbl logo">
@@ -21,7 +21,7 @@
       hx-target=".main"
       hx-sync="closest form:replace"
     >
-    {# The same view again, once the query has settled, and this one may call Wikipedia.
+    {% comment %} The same view again, once the query has settled, and this one may call Wikipedia.
        Typing a 15-character query used to cost a Wikipedia call per keystroke to answer a
        single question, and 92% of those prefixes are ones nobody ever searches for, so no
        cache can absorb them.
@@ -42,7 +42,7 @@
        actually changes. The `changed` modifier is not the fix here: htmx keeps lastValue
        on the element being listened to, which for both triggers is the same
        .search-bar-input, so the 100ms trigger above would consume the change and this one
-       would never fire at all. #}
+       would never fire at all. {% endcomment %}
     <span
       class="external-search"
       hx-get="/app/home/?external=1"

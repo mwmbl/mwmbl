@@ -66,8 +66,8 @@
             <td class="key">Published version</td>
             <td>
               {% if snapshot.published_version %}
-                {# Truncated to the same 12 characters the publish/load log lines use, so
-                   the page and the logs can be matched up by eye. #}
+                {% comment %} Truncated to the same 12 characters the publish/load log lines use, so
+                   the page and the logs can be matched up by eye. {% endcomment %}
                 <code title="{{ snapshot.published_version }}">{{ snapshot.published_version|slice:":12" }}</code>
                 {% if not snapshot.blob_present %}
                   <span class="bad">&mdash; version present but blob missing; it was
