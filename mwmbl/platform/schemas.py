@@ -176,6 +176,106 @@ class UpdateDomainSubmission(ModelSchema):
         model = DomainSubmission
         fields = ["status", "rejection_reason", "rejection_detail"]
 
+    # Echoed back by the client so we record what the moderator was actually looking at.
+    # Optional: a client that shows no suggestions simply omits them, and a decision made
+    # without a suggestion is stored as exactly that rather than as a suggestion of "".
+    suggested_status: Optional[str] = Field(
+        default=None, description="The action the tool suggested, as shown to the moderator.")
+    suggested_reason: Optional[str] = Field(
+        default=None, description="The rejection reason the tool suggested, if any.")
+    suggestion_confidence: Optional[float] = Field(
+        default=None, description="Confidence of the suggestion that was shown.")
+    suggestion_model_version: Optional[str] = Field(
+        default=None, description="Version of the model that produced the shown suggestion.")
+
+
+class EvidenceItemSchema(Schema):
+    """One checkable fact behind a suggestion."""
+    kind: str = Field(description="Machine-readable check name, e.g. `http_status`.")
+    direction: str = Field(description="`reject`, `approve` or `neutral`.")
+    label: str = Field(description="Moderator-facing text, e.g. 'Homepage returns HTTP 404'.")
+
+
+class SuggestionSchema(Schema):
+    action: str = Field(description="`APPROVE`, `REJECT` or `UNSURE`.")
+    confidence: float
+    reason: str = Field(default="", description="Rejection reason; empty unless action is REJECT.")
+    reason_confidence: float = 0.0
+    reason_source: str = Field(
+        default="model",
+        description=(
+            "`rule` when a deterministic check decided it, `model` when the classifier did, "
+            "`derived` when the reason class is learned from public blocklists rather than "
+            "from moderator decisions and should be treated as a weaker hint."
+        ),
+    )
+    model_version: str = ""
+    evidence: list[EvidenceItemSchema] = []
+
+
+class CrawledPageSchema(Schema):
+    url: str
+    status: Optional[int] = None
+    title: str = ""
+    extract: str = ""
+    num_links: int = 0
+    error: str = ""
+
+
+class QueueItemSchema(Schema):
+    """A row of the moderation queue: the submission plus its precomputed suggestion."""
+    id: int
+    name: str
+    submitted_by: int
+    submitted_on: datetime
+    status: str
+    evidence_state: str = Field(
+        description="`PENDING` while the domain is still being crawled, then `READY` or `FAILED`.")
+    suggestion: Optional[SuggestionSchema] = Field(
+        default=None,
+        description="Absent until the domain has been crawled. Never a placeholder.")
+
+
+class SubmissionDetailSchema(Schema):
+    """Everything a moderator needs to decide one submission."""
+    id: int
+    name: str
+    submitted_by: int
+    submitted_on: datetime
+    status: str
+    rejection_reason: str = ""
+    rejection_detail: str = ""
+    evidence_state: str
+    suggestion: Optional[SuggestionSchema] = None
+    pages: list[CrawledPageSchema] = []
+    signals: dict = {}
+    submitter_record: dict = Field(
+        default={}, description="Counts of this submitter's previously approved/rejected domains.")
+    prior_decisions: dict = Field(
+        default={}, description="Counts of earlier decisions on this same domain.")
+    index_stats: dict = Field(
+        default={}, description="What the crawler already knows about this domain.")
+
+
+class BulkDecision(Schema):
+    submission_id: int
+    status: str
+    rejection_reason: str = ""
+    rejection_detail: str = ""
+    suggested_status: Optional[str] = None
+    suggested_reason: Optional[str] = None
+    suggestion_confidence: Optional[float] = None
+    suggestion_model_version: Optional[str] = None
+
+
+class BulkDecisionRequest(Schema):
+    """A screenful of individually-made decisions, sent in one request.
+
+    Deliberately not "accept all suggestions": each entry carries its own status, so the
+    client can only send choices a moderator actually made.
+    """
+    decisions: list[BulkDecision]
+
 
 class VoteRequest(Schema):
     """Request schema for voting on search results."""
@@ -277,3 +377,10 @@ class UserVoteHistory(Schema):
         description="When the vote was cast",
         example="2024-01-15T10:30:00Z"
     )
+
+
+class ModerationQueue(Schema):
+    """A page of the moderation queue. Shape matches the paginated endpoints the client
+    already consumes, so `items`/`count` need no special handling."""
+    items: list[QueueItemSchema]
+    count: int

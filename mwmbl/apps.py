@@ -145,13 +145,14 @@ class MwmblConfig(AppConfig):
             from background_task.models import Task
             from mwmbl.background import (
                 purge_blacklisted_from_queue, refresh_blacklist_snapshot, report_usage_to_polar,
-                sync_search_counts,
+                retrain_domain_moderation_model, sync_search_counts,
             )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
             POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
+            MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -177,6 +178,14 @@ class MwmblConfig(AppConfig):
             if not Task.objects.filter(task_name=BLACKLIST_PURGE_TASK).exists():
                 purge_blacklisted_from_queue(
                     repeat=settings.BLACKLIST_PURGE_INTERVAL_SECONDS, repeat_until=None)
+
+            # Retrain the moderation suggester monthly. Scheduled a month out rather than
+            # schedule=0: unlike the blacklist snapshot there is nothing useful about
+            # retraining at deploy time, and the shipped artifact is already current.
+            if not Task.objects.filter(task_name=MODERATION_RETRAIN_TASK).exists():
+                retrain_domain_moderation_model(
+                    schedule=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
+                    repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

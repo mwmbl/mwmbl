@@ -106,6 +106,16 @@ class DomainSubmission(models.Model):
     rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
     rejection_detail = models.CharField(max_length=300, blank=True)
 
+    # What the suggestion model was showing when the moderator made this decision. Deliberately
+    # separate storage from the live suggestion on DomainEvidence: a retrain rewrites that row,
+    # and sharing the columns would silently rewrite the record of what was actually on screen.
+    # These are what let us measure whether the suggestions help, and de-bias the next retrain
+    # against decisions that merely confirmed a suggestion.
+    suggested_status = models.CharField(max_length=20, blank=True)
+    suggested_reason = models.CharField(max_length=20, blank=True)
+    suggestion_confidence = models.FloatField(null=True, blank=True)
+    suggestion_model_version = models.CharField(max_length=50, blank=True)
+
 
 def random_api_key():
     """Kept for migration compatibility (0010_apikey references this by name)."""
@@ -286,3 +296,53 @@ class SourceProvenance(models.Model):
             models.Index(fields=['source']),
             models.Index(fields=['timestamp']),
         ]
+
+
+class DomainEvidence(models.Model):
+    """Crawl evidence and the precomputed suggestion for a submitted domain.
+
+    Both the moderator's detail panel and the suggestion model read these rows, so what the
+    moderator is shown and what the model judged can never disagree. Everything here is
+    computed by a background task at submission time: the moderation queue is a plain indexed
+    read, with no inference on the request path.
+
+    Keyed on the domain rather than the submission because domains get resubmitted - 615 of
+    6,949 distinct names in the last judgments export had more than one submission - and the
+    crawl is about the domain, not about who asked for it.
+    """
+
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Queued for crawling"
+        READY = "READY", "Crawled and scored"
+        FAILED = "FAILED", "Crawling failed"
+
+    domain = models.CharField(max_length=300, unique=True)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+
+    # Crawl results.
+    http_status = models.IntegerField(null=True, blank=True)
+    final_domain = models.CharField(max_length=300, blank=True)   # after redirects
+    error = models.CharField(max_length=100, blank=True)          # RobotsDenied, AbortError, ...
+    pages = models.JSONField(default=list)      # [{url, status, title, extract}], up to 3
+    signals = models.JSONField(default=dict)    # derived: lang, has_links, ad_script_count, ...
+
+    # Precomputed suggestion. The queue reads these columns; it never calls the model.
+    suggested_action = models.CharField(max_length=10, blank=True)   # APPROVE | REJECT | UNSURE
+    suggested_reason = models.CharField(max_length=20, blank=True)
+    confidence = models.FloatField(null=True, blank=True)
+    # One number combining direction and confidence so "confident rejects and genuinely
+    # uncertain rows first, obvious approvals last" is a single indexed ORDER BY. Sorting on
+    # confidence alone cannot express that, because it is highest at both ends.
+    review_priority = models.FloatField(null=True, blank=True)
+    evidence = models.JSONField(default=list)   # cached rule + model evidence items
+    model_version = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["state", "-review_priority"]),
+            models.Index(fields=["suggested_action", "suggested_reason"]),
+        ]
+
+    def __str__(self):
+        return f"{self.domain} ({self.state})"

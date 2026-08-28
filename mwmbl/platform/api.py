@@ -6,7 +6,9 @@ from allauth.account.utils import setup_user_email, send_email_confirmation
 from django.conf import settings
 from django.core import signing
 from django.core.exceptions import ValidationError
+from django.db.models import F, OuterRef, Subquery
 from django.utils import timezone
+from redis import Redis
 from ninja import Router
 from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
@@ -19,7 +21,13 @@ from mwmbl.exceptions import InvalidRequest
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.utils import normalize_domain, validate_domain
 from mwmbl import pricing
-from mwmbl.models import AgreementType, MwmblUser, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
+from mwmbl.background import enrich_domain_submission
+from mwmbl.crawler.stats import StatsManager
+from mwmbl.models import AgreementType, MwmblUser, DomainEvidence, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
+from mwmbl.moderation.suggest import (
+    prior_decision_counts, prior_decisions, submitter_record, submitter_records,
+    suggestion_for,
+)
 from mwmbl.platform.schemas import (
     Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
     VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
@@ -28,6 +36,7 @@ from mwmbl.platform.schemas import (
     ForgotPasswordRequest, ResetPasswordRequest,
     AgreementAcceptRequest, AgreementResponse,
     MarketingConsentRequest, MarketingConsentResponse, MarketingConsentListResponse,
+    BulkDecisionRequest, ModerationQueue, QueueItemSchema, SubmissionDetailSchema,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,11 +248,239 @@ def update_submission_status(request, submission_id: int, update_submission: Upd
     if not request.user.has_perm("mwmbl.change_domain_submission_status"):
         raise InvalidRequest("You do not have permission to update this submission.")
 
-    submission.status = update_submission.status
-    submission.rejection_reason = update_submission.rejection_reason
-    submission.rejection_detail = update_submission.rejection_detail
-    submission.save()
+    apply_decision(submission, update_submission, request.user)
     return {"status": "ok", "message": "Submission updated."}
+
+
+def apply_decision(submission: DomainSubmission, decision, user) -> None:
+    """Record a moderator's decision, along with the suggestion they were shown.
+
+    The suggestion fields are an audit trail, not a copy of the live one on DomainEvidence: a
+    retrain rewrites that row, and we need to keep what was actually on screen so the effect
+    of the suggestions on decisions stays measurable.
+    """
+    submission.status = decision.status
+    submission.rejection_reason = decision.rejection_reason
+    submission.rejection_detail = decision.rejection_detail
+    submission.status_changed_by = user
+    submission.status_changed_on = timezone.now()
+    submission.suggested_status = decision.suggested_status or ""
+    submission.suggested_reason = decision.suggested_reason or ""
+    submission.suggestion_confidence = decision.suggestion_confidence
+    submission.suggestion_model_version = decision.suggestion_model_version or ""
+    submission.save()
+
+
+def check_moderator(request):
+    if not request.user.has_perm("mwmbl.change_domain_submission_status"):
+        raise InvalidRequest("You do not have permission to moderate domain submissions.",
+                             status=403)
+
+
+@router.get(
+    "/domain-submissions/queue",
+    auth=JWTAuth(),
+    response=ModerationQueue,
+    summary="The moderation queue",
+    description=(
+        "Domain submissions awaiting review, with the suggestion for each one. "
+        "Requires the `change_domain_submission_status` permission.\n\n"
+        "Suggestions are precomputed when a domain is submitted, so this endpoint runs no "
+        "model: filtering, ordering and pagination all happen in the database. A submission "
+        "whose domain is still being crawled comes back with `evidence_state` of `PENDING` "
+        "and no suggestion, rather than a placeholder.\n\n"
+        "`order_by=needs_review` (the default) puts confident rejections first, then rows the "
+        "tool is unsure about, then confident approvals, and finally submissions that have "
+        "not been crawled yet. `oldest` and `confidence` are also accepted."
+    ),
+)
+def get_moderation_queue(
+        request,
+        limit: int = 50,
+        offset: int = 0,
+        order_by: str = "needs_review",
+        suggested_action: str = None,
+        suggested_reason: str = None,
+        submitted_by: int = None,
+        min_confidence: float = None,
+) -> dict:
+    check_moderator(request)
+
+    # DomainEvidence is keyed on the domain name rather than by a foreign key, because domains
+    # get resubmitted and the crawl belongs to the domain. A correlated subquery joins them
+    # without one, and keeps the filtering, ordering and slicing in SQL - which is the whole
+    # reason suggestions are precomputed. Building the list in Python would mean materialising
+    # every pending submission (there are ~4,000) on every request.
+    evidence = DomainEvidence.objects.filter(domain=OuterRef("name"))
+    submissions = (DomainSubmission.objects
+                   .filter(status="PENDING")
+                   # Prefixed because DomainSubmission already has suggested_status and
+                   # suggested_reason columns - the audit of what a moderator was shown -
+                   # and an annotation may not shadow a real field.
+                   .annotate(
+                       evidence_state=Subquery(evidence.values("state")[:1]),
+                       evidence_action=Subquery(evidence.values("suggested_action")[:1]),
+                       evidence_reason=Subquery(evidence.values("suggested_reason")[:1]),
+                       evidence_confidence=Subquery(evidence.values("confidence")[:1]),
+                       evidence_priority=Subquery(evidence.values("review_priority")[:1]),
+                   ))
+
+    if submitted_by is not None:
+        submissions = submissions.filter(submitted_by_id=submitted_by)
+    if suggested_action:
+        submissions = submissions.filter(evidence_action=suggested_action)
+    if suggested_reason:
+        submissions = submissions.filter(evidence_reason=suggested_reason)
+    if min_confidence is not None:
+        submissions = submissions.filter(evidence_confidence__gte=min_confidence)
+
+    submissions = submissions.order_by(*_queue_ordering(order_by))
+
+    count = submissions.count()
+    page = list(submissions[offset:offset + limit])
+    return {"items": _queue_items(page), "count": count}
+
+
+# Uncrawled rows sort last under every ordering: they are not more urgent than a confident
+# rejection, and a moderator can do nothing with one until the crawl lands.
+QUEUE_ORDERINGS = {
+    "oldest": ("submitted_on",),
+    "confidence": (F("evidence_confidence").desc(nulls_last=True), "submitted_on"),
+    "needs_review": (F("evidence_priority").desc(nulls_last=True), "submitted_on"),
+}
+
+
+def _queue_ordering(order_by: str):
+    return QUEUE_ORDERINGS.get(order_by, QUEUE_ORDERINGS["needs_review"])
+
+
+def _queue_items(submissions: list[DomainSubmission]) -> list[QueueItemSchema]:
+    """Build the page's rows, aggregating the live checks across the page rather than per row."""
+    evidence_by_domain = {row.domain: row for row in DomainEvidence.objects.filter(
+        domain__in=[submission.name for submission in submissions])}
+    submitters = submitter_records({submission.submitted_by_id for submission in submissions})
+    priors = prior_decision_counts({submission.name for submission in submissions})
+
+    empty = {"approved": 0, "rejected": 0}
+    items = []
+    for submission in submissions:
+        evidence = evidence_by_domain.get(submission.name)
+        suggestion = suggestion_for(
+            submission, evidence,
+            submitter=submitters.get(submission.submitted_by_id, empty),
+            prior=priors.get(submission.name, empty))
+        items.append(QueueItemSchema(
+            id=submission.id,
+            name=submission.name,
+            submitted_by=submission.submitted_by_id,
+            submitted_on=submission.submitted_on,
+            status=submission.status,
+            evidence_state=evidence.state if evidence else "PENDING",
+            suggestion=suggestion.__dict__ if suggestion else None,
+        ))
+    return items
+
+
+@router.get(
+    "/domain-submissions/ids/{submission_id}",
+    auth=JWTAuth(),
+    response=SubmissionDetailSchema,
+    summary="Everything needed to decide one submission",
+    description=(
+        "The submission, the pages crawled from the domain, the evidence behind the "
+        "suggestion, the submitter's track record and any earlier decisions on the same "
+        "domain. Requires the `change_domain_submission_status` permission."
+    ),
+)
+def get_submission_detail(request, submission_id: int) -> SubmissionDetailSchema:
+    check_moderator(request)
+
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
+    if submission is None:
+        raise InvalidRequest("Submission not found.", status=404)
+
+    evidence = DomainEvidence.objects.filter(domain=submission.name).first()
+    suggestion = suggestion_for(submission, evidence)
+    return SubmissionDetailSchema(
+        id=submission.id,
+        name=submission.name,
+        submitted_by=submission.submitted_by_id,
+        submitted_on=submission.submitted_on,
+        status=submission.status,
+        rejection_reason=submission.rejection_reason,
+        rejection_detail=submission.rejection_detail,
+        evidence_state=evidence.state if evidence else "PENDING",
+        suggestion=suggestion.__dict__ if suggestion else None,
+        pages=evidence.pages if evidence else [],
+        signals=evidence.signals if evidence else {},
+        submitter_record=submitter_record(submission.submitted_by_id),
+        prior_decisions=prior_decisions(submission),
+        index_stats=_index_stats(submission.name),
+    )
+
+
+@router.post(
+    "/domain-submissions/decisions",
+    auth=JWTAuth(),
+    summary="Record several moderation decisions at once",
+    description=(
+        "Submit a screenful of individually-made decisions in one request. Each entry carries "
+        "its own status, so this cannot be used to accept every suggestion in bulk - a "
+        "moderator still decides each submission. "
+        "Requires the `change_domain_submission_status` permission."
+    ),
+)
+def submit_decisions(request, decisions: BulkDecisionRequest):
+    check_email_verified(request)
+    check_moderator(request)
+
+    submissions = {submission.id: submission for submission in DomainSubmission.objects.filter(
+        id__in=[decision.submission_id for decision in decisions.decisions])}
+
+    updated, missing = 0, []
+    for decision in decisions.decisions:
+        submission = submissions.get(decision.submission_id)
+        if submission is None:
+            missing.append(decision.submission_id)
+            continue
+        apply_decision(submission, decision, request.user)
+        updated += 1
+
+    return {"status": "ok", "updated": updated, "not_found": missing}
+
+
+@router.post(
+    "/domain-submissions/ids/{submission_id}/refetch",
+    auth=JWTAuth(),
+    summary="Re-crawl a submitted domain",
+    description=(
+        "Queue a fresh crawl of the domain and recompute its suggestion - for when a site was "
+        "simply down when it was first checked. "
+        "Requires the `change_domain_submission_status` permission."
+    ),
+)
+def refetch_submission_evidence(request, submission_id: int):
+    check_moderator(request)
+
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
+    if submission is None:
+        raise InvalidRequest("Submission not found.", status=404)
+
+    # Clearing the row is what makes the crawl actually happen: the task skips domains whose
+    # evidence is still fresh, which is the behaviour a re-fetch is asking to override.
+    DomainEvidence.objects.filter(domain=submission.name).delete()
+    enrich_domain_submission(submission.name)
+    return {"status": "ok", "message": f"Queued a re-crawl of {submission.name}."}
+
+
+def _index_stats(domain: str) -> dict:
+    """What the crawler already knows about this domain, when Redis is reachable."""
+    try:
+        manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
+        return manager.get_stats_for_domain(domain).__dict__
+    except Exception:
+        logger.warning("Could not read index stats for %s", domain, exc_info=True)
+        return {}
 
 
 @router.post(

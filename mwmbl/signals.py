@@ -1,10 +1,15 @@
 """Signal receivers. Connected from MwmblConfig.ready().
 
-Only one so far: approving a domain submission has to reach the blacklist snapshot, because
-approved domains are subtracted from the remote lists when the snapshot is built rather than
-checked per query (see mwmbl.indexer.blacklist_snapshot). Without this an approval would sit
-inert for up to BLACKLIST_SNAPSHOT_REFRESH_SECONDS - six hours - and the moderator would
-reasonably conclude it had not worked.
+Both of them are about a domain submission reaching work that happens elsewhere:
+
+* Approving one has to reach the blacklist snapshot, because approved domains are subtracted
+  from the remote lists when the snapshot is built rather than checked per query (see
+  mwmbl.indexer.blacklist_snapshot). Without this an approval would sit inert for up to
+  BLACKLIST_SNAPSHOT_REFRESH_SECONDS - six hours - and the moderator would reasonably
+  conclude it had not worked.
+* Creating one has to reach the moderation crawler, so that by the time a moderator opens the
+  queue the domain has already been fetched and scored. Doing that work on their request
+  instead would put three page fetches in front of every row.
 """
 from datetime import timedelta
 from logging import getLogger
@@ -21,6 +26,22 @@ logger = getLogger(__name__)
 
 
 BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
+
+
+@receiver(post_save, sender=DomainSubmission)
+def enrich_new_submission(sender, instance: DomainSubmission, created: bool, **kwargs):
+    """Crawl a newly submitted domain so the moderation queue has a suggestion waiting.
+
+    Only on creation: a moderator saving a decision must not trigger a re-crawl. The task
+    itself skips domains whose evidence is still fresh, so a resubmitted domain costs nothing.
+    """
+    if not created:
+        return
+
+    from mwmbl.background import enrich_domain_submission
+
+    enrich_domain_submission(instance.name)
+    logger.info("Scheduled moderation enrichment for %s", instance.name)
 
 
 @receiver(post_save, sender=DomainSubmission)
