@@ -18,6 +18,7 @@ from background_task import background
 from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import transaction
 from redis import Redis
 
 from mwmbl import pricing
@@ -28,7 +29,7 @@ from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_sna
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
 from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
-from mwmbl.moderation.evidence import crawl_domain, store_evidence
+from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
 from mwmbl.moderation.model import reset_model_cache
 from mwmbl.moderation.suggest import refresh_suggestion
 from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
@@ -262,14 +263,21 @@ def enrich_domain_submission(domain: str):
 
     redis = Redis.from_url(settings.REDIS_URL)
     try:
-        evidence = store_evidence(domain, crawl_domain(domain, redis))
-    except Exception:
+        crawl = crawl_domain(domain, redis)
+    except Exception as exception:
         logger.exception("Failed to crawl %s for moderation", domain)
-        DomainEvidence.objects.update_or_create(
-            domain=domain, defaults={"state": DomainEvidence.State.FAILED})
+        store_failure(domain, type(exception).__name__)
         return
 
-    refresh_suggestion(evidence)
+    # One transaction, because the row is only useful once both halves are in it. Committing
+    # READY with no suggestion on it - a deploy restarting the worker in between would do it -
+    # leaves a row the freshness check above then skips for a month, so the queue would show
+    # "not assessed yet" for a domain that has in fact been crawled. Scoring failures are left
+    # to propagate: the transaction rolls back and the task runner retries, which is a better
+    # answer than recording a crawl that did happen as a crawl failure.
+    with transaction.atomic():
+        evidence = store_evidence(domain, crawl)
+        refresh_suggestion(evidence)
     logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action,
                 evidence.confidence or 0.0)
 

@@ -33,6 +33,13 @@ gate needs to vary them independently:
     that is not adult content, the do-not-crawl cases, promotion of a paid product. It exists
     to cover concepts, not to move aggregate numbers.
 
+Real rows carry the suggestion that was on screen when the decision was made, because a
+retrain trains on decisions the previous model had a hand in. That is reported by
+mwmbl.moderation.train as ``suggestion_influence`` rather than corrected for: with no decided
+submission yet made with a suggestion shown, any weighting would be an unmeasured guess, and
+this module's whole argument is that unmeasured changes to the training mix do not ship. The
+number is what will say when it needs to be.
+
 Historic malformed submissions are excluded. 70 rows are ``null``, an IP address or
 capitalised; migrations 0032/0033 fixed that at the API layer, so training on them would teach
 the model to detect a problem that can no longer occur.
@@ -84,6 +91,10 @@ class TrainingRow:
     # all, so that is the slice the retrain gate reads. None for derived and seed rows, which
     # are training-only.
     submitter: Optional[str] = None
+    # What the tool suggested when this decision was made, empty when nothing was shown. Not
+    # a feature either - it is how train.evaluate reports how much of the training data the
+    # previous model had a hand in.
+    suggested_status: str = ""
 
     def to_example(self) -> ModerationExample:
         return ModerationExample(self.domain, self.page_texts)
@@ -119,6 +130,7 @@ def real_rows() -> list[TrainingRow]:
             page_texts=page_texts(evidence_by_domain.get(submission.name)),
             timestamp=submission.submitted_on.isoformat() if submission.submitted_on else None,
             submitter=str(submission.submitted_by_id),
+            suggested_status=submission.suggested_status,
         ))
     return rows
 

@@ -44,6 +44,12 @@ NON_ENGLISH_TLDS = frozenset({
     "pt", "es", "it", "fr", "de", "nl", "se", "no", "fi", "dk", "vn", "th", "id", "il", "ir",
 })
 
+# How much an earlier decision on the same domain is worth. Named because the queue's SQL
+# reproduces this check to filter and order on it (mwmbl.moderation.suggest), and the two
+# drifting apart would show a moderator one suggestion and filter on another.
+PRIOR_DECISION_CONFIDENCE = 0.9
+PRIOR_DECISION_REASON = "OTHER"
+
 
 @dataclass(frozen=True)
 class EvidenceItem:
@@ -138,6 +144,16 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
             "On a public malware/adult blocklist - approving here also unblocks it. "
             "These lists are built for ad-blocking and do have false positives."))
 
+    # Neutral for the same reason robots.txt is: a fact the moderator should have, not a
+    # decision to make for them. Plenty of small personal sites - the ones this index exists
+    # for - still have no certificate, and no rejection detail a moderator has written
+    # mentions TLS. It only means anything when we actually reached the site: after a failed
+    # fetch "https: False" says the https attempt failed, which the unreachable line already
+    # said better.
+    if fetched and signals.get("https") is False:
+        items.append(EvidenceItem(
+            "no_tls", NEUTRAL, "Served over plain HTTP - no TLS certificate"))
+
     if fetched:
         items.append(EvidenceItem(
             "reachable", APPROVE,
@@ -171,11 +187,12 @@ def live_evidence(submitter_record: dict, prior_decisions: dict) -> list[Evidenc
     if prior_decisions.get("approved"):
         items.append(EvidenceItem(
             "prior_decision", APPROVE, "This domain has already been approved before",
-            implies_action="APPROVE", implies_confidence=0.9))
+            implies_action="APPROVE", implies_confidence=PRIOR_DECISION_CONFIDENCE))
     elif prior_decisions.get("rejected"):
         items.append(EvidenceItem(
             "prior_decision", REJECT, "This domain has already been rejected before",
-            implies_action="REJECT", implies_reason="OTHER", implies_confidence=0.9))
+            implies_action="REJECT", implies_reason=PRIOR_DECISION_REASON,
+            implies_confidence=PRIOR_DECISION_CONFIDENCE))
 
     return items
 

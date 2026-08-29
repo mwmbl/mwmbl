@@ -5,19 +5,20 @@
 
 The gate compares the new model's cold-start PR-AUC against the lower bound of the incumbent's
 bootstrap interval, so a change that only looks like an improvement does not ship.
+
+Publishing writes a ModerationModelArtifact row rather than a file: the incumbent the gate
+reads and the model the workers serve are then the same object, and neither is lost to a
+deploy. See mwmbl.moderation.model.
 """
 import json
 from datetime import date
-from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from mwmbl.background import rescore_pending_submissions
 from mwmbl.models import DomainSubmission
 from mwmbl.moderation import training_data
-from mwmbl.moderation.model import (
-    METRICS_FILENAME, MODEL_FILENAME, load_metrics, reset_model_cache)
+from mwmbl.moderation.model import load_metrics, publish
 from mwmbl.moderation.train import passes_gate, train
 
 # A reason class with fewer real examples than this is a candidate for blocklist-derived
@@ -36,7 +37,6 @@ class Command(BaseCommand):
                             help="Train and report metrics without writing the artifact")
         parser.add_argument("--force", action="store_true",
                             help="Publish even if the gate fails")
-        parser.add_argument("--output-dir", default=settings.DOMAIN_MODERATION_MODEL_DIR)
         parser.add_argument(
             "--derived", action="store_true",
             help=("Add blocklist-derived rows for reason classes short of real data. Off by "
@@ -74,7 +74,11 @@ class Command(BaseCommand):
             self.stderr.write("Gate failed; not publishing. Re-run with --force to override.")
             return
 
-        self._publish(model, metrics, Path(options["output_dir"]))
+        publish(model, metrics)
+        self.stdout.write(self.style.SUCCESS(
+            f"Published {model.version}; every worker picks it up within a minute."))
+        rescore_pending_submissions(schedule=0)
+        self.stdout.write("Scheduled a rescore of the pending queue with the new model.")
 
     @staticmethod
     def _reasons_needing_data(rows) -> set[str]:
@@ -84,16 +88,3 @@ class Command(BaseCommand):
                 counts[row.reason] = counts.get(row.reason, 0) + 1
         return {reason for reason in DomainSubmission.DOMAIN_REJECTION_REASON
                 if counts.get(reason, 0) < MIN_REAL_ROWS_PER_REASON}
-
-    def _publish(self, model, metrics, output_dir: Path):
-        import joblib
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, output_dir / MODEL_FILENAME)
-        (output_dir / METRICS_FILENAME).write_text(json.dumps(metrics, indent=2))
-        self.stdout.write(self.style.SUCCESS(
-            f"Wrote {model.version} to {output_dir / MODEL_FILENAME}"))
-
-        reset_model_cache()
-        rescore_pending_submissions(schedule=0)
-        self.stdout.write("Scheduled a rescore of the pending queue with the new model.")

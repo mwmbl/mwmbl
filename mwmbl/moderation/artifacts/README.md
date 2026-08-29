@@ -6,15 +6,22 @@ held-out real decisions when it was built. Both are committed deliberately, for 
 deterministic checks alone, so shipping one means a fresh deploy is useful on day one instead of
 after the first retrain.
 
+**This directory is the warm start, and nothing writes to it.** A retrain publishes a
+`ModerationModelArtifact` row in Postgres, and that row is what every worker serves and what the
+gate compares against; these files are read only when the table is empty. Writing the artifact
+here would mean each deploy reverting the retrain to whatever was last committed, and each
+worker replica keeping its own copy.
+
 ## Regenerating
 
     uv run manage.py train_domain_moderation_model --dry-run   # report metrics only
     uv run manage.py train_domain_moderation_model             # publish if it passes the gate
 
 The gate compares the new model's cold-start PR-AUC against the *lower bound* of the incumbent's
-bootstrap interval in `metrics.json`, so a change that only looks like an improvement does not
-ship. Publishing also schedules `rescore_pending_submissions`, which re-scores the existing queue
-with the new model.
+bootstrap interval — the metrics stored beside the published model, falling back to `metrics.json`
+until something has been published — so a change that only looks like an improvement does not
+ship. Publishing writes a new artifact row, which every worker picks up within a minute, and
+schedules `rescore_pending_submissions` to re-score the existing queue with the new model.
 
 To reproduce the numbers without a production database, train from the sanitized judgments export
 instead:
@@ -35,8 +42,10 @@ retrain to change the artifact substantially.
 `LogisticRegression` heads, and ONNX export of a TF-IDF pipeline is far more trouble than it is
 worth at this size. Two consequences worth knowing:
 
-- Unpickling executes code, so this file is trusted exactly as much as the rest of the repo. Do
-  not point `DOMAIN_MODERATION_MODEL_DIR` at a directory anyone else can write to.
+- Unpickling executes code, so this file — and the artifact rows, which anything that can write
+  to the database could replace — is trusted exactly as much as the rest of the repo. Do not
+  point `DOMAIN_MODERATION_MODEL_DIR` at a directory anyone else can write to.
 - A scikit-learn upgrade can make an old pickle unloadable. `mwmbl.moderation.model` catches that
-  and logs it rather than failing, falling back to the deterministic checks — so the symptom is
-  "every suggestion says UNSURE", and the fix is a retrain.
+  and logs it, falling back to this committed artifact and then to the deterministic checks — so
+  the symptom is suggestions reverting to an older model version, or saying UNSURE, and the fix
+  is a retrain.

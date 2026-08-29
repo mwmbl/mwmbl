@@ -1,6 +1,6 @@
 """Tie the checks and the model together, and put the answer where the queue can read it.
 
-Two entry points, split by when they can be run:
+Three entry points, split by when they can be run:
 
 :func:`refresh_suggestion` writes the cached suggestion onto a DomainEvidence row. It is
 called by the enrichment task, the backfill command and the post-retrain rescore - never by a
@@ -9,15 +9,26 @@ request.
 :func:`suggestion_for` reads that cached suggestion back and adds the evidence that would go
 stale if it were cached: the submitter's record, and whether this domain has been decided
 since. Both are indexed lookups.
+
+:func:`annotate_queue` says the same thing in SQL, because the queue filters, orders and
+paginates thousands of pending rows in the database and cannot call :func:`suggestion_for` to
+decide which ones to return.
+
+:func:`one_row_per_domain` and :func:`annotate_votes` are what turn that row-per-submission
+queryset into the row-per-domain the moderator actually reviews. Both are SQL for the same
+reason.
 """
 from __future__ import annotations
 
 from logging import getLogger
 from typing import Iterable
 
-from django.db.models import Count, Q
+from django.db.models import (
+    Case, CharField, Count, Exists, F, FloatField, IntegerField, OuterRef, Q, Subquery, Value,
+    When)
+from django.db.models.functions import Coalesce, Substr
 
-from mwmbl.models import DomainEvidence, DomainSubmission
+from mwmbl.models import DomainEvidence, DomainSubmission, SearchResultVote
 from mwmbl.moderation import rules
 from mwmbl.moderation.evidence import page_texts
 from mwmbl.moderation.model import Suggestion, suggest
@@ -33,12 +44,13 @@ def refresh_suggestion(evidence: DomainEvidence) -> DomainEvidence:
     evidence.suggested_action = suggestion.action
     evidence.suggested_reason = suggestion.reason
     evidence.confidence = suggestion.confidence
-    evidence.review_priority = suggestion.review_priority
+    evidence.reason_confidence = suggestion.reason_confidence
+    evidence.reason_source = suggestion.reason_source
     evidence.model_version = suggestion.model_version
     evidence.evidence = suggestion.evidence
     evidence.save(update_fields=[
-        "suggested_action", "suggested_reason", "confidence", "review_priority",
-        "model_version", "evidence",
+        "suggested_action", "suggested_reason", "confidence", "reason_confidence",
+        "reason_source", "model_version", "evidence",
     ])
     return evidence
 
@@ -97,11 +109,188 @@ def suggestion_for(submission: DomainSubmission,
         action=action,
         confidence=confidence,
         reason=evidence.suggested_reason if action == "REJECT" else "",
-        reason_confidence=confidence if action == "REJECT" else 0.0,
-        reason_source="rule" if cached_decisive is not None else "model",
+        # The reason's own confidence, not the rejection's. A model can be sure a domain
+        # should go and barely have a view on why, and showing "SPAM (0.92)" when the reason
+        # head scored 0.31 would present a guess as a finding.
+        reason_confidence=(evidence.reason_confidence or 0.0) if action == "REJECT" else 0.0,
+        reason_source=evidence.reason_source or "model",
         model_version=evidence.model_version,
         evidence=list(evidence.evidence or []) + [item.to_dict() for item in live],
     )
+
+
+# --------------------------------------------------------------------------------------
+# The same adjustment, in SQL.
+#
+# suggestion_for adjusts the stored suggestion in two ways that depend on other rows - an
+# earlier decision on the same domain overrides it, and an approval is withheld from a
+# submitter with no track record - so neither can be precomputed onto DomainEvidence. The
+# queue still has to filter, order and paginate on the result across every pending submission,
+# which has to happen in the database.
+#
+# So it is written twice, and test_queue_display_matches_suggestion_for holds the two
+# together. Filtering on UNSURE must return exactly the rows drawn as UNSURE, and the "needs a
+# human first" ordering must sort on the confidence the moderator is actually shown.
+
+DECIDED = Q(status__in=("APPROVED", "REJECTED"))
+
+
+def annotate_queue(submissions):
+    """Annotate submissions with the suggestion each one will be rendered with.
+
+    Adds ``displayed_action``, ``displayed_reason``, ``displayed_confidence`` and
+    ``displayed_priority``, all NULL while the domain has no READY evidence - which is how
+    "not assessed yet" sorts last and matches no suggestion filter.
+    """
+    # DomainEvidence is keyed on the domain rather than by a foreign key, because domains get
+    # resubmitted and the crawl belongs to the domain. A correlated subquery joins them
+    # without one, and keeps the filtering and ordering in SQL.
+    evidence = DomainEvidence.objects.filter(domain=OuterRef("name"))
+    submissions = submissions.annotate(
+        # Prefixed because DomainSubmission already has suggested_status and suggested_reason
+        # columns - the audit of what a moderator was shown - and an annotation may not
+        # shadow a real field.
+        evidence_state=Subquery(evidence.values("state")[:1]),
+        evidence_action=Subquery(evidence.values("suggested_action")[:1]),
+        evidence_reason=Subquery(evidence.values("suggested_reason")[:1]),
+        evidence_confidence=Subquery(evidence.values("confidence")[:1]),
+        evidence_source=Subquery(evidence.values("reason_source")[:1]),
+        # The live checks, as one boolean each. Only PENDING submissions are ever queued, so
+        # a submission never counts itself in either of these.
+        prior_approved=Exists(DomainSubmission.objects.filter(
+            name=OuterRef("name"), status="APPROVED")),
+        prior_rejected=Exists(DomainSubmission.objects.filter(
+            name=OuterRef("name"), status="REJECTED")),
+        submitter_decided=Exists(DomainSubmission.objects.filter(
+            DECIDED, submitted_by_id=OuterRef("submitted_by_id"))),
+    )
+
+    scored = Q(evidence_state=DomainEvidence.State.READY)
+    # A prior decision only overrides the stored suggestion when it is stronger than the check
+    # that produced it. reason_source is how we know a check produced it at all: when it did,
+    # the stored confidence *is* that check's implied confidence (see model.suggest).
+    stored_check_holds = (Q(evidence_source="rule")
+                          & Q(evidence_confidence__gte=rules.PRIOR_DECISION_CONFIDENCE))
+    prior_approval = scored & Q(prior_approved=True) & ~stored_check_holds
+    prior_rejection = (scored & Q(prior_rejected=True) & Q(prior_approved=False)
+                       & ~stored_check_holds)
+    # No cached check implies APPROVE - they are all reasons to reject - so a stored APPROVE
+    # is always the model's, which is what the withheld-approval rule is about.
+    withheld = scored & Q(evidence_action="APPROVE") & Q(submitter_decided=False)
+
+    submissions = submissions.annotate(
+        displayed_action=Case(
+            When(prior_approval, then=Value("APPROVE")),
+            When(prior_rejection, then=Value("REJECT")),
+            When(withheld, then=Value("UNSURE")),
+            When(scored, then=F("evidence_action")),
+            default=Value(None),
+            output_field=CharField(),
+        ),
+        displayed_confidence=Case(
+            When(prior_approval | prior_rejection,
+                 then=Value(rules.PRIOR_DECISION_CONFIDENCE)),
+            When(withheld, then=Value(0.0)),
+            When(scored, then=F("evidence_confidence")),
+            default=Value(None),
+            output_field=FloatField(),
+        ),
+        displayed_reason=Case(
+            When(prior_rejection, then=Value(rules.PRIOR_DECISION_REASON)),
+            When(scored & Q(evidence_action="REJECT") & ~prior_approval,
+                 then=F("evidence_reason")),
+            When(scored, then=Value("")),
+            default=Value(None),
+            output_field=CharField(),
+        ),
+    )
+
+    # Suggestion.review_priority, over the adjusted values. This is why the sort key is not a
+    # stored column: the rows whose approval was withheld are the ones a human most needs to
+    # look at, and a precomputed priority would sort them by the confidence of the approval we
+    # decided not to show - straight to the bottom of "what needs a human".
+    return submissions.annotate(
+        displayed_priority=Case(
+            When(Q(displayed_action="REJECT"), then=Value(1.0) + F("displayed_confidence")),
+            When(Q(displayed_action="APPROVE"), then=Value(1.0) - F("displayed_confidence")),
+            When(Q(displayed_action="UNSURE"), then=Value(1.0)),
+            default=Value(None),
+            output_field=FloatField(),
+        ),
+    )
+
+
+# --------------------------------------------------------------------------------------
+# From a submission per row to a domain per row.
+
+
+def one_row_per_domain(submissions, status: str | None = "PENDING", pick: str = "first"):
+    """Keep one submission per name, and count the rest onto it as ``submission_count``.
+
+    A moderator reviews a *domain*: nine submissions of cheap-rolex-outlet.biz are one card
+    and one decision, not nine. Deliberately not a GROUP BY, though: the suggestion depends on
+    the submitter's own track record (see :func:`suggestion_for`), and a domain submitted by
+    two accounts has no single one to read. Collapsing to a representative row instead leaves
+    :func:`annotate_queue` and :func:`suggestion_for` working on a submission, which is what
+    holds those two together.
+
+    ``pick`` chooses which row represents the domain, and in both cases it is the row whose
+    own fields the client is going to draw:
+
+    * ``"first"`` - the earliest submission, because the queue card says "first submitted 6
+      days ago by anon_4417";
+    * ``"last"`` - the most recently touched one, because a history listing shows the decision
+      that currently stands.
+
+    Ties break on the primary key, so the representative is deterministic either way.
+    """
+    touched = Coalesce("status_changed_on", "submitted_on")
+    submissions = submissions.annotate(touched=touched)
+
+    same_domain = DomainSubmission.objects.filter(name=OuterRef("name"))
+    if status is not None:
+        same_domain = same_domain.filter(status=status)
+
+    if pick == "first":
+        beats = same_domain.filter(
+            Q(submitted_on__lt=OuterRef("submitted_on"))
+            | Q(submitted_on=OuterRef("submitted_on"), pk__lt=OuterRef("pk")))
+    else:
+        beats = same_domain.annotate(touched=touched).filter(
+            Q(touched__gt=OuterRef("touched"))
+            | Q(touched=OuterRef("touched"), pk__gt=OuterRef("pk")))
+
+    return submissions.annotate(
+        submission_count=Coalesce(
+            Subquery(same_domain.values("name").annotate(n=Count("pk")).values("n"),
+                     output_field=IntegerField()),
+            Value(0)),
+    ).filter(~Exists(beats))
+
+
+def annotate_votes(submissions):
+    """Add ``upvotes`` and ``downvotes``: the votes cast on URLs belonging to the domain.
+
+    In SQL because the queue orders on these across the whole backlog. SearchResultVote
+    carries the host in its own indexed column for exactly this - Postgres cannot pick a
+    domain out of a URLField - and both sides drop a leading ``www.`` so that a vote on
+    www.example.com/x counts towards a submission of example.com.
+
+    Coalesced to zero rather than left NULL: a domain nobody has voted on has no votes, and
+    ordering on NULL would scatter those rows through the sort instead of ending it.
+    """
+    def counted(vote_type):
+        return Coalesce(
+            Subquery(SearchResultVote.objects
+                     .filter(domain=OuterRef("bare_name"), vote_type=vote_type)
+                     .values("domain").annotate(n=Count("pk")).values("n"),
+                     output_field=IntegerField()),
+            Value(0))
+
+    return submissions.annotate(
+        bare_name=Case(When(name__startswith="www.", then=Substr("name", 5)),
+                       default=F("name"), output_field=CharField()),
+    ).annotate(upvotes=counted("upvote"), downvotes=counted("downvote"))
 
 
 def submitter_record(user_id: int) -> dict:

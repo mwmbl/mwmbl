@@ -62,13 +62,23 @@ def rebuild_blacklist_snapshot_on_approval(sender, instance: DomainSubmission, *
     if instance.status != "APPROVED":
         return
 
+    if schedule_blacklist_rebuild():
+        logger.info("Scheduled a blacklist snapshot rebuild after approving %s", instance.name)
+
+
+def schedule_blacklist_rebuild() -> bool:
+    """Ask for a snapshot rebuild, unless one is already due. True if this call scheduled it.
+
+    Shared with the undo endpoint, which changes statuses with .update() and so fires no
+    post_save at all: an approval that is undone has to reach the snapshot for the same reason
+    the approval did, in the other direction.
+    """
     from mwmbl.background import refresh_blacklist_snapshot
 
     delay = settings.BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS
     cutoff = timezone.now() + timedelta(seconds=delay)
     if Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK, run_at__lte=cutoff).exists():
-        return
+        return False
 
     refresh_blacklist_snapshot(schedule=delay)
-    logger.info("Scheduled a blacklist snapshot rebuild in %ds after approving %s",
-                delay, instance.name)
+    return True

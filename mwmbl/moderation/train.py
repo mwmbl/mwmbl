@@ -117,6 +117,7 @@ def evaluate(model: ModerationModel, train_rows: list[TrainingRow],
     }
     metrics["reason_head"] = _evaluate_reason_head(predictions, test_rows)
     metrics["train_rows_by_source"] = _count_sources(train_rows)
+    metrics["suggestion_influence"] = _suggestion_influence(train_rows + test_rows)
     return metrics
 
 
@@ -166,6 +167,28 @@ def _evaluate_reason_head(predictions, test_rows: list[TrainingRow]) -> dict:
         # chronological split - LANGUAGE lands 2 rows in a typical test set - and an F1 of 0.0
         # on 2 rows is noise that reads like a broken class.
         "support": counts,
+    }
+
+
+def _suggestion_influence(rows: list[TrainingRow]) -> dict:
+    """How much of the training data was decided with a suggestion on screen, and how often
+    the moderator agreed with it.
+
+    A retrain learns from decisions the previous model influenced, and the gate cannot see
+    that: the held-out labels come from the same influenced population, so a model that has
+    taught moderators its own mistakes scores well on them. Nothing here corrects for it -
+    reweighting on an unmeasured hunch is exactly what this module refuses to do elsewhere -
+    but a rising ``agreed`` against a rising ``shown`` is the shape to watch for, and it is
+    the argument for down-weighting confirmations when there is enough data to test it on.
+    """
+    real = [row for row in rows if row.source == REAL]
+    shown = [row for row in real if row.suggested_status]
+    agreed = [row for row in shown
+              if (row.suggested_status == "REJECTED") == row.rejected]
+    return {
+        "real_rows": len(real),
+        "shown_a_suggestion": len(shown),
+        "agreed_with_it": len(agreed),
     }
 
 

@@ -355,6 +355,10 @@ EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60
 # Domain moderation suggestions. The model is loaded only by the background worker that
 # enriches submissions - the queue reads the stored suggestion - so a missing artifact
 # degrades to the deterministic checks rather than affecting any moderator request.
+#
+# Retrained models are stored in Postgres (mwmbl.models.ModerationModelArtifact), because a
+# container filesystem is neither shared between workers nor kept across a deploy. This
+# directory holds the read-only warm start used until the first retrain publishes one.
 DOMAIN_MODERATION_MODEL_DIR = os.environ.get(
     "DOMAIN_MODERATION_MODEL_DIR",
     str(Path(__file__).parent / "moderation" / "artifacts"))

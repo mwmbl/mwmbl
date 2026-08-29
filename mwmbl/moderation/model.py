@@ -9,22 +9,31 @@ DomainEvidence, so the moderation queue is a plain indexed database read and no 
 ever loads this module. A missing or slow artifact therefore cannot touch a moderator's
 request; the worst case is a queue row that honestly says it has not been assessed yet.
 
+The fitted artifact lives in Postgres (mwmbl.models.ModerationModelArtifact), not on disk. It
+is written monthly by a retrain and read by every worker, and a container filesystem is
+neither shared between workers nor kept across a deploy. The copy in ``artifacts/`` is the
+warm start for a database that has none yet, and nothing writes to it.
+
 Loading mirrors mwmbl.tinysearchengine.super_search_select.judge: a lazy singleton behind a
-lock, memoized failure, and graceful degradation to rules-only when the artifact is absent so
-a deploy without it keeps working.
+lock, memoized failure, and graceful degradation to rules-only when no artifact can be loaded
+so a deploy without one keeps working.
 """
 from __future__ import annotations
 
+import io
 import json
 import threading
+import time
 from dataclasses import dataclass, field
 from logging import getLogger
 from pathlib import Path
 from typing import Optional
 
+import joblib
 import numpy as np
 from django.conf import settings
 
+from mwmbl.models import ModerationModelArtifact
 from mwmbl.moderation.features import Featuriser, ModerationExample
 from mwmbl.moderation.rules import APPROVE, EvidenceItem, REJECT, decisive
 
@@ -32,6 +41,12 @@ logger = getLogger(__name__)
 
 MODEL_FILENAME = "model.joblib"
 METRICS_FILENAME = "metrics.json"
+
+# How long a loaded model is served before the database is asked whether a retrain has
+# published a newer one. A retrain happens in one worker process and every worker serves
+# suggestions, so without this they would disagree until the next restart. The check is a
+# single indexed row read, and a minute of staleness after a monthly retrain costs nothing.
+MODEL_REFRESH_SECONDS = 60
 
 # A reason class with no real decisions behind it must not present as though it had. The
 # reason head learns whatever classes the training data contains (reason_head.classes_ is the
@@ -152,40 +167,83 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
 
 
 _model: Optional[ModerationModel] = None
-_load_attempted = False
+_loaded_version: Optional[str] = None
+_checked_at: Optional[float] = None
 _lock = threading.Lock()
 
 
 def get_model() -> Optional[ModerationModel]:
-    """Lazily load the shared model; None (memoized) if the artifact is unavailable."""
-    global _model, _load_attempted
-    if _load_attempted:
-        return _model
+    """The published model, reloaded when a retrain has published a newer one.
+
+    None (until the published version changes) when nothing can be loaded, so a suggestion
+    falls back to the deterministic checks rather than failing.
+    """
+    global _model, _loaded_version, _checked_at
     with _lock:
-        if _load_attempted:
+        if _checked_at is not None and time.monotonic() - _checked_at < MODEL_REFRESH_SECONDS:
             return _model
-        _model = _load(Path(settings.DOMAIN_MODERATION_MODEL_DIR))
-        _load_attempted = True
+        published = _published_version()
+        if _checked_at is None or published != _loaded_version:
+            _model = _load(published)
+            _loaded_version = published
+        _checked_at = time.monotonic()
     return _model
+
+
+def publish(model: ModerationModel, metrics: dict) -> ModerationModelArtifact:
+    """Store a trained model and its metrics as the artifact every worker will serve."""
+    buffer = io.BytesIO()
+    joblib.dump(model, buffer)
+    # Versions are dated, so a second retrain on the same day replaces the first rather than
+    # colliding on the unique version.
+    artifact, _ = ModerationModelArtifact.objects.update_or_create(
+        version=model.version,
+        defaults={"model": buffer.getvalue(), "metrics": metrics})
+    reset_model_cache()
+    return artifact
 
 
 def reset_model_cache() -> None:
     """Drop the cached model so the next call reloads. Used after a retrain, and by tests."""
-    global _model, _load_attempted
+    global _model, _loaded_version, _checked_at
     with _lock:
         _model = None
-        _load_attempted = False
+        _loaded_version = None
+        _checked_at = None
 
 
-def _load(model_dir: Path) -> Optional[ModerationModel]:
-    model_path = model_dir / MODEL_FILENAME
+def _published_version() -> Optional[str]:
+    """The version of the newest stored artifact, or None to fall back to the bundled one."""
+    row = ModerationModelArtifact.objects.order_by("-created_on").values("version").first()
+    return row["version"] if row else None
+
+
+def _load(version: Optional[str]) -> Optional[ModerationModel]:
+    if version is None:
+        return _load_bundled()
+    try:
+        artifact = ModerationModelArtifact.objects.get(version=version)
+        model = joblib.load(io.BytesIO(bytes(artifact.model)))
+    except Exception:
+        # An artifact pickled by a different scikit-learn version is the realistic case, and
+        # it must not take the enrichment task down with it: fall back to the model shipped
+        # with this code, which was pickled by the dependencies this code is running.
+        logger.exception("Failed to load moderation model %s; falling back to the bundled "
+                         "artifact", version)
+        return _load_bundled()
+    logger.info("Domain moderation model %s loaded from the database", model.version)
+    return model
+
+
+def _load_bundled() -> Optional[ModerationModel]:
+    """The artifact shipped in the source tree, for a database with no retrain in it yet."""
+    model_path = Path(settings.DOMAIN_MODERATION_MODEL_DIR) / MODEL_FILENAME
     if not model_path.exists():
         logger.warning(
-            "Domain moderation model not found at %s; suggestions will use the deterministic "
-            "checks only", model_path)
+            "Domain moderation model not found at %s and none published; suggestions will "
+            "use the deterministic checks only", model_path)
         return None
     try:
-        import joblib
         model = joblib.load(model_path)
     except Exception:
         logger.exception("Failed to load the domain moderation model from %s", model_path)
@@ -194,9 +252,15 @@ def _load(model_dir: Path) -> Optional[ModerationModel]:
     return model
 
 
-def load_metrics(model_dir: Optional[Path] = None) -> dict:
-    """The metrics written alongside the artifact, so the retrain gate can compare against it."""
-    path = Path(model_dir or settings.DOMAIN_MODERATION_MODEL_DIR) / METRICS_FILENAME
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
+def load_metrics() -> dict:
+    """The metrics of the published model, so the retrain gate can compare against them.
+
+    Read from the same row as the model they describe: the gate's guarantee is that a
+    candidate beats the artifact currently being served, and metrics stored anywhere else
+    could be describing a different one.
+    """
+    row = ModerationModelArtifact.objects.order_by("-created_on").values("metrics").first()
+    if row is not None:
+        return row["metrics"]
+    bundled = Path(settings.DOMAIN_MODERATION_MODEL_DIR) / METRICS_FILENAME
+    return json.loads(bundled.read_text()) if bundled.exists() else {}

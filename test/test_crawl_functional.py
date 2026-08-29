@@ -242,11 +242,12 @@ class TestCrawlFunctional:
         
         with patch('mwmbl.crawler.retrieve.fetch') as mock_fetch:
             with patch('mwmbl.crawler.retrieve.robots_allowed', return_value=True):
-                mock_fetch.return_value = (200, mock_html_content)
+                mock_fetch.return_value = (200, mock_html_content, 'https://example.com')
                 
                 result = crawl_url('https://example.com', redis=None)
                 
                 assert result['url'] == 'https://example.com'
+                assert result['resolved_url'] == 'https://example.com'
                 assert result['status'] == 200
                 assert result['content'] is not None
                 assert result['content']['title'] == 'Test Page'

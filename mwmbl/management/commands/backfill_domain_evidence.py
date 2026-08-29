@@ -20,10 +20,12 @@ import time
 from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_date
 
+from django.db import transaction
+
 from mwmbl.crawler.env_vars import CRAWL_DELAY_SECONDS
 from mwmbl.indexer.blacklist_snapshot import get_redis
 from mwmbl.models import DomainEvidence, DomainSubmission
-from mwmbl.moderation.evidence import crawl_domain, store_evidence
+from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
 from mwmbl.moderation.suggest import refresh_suggestion
 from mwmbl.moderation.training_data import is_trainable_domain
 
@@ -46,17 +48,17 @@ class Command(BaseCommand):
         redis = get_redis()
         for number, domain in enumerate(domains, start=1):
             try:
-                evidence = store_evidence(domain, crawl_domain(domain, redis))
-                refresh_suggestion(evidence)
+                # Both halves in one transaction, so an interrupted run never leaves a READY
+                # row with no suggestion on it - which the freshness check would then skip.
+                with transaction.atomic():
+                    evidence = store_evidence(domain, crawl_domain(domain, redis))
+                    refresh_suggestion(evidence)
                 self.stdout.write(
                     f"[{number}/{len(domains)}] {domain}: {evidence.suggested_action or '?'} "
                     f"({evidence.state})")
             except Exception as exception:
                 # One unfetchable domain must not end a backfill of thousands.
-                DomainEvidence.objects.update_or_create(
-                    domain=domain,
-                    defaults={"state": DomainEvidence.State.FAILED,
-                              "error": type(exception).__name__})
+                store_failure(domain, type(exception).__name__)
                 self.stderr.write(f"[{number}/{len(domains)}] {domain}: FAILED ({exception})")
             if options["delay"]:
                 time.sleep(options["delay"])

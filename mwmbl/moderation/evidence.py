@@ -6,6 +6,10 @@ detection") are judgements about a site, not a page. The same three pages are sh
 moderator's detail panel and fed to the model, so what a moderator sees and what the model
 judged can never disagree.
 
+The homepage is fetched over https, falling back to http once if that errors, so that a
+site without a certificate is reported as a site without a certificate rather than as a site
+that is down.
+
 This reuses mwmbl.crawler.retrieve.crawl_url, which already does robots.txt with Redis
 caching, SSRF validation, a 3 second timeout, a 1 MB cap and justext extraction with Open
 Graph fallbacks. Super Search already calls it from inside the server process, so nothing
@@ -50,7 +54,7 @@ def crawl_domain(domain: str, redis, max_pages: int = None) -> dict:
     if max_pages is None:
         max_pages = settings.MODERATION_PAGES_PER_DOMAIN
 
-    homepage = crawl_url(f"https://{domain}/", redis)
+    homepage, https = _fetch_homepage(domain, redis)
     pages = [_page(homepage)]
     error = (homepage.get("error") or {}).get("name", "") if homepage.get("error") else ""
 
@@ -64,8 +68,33 @@ def crawl_domain(domain: str, redis, max_pages: int = None) -> dict:
         "final_domain": _final_domain(homepage, domain),
         "error": error,
         "pages": pages,
-        "signals": _signals(domain, pages),
+        "signals": _signals(domain, pages, https),
     }
+
+
+def _fetch_homepage(domain: str, redis) -> tuple[dict, bool]:
+    """The homepage, and whether it came back over TLS.
+
+    Only https used to be tried, which made "this site has no certificate" and "this site is
+    down" the same result - a decisive REJECT for being unreachable. They are not the same
+    thing: a site served over plain http is a site, and whether it has TLS is something to
+    show a moderator rather than to decide for them. So a failed https fetch is retried once
+    over http, and which one answered is recorded.
+
+    Only a fetch *error* is retried. A 404 over https is an answer, and asking the same
+    server the same question again without TLS will get the same one.
+    """
+    over_https = crawl_url(f"https://{domain}/", redis)
+    if not over_https.get("error"):
+        return over_https, True
+
+    over_http = crawl_url(f"http://{domain}/", redis)
+    if over_http.get("error"):
+        # Neither worked. Report the https attempt: it is the one whose error describes what
+        # we would do in production, and reporting the http failure would say "no TLS" about
+        # a domain that simply is not there.
+        return over_https, False
+    return over_http, False
 
 
 def store_evidence(domain: str, crawl: dict) -> DomainEvidence:
@@ -81,6 +110,36 @@ def store_evidence(domain: str, crawl: dict) -> DomainEvidence:
             "pages": crawl["pages"],
             "signals": crawl["signals"],
             "evidence": [item.to_dict() for item in rules.crawl_evidence(domain, crawl)],
+        },
+    )
+    return evidence
+
+
+def store_failure(domain: str, error: str) -> DomainEvidence:
+    """Record that a domain could not be crawled, clearing what an earlier crawl left behind.
+
+    Everything the crawl produced goes with it, rather than only the state. The detail panel
+    renders whatever is on the row, so a month-old page list and its suggestion sitting next
+    to a FAILED state reads to a moderator as current evidence about a site that is now
+    unreachable - which is precisely the fact the state is trying to report.
+    """
+    evidence, _ = DomainEvidence.objects.update_or_create(
+        domain=domain,
+        defaults={
+            "state": DomainEvidence.State.FAILED,
+            "fetched_at": timezone.now(),      # when we last tried, not when we last succeeded
+            "error": error,
+            "http_status": None,
+            "final_domain": "",
+            "pages": [],
+            "signals": {},
+            "evidence": [],
+            "suggested_action": "",
+            "suggested_reason": "",
+            "confidence": None,
+            "reason_confidence": None,
+            "reason_source": "",
+            "model_version": "",
         },
     )
     return evidence
@@ -125,12 +184,17 @@ def _follow_up_urls(domain: str, homepage: dict, limit: int) -> list[str]:
 
 
 def _final_domain(homepage: dict, domain: str) -> str:
-    """The host we ended up on. crawl_url follows redirects and reports the URL it fetched."""
-    final = urlparse(homepage.get("url") or "").netloc
+    """The host we ended up on, empty when that is the domain we asked for.
+
+    ``resolved_url`` is the last hop of the redirect chain, which crawl_url reports separately
+    from ``url`` - the URL we asked for, and the one the rest of the crawler keys on. Reading
+    ``url`` here would compare the domain against itself and silently never find a redirect.
+    """
+    final = urlparse(homepage.get("resolved_url") or "").netloc
     return final if final and final != domain else ""
 
 
-def _signals(domain: str, pages: list[dict]) -> dict:
+def _signals(domain: str, pages: list[dict], https: bool) -> dict:
     text = " ".join(f"{page['title']} {page['extract']}" for page in pages).lower()
     try:
         blacklisted = get_snapshot_blacklist().is_domain_blacklisted(domain)
@@ -146,6 +210,7 @@ def _signals(domain: str, pages: list[dict]) -> dict:
         "ad_markers": sum(marker in text for marker in AD_MARKERS),
         "paywall_markers": sum(marker in text for marker in PAYWALL_MARKERS),
         "blacklisted": blacklisted,
+        "https": https,
     }
 
 
