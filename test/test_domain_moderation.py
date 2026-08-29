@@ -27,7 +27,7 @@ from mwmbl.moderation.features import Featuriser, ModerationExample
 from mwmbl.moderation.model import (
     Suggestion, get_model, load_metrics, publish, reset_model_cache, suggest)
 from mwmbl.moderation.suggest import annotate_queue, refresh_suggestion, suggestion_for
-from mwmbl.moderation.train import passes_gate
+from mwmbl.moderation.train import _suggestion_influence, passes_gate
 from mwmbl.moderation.training_data import TrainingRow, is_trainable_domain
 
 QUEUE_URL = "/api/v1/platform/domain-submissions/queue"
@@ -201,6 +201,25 @@ def test_derived_rows_never_reach_the_test_split():
     train_rows, test_rows = split_by_time(real + derived + seed)
     assert all(row.source == "real" for row in test_rows)
     assert {row.source for row in train_rows} == {"real", "derived", "seed"}
+
+
+def test_agreement_is_measured_against_the_action_that_was_shown():
+    """suggested_status records what the tool displayed - APPROVE, REJECT or UNSURE - so
+    comparing it against a submission status ("REJECTED") matched nothing and inverted the
+    count: every rejection the moderator agreed with was scored as a disagreement."""
+    def decided(rejected, shown):
+        return TrainingRow("example.com", rejected, "", "real", [], suggested_status=shown)
+
+    influence = _suggestion_influence([
+        decided(rejected=True, shown="REJECT"),      # agreed
+        decided(rejected=False, shown="REJECT"),     # disagreed
+        decided(rejected=False, shown="APPROVE"),    # agreed
+        decided(rejected=True, shown="UNSURE"),      # shown, but took no side
+        decided(rejected=True, shown=""),            # nothing was shown
+    ])
+
+    assert influence == {"real_rows": 5, "shown_a_suggestion": 4,
+                         "suggested_a_side": 3, "agreed_with_it": 2}
 
 
 # --------------------------------------------------------------------- API
@@ -423,6 +442,9 @@ def test_the_card_carries_its_sample_pages_and_padlock(client, moderator, establ
     DomainSubmission.objects.create(name="crawled.com", submitted_by=established)
     ready_evidence("crawled.com", signals={"has_links": True, "https": False})
     DomainSubmission.objects.create(name="uncrawled.com", submitted_by=established)
+    DomainSubmission.objects.create(name="unreachable.com", submitted_by=established)
+    ready_evidence("unreachable.com", signals={"has_links": False, "https": None},
+                   error="AbortError", http_status=None)
 
     items = {item["name"]: item
              for item in client.get(QUEUE_URL,
@@ -433,6 +455,8 @@ def test_the_card_carries_its_sample_pages_and_padlock(client, moderator, establ
     # Not False: an uncrawled domain must not draw an open padlock.
     assert items["uncrawled.com"]["https"] is None
     assert items["uncrawled.com"]["pages"] == []
+    # Nor a domain that was crawled and never answered - nothing was learned about its TLS.
+    assert items["unreachable.com"]["https"] is None
 
 
 @pytest.mark.django_db
@@ -935,7 +959,10 @@ def test_a_domain_that_is_simply_down_is_still_reported_as_unreachable():
         "http://gone.example/": ConnectionError("no route to host"),
     }, "gone.example")
 
-    assert crawl["signals"]["https"] is False
+    # Unknown, not absent: the rules layer already gates "no TLS" behind having reached the
+    # site, but the queue card reads this signal straight out of the row, and False there
+    # draws a definite "no TLS" for a domain nothing ever answered for.
+    assert crawl["signals"]["https"] is None
     assert crawl["error"] == "AbortError"
     kinds = {item.kind for item in rules.crawl_evidence("gone.example", crawl)}
     assert "no_tls" not in kinds
@@ -1100,11 +1127,12 @@ def test_a_withheld_approval_outranks_a_confident_one(client, moderator, submitt
 class _StubModel:
     """A stand-in for ModerationModel. joblib only needs it to pickle and carry a version."""
 
-    def __init__(self, version):
+    def __init__(self, version, score=0.5):
         self.version = version
+        self.score = score
 
     def predict(self, examples):
-        return [(0.5, "SPAM", 0.5) for _ in examples]
+        return [(self.score, "SPAM", self.score) for _ in examples]
 
 
 def artifact_bytes(model) -> bytes:
@@ -1136,6 +1164,22 @@ def test_a_worker_picks_up_a_retrain_it_did_not_run(monkeypatch):
         model=artifact_bytes(_StubModel("domain-mod-2026-10-01")))
 
     assert get_model().version == "domain-mod-2026-10-01"
+
+
+@pytest.mark.django_db
+def test_a_second_retrain_on_the_same_day_still_reaches_the_other_workers(monkeypatch):
+    """Versions are dated, so a same-day republish keeps the version and replaces the bytes.
+    A worker comparing versions alone would serve the superseded model until it restarted."""
+    publish(_StubModel("domain-mod-2026-09-01"), {"cold_start": {"pr_auc": 0.5}})
+    assert get_model().predict([None]) == [(0.5, "SPAM", 0.5)]
+
+    monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
+    # publish() drops the cache of the process that ran it, and this is any other worker.
+    monkeypatch.setattr(model_module, "reset_model_cache", lambda: None)
+    publish(_StubModel("domain-mod-2026-09-01", score=0.9), {"cold_start": {"pr_auc": 0.8}})
+
+    assert get_model().predict([None]) == [(0.9, "SPAM", 0.9)]
+    assert load_metrics()["cold_start"]["pr_auc"] == 0.8
 
 
 @pytest.mark.django_db
@@ -1215,6 +1259,24 @@ def test_a_rejection_reason_outside_the_four_choices_is_refused(client, moderato
         content_type="application/json", headers={"Authorization": token(moderator)})
 
     assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_a_decision_carrying_the_suggestion_action_as_its_status_is_refused(
+        client, moderator, submitter):
+    """"APPROVE" is what the tool suggests; "APPROVED" is what a submission becomes. Django
+    does not check choices on save(), so the near-miss used to be written to every submission
+    of the domain, which then matched neither the pending queue nor the approved set."""
+    DomainSubmission.objects.create(name="example.com", submitted_by=submitter)
+
+    response = client.post(
+        DECISIONS_URL,
+        data={"decisions": [{"domain": "example.com", "status": "APPROVE",
+                             "suggested_status": "APPROVE"}]},
+        content_type="application/json", headers={"Authorization": token(moderator)})
+
+    assert response.status_code == 422
+    assert DomainSubmission.objects.get(name="example.com").status == "PENDING"
 
 
 @pytest.mark.django_db

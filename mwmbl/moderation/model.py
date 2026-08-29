@@ -25,6 +25,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from logging import getLogger
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,7 @@ from typing import Optional
 import joblib
 import numpy as np
 from django.conf import settings
+from django.utils import timezone
 
 from mwmbl.models import ModerationModelArtifact
 from mwmbl.moderation.features import Featuriser, ModerationExample
@@ -167,7 +169,7 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
 
 
 _model: Optional[ModerationModel] = None
-_loaded_version: Optional[str] = None
+_loaded_stamp: Optional[tuple[str, datetime]] = None
 _checked_at: Optional[float] = None
 _lock = threading.Lock()
 
@@ -175,17 +177,17 @@ _lock = threading.Lock()
 def get_model() -> Optional[ModerationModel]:
     """The published model, reloaded when a retrain has published a newer one.
 
-    None (until the published version changes) when nothing can be loaded, so a suggestion
+    None (until the published artifact changes) when nothing can be loaded, so a suggestion
     falls back to the deterministic checks rather than failing.
     """
-    global _model, _loaded_version, _checked_at
+    global _model, _loaded_stamp, _checked_at
     with _lock:
         if _checked_at is not None and time.monotonic() - _checked_at < MODEL_REFRESH_SECONDS:
             return _model
-        published = _published_version()
-        if _checked_at is None or published != _loaded_version:
-            _model = _load(published)
-            _loaded_version = published
+        published = _published_stamp()
+        if _checked_at is None or published != _loaded_stamp:
+            _model = _load(published[0] if published else None)
+            _loaded_stamp = published
         _checked_at = time.monotonic()
     return _model
 
@@ -195,27 +197,36 @@ def publish(model: ModerationModel, metrics: dict) -> ModerationModelArtifact:
     buffer = io.BytesIO()
     joblib.dump(model, buffer)
     # Versions are dated, so a second retrain on the same day replaces the first rather than
-    # colliding on the unique version.
+    # colliding on the unique version. created_on is refreshed along with the bytes: it is
+    # what tells the other workers this row has changed, since the version they compare
+    # against has not.
     artifact, _ = ModerationModelArtifact.objects.update_or_create(
         version=model.version,
-        defaults={"model": buffer.getvalue(), "metrics": metrics})
+        defaults={"model": buffer.getvalue(), "metrics": metrics,
+                  "created_on": timezone.now()})
     reset_model_cache()
     return artifact
 
 
 def reset_model_cache() -> None:
     """Drop the cached model so the next call reloads. Used after a retrain, and by tests."""
-    global _model, _loaded_version, _checked_at
+    global _model, _loaded_stamp, _checked_at
     with _lock:
         _model = None
-        _loaded_version = None
+        _loaded_stamp = None
         _checked_at = None
 
 
-def _published_version() -> Optional[str]:
-    """The version of the newest stored artifact, or None to fall back to the bundled one."""
-    row = ModerationModelArtifact.objects.order_by("-created_on").values("version").first()
-    return row["version"] if row else None
+def _published_stamp() -> Optional[tuple[str, datetime]]:
+    """Version and write time of the newest stored artifact, None to fall back to the bundled.
+
+    The write time is part of the identity because versions are dated: a second retrain on the
+    same day replaces that row's bytes under the same version, and a worker comparing versions
+    alone would keep serving the superseded pickle until it restarted.
+    """
+    row = (ModerationModelArtifact.objects.order_by("-created_on")
+           .values("version", "created_on").first())
+    return (row["version"], row["created_on"]) if row else None
 
 
 def _load(version: Optional[str]) -> Optional[ModerationModel]:

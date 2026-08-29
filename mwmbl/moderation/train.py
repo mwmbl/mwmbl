@@ -183,11 +183,17 @@ def _suggestion_influence(rows: list[TrainingRow]) -> dict:
     """
     real = [row for row in rows if row.source == REAL]
     shown = [row for row in real if row.suggested_status]
-    agreed = [row for row in shown
-              if (row.suggested_status == "REJECTED") == row.rejected]
+    # suggested_status holds the *action* the tool displayed - APPROVE, REJECT or UNSURE -
+    # and not a submission status, so it is never "REJECTED". A suggestion of UNSURE takes no
+    # side, and a decision made against one agrees with nothing: it counts as shown, but is
+    # not part of the population agreement is measured over.
+    took_a_side = [row for row in shown if row.suggested_status in ("APPROVE", "REJECT")]
+    agreed = [row for row in took_a_side
+              if (row.suggested_status == "REJECT") == row.rejected]
     return {
         "real_rows": len(real),
         "shown_a_suggestion": len(shown),
+        "suggested_a_side": len(took_a_side),
         "agreed_with_it": len(agreed),
     }
 

@@ -72,8 +72,8 @@ def crawl_domain(domain: str, redis, max_pages: int = None) -> dict:
     }
 
 
-def _fetch_homepage(domain: str, redis) -> tuple[dict, bool]:
-    """The homepage, and whether it came back over TLS.
+def _fetch_homepage(domain: str, redis) -> tuple[dict, bool | None]:
+    """The homepage, and whether it came back over TLS - None when nothing came back.
 
     Only https used to be tried, which made "this site has no certificate" and "this site is
     down" the same result - a decisive REJECT for being unreachable. They are not the same
@@ -83,6 +83,9 @@ def _fetch_homepage(domain: str, redis) -> tuple[dict, bool]:
 
     Only a fetch *error* is retried. A 404 over https is an answer, and asking the same
     server the same question again without TLS will get the same one.
+
+    A domain neither attempt reached has no answer either way, and says so with None: False
+    there would be read as a fact about the site rather than about the fetch.
     """
     over_https = crawl_url(f"https://{domain}/", redis)
     if not over_https.get("error"):
@@ -92,8 +95,10 @@ def _fetch_homepage(domain: str, redis) -> tuple[dict, bool]:
     if over_http.get("error"):
         # Neither worked. Report the https attempt: it is the one whose error describes what
         # we would do in production, and reporting the http failure would say "no TLS" about
-        # a domain that simply is not there.
-        return over_https, False
+        # a domain that simply is not there. TLS is unknown rather than absent for the same
+        # reason: the queue card reads this signal directly, and False draws a definite
+        # "no TLS" on a domain nothing ever reached.
+        return over_https, None
     return over_http, False
 
 
@@ -194,7 +199,7 @@ def _final_domain(homepage: dict, domain: str) -> str:
     return final if final and final != domain else ""
 
 
-def _signals(domain: str, pages: list[dict], https: bool) -> dict:
+def _signals(domain: str, pages: list[dict], https: bool | None) -> dict:
     text = " ".join(f"{page['title']} {page['extract']}" for page in pages).lower()
     try:
         blacklisted = get_snapshot_blacklist().is_domain_blacklisted(domain)

@@ -167,24 +167,33 @@ class ConfirmEmail(Schema):
 
 
 class RejectionFieldsMixin:
-    """Validate the rejection reason and its detail, wherever a decision arrives.
+    """Validate a decision's status, its rejection reason and the detail, wherever it arrives.
 
-    Django enforces neither of these. ``choices`` is not checked on ``save()``, so an
-    arbitrary string of twenty characters or fewer lands in the column and comes back out at
-    a moderator as a reason nothing knows how to render; and nothing has ever required the
-    detail that "Other - needs detail" promises, which is the only place a rejected submitter
-    finds out what was actually wrong.
+    Django enforces none of these. ``choices`` is not checked on ``save()``, so an arbitrary
+    string of twenty characters or fewer lands in the column and comes back out at a moderator
+    as a reason nothing knows how to render; and nothing has ever required the detail that
+    "Other - needs detail" promises, which is the only place a rejected submitter finds out
+    what was actually wrong.
+
+    The same goes for ``status``, and there it is worse than unrenderable: a decision carrying
+    the *suggestion* action instead of a status - "APPROVE" for "APPROVED", which the same
+    payload also sends as ``suggested_status`` - is accepted and written to every submission of
+    the domain, which then matches neither the pending queue nor the approved set the blocklist
+    is built from, and disappears from moderation entirely.
 
     A schema validator rather than a check in the view, so these come back as a 422 naming
     the field, the same as an over-long audit value.
     """
 
     @model_validator(mode="after")
-    def _check_rejection(self):
+    def _check_decision_fields(self):
         # Both columns are blank=True, so ninja types them Optional and an omitted field
         # arrives as None rather than "".
         reason = self.rejection_reason or ""
         detail = self.rejection_detail or ""
+        if self.status not in DomainSubmission.DOMAIN_SUBMISSION_STATUS:
+            allowed = ", ".join(DomainSubmission.DOMAIN_SUBMISSION_STATUS)
+            raise ValueError(f"status must be one of: {allowed}")
         if reason and reason not in DomainSubmission.DOMAIN_REJECTION_REASON:
             allowed = ", ".join(DomainSubmission.DOMAIN_REJECTION_REASON)
             raise ValueError(f"rejection_reason must be one of: {allowed}")
