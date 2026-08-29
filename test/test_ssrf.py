@@ -124,9 +124,25 @@ def test_fetch_blocks_redirect_to_internal(monkeypatch):
 def test_fetch_returns_content_for_public_url(monkeypatch):
     monkeypatch.setattr(retrieve.requests, "get",
                         lambda *a, **k: _FakeResponse(200, body=b"page body"))
-    status, content = retrieve.fetch("http://93.184.216.34/page")
+    status, content, resolved_url = retrieve.fetch("http://93.184.216.34/page")
     assert status == 200
     assert content == b"page body"
+    assert resolved_url == "http://93.184.216.34/page"
+
+
+def test_fetch_reports_the_host_that_answered_not_the_one_we_asked(monkeypatch):
+    """The last hop is the only place a redirect is visible to a caller. Moderation rejects
+    domains that redirect elsewhere, and cannot see one if fetch reports the requested URL."""
+    def fake_get(url, **kwargs):
+        if url == "http://93.184.216.34/start":
+            return _FakeResponse(301, headers={"Location": "http://93.184.216.35/parked"},
+                                 is_redirect=True)
+        return _FakeResponse(200, body=b"parking page")
+
+    monkeypatch.setattr(retrieve.requests, "get", fake_get)
+    status, _, resolved_url = retrieve.fetch("http://93.184.216.34/start")
+    assert status == 200
+    assert resolved_url == "http://93.184.216.35/parked"
 
 
 # ---------------------------------------------------------------------------

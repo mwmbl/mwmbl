@@ -1,0 +1,45 @@
+# Hand-written moderation examples covering concepts neither the real decisions nor the public
+# blocklists supply. Small and deliberately so: this exists to teach the model that a category
+# exists, not to move aggregate numbers. Each row mirrors a rejection reason a moderator has
+# actually written in DomainSubmission.rejection_detail.
+#
+# Format: {"domain": ..., "status": APPROVED|REJECTED, "reason": ..., "text": optional page text}
+#
+# OFFENSIVE that is not adult content, which the blocklist rule in rules.py already covers
+# exactly. Only one real domain appears here - theonion.com, the single submission a moderator
+# actually labelled OFFENSIVE ("known to be satire still might be misleading"). The rest use
+# the reserved .example TLD: they are synthetic exemplars of a category, written so the class
+# has some shape, and deliberately not real sites. Converting a terse moderator note on a real
+# domain into a reason they did not themselves record would be putting our judgement into the
+# training data under their name.
+{"domain": "theonion.com", "status": "REJECTED", "reason": "OFFENSIVE", "text": "America's Finest News Source. Satirical news and headlines."}
+{"domain": "stormfront-mirror.example", "status": "REJECTED", "reason": "OFFENSIVE", "text": "White nationalist community forum and discussion board"}
+{"domain": "gore-archive.example", "status": "REJECTED", "reason": "OFFENSIVE", "text": "Shock content archive, graphic violence and death imagery"}
+{"domain": "8kunboards.example", "status": "REJECTED", "reason": "OFFENSIVE", "text": "Unmoderated imageboard, hate speech and harassment campaigns"}
+#
+# Do-not-crawl policy: other search engines and ourselves. Rejected with details such as
+# "don't crawl ourselves" and "same as google.com no actual useful links apart from the search UI".
+{"domain": "mwmbl.org", "status": "REJECTED", "reason": "OTHER", "text": "Mwmbl search. Free, open-source, non-profit search engine."}
+{"domain": "scholar.google.com", "status": "REJECTED", "reason": "OTHER", "text": "Google Scholar search. Stand on the shoulders of giants."}
+{"domain": "duckduckgo.com", "status": "REJECTED", "reason": "OTHER", "text": "Privacy, simplified. Search the web without being tracked."}
+{"domain": "4get.ca", "status": "REJECTED", "reason": "OTHER", "text": "Search. A proxy search engine front end."}
+{"domain": "startpage.com", "status": "REJECTED", "reason": "OTHER", "text": "Private search engine. Search results without tracking."}
+#
+# Promotion of a paid product: a real site, but the domain exists to sell one thing.
+{"domain": "receipt-bot.com", "status": "REJECTED", "reason": "OTHER", "text": "Automate your bookkeeping. Start your free trial today. Pricing from $29/month."}
+{"domain": "valvepackingsealkits.com", "status": "REJECTED", "reason": "OTHER", "text": "Buy valve packing seal kits online. Request a quote. Free shipping on orders over $500."}
+{"domain": "wheel-excavators.com", "status": "REJECTED", "reason": "OTHER", "text": "Wheel excavators for sale. Contact our sales team for a quote today."}
+{"domain": "royallp.example", "status": "REJECTED", "reason": "OTHER", "text": "Invest with us. Guaranteed returns. Sign up now and claim your bonus."}
+{"domain": "satire-headlines.example", "status": "REJECTED", "reason": "OFFENSIVE", "text": "Fake news you can trust. Satirical headlines presented as real reporting."}
+#
+# Sites whose content is not text, so there is nothing for a search index to hold.
+{"domain": "tiktok.com", "status": "REJECTED", "reason": "OTHER", "text": "Watch short videos. Trending videos and creators."}
+{"domain": "many.fan", "status": "REJECTED", "reason": "OTHER", "text": "Subscribe to creators. Unlock exclusive content with a paid membership."}
+#
+# Approvals, to keep the seed set from teaching the model that everything hand-written is bad.
+# These are the kinds of site the index exists for: documentation, reference, and long-form writing.
+{"domain": "docs.python.org", "status": "APPROVED", "reason": "", "text": "Python documentation. The Python language reference, library reference and tutorials."}
+{"domain": "developer.mozilla.org", "status": "APPROVED", "reason": "", "text": "MDN Web Docs. Resources for developers, by developers. HTML, CSS and JavaScript reference."}
+{"domain": "en.wikisource.org", "status": "APPROVED", "reason": "", "text": "Wikisource, the free library. Source texts and historical documents."}
+{"domain": "plato.stanford.edu", "status": "APPROVED", "reason": "", "text": "Stanford Encyclopedia of Philosophy. Peer-reviewed reference articles on philosophy."}
+{"domain": "lwn.net", "status": "APPROVED", "reason": "", "text": "LWN.net news from the source. In-depth reporting on the Linux kernel and free software."}

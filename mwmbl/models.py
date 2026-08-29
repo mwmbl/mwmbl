@@ -9,6 +9,7 @@ from ninja import ModelSchema
 from ninja.orm import create_schema
 
 from mwmbl.usernames import generate_username
+from mwmbl.utils import bare_host
 
 
 class MwmblUser(AbstractUser):
@@ -82,6 +83,11 @@ class DomainSubmission(models.Model):
         ]
         indexes = [
             models.Index(fields=['submitted_on']),
+            # The moderation queue asks "has this domain been decided before?" and "has this
+            # submitter?" once per row it renders, as correlated subqueries. Both are lookups
+            # into this table by a decided status. See mwmbl.moderation.suggest.
+            models.Index(fields=['name', 'status']),
+            models.Index(fields=['submitted_by', 'status']),
         ]
 
     DOMAIN_SUBMISSION_STATUS = {
@@ -105,6 +111,18 @@ class DomainSubmission(models.Model):
     status_changed_on = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
     rejection_detail = models.CharField(max_length=300, blank=True)
+
+    # What the suggestion model was showing when the moderator made this decision. Deliberately
+    # separate storage from the live suggestion on DomainEvidence: a retrain rewrites that row,
+    # and sharing the columns would silently rewrite the record of what was actually on screen.
+    # These are what make the suggestions' influence measurable: a retrain trains on decisions
+    # that were themselves made with a suggestion on screen, and without a record of what was
+    # shown there is no way to see that happening. The retrain does not yet weight rows by it -
+    # see mwmbl.moderation.training_data - it reports it.
+    suggested_status = models.CharField(max_length=20, blank=True)
+    suggested_reason = models.CharField(max_length=20, blank=True)
+    suggestion_confidence = models.FloatField(null=True, blank=True)
+    suggestion_model_version = models.CharField(max_length=50, blank=True)
 
 
 def random_api_key():
@@ -238,12 +256,23 @@ class SearchResultVote(models.Model):
     query = models.CharField(max_length=300)  # The search query context
     vote_type = models.CharField(max_length=10, choices=[(k, v) for k, v in VOTE_TYPES.items()])
     timestamp = models.DateTimeField(auto_now_add=True)
-    
+    # The host the URL belongs to, derived on save. Denormalised because the moderation queue
+    # rolls votes up per domain, and it orders and paginates thousands of pending domains on
+    # the result - which has to happen in the database, and cannot parse a URLField there.
+    domain = models.CharField(max_length=300, blank=True)
+
+    def save(self, *args, **kwargs):
+        self.domain = bare_host(self.url)
+        super().save(*args, **kwargs)
+
     class Meta:
         unique_together = ['user', 'url', 'query']  # One vote per user per result per query
         indexes = [
             models.Index(fields=['url', 'query']),
             models.Index(fields=['timestamp']),
+            # The per-domain rollup the moderation queue reads: count this domain's upvotes,
+            # count its downvotes. See mwmbl.moderation.suggest.annotate_votes.
+            models.Index(fields=['domain', 'vote_type']),
         ]
 
 
@@ -286,3 +315,93 @@ class SourceProvenance(models.Model):
             models.Index(fields=['source']),
             models.Index(fields=['timestamp']),
         ]
+
+
+class DomainEvidence(models.Model):
+    """Crawl evidence and the precomputed suggestion for a submitted domain.
+
+    Both the moderator's detail panel and the suggestion model read these rows, so what the
+    moderator is shown and what the model judged can never disagree. Everything here is
+    computed by a background task at submission time: the moderation queue is a plain indexed
+    read, with no inference on the request path.
+
+    Keyed on the domain rather than the submission because domains get resubmitted - 615 of
+    6,949 distinct names in the last judgments export had more than one submission - and the
+    crawl is about the domain, not about who asked for it.
+
+    What the queue orders on is *not* stored here. The suggestion a moderator sees depends on
+    rows this one knows nothing about - the submitter's record, and whether the domain has
+    since been decided - so the sort key is computed per query in SQL by
+    mwmbl.moderation.suggest.annotate_queue. Storing one would only ever be the answer to a
+    question nobody asked in that form.
+    """
+
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Queued for crawling"
+        READY = "READY", "Crawled and scored"
+        FAILED = "FAILED", "Crawling failed"
+
+    domain = models.CharField(max_length=300, unique=True)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+
+    # Crawl results.
+    http_status = models.IntegerField(null=True, blank=True)
+    final_domain = models.CharField(max_length=300, blank=True)   # after redirects
+    error = models.CharField(max_length=100, blank=True)          # RobotsDenied, AbortError, ...
+    pages = models.JSONField(default=list)      # [{url, status, title, extract}], up to 3
+    signals = models.JSONField(default=dict)    # derived: lang, has_links, ad_script_count, ...
+
+    # Precomputed suggestion. The queue reads these columns; it never calls the model.
+    suggested_action = models.CharField(max_length=10, blank=True)   # APPROVE | REJECT | UNSURE
+    suggested_reason = models.CharField(max_length=20, blank=True)
+    confidence = models.FloatField(null=True, blank=True)
+    # How sure we are of the *reason*, and where it came from - both separate from the numbers
+    # above, because a confident rejection can carry a barely-held guess at why. Storing them
+    # is what lets the API show the reason with its own confidence instead of the rejection's,
+    # and keeps `derived` (a reason class learned from blocklists rather than from moderator
+    # decisions) visible to the moderator it is a caveat for.
+    reason_confidence = models.FloatField(null=True, blank=True)
+    reason_source = models.CharField(max_length=10, blank=True)   # rule | model | derived
+    evidence = models.JSONField(default=list)   # cached rule + model evidence items
+    model_version = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["suggested_action", "suggested_reason"]),
+        ]
+
+    def __str__(self):
+        return f"{self.domain} ({self.state})"
+
+
+class ModerationModelArtifact(models.Model):
+    """A trained moderation suggester, stored where a deploy cannot overwrite it.
+
+    The artifact used to live in the source tree, which meant every deploy silently reverted
+    the monthly retrain to whatever was committed, and each worker replica kept its own
+    divergent copy. The database is the one place all the workers already agree on.
+
+    Rows accumulate: the newest is served, and the ones behind it are the record of what was
+    serving when a given decision was made. Versions are dated, so a second retrain on the
+    same day replaces its own row rather than adding one. ``metrics`` travels in the same row
+    as the model it describes, so the retrain gate cannot compare a candidate against numbers
+    that belong to a different artifact. At a monthly retrain that is ~12 MB a year.
+
+    The model bundled in mwmbl/moderation/artifacts is the warm start for a database with no
+    rows yet; nothing ever writes to it. See mwmbl.moderation.model.
+    """
+
+    version = models.CharField(max_length=50, unique=True)
+    model = models.BinaryField()                # joblib pickle of a ModerationModel, ~1 MB
+    metrics = models.JSONField(default=dict)    # what train.evaluate measured for this model
+    created_on = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        get_latest_by = "created_on"
+        indexes = [
+            models.Index(fields=["-created_on"]),
+        ]
+
+    def __str__(self):
+        return f"{self.version} ({self.created_on:%Y-%m-%d})"

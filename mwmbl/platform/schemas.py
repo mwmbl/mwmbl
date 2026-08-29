@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 from ninja import Schema, ModelSchema, Field
+from pydantic import model_validator
 
 from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
 
@@ -165,16 +166,221 @@ class ConfirmEmail(Schema):
     )
 
 
+class RejectionFieldsMixin:
+    """Validate a decision's status, its rejection reason and the detail, wherever it arrives.
+
+    Django enforces none of these. ``choices`` is not checked on ``save()``, so an arbitrary
+    string of twenty characters or fewer lands in the column and comes back out at a moderator
+    as a reason nothing knows how to render; and nothing has ever required the detail that
+    "Other - needs detail" promises, which is the only place a rejected submitter finds out
+    what was actually wrong.
+
+    The same goes for ``status``, and there it is worse than unrenderable: a decision carrying
+    the *suggestion* action instead of a status - "APPROVE" for "APPROVED", which the same
+    payload also sends as ``suggested_status`` - is accepted and written to every submission of
+    the domain, which then matches neither the pending queue nor the approved set the blocklist
+    is built from, and disappears from moderation entirely.
+
+    A schema validator rather than a check in the view, so these come back as a 422 naming
+    the field, the same as an over-long audit value.
+    """
+
+    @model_validator(mode="after")
+    def _check_decision_fields(self):
+        # Both columns are blank=True, so ninja types them Optional and an omitted field
+        # arrives as None rather than "".
+        reason = self.rejection_reason or ""
+        detail = self.rejection_detail or ""
+        if self.status not in DomainSubmission.DOMAIN_SUBMISSION_STATUS:
+            allowed = ", ".join(DomainSubmission.DOMAIN_SUBMISSION_STATUS)
+            raise ValueError(f"status must be one of: {allowed}")
+        if reason and reason not in DomainSubmission.DOMAIN_REJECTION_REASON:
+            allowed = ", ".join(DomainSubmission.DOMAIN_REJECTION_REASON)
+            raise ValueError(f"rejection_reason must be one of: {allowed}")
+        if reason and self.status != "REJECTED":
+            raise ValueError("rejection_reason is only meaningful when status is REJECTED")
+        if reason == "OTHER" and not detail.strip():
+            raise ValueError(
+                "rejection_detail is required when rejection_reason is OTHER - it is what "
+                "the submitter is shown")
+        return self
+
+
 class DomainSubmissionSchema(ModelSchema):
     class Meta:
         model = DomainSubmission
         fields = ["id", "name", "submitted_by", "submitted_on", "status", "rejection_reason", "rejection_detail"]
 
 
-class UpdateDomainSubmission(ModelSchema):
+class UpdateDomainSubmission(RejectionFieldsMixin, ModelSchema):
     class Meta:
         model = DomainSubmission
         fields = ["status", "rejection_reason", "rejection_detail"]
+
+    # Echoed back by the client so we record what the moderator was actually looking at.
+    # Optional: a client that shows no suggestions simply omits them, and a decision made
+    # without a suggestion is stored as exactly that rather than as a suggestion of "".
+    #
+    # The lengths match the columns these land in. Django does not enforce max_length on
+    # save(), so without them an over-long value is a 500 from Postgres where it should be a
+    # 400 naming the field.
+    suggested_status: Optional[str] = Field(
+        default=None, max_length=20,
+        description="The action the tool suggested, as shown to the moderator.")
+    suggested_reason: Optional[str] = Field(
+        default=None, max_length=20,
+        description="The rejection reason the tool suggested, if any.")
+    suggestion_confidence: Optional[float] = Field(
+        default=None, description="Confidence of the suggestion that was shown.")
+    suggestion_model_version: Optional[str] = Field(
+        default=None, max_length=50,
+        description="Version of the model that produced the shown suggestion.")
+
+
+class EvidenceItemSchema(Schema):
+    """One checkable fact behind a suggestion."""
+    kind: str = Field(description="Machine-readable check name, e.g. `http_status`.")
+    direction: str = Field(description="`reject`, `approve` or `neutral`.")
+    label: str = Field(description="Moderator-facing text, e.g. 'Homepage returns HTTP 404'.")
+
+
+class SuggestionSchema(Schema):
+    action: str = Field(description="`APPROVE`, `REJECT` or `UNSURE`.")
+    confidence: float
+    reason: str = Field(default="", description="Rejection reason; empty unless action is REJECT.")
+    reason_confidence: float = 0.0
+    reason_source: str = Field(
+        default="model",
+        description=(
+            "`rule` when a deterministic check decided it, `model` when the classifier did, "
+            "`derived` when the reason class is learned from public blocklists rather than "
+            "from moderator decisions and should be treated as a weaker hint."
+        ),
+    )
+    model_version: str = ""
+    evidence: list[EvidenceItemSchema] = []
+
+
+class CrawledPageSchema(Schema):
+    url: str
+    status: Optional[int] = None
+    title: str = ""
+    extract: str = ""
+    num_links: int = 0
+    error: str = ""
+
+
+class QueueItemSchema(Schema):
+    """One pending domain: everything the review card and its up-next row draw.
+
+    Keyed on the domain, not on a submission. A domain submitted nine times is one thing to
+    look at and one decision to make, so there is no single submission id behind a row -
+    decisions are addressed to `name` (see `DomainDecision`).
+
+    Everything a card shows is here so that moving to the next one costs no request: the
+    sample pages, the vote counts, the padlock and the suggestion all travel with the row.
+    """
+    name: str
+    submission_count: int = Field(
+        description="How many submissions of this domain are still pending.")
+    first_submitted_on: datetime = Field(
+        description="When this domain was first submitted, by whoever asked first.")
+    first_submitted_by: int
+    first_submitted_by_username: str
+    upvotes: int = Field(
+        description="Votes cast on results from this domain, ignoring a leading `www.`.")
+    downvotes: int
+    https: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether the homepage answered over TLS. `null` until the domain has been "
+            "crawled - an uncrawled domain must not draw an open padlock."
+        ))
+    evidence_state: str = Field(
+        description="`PENDING` while the domain is still being crawled, then `READY` or `FAILED`.")
+    pages: list[CrawledPageSchema] = Field(
+        default=[], description="The pages crawled from the domain, as shown on the card.")
+    suggestion: Optional[SuggestionSchema] = Field(
+        default=None,
+        description="Absent until the domain has been crawled. Never a placeholder.")
+
+
+class SubmissionDetailSchema(Schema):
+    """Everything a moderator needs to decide one submission."""
+    id: int
+    name: str
+    submitted_by: int
+    submitted_by_username: str = ""
+    submitted_on: datetime
+    status: str
+    rejection_reason: str = ""
+    rejection_detail: str = ""
+    evidence_state: str
+    suggestion: Optional[SuggestionSchema] = None
+    pages: list[CrawledPageSchema] = []
+    signals: dict = {}
+    submitter_record: dict = Field(
+        default={}, description="Counts of this submitter's previously approved/rejected domains.")
+    prior_decisions: dict = Field(
+        default={}, description="Counts of earlier decisions on this same domain.")
+    index_stats: dict = Field(
+        default={}, description="What the crawler already knows about this domain.")
+
+
+class DomainDecision(RejectionFieldsMixin, Schema):
+    """One decision, about one domain. Lengths match the columns these are stored in.
+
+    Addressed to the domain rather than to a submission id, because that is what a moderator
+    decided about: a decision settles every submission of the name at once, so nine asks for
+    the same site cannot end up half approved and half rejected.
+    """
+    domain: str = Field(max_length=300)
+    status: str = Field(max_length=20)
+    rejection_reason: str = Field(default="", max_length=20)
+    rejection_detail: str = Field(default="", max_length=300)
+    suggested_status: Optional[str] = Field(default=None, max_length=20)
+    suggested_reason: Optional[str] = Field(default=None, max_length=20)
+    suggestion_confidence: Optional[float] = None
+    suggestion_model_version: Optional[str] = Field(default=None, max_length=50)
+
+
+class BulkDecisionRequest(Schema):
+    """A screenful of individually-made decisions, sent in one request.
+
+    Deliberately not "accept all suggestions": each entry carries its own status, so the
+    client can only send choices a moderator actually made.
+    """
+    decisions: list[DomainDecision]
+
+
+class ModeratedDomainSchema(Schema):
+    """One domain in the moderation history: the decision that currently stands on it.
+
+    One row per domain, like the queue, and for the same reason - and it carries the
+    `suggested_*` audit columns so a moderator revisiting a call can see what was on screen
+    when it was made, rather than what the model would say about the domain today.
+    """
+    name: str
+    submission_count: int
+    status: str
+    rejection_reason: str = ""
+    rejection_detail: str = ""
+    first_submitted_on: datetime
+    first_submitted_by: int
+    first_submitted_by_username: str
+    status_changed_on: Optional[datetime] = None
+    status_changed_by: Optional[int] = None
+    status_changed_by_username: str = ""
+    suggested_status: str = ""
+    suggested_reason: str = ""
+    suggestion_confidence: Optional[float] = None
+    suggestion_model_version: str = ""
+
+
+class ModerationHistory(Schema):
+    """A page of past moderations. Same `items`/`count` shape as the queue."""
+    items: list[ModeratedDomainSchema]
+    count: int
 
 
 class VoteRequest(Schema):
@@ -277,3 +483,14 @@ class UserVoteHistory(Schema):
         description="When the vote was cast",
         example="2024-01-15T10:30:00Z"
     )
+
+
+class ModerationQueue(Schema):
+    """A page of the moderation queue. Shape matches the paginated endpoints the client
+    already consumes, so `items`/`count` need no special handling.
+
+    `count` is distinct pending *domains* - the "24 pending" in the header - not pending
+    submissions.
+    """
+    items: list[QueueItemSchema]
+    count: int

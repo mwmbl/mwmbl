@@ -9,7 +9,7 @@ Also contains Django Background Tasks for periodic maintenance:
 """
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from logging import getLogger, basicConfig
 from pathlib import Path
 from time import sleep
@@ -17,6 +17,8 @@ from time import sleep
 from background_task import background
 from django.conf import settings
 from django.core.cache import cache
+from django.core.management import call_command
+from django.db import transaction
 from redis import Redis
 
 from mwmbl import pricing
@@ -26,7 +28,10 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
-from mwmbl.models import OldIndex, UsageBucket
+from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
+from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
+from mwmbl.moderation.model import reset_model_cache
+from mwmbl.moderation.suggest import refresh_suggestion
 from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
 from mwmbl.tinysearchengine.copy_index import copy_pages
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -230,3 +235,82 @@ def report_usage_to_polar():
         return
 
     UsageBucket.objects.bulk_update(buckets_to_update, ["reported_overage"])
+
+
+# ---------------------------------------------------------------------------
+# Domain moderation suggestions (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+@background(schedule=0)
+def enrich_domain_submission(domain: str):
+    """Crawl a submitted domain and store the suggestion the moderation queue will read.
+
+    All of the cost of a suggestion lives here rather than on the moderator's request: three
+    page fetches, the deterministic checks, and the model. Scheduled by a post_save receiver
+    when a submission is created (mwmbl.signals).
+
+    Idempotent by design - the queue only asks for a suggestion, never for a fresh crawl - so
+    a domain whose evidence is still fresh is left alone. That matters because 615 of 6,949
+    distinct submitted domains have been submitted more than once.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=settings.MODERATION_EVIDENCE_MAX_AGE_DAYS)
+    existing = DomainEvidence.objects.filter(domain=domain).first()
+    if (existing is not None and existing.state == DomainEvidence.State.READY
+            and existing.fetched_at and existing.fetched_at > cutoff):
+        logger.info("Evidence for %s is still fresh, skipping crawl", domain)
+        return
+
+    redis = Redis.from_url(settings.REDIS_URL)
+    try:
+        crawl = crawl_domain(domain, redis)
+    except Exception as exception:
+        logger.exception("Failed to crawl %s for moderation", domain)
+        store_failure(domain, type(exception).__name__)
+        return
+
+    # One transaction, because the row is only useful once both halves are in it. Committing
+    # READY with no suggestion on it - a deploy restarting the worker in between would do it -
+    # leaves a row the freshness check above then skips for a month, so the queue would show
+    # "not assessed yet" for a domain that has in fact been crawled. Scoring failures are left
+    # to propagate: the transaction rolls back and the task runner retries, which is a better
+    # answer than recording a crawl that did happen as a crawl failure.
+    with transaction.atomic():
+        evidence = store_evidence(domain, crawl)
+        refresh_suggestion(evidence)
+    logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action,
+                evidence.confidence or 0.0)
+
+
+@background(schedule=0)
+def rescore_pending_submissions():
+    """Recompute stored suggestions for everything still awaiting moderation.
+
+    Run after a retrain. Without it a new model would only ever affect submissions made after
+    it shipped, leaving the existing queue scored by its predecessor. No crawling is involved
+    - the page text is already stored - so the whole backlog re-scores in seconds.
+    """
+    reset_model_cache()
+    pending_domains = set(DomainSubmission.objects
+                          .filter(status="PENDING")
+                          .values_list("name", flat=True))
+    queryset = DomainEvidence.objects.filter(domain__in=pending_domains,
+                                             state=DomainEvidence.State.READY)
+
+    rescored = 0
+    for evidence in queryset.iterator():
+        refresh_suggestion(evidence)
+        rescored += 1
+    logger.info("Rescored %d pending submissions", rescored)
+
+
+@background(schedule=0)
+def retrain_domain_moderation_model():
+    """Retrain the moderation suggester on the decisions made since the last run.
+
+    Safe to automate because the gate, not a human, is what stops a regression: the new model
+    is only published if its cold-start PR-AUC clears the lower bound of the incumbent's
+    bootstrap interval. It runs in this worker, which is also the only process that loads the
+    model, so the reload and the pending-queue rescore both take effect immediately.
+    """
+    call_command("train_domain_moderation_model")

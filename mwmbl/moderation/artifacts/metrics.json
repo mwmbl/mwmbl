@@ -1,0 +1,41 @@
+{
+  "all": {
+    "slice": "all",
+    "rows": 949,
+    "positives": 89,
+    "pr_auc": 0.3987,
+    "pr_auc_ci": [
+      0.3007,
+      0.4949
+    ],
+    "recall_at_precision_75": 0.2135
+  },
+  "cold_start": {
+    "slice": "cold_start",
+    "rows": 150,
+    "positives": 81,
+    "pr_auc": 0.7788,
+    "pr_auc_ci": [
+      0.6885,
+      0.8588
+    ],
+    "recall_at_precision_75": 0.4074
+  },
+  "reason_head": {
+    "rows": 71,
+    "f1": {
+      "LANGUAGE": 0.0,
+      "OTHER": 0.3448,
+      "SPAM": 0.8288
+    },
+    "support": {
+      "LANGUAGE": 2,
+      "OTHER": 13,
+      "SPAM": 56
+    }
+  },
+  "train_rows_by_source": {
+    "real": 2847,
+    "seed": 21
+  }
+}

@@ -351,3 +351,27 @@ EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache k
 # A query a provider has nothing for is worth remembering too, or it is re-fetched forever.
 # Shorter, because a result appearing is a likelier change than an existing one moving.
 EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+# Domain moderation suggestions. The model is loaded only by the background worker that
+# enriches submissions - the queue reads the stored suggestion - so a missing artifact
+# degrades to the deterministic checks rather than affecting any moderator request.
+#
+# Retrained models are stored in Postgres (mwmbl.models.ModerationModelArtifact), because a
+# container filesystem is neither shared between workers nor kept across a deploy. This
+# directory holds the read-only warm start used until the first retrain publishes one.
+DOMAIN_MODERATION_MODEL_DIR = os.environ.get(
+    "DOMAIN_MODERATION_MODEL_DIR",
+    str(Path(__file__).parent / "moderation" / "artifacts"))
+MODERATION_PAGES_PER_DOMAIN = 3      # homepage plus two, shown to the moderator and read by the model
+# Both measured on held-out decisions rather than picked as round numbers. At 0.75 a suggested
+# rejection is right 81% of the time overall and 88% for submitters with no track record; at
+# 0.25 a suggested approval is wrong 6% of the time overall. Between the two the suggestion is
+# UNSURE, which the queue surfaces as needing a human.
+#
+# The approve side is *also* withheld entirely for submitters with no track record, where it
+# would otherwise be wrong 44% of the time - see mwmbl.moderation.suggest. That, rather than
+# these two numbers, is where the asymmetry between approving and rejecting lives.
+MODERATION_REJECT_THRESHOLD = 0.75
+MODERATION_APPROVE_THRESHOLD = 0.25
+MODERATION_EVIDENCE_MAX_AGE_DAYS = 30    # refetch rather than reuse evidence older than this
+MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60   # monthly; the gate guards each publish

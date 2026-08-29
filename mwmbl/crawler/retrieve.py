@@ -60,6 +60,10 @@ def fetch(url):
     Redirects are followed manually so each hop can be re-validated against the
     SSRF guard: a public URL must not be able to 3xx us into an internal address.
 
+    Returns (status code, content, resolved URL). The resolved URL is the last hop, which is
+    the only place the redirect chain is visible to a caller: it says which host actually
+    served the page, rather than which one we asked.
+
     https://stackoverflow.com/a/22347526
     """
 
@@ -89,7 +93,7 @@ def fetch(url):
                 logger.debug(f"Maximum size reached for URL {url}")
                 break
 
-        return r.status_code, content
+        return r.status_code, content, url
 
     raise ValueError(f"Too many redirects for URL {url}")
 
@@ -114,7 +118,7 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         return allowed
 
     try:
-        status_code, content = fetch(robots_url)
+        status_code, content, _ = fetch(robots_url)
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Robots error: {robots_url}, {e}")
         _cache_robots_content(redis, domain, [], error=True)
@@ -320,7 +324,7 @@ def crawl_url(url, redis: Redis):
         }
 
     try:
-        status_code, content = fetch(url)
+        status_code, content, resolved_url = fetch(url)
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Exception crawling URl {url}: {e}")
         return {
@@ -337,6 +341,7 @@ def crawl_url(url, redis: Redis):
     if len(content) == 0:
         return {
             'url': url,
+            'resolved_url': resolved_url,
             'status': status_code,
             'timestamp': js_timestamp,
             'content': None,
@@ -354,6 +359,7 @@ def crawl_url(url, redis: Redis):
         logger.exception(f"Error parsing dom: {url}")
         return {
             'url': url,
+            'resolved_url': resolved_url,
             'status': status_code,
             'timestamp': js_timestamp,
             'content': None,
@@ -380,6 +386,7 @@ def crawl_url(url, redis: Redis):
         logger.exception("Error parsing paragraphs - offending control bytes: %s", bad_bytes)
         return {
             'url': url,
+            'resolved_url': resolved_url,
             'status': status_code,
             'timestamp': js_timestamp,
             'content': None,
@@ -424,6 +431,7 @@ def crawl_url(url, redis: Redis):
 
     return {
       'url': url,
+      'resolved_url': resolved_url,
       'status': status_code,
       'timestamp': js_timestamp,
       'content': {

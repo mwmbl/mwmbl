@@ -93,6 +93,20 @@ def normalize_domain(domain_or_url: str) -> str:
     return netloc.lower()
 
 
+def bare_host(domain_or_url: str) -> str:
+    """:func:`normalize_domain`, minus a leading ``www.``.
+
+        >>> bare_host("https://www.example.com/a/b?c=d"), bare_host("example.com")
+        ('example.com', 'example.com')
+
+    Votes are cast against result URLs and domains are submitted by hand, so the two disagree
+    about ``www.`` constantly. Reducing both sides to the same host is what makes a vote on
+    www.example.com/x count towards a submission of example.com.
+    """
+    host = normalize_domain(domain_or_url)
+    return host[4:] if host.startswith("www.") else host
+
+
 def validate_domain(domain_or_url: str):
     domain = normalize_domain(domain_or_url)
     if VALID_DOMAIN_REGEX.fullmatch(domain) is None:
