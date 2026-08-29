@@ -160,3 +160,51 @@ def test_api_update_submission_status_grants_moderator_permission(client, verifi
     assert response.status_code == 200
     submission.refresh_from_db()
     assert submission.status == "APPROVED"
+
+
+@pytest.mark.django_db
+def test_api_update_status_rejects_a_moderation_action_as_a_status(client, verified_user, access_token):
+    """"APPROVE" is the word a client shows its moderator; "APPROVED" is the status.
+
+    Posting the former used to be accepted and written straight to the column - `choices` is
+    checked by full_clean(), which save() never calls - and the submission then matched
+    neither the pending queue nor the approved set, so the decision vanished. It is a 422
+    naming the field now.
+    """
+    submission = DomainSubmission.objects.create(name="example.com", submitted_by=verified_user)
+    verified_user.user_permissions.add(Permission.objects.get(
+        codename="change_domain_submission_status", content_type__app_label="mwmbl"))
+
+    response = client.post(
+        f"/api/v1/platform/domain-submissions/ids/{submission.id}",
+        data=json.dumps({"status": "APPROVE", "rejection_reason": "", "rejection_detail": ""}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+
+    assert response.status_code == 422
+    assert "status must be one of" in response.content.decode()
+    submission.refresh_from_db()
+    assert submission.status == "PENDING"
+
+
+@pytest.mark.django_db
+def test_api_update_status_accepts_an_approval_without_rejection_fields(client, verified_user, access_token):
+    """Both rejection columns are NOT NULL, and ninja types them Optional, so omitting them
+    on an approval sent None into the column and came back as a 500."""
+    submission = DomainSubmission.objects.create(name="example.com", submitted_by=verified_user)
+    verified_user.user_permissions.add(Permission.objects.get(
+        codename="change_domain_submission_status", content_type__app_label="mwmbl"))
+
+    response = client.post(
+        f"/api/v1/platform/domain-submissions/ids/{submission.id}",
+        data=json.dumps({"status": "APPROVED"}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+
+    assert response.status_code == 200
+    submission.refresh_from_db()
+    assert submission.status == "APPROVED"
+    assert submission.rejection_reason == ""
+    assert submission.rejection_detail == ""

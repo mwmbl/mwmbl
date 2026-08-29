@@ -76,6 +76,23 @@ class OldIndex(models.Model):
     last_page_copied = models.IntegerField(null=True, blank=True)
 
 
+# Module level rather than class attributes because the check constraints below need them,
+# and a nested Meta cannot see names from the class body it sits in. The class attributes are
+# kept as aliases: they are what the API schemas and management commands read.
+DOMAIN_SUBMISSION_STATUS = {
+    "PENDING": "The domain submission is awaiting review",
+    "APPROVED": "The domain submission has been approved",
+    "REJECTED": "The domain submission has been rejected",
+}
+
+DOMAIN_REJECTION_REASON = {
+    "SPAM": "The domain submission was rejected because it was spam",
+    "OFFENSIVE": "The domain submission was rejected because it was offensive",
+    "LANGUAGE": "The domain is in an unsupported language",
+    "OTHER": "The domain submission was rejected for another reason",
+}
+
+
 class DomainSubmission(models.Model):
     class Meta:
         permissions = [
@@ -89,19 +106,26 @@ class DomainSubmission(models.Model):
             models.Index(fields=['name', 'status']),
             models.Index(fields=['submitted_by', 'status']),
         ]
+        constraints = [
+            # `choices` is documentation, not enforcement: it is checked by full_clean(),
+            # which save() never calls, and it produces no database constraint at all. A
+            # moderation client that posted the action it shows the moderator - "APPROVE" for
+            # "APPROVED" - therefore wrote that straight into the column, where it matched
+            # neither the pending queue nor the approved set the curated domains are built
+            # from, and the decision disappeared. 1,785 rows were written that way before
+            # migration 0037 repaired them and added these.
+            models.CheckConstraint(
+                condition=models.Q(status__in=list(DOMAIN_SUBMISSION_STATUS)),
+                name="domain_submission_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(rejection_reason__in=[""] + list(DOMAIN_REJECTION_REASON)),
+                name="domain_submission_rejection_reason_valid",
+            ),
+        ]
 
-    DOMAIN_SUBMISSION_STATUS = {
-        "PENDING": "The domain submission is awaiting review",
-        "APPROVED": "The domain submission has been approved",
-        "REJECTED": "The domain submission has been rejected",
-    }
-
-    DOMAIN_REJECTION_REASON = {
-        "SPAM": "The domain submission was rejected because it was spam",
-        "OFFENSIVE": "The domain submission was rejected because it was offensive",
-        "LANGUAGE": "The domain is in an unsupported language",
-        "OTHER": "The domain submission was rejected for another reason",
-    }
+    DOMAIN_SUBMISSION_STATUS = DOMAIN_SUBMISSION_STATUS
+    DOMAIN_REJECTION_REASON = DOMAIN_REJECTION_REASON
 
     name = models.CharField(max_length=300)
     submitted_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="domain_submissions")

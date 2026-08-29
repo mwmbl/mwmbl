@@ -261,8 +261,11 @@ def apply_decision(submission: DomainSubmission, decision, user) -> None:
     of the suggestions on decisions stays measurable.
     """
     submission.status = decision.status
-    submission.rejection_reason = decision.rejection_reason
-    submission.rejection_detail = decision.rejection_detail
+    # Both columns are NOT NULL, and ninja types a blank=True CharField as Optional, so a
+    # client that simply omits the rejection fields on an approval sends None and would
+    # otherwise get an IntegrityError back as a 500.
+    submission.rejection_reason = decision.rejection_reason or ""
+    submission.rejection_detail = decision.rejection_detail or ""
     submission.status_changed_by = user
     submission.status_changed_on = timezone.now()
     submission.suggested_status = decision.suggested_status or ""
