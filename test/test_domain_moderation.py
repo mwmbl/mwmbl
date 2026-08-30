@@ -1409,6 +1409,38 @@ def test_an_artifact_from_a_different_feature_set_degrades_to_the_rules(tmp_path
     assert (suggestion.action, suggestion.model_version) == ("UNSURE", "")
 
 
+@pytest.mark.django_db
+def test_a_model_newer_than_the_code_degrades_instead_of_ending_the_run(tmp_path, settings):
+    """is_compatible() protects the running code from an artifact older than it. Nothing can
+    protect it from a *newer* one: a featuriser is pickled whole, so a model trained by code
+    with one more feature produces a matrix the workers cannot use and they cannot know that
+    until they try. A retrain from a freshly built image did exactly that in August 2026 and
+    failed all 2,409 rows of a queue rescore, retrying forever on the same exception."""
+    joblib.dump(_StaleFeatureSetModel(), tmp_path / "model.joblib")
+    settings.DOMAIN_MODERATION_MODEL_DIR = str(tmp_path)
+
+    # The model is handed in directly, as a worker holding an already-loaded one would have it,
+    # so the load-time probe is bypassed exactly the way it is in production.
+    suggestion = suggest("a.com", [], [], model=_StaleFeatureSetModel())
+
+    assert (suggestion.action, suggestion.confidence) == ("UNSURE", 0.0)
+    assert suggestion.model_version == ""
+
+
+@pytest.mark.django_db
+def test_a_decisive_check_still_wins_over_a_model_that_cannot_score():
+    """The deterministic checks do not need the model, so an unscorable one must not downgrade
+    a decisive answer to UNSURE."""
+    items = [rules.EvidenceItem(kind="http_error", direction="REJECT",
+                                label="Homepage returns 404", implies_action="REJECT",
+                                implies_reason="OTHER", implies_confidence=0.95)]
+
+    suggestion = suggest("a.com", [], items, model=_StaleFeatureSetModel())
+
+    assert suggestion.action == "REJECT"
+    assert suggestion.reason_source == "rule"
+
+
 # --------------------------------------------------------------------- request validation
 
 @pytest.mark.django_db

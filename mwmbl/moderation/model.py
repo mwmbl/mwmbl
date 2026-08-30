@@ -155,8 +155,21 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
         return Suggestion(action="UNSURE", confidence=0.0, model_version="",
                           evidence=[item.to_dict() for item in evidence_items])
 
-    reject_probability, reason, reason_confidence = model.predict(
-        [ModerationExample(domain, page_texts)])[0]
+    try:
+        reject_probability, reason, reason_confidence = model.predict(
+            [ModerationExample(domain, page_texts)])[0]
+    except Exception:
+        # The same degradation, for a model that loaded but cannot score. is_compatible()
+        # catches this at load time, but only for artifacts *older* than the running code -
+        # it cannot protect code that is older than the artifact. A retrain run from a freshly
+        # built image publishes a model every not-yet-restarted worker then chokes on, and in
+        # August 2026 that failed all 2,409 rows of a queue rescore and left the task retrying
+        # on the same exception. One unscorable domain is a suggestion we do not have; it is
+        # not a reason to end the run.
+        logger.exception("Model %s could not score %s; falling back to the deterministic "
+                         "checks", model.version, domain)
+        return Suggestion(action="UNSURE", confidence=0.0, model_version="",
+                          evidence=[item.to_dict() for item in evidence_items])
 
     if reject_probability >= settings.MODERATION_REJECT_THRESHOLD:
         action, confidence = "REJECT", reject_probability

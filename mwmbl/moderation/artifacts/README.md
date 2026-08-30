@@ -58,6 +58,22 @@ and every deploy runs on the deterministic checks alone until the first retrain 
 probe is what turns that from an exception per domain inside the enrichment task into an honest
 "not assessed yet" — it is not a licence to leave the artifact stale.
 
+## Retrain from the image the workers are running
+
+`is_compatible()` protects the running code from an artifact **older** than it. Nothing can
+protect it from one that is *newer*: a featuriser is pickled whole, so a model trained by code
+with one more feature than the workers build produces a matrix they cannot use, and they have no
+way to know that in advance.
+
+That is not hypothetical. In August 2026 a retrain run through `dokku enter` on a freshly built
+image published a model with nine shape features while the long-running container was still on
+eight. Every one of the 2,409 rows in the queue rescore failed with `X has 57673 features, but
+LogisticRegression is expecting 57674`, and the task retried on the same exception.
+
+So **deploy first, then retrain** — the process that publishes must be running the same image as
+the process that serves. If it happens anyway, delete the offending `ModerationModelArtifact` row
+and the workers fall back to the warm start here; then deploy and retrain again.
+
 ## What this version was trained on
 
 The committed artifact comes from the judgments export, which carries no page text. Only the 21
