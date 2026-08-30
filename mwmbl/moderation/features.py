@@ -38,8 +38,12 @@ MAX_TEXT_CHARS = 2000
 # penalty then charges for, and has_text is the one feature that most needs to be heard.
 SHAPE_SCALE = 40.0
 COUNT_FEATURE_NAMES = ["len", "labels", "digits", "hyphens", "sld_len", "spamwords", "tld_len"]
-INDICATOR_FEATURE_NAMES = ["www", "has_text"]
-NUM_SHAPE_FEATURES = len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES)
+INDICATOR_FEATURE_NAMES = ["www"]
+# Held out separately from the text block, because the two can fail independently: the block
+# can earn its place while the indicator is a trap. See Featuriser.
+OPTIONAL_INDICATOR_FEATURE_NAMES = ["has_text"]
+NUM_SHAPE_FEATURES = (len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES)
+                      + len(OPTIONAL_INDICATOR_FEATURE_NAMES))
 
 
 @dataclass
@@ -77,19 +81,12 @@ def shape_features(domain: str) -> list[float]:
     ]
 
 
-def indicator_features(example: "ModerationExample") -> list[float]:
-    """The unscaled 0/1 features, in INDICATOR_FEATURE_NAMES order.
-
-    ``has_text`` exists because an empty text block and a page whose words are all out of
-    vocabulary produce the same all-zero TF-IDF row, and they are not the same thing. Evidence
-    is crawled for recent submissions first, so in a chronological split most training rows
-    have no text and most test rows do; without this the model cannot tell the two apart, and
-    the difference is silently absorbed into the intercept it fitted on the training mix.
-    """
-    return [
-        float(example.domain.lower().startswith("www.")),
-        float(bool(example.text.strip())),
-    ]
+def indicator_features(example: "ModerationExample", use_has_text: bool = True) -> list[float]:
+    """The unscaled 0/1 features, in INDICATOR + OPTIONAL_INDICATOR name order."""
+    indicators = [float(example.domain.lower().startswith("www."))]
+    if use_has_text:
+        indicators.append(float(bool(example.text.strip())))
+    return indicators
 
 
 class Featuriser:
@@ -99,10 +96,27 @@ class Featuriser:
     training saw rather than rebuilding one from different data.
     """
 
-    def __init__(self, use_text: bool = True):
-        # Set False to fit the domain-name-only model, so the ablation that answers "is the
-        # crawled page text helping?" runs through exactly this code rather than a copy of it.
+    def __init__(self, use_text: bool = True, use_has_text: bool = True):
+        """``use_text`` fits the page-text vocabulary; ``use_has_text`` the "was it crawled at
+        all" indicator. Two flags rather than one because the two can fail independently, and
+        the August 2026 numbers suggest they did.
+
+        ``has_text`` exists because an empty text block and a page whose words are all out of
+        vocabulary produce the same all-zero TF-IDF row, and they are not the same thing. But
+        evidence is crawled newest-first, so under a chronological split the indicator is also
+        a proxy for *recency* - 46% of training rows against 92% of cold-start test rows in the
+        first production run - and recency is when the .ai spam wave happened. A model can
+        therefore learn ``has_text -> reject`` from the training mix and then apply it to a test
+        set where almost everything has text: the ordering barely moves, so PR-AUC does not
+        notice, but the whole score distribution shifts through the serving threshold and
+        precision at the head collapses. Recall at 75% precision halved between the two
+        production runs, which is the shape of exactly that.
+
+        So it is ablatable, and the honest fix is to even out the coverage by backfilling
+        evidence for older submissions rather than to argue about the feature.
+        """
         self.use_text = use_text
+        self.use_has_text = use_has_text
         # char_wb over the domain: catches the morphology of generated spam names, and the
         # word-boundary variant keeps n-grams from spanning label boundaries.
         self.domain_chars = TfidfVectorizer(
@@ -150,10 +164,10 @@ class Featuriser:
         blocks.append(self._shape_block(examples))
         return hstack(blocks).tocsr()
 
-    @staticmethod
-    def _shape_block(examples: list[ModerationExample]) -> csr_matrix:
+    def _shape_block(self, examples: list[ModerationExample]) -> csr_matrix:
         counts = np.array([shape_features(example.domain) for example in examples], dtype=float)
-        indicators = np.array([indicator_features(example) for example in examples], dtype=float)
+        indicators = np.array([indicator_features(example, self.use_has_text)
+                               for example in examples], dtype=float)
         return csr_matrix(np.hstack([counts / SHAPE_SCALE, indicators]))
 
     def feature_names(self) -> np.ndarray:
@@ -165,5 +179,7 @@ class Featuriser:
         if self.text is not None:
             names.append(np.array([f"text={name}"
                                    for name in self.text.get_feature_names_out()]))
-        names.append(np.array(COUNT_FEATURE_NAMES + INDICATOR_FEATURE_NAMES))
+        indicators = INDICATOR_FEATURE_NAMES + (
+            OPTIONAL_INDICATOR_FEATURE_NAMES if self.use_has_text else [])
+        names.append(np.array(COUNT_FEATURE_NAMES + indicators))
         return np.concatenate(names)

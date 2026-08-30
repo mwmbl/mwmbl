@@ -45,11 +45,17 @@ class Command(BaseCommand):
                             help="Publish even if the gate fails")
         parser.add_argument(
             "--no-text", action="store_true", dest="no_text",
-            help="Fit on the domain name alone, ignoring crawled page text")
+            help="Fit on the domain name alone, ignoring the crawled page text vocabulary")
+        parser.add_argument(
+            "--no-has-text", action="store_true", dest="no_has_text",
+            help=("Drop the was-it-crawled indicator. Evidence is crawled newest-first, so it "
+                  "doubles as a proxy for recency and can move the score distribution through "
+                  "the serving threshold; --ablate measures whether it is doing that here"))
         parser.add_argument(
             "--ablate", action="store_true",
-            help=("Also train the domain-name-only model and report both, so the contribution "
-                  "of the crawled page text is measured on the same split rather than guessed"))
+            help=("Also train without the page-text vocabulary and without the has_text "
+                  "indicator, and report all three on the same split, so each is measured "
+                  "rather than guessed"))
         parser.add_argument(
             "--derived", action="store_true",
             help=("Add blocklist-derived rows for reason classes short of real data. Off by "
@@ -79,7 +85,7 @@ class Command(BaseCommand):
         # no longer featurise - the gate falls back to the stored metrics and says so.
         incumbent = load_published_model()
         model, metrics = train(rows, version, use_text=not options["no_text"],
-                               incumbent=incumbent)
+                               use_has_text=not options["no_has_text"], incumbent=incumbent)
         self.stdout.write(json.dumps(metrics, indent=2))
 
         if options["ablate"]:
@@ -101,30 +107,51 @@ class Command(BaseCommand):
         rescore_pending_submissions(schedule=0)
         self.stdout.write("Scheduled a rescore of the pending queue with the new model.")
 
-    def _report_ablation(self, rows, version, with_text: dict) -> None:
-        """Train the same model without the text block and print both cold-start scores.
+    def _report_ablation(self, rows, version, full: dict) -> None:
+        """Hold out each half of the page-text features in turn, on the same split.
 
-        Same rows, same split, same seed, so the difference is the text block and nothing else.
-        Normalised AP rather than PR-AUC because the two fits see identical prevalence here and
-        it keeps the number on the same scale as everything else the retrain reports.
+        Same rows, same seed, so each line differs from the one above it by one thing. Both
+        ranking quality and the *operating point* are reported: a feature can hold the ranking
+        while shifting the score distribution through MODERATION_REJECT_THRESHOLD, which is
+        what appears to have happened to has_text, and normalised AP alone cannot see it.
         """
-        _, without_text = train(rows, f"{version}-no-text", use_text=False)
-        self.stdout.write("\nAblation - does the crawled page text help?")
-        for name, metrics in (("with text", with_text), ("domain name only", without_text)):
+        _, no_text = train(rows, f"{version}-no-text", use_text=False, use_has_text=False)
+        _, no_has_text = train(rows, f"{version}-no-has-text", use_has_text=False)
+
+        self.stdout.write("\nAblation - are the page-text features earning their place?")
+        self.stdout.write(f"  {'':>22}  {'norm AP':>17}  {'reject P':>16}  "
+                          f"{'reject R':>16}  {'unsure':>7}")
+        for name, metrics in (("text + has_text", full),
+                              ("text, no has_text", no_has_text),
+                              ("domain name only", no_text)):
             cold = metrics.get("cold_start")
             if cold is None:
-                self.stdout.write(f"  {name:>16}: no cold-start slice")
+                self.stdout.write(f"  {name:>22}: no cold-start slice")
                 continue
+            at = cold["at_thresholds"]
             self.stdout.write(
-                f"  {name:>16}: normalised AP {cold['normalised_ap']:.4f} "
-                f"[{cold['normalised_ap_ci'][0]:.4f}, {cold['normalised_ap_ci'][1]:.4f}]  "
-                f"(PR-AUC {cold['pr_auc']:.4f}, base rate {cold['base_rate']:.4f})")
+                f"  {name:>22}  {self._with_interval(cold['normalised_ap'], cold['normalised_ap_ci'])}  "
+                f"{self._with_interval(at['reject_precision'], at['reject_precision_ci'])}  "
+                f"{self._with_interval(at['reject_recall'], at['reject_recall_ci'])}  "
+                f"{at['unsure_share']:>7.3f}")
+
+        cold = full.get("cold_start", {})
         self.stdout.write(
-            f"  {with_text.get('train_rows_with_text', 0)} of "
-            f"{sum(with_text.get('train_rows_by_source', {}).values())} training rows and "
-            f"{with_text.get('cold_start', {}).get('rows_with_text', 0)} of "
-            f"{with_text.get('cold_start', {}).get('rows', 0)} cold-start test rows have text. "
-            f"A large gap between those two is the skew to fix before reading the ablation.\n")
+            f"\n  {full.get('train_rows_with_text', 0)} of "
+            f"{sum(full.get('train_rows_by_source', {}).values())} training rows and "
+            f"{cold.get('rows_with_text', 0)} of {cold.get('rows', 0)} cold-start test rows "
+            f"have text.\n  A large gap between those two makes has_text a proxy for recency "
+            f"rather than for evidence, and the fix is to backfill evidence for the older "
+            f"submissions rather than to argue about the feature.\n")
+
+    @staticmethod
+    def _with_interval(value, interval) -> str:
+        """A point estimate and its interval, or a dash where the threshold selected nothing."""
+        if value is None:
+            return f"{'-':>16}"
+        if interval is None:
+            return f"{value:>6.3f}          "
+        return f"{value:>6.3f} [{interval[0]:.2f},{interval[1]:.2f}]"
 
     @staticmethod
     def _reasons_needing_data(rows) -> set[str]:

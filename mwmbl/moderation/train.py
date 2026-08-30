@@ -32,6 +32,7 @@ from logging import getLogger
 from typing import Optional
 
 import numpy as np
+from django.conf import settings
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, f1_score, precision_recall_curve
 
@@ -53,6 +54,13 @@ MIN_CLASS_ROWS = 5
 GATE_TOLERANCE = 0.05
 
 
+# Statistics bootstrapped alongside PR-AUC. Named here rather than inferred from the point
+# estimate, so a statistic that is undefined in *every* resample - reject precision on a slice
+# where nothing clears the threshold - still reports, as null, rather than vanishing.
+OPERATING_POINT_KEYS = ["reject_share", "reject_precision", "reject_recall", "approve_share",
+                        "approve_error_rate", "unsure_share", "recall_at_precision_75"]
+
+
 @dataclass
 class Evaluation:
     slice_name: str
@@ -63,7 +71,7 @@ class Evaluation:
     pr_auc_ci: tuple[float, float]
     normalised_ap: float
     normalised_ap_ci: tuple[float, float]
-    recall_at_precision_75: float
+    operating_point: dict
     rows_with_text: int
 
     def to_dict(self) -> dict:
@@ -79,7 +87,13 @@ class Evaluation:
             "normalised_ap": round(self.normalised_ap, 4),
             "normalised_ap_ci": [round(self.normalised_ap_ci[0], 4),
                                  round(self.normalised_ap_ci[1], 4)],
-            "recall_at_precision_75": round(self.recall_at_precision_75, 4),
+            # What a moderator actually experiences. PR-AUC is a summary over every threshold,
+            # including ones nothing runs at; the server suggests REJECT at
+            # MODERATION_REJECT_THRESHOLD and APPROVE at MODERATION_APPROVE_THRESHOLD, and a
+            # model can hold its ranking while its score distribution shifts through those and
+            # ruins precision at the head. That happened between the first two production runs
+            # and only recall_at_precision_75 saw it - the one number with no interval on it.
+            "at_thresholds": self.operating_point,
             # Evidence is crawled newest-first, so this differs sharply between the splits and
             # is the number to look at before believing anything about the text features.
             "rows_with_text": self.rows_with_text,
@@ -106,19 +120,21 @@ def split_by_time(rows: list[TrainingRow]) -> tuple[list[TrainingRow], list[Trai
 
 
 def train(rows: list[TrainingRow], version: str, use_text: bool = True,
+          use_has_text: bool = True,
           incumbent: Optional[ModerationModel] = None) -> tuple[ModerationModel, dict]:
     """Fit both heads and evaluate on held-out real rows only.
 
-    ``use_text=False`` fits the domain-name-only model, which is the ablation that answers
-    whether the crawled page text is earning its place. ``incumbent`` is the model currently
-    being served; when given, the metrics carry a paired comparison against it on these exact
-    test rows, which is the only comparison that means anything.
+    ``use_text`` and ``use_has_text`` are the two halves of the page-text ablation - the
+    vocabulary and the was-it-crawled indicator - held out separately because they can fail
+    independently. ``incumbent`` is the model currently being served; when given, the metrics
+    carry a paired comparison against it on these exact test rows, which is the only comparison
+    that means anything.
     """
     train_rows, test_rows = split_by_time(rows)
     logger.info("Training on %d rows (%d real), testing on %d real rows",
                 len(train_rows), sum(r.source == REAL for r in train_rows), len(test_rows))
 
-    featuriser = Featuriser(use_text=use_text)
+    featuriser = Featuriser(use_text=use_text, use_has_text=use_has_text)
     features = featuriser.fit_transform([row.to_example() for row in train_rows])
 
     # The binary head sees real rows only: blanket augmentation was measured and did not help.
@@ -170,6 +186,7 @@ def evaluate(model: ModerationModel, train_rows: list[TrainingRow],
     metrics["train_rows_with_text"] = sum(
         1 for row in train_rows if row.to_example().text.strip())
     metrics["uses_text"] = model.featuriser.text is not None
+    metrics["uses_has_text"] = model.featuriser.use_has_text
     metrics["suggestion_influence"] = _suggestion_influence(train_rows + test_rows)
     if incumbent is not None:
         metrics["versus_incumbent"] = compare_models(
@@ -244,10 +261,41 @@ def compare_models(candidate: ModerationModel, incumbent: ModerationModel,
     }
 
 
+def recall_at_precision(truth: np.ndarray, scores: np.ndarray, target: float = 0.75) -> float:
+    precision, recall, _ = precision_recall_curve(truth, scores)
+    return max((r for p, r in zip(precision, recall) if p >= target and r > 0), default=0.0)
+
+
+def operating_point(truth: np.ndarray, scores: np.ndarray) -> dict:
+    """What the thresholds the server actually runs at would do to this slice.
+
+    ``reject_precision`` is how often a REJECT suggestion is right, and ``approve_error_rate``
+    how often an APPROVE suggestion is quietly wrong - the more expensive of the two, because a
+    moderator who trusts it never looks. ``unsure_share`` is the fraction the tool declines to
+    help with at all.
+
+    None where a threshold selects nothing, which is a real answer about the slice rather than
+    a zero: no rows suggested REJECT has no precision, and reporting 0.0 would read as a model
+    that is wrong every time instead of one that never speaks.
+    """
+    reject = scores >= settings.MODERATION_REJECT_THRESHOLD
+    approve = scores <= settings.MODERATION_APPROVE_THRESHOLD
+    return {
+        "reject_share": float(reject.mean()),
+        "reject_precision": float(truth[reject].mean()) if reject.any() else None,
+        "reject_recall": float(truth[reject].sum() / truth.sum()) if truth.sum() else None,
+        "approve_share": float(approve.mean()),
+        "approve_error_rate": float(truth[approve].mean()) if approve.any() else None,
+        "unsure_share": float((~reject & ~approve).mean()),
+        "recall_at_precision_75": recall_at_precision(truth, scores),
+    }
+
+
 def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray,
                     has_text: np.ndarray) -> Evaluation:
     generator = np.random.default_rng(0)
     samples, normalised = [], []
+    points: dict[str, list] = {key: [] for key in OPERATING_POINT_KEYS}
     for _ in range(BOOTSTRAP_SAMPLES):
         indices = generator.choice(len(truth), len(truth), replace=True)
         if not _has_both_classes(truth[indices]):
@@ -257,9 +305,18 @@ def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray,
         # Normalised per resample, against that resample's own base rate: the resampling itself
         # moves prevalence around, and correcting with the whole-slice rate would leave that in.
         normalised.append(normalise(average_precision, truth[indices].mean()))
+        for key, value in operating_point(truth[indices], scores[indices]).items():
+            if value is not None:
+                points[key].append(value)
 
-    precision, recall, _ = precision_recall_curve(truth, scores)
     base_rate = float(truth.mean())
+    measured = operating_point(truth, scores)
+    for key in OPERATING_POINT_KEYS:
+        measured[key] = round(measured[key], 4) if measured[key] is not None else None
+        measured[f"{key}_ci"] = _interval(points[key])
+    measured["reject_threshold"] = settings.MODERATION_REJECT_THRESHOLD
+    measured["approve_threshold"] = settings.MODERATION_APPROVE_THRESHOLD
+
     return Evaluation(
         slice_name=name,
         rows=len(truth),
@@ -271,10 +328,17 @@ def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray,
         normalised_ap=normalise(float(average_precision_score(truth, scores)), base_rate),
         normalised_ap_ci=(float(np.percentile(normalised, 2.5)) if normalised else 0.0,
                           float(np.percentile(normalised, 97.5)) if normalised else 0.0),
-        recall_at_precision_75=max(
-            (r for p, r in zip(precision, recall) if p >= 0.75 and r > 0), default=0.0),
+        operating_point=measured,
         rows_with_text=int(has_text.sum()),
     )
+
+
+def _interval(values: list) -> Optional[list]:
+    """A 95% interval, or None when no resample could measure the statistic at all."""
+    if not values:
+        return None
+    return [round(float(np.percentile(values, 2.5)), 4),
+            round(float(np.percentile(values, 97.5)), 4)]
 
 
 def _evaluate_reason_head(predictions, test_rows: list[TrainingRow]) -> dict:

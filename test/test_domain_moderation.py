@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import joblib
+import numpy as np
 import pytest
 from allauth.account.models import EmailAddress
 from background_task.models import Task
@@ -29,7 +30,7 @@ from mwmbl.moderation.features import Featuriser, ModerationExample
 from mwmbl.moderation.model import (
     Suggestion, get_model, load_metrics, publish, reset_model_cache, suggest)
 from mwmbl.moderation.suggest import annotate_queue, refresh_suggestion, suggestion_for
-from mwmbl.moderation.train import _suggestion_influence, passes_gate
+from mwmbl.moderation.train import _suggestion_influence, operating_point, passes_gate
 from mwmbl.moderation.training_data import TrainingRow, is_trainable_domain
 
 QUEUE_URL = "/api/v1/platform/domain-submissions/queue"
@@ -243,6 +244,57 @@ def test_judgements_already_on_a_zero_to_one_scale_are_left_alone(tmp_path):
         '{"domain": "aislopgenerator.xyz", "reject_probability": 0.95, "reason": "SPAM"}\n')
 
     assert read_judgements(path) == {"obviously-fine.org": 0.01, "aislopgenerator.xyz": 0.95}
+
+
+def test_the_operating_point_is_measured_where_the_server_actually_runs():
+    """PR-AUC summarises every threshold, including ones nothing runs at. What a moderator sees
+    is decided by MODERATION_REJECT_THRESHOLD and MODERATION_APPROVE_THRESHOLD, and a model can
+    hold its ranking while its scores drift through those."""
+    truth = np.array([1, 1, 1, 0, 0, 0, 0, 0])
+    scores = np.array([0.9, 0.8, 0.4, 0.9, 0.5, 0.1, 0.1, 0.1])
+
+    point = operating_point(truth, scores)
+
+    # 0.9, 0.8 and 0.9 clear the 0.75 reject threshold: two of the three are real rejections.
+    assert point["reject_share"] == 3 / 8
+    assert point["reject_precision"] == pytest.approx(2 / 3)
+    assert point["reject_recall"] == pytest.approx(2 / 3)
+    # 0.1, 0.1, 0.1 fall under the 0.25 approve threshold, and none of them was rejected.
+    assert point["approve_share"] == 3 / 8
+    assert point["approve_error_rate"] == 0.0
+    assert point["unsure_share"] == 2 / 8
+
+
+def test_a_threshold_that_selects_nothing_reports_null_not_zero():
+    """A model that never suggests REJECT has no reject precision. Reporting 0.0 would read as
+    a model that is wrong every time instead of one that never speaks."""
+    truth = np.array([1, 1, 0, 0])
+    point = operating_point(truth, np.array([0.5, 0.5, 0.5, 0.5]))
+
+    assert point["reject_share"] == 0.0
+    assert point["reject_precision"] is None
+    assert point["approve_error_rate"] is None
+    assert point["unsure_share"] == 1.0
+
+
+def test_has_text_can_be_held_out_independently_of_the_text_block():
+    """The two halves of the page-text features can fail independently - the vocabulary can
+    earn its place while the indicator is a proxy for recency - so the ablation holds out each
+    on its own rather than both together."""
+    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+                ModerationExample("docs.python.org", ["python language reference tool"]),
+                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+
+    both = Featuriser()
+    no_indicator = Featuriser(use_has_text=False)
+    both.fit_transform(examples)
+    no_indicator.fit_transform(examples)
+
+    assert "has_text" in list(both.feature_names())
+    assert "has_text" not in list(no_indicator.feature_names())
+    assert no_indicator.text is not None            # the vocabulary block is still there
+    assert (no_indicator.transform(examples).shape[1]
+            == both.transform(examples).shape[1] - 1)
 
 
 def test_malformed_historic_names_are_excluded_from_training():

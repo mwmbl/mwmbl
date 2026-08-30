@@ -14,8 +14,9 @@ worker replica keeping its own copy.
 
 ## Regenerating
 
-    uv run manage.py train_domain_moderation_model --dry-run   # report metrics only
-    uv run manage.py train_domain_moderation_model             # publish if it passes the gate
+    uv run manage.py train_domain_moderation_model --dry-run             # metrics only
+    uv run manage.py train_domain_moderation_model --dry-run --ablate    # + feature ablation
+    uv run manage.py train_domain_moderation_model                       # publish if it passes
 
 The gate loads the published model, scores it and the candidate on the *same* held-out rows, and
 bootstraps the difference; the candidate ships unless it is confidently worse. Raw PR-AUC is never
@@ -23,6 +24,14 @@ compared across two runs, because its floor is the positive rate — the August 
 blocked for a 0.11 "regression" that was entirely a shift in prevalence after migration 0037. See
 `mwmbl.moderation.train`. Publishing writes a new artifact row, which every worker picks up within
 a minute, and schedules `rescore_pending_submissions` to re-score the existing queue.
+
+Every slice also reports `at_thresholds`: precision, recall and the unsure share at
+`MODERATION_REJECT_THRESHOLD` and `MODERATION_APPROVE_THRESHOLD`, each with an interval. PR-AUC
+summarises every threshold, including ones nothing runs at, so a model can hold its ranking while
+its score distribution drifts through the two the server serves — read `reject_precision` and
+`approve_error_rate` before believing a retrain is an improvement. `--ablate` holds out the
+page-text vocabulary and the `has_text` indicator separately and reports all three fits on the
+same split; `--no-text` and `--no-has-text` fit those variants directly.
 
 To reproduce the numbers without a production database, train from the sanitized judgments export
 instead:
