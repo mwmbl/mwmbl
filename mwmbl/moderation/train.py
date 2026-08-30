@@ -120,15 +120,16 @@ def split_by_time(rows: list[TrainingRow]) -> tuple[list[TrainingRow], list[Trai
 
 
 def train(rows: list[TrainingRow], version: str, use_text: bool = True,
-          use_has_text: bool = True,
+          use_has_text: bool = False,
           incumbent: Optional[ModerationModel] = None) -> tuple[ModerationModel, dict]:
     """Fit both heads and evaluate on held-out real rows only.
 
     ``use_text`` and ``use_has_text`` are the two halves of the page-text ablation - the
     vocabulary and the was-it-crawled indicator - held out separately because they can fail
-    independently. ``incumbent`` is the model currently being served; when given, the metrics
-    carry a paired comparison against it on these exact test rows, which is the only comparison
-    that means anything.
+    independently, and did: the vocabulary is worth 0.143 normalised AP and the indicator is
+    worth slightly less than nothing, so it defaults off. ``incumbent`` is the model currently
+    being served; when given, the metrics carry a paired comparison against it on these exact
+    test rows, which is the only comparison that means anything.
     """
     train_rows, test_rows = split_by_time(rows)
     logger.info("Training on %d rows (%d real), testing on %d real rows",

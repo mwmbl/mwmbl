@@ -47,15 +47,16 @@ class Command(BaseCommand):
             "--no-text", action="store_true", dest="no_text",
             help="Fit on the domain name alone, ignoring the crawled page text vocabulary")
         parser.add_argument(
-            "--no-has-text", action="store_true", dest="no_has_text",
-            help=("Drop the was-it-crawled indicator. Evidence is crawled newest-first, so it "
-                  "doubles as a proxy for recency and can move the score distribution through "
-                  "the serving threshold; --ablate measures whether it is doing that here"))
+            "--has-text", action="store_true", dest="has_text",
+            help=("Add the was-it-crawled indicator, which is off by default because it "
+                  "measured worse on every metric: evidence is crawled newest-first, so it "
+                  "doubles as a proxy for recency. Worth re-measuring with --ablate once "
+                  "backfill_domain_evidence has evened out the coverage"))
         parser.add_argument(
             "--ablate", action="store_true",
-            help=("Also train without the page-text vocabulary and without the has_text "
-                  "indicator, and report all three on the same split, so each is measured "
-                  "rather than guessed"))
+            help=("Also train with the has_text indicator and without the page-text "
+                  "vocabulary, and report all three on the same split, so each feature is "
+                  "measured rather than guessed"))
         parser.add_argument(
             "--derived", action="store_true",
             help=("Add blocklist-derived rows for reason classes short of real data. Off by "
@@ -85,7 +86,7 @@ class Command(BaseCommand):
         # no longer featurise - the gate falls back to the stored metrics and says so.
         incumbent = load_published_model()
         model, metrics = train(rows, version, use_text=not options["no_text"],
-                               use_has_text=not options["no_has_text"], incumbent=incumbent)
+                               use_has_text=options["has_text"], incumbent=incumbent)
         self.stdout.write(json.dumps(metrics, indent=2))
 
         if options["ablate"]:
@@ -110,19 +111,23 @@ class Command(BaseCommand):
     def _report_ablation(self, rows, version, full: dict) -> None:
         """Hold out each half of the page-text features in turn, on the same split.
 
-        Same rows, same seed, so each line differs from the one above it by one thing. Both
+        Same rows, same seed, so each line differs from what ships by exactly one feature. Both
         ranking quality and the *operating point* are reported: a feature can hold the ranking
-        while shifting the score distribution through MODERATION_REJECT_THRESHOLD, which is
-        what appears to have happened to has_text, and normalised AP alone cannot see it.
+        while shifting the score distribution through MODERATION_REJECT_THRESHOLD, and
+        normalised AP alone cannot see that.
+
+        The intervals are independent, not paired, so they overlap far more than the difference
+        between two lines is uncertain by. Read the direction across all four columns rather
+        than any single interval.
         """
         _, no_text = train(rows, f"{version}-no-text", use_text=False, use_has_text=False)
-        _, no_has_text = train(rows, f"{version}-no-has-text", use_has_text=False)
+        _, with_has_text = train(rows, f"{version}-has-text", use_has_text=True)
 
         self.stdout.write("\nAblation - are the page-text features earning their place?")
         self.stdout.write(f"  {'':>22}  {'norm AP':>17}  {'reject P':>16}  "
                           f"{'reject R':>16}  {'unsure':>7}")
-        for name, metrics in (("text + has_text", full),
-                              ("text, no has_text", no_has_text),
+        for name, metrics in (("text (shipped)", full),
+                              ("text + has_text", with_has_text),
                               ("domain name only", no_text)):
             cold = metrics.get("cold_start")
             if cold is None:
@@ -141,8 +146,8 @@ class Command(BaseCommand):
             f"{sum(full.get('train_rows_by_source', {}).values())} training rows and "
             f"{cold.get('rows_with_text', 0)} of {cold.get('rows', 0)} cold-start test rows "
             f"have text.\n  A large gap between those two makes has_text a proxy for recency "
-            f"rather than for evidence, and the fix is to backfill evidence for the older "
-            f"submissions rather than to argue about the feature.\n")
+            f"rather than for evidence, which is why it is off by default. Backfill evidence "
+            f"for the older\n  submissions to close the gap, then re-read this table.\n")
 
     @staticmethod
     def _with_interval(value, interval) -> str:

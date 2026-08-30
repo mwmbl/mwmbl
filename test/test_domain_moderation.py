@@ -188,7 +188,7 @@ def test_has_text_separates_an_uncrawled_domain_from_one_whose_words_are_unknown
     newest-first, so under a chronological split most training rows have no text and most test
     rows do; without this indicator the model cannot tell the two cases apart and the
     difference is absorbed into an intercept fitted on the training mix."""
-    featuriser = Featuriser()
+    featuriser = Featuriser(use_has_text=True)
     featuriser.fit_transform([
         ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
         ModerationExample("docs.python.org", ["python language reference tool"]),
@@ -213,7 +213,6 @@ def test_the_ablation_fits_the_same_features_minus_the_text_block():
     without = Featuriser(use_text=False)
     assert without.fit_transform(examples).shape[1] < with_text
     assert without.text is None
-    assert "has_text" in list(without.feature_names())
 
 
 def test_a_judges_most_confident_approval_is_not_read_as_a_certain_rejection(tmp_path):
@@ -285,16 +284,16 @@ def test_has_text_can_be_held_out_independently_of_the_text_block():
                 ModerationExample("docs.python.org", ["python language reference tool"]),
                 ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
 
-    both = Featuriser()
-    no_indicator = Featuriser(use_has_text=False)
+    both = Featuriser(use_has_text=True)
+    shipped = Featuriser()
     both.fit_transform(examples)
-    no_indicator.fit_transform(examples)
+    shipped.fit_transform(examples)
 
     assert "has_text" in list(both.feature_names())
-    assert "has_text" not in list(no_indicator.feature_names())
-    assert no_indicator.text is not None            # the vocabulary block is still there
-    assert (no_indicator.transform(examples).shape[1]
-            == both.transform(examples).shape[1] - 1)
+    # Off by default: measured against production data it made every metric worse.
+    assert "has_text" not in list(shipped.feature_names())
+    assert shipped.text is not None                 # the vocabulary block is still there
+    assert shipped.transform(examples).shape[1] == both.transform(examples).shape[1] - 1
 
 
 def test_malformed_historic_names_are_excluded_from_training():

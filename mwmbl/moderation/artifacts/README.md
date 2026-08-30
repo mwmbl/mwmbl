@@ -29,9 +29,17 @@ Every slice also reports `at_thresholds`: precision, recall and the unsure share
 `MODERATION_REJECT_THRESHOLD` and `MODERATION_APPROVE_THRESHOLD`, each with an interval. PR-AUC
 summarises every threshold, including ones nothing runs at, so a model can hold its ranking while
 its score distribution drifts through the two the server serves — read `reject_precision` and
-`approve_error_rate` before believing a retrain is an improvement. `--ablate` holds out the
-page-text vocabulary and the `has_text` indicator separately and reports all three fits on the
-same split; `--no-text` and `--no-has-text` fit those variants directly.
+`approve_error_rate` before believing a retrain is an improvement. `--ablate` reports the shipped
+model, the same model plus the `has_text` indicator, and the domain-name-only model on the same
+split; `--no-text` and `--has-text` fit those variants directly.
+
+Measured on production data, the page-text vocabulary is worth **+0.143 normalised AP** on the
+cold-start slice (0.535 against 0.392) and halves the share of submissions the tool declines to
+judge (`unsure` 0.118 against 0.249). The `has_text` indicator is **off**, because it made every
+metric worse — normalised AP 0.535 → 0.521, reject precision 0.657 → 0.636, reject recall 0.121
+→ 0.111. Evidence is crawled newest-first, so with 46% of training rows and 92% of cold-start
+test rows carrying text the indicator is a proxy for recency, and recency is when the .ai spam
+wave happened. Re-measure it with `--ablate` once `backfill_domain_evidence` has closed that gap.
 
 To reproduce the numbers without a production database, train from the sanitized judgments export
 instead:

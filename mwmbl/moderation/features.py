@@ -81,7 +81,7 @@ def shape_features(domain: str) -> list[float]:
     ]
 
 
-def indicator_features(example: "ModerationExample", use_has_text: bool = True) -> list[float]:
+def indicator_features(example: "ModerationExample", use_has_text: bool = False) -> list[float]:
     """The unscaled 0/1 features, in INDICATOR + OPTIONAL_INDICATOR name order."""
     indicators = [float(example.domain.lower().startswith("www."))]
     if use_has_text:
@@ -96,24 +96,26 @@ class Featuriser:
     training saw rather than rebuilding one from different data.
     """
 
-    def __init__(self, use_text: bool = True, use_has_text: bool = True):
+    def __init__(self, use_text: bool = True, use_has_text: bool = False):
         """``use_text`` fits the page-text vocabulary; ``use_has_text`` the "was it crawled at
-        all" indicator. Two flags rather than one because the two can fail independently, and
-        the August 2026 numbers suggest they did.
+        all" indicator. Two flags rather than one because the two can fail independently - and
+        measured against production data, they did.
 
-        ``has_text`` exists because an empty text block and a page whose words are all out of
-        vocabulary produce the same all-zero TF-IDF row, and they are not the same thing. But
-        evidence is crawled newest-first, so under a chronological split the indicator is also
-        a proxy for *recency* - 46% of training rows against 92% of cold-start test rows in the
-        first production run - and recency is when the .ai spam wave happened. A model can
-        therefore learn ``has_text -> reject`` from the training mix and then apply it to a test
-        set where almost everything has text: the ordering barely moves, so PR-AUC does not
-        notice, but the whole score distribution shifts through the serving threshold and
-        precision at the head collapses. Recall at 75% precision halved between the two
-        production runs, which is the shape of exactly that.
+        The vocabulary earns its place easily: holding it out costs 0.143 normalised AP on the
+        cold-start slice (0.535 -> 0.392) and doubles the share of submissions the tool declines
+        to have an opinion about (0.118 -> 0.249).
 
-        So it is ablatable, and the honest fix is to even out the coverage by backfilling
-        evidence for older submissions rather than to argue about the feature.
+        ``has_text`` is **off by default, because it was measured and did not help.** The idea
+        was sound - an uncrawled domain and a page whose words are all out of vocabulary produce
+        the same all-zero TF-IDF row, and they are not the same thing - but evidence is crawled
+        newest-first, so under a chronological split the indicator is also a proxy for *recency*
+        (46% of training rows against 92% of cold-start test rows), and recency is when the .ai
+        spam wave happened. Holding it out improved every metric measured: normalised AP 0.521
+        -> 0.535, reject precision 0.636 -> 0.657, reject recall 0.111 -> 0.121. Small against
+        their intervals, individually; consistent across all of them.
+
+        The flag stays so it can be re-measured once ``backfill_domain_evidence`` has evened out
+        the coverage, which is the condition under which it would start meaning what it says.
         """
         self.use_text = use_text
         self.use_has_text = use_has_text

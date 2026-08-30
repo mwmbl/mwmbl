@@ -115,8 +115,8 @@
     "rows": 71,
     "f1": {
       "LANGUAGE": 0.0,
-      "OTHER": 0.2609,
-      "SPAM": 0.8547
+      "OTHER": 0.375,
+      "SPAM": 0.8148
     },
     "support": {
       "LANGUAGE": 2,
@@ -130,7 +130,7 @@
   },
   "train_rows_with_text": 21,
   "uses_text": true,
-  "uses_has_text": true,
+  "uses_has_text": false,
   "suggestion_influence": {
     "real_rows": 3796,
     "shown_a_suggestion": 0,
