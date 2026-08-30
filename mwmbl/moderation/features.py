@@ -32,10 +32,18 @@ SPAM_WORDS = [
 # crawler (65 and 155 chars), so three pages is a few hundred characters at most.
 MAX_TEXT_CHARS = 2000
 
-NUM_SHAPE_FEATURES = 8
-# Shape features are raw counts; scaling them into roughly [0, 1] keeps the regularisation
-# comparable across them and the TF-IDF blocks.
+# Counts are scaled into roughly [0, 1] so the regularisation is comparable across them and
+# the TF-IDF blocks. Indicators are already in [0, 1] and are deliberately *not* scaled: a 0/1
+# divided by 40 forces its coefficient forty times larger to say the same thing, which the L2
+# penalty then charges for, and has_text is the one feature that most needs to be heard.
 SHAPE_SCALE = 40.0
+COUNT_FEATURE_NAMES = ["len", "labels", "digits", "hyphens", "sld_len", "spamwords", "tld_len"]
+INDICATOR_FEATURE_NAMES = ["www"]
+# Held out separately from the text block, because the two can fail independently: the block
+# can earn its place while the indicator is a trap. See Featuriser.
+OPTIONAL_INDICATOR_FEATURE_NAMES = ["has_text"]
+NUM_SHAPE_FEATURES = (len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES)
+                      + len(OPTIONAL_INDICATOR_FEATURE_NAMES))
 
 
 @dataclass
@@ -59,6 +67,7 @@ def _tld_tokens(domain: str) -> list[str]:
 
 
 def shape_features(domain: str) -> list[float]:
+    """The scaled counts, in COUNT_FEATURE_NAMES order."""
     host = domain.lower()
     labels = host.split(".")
     return [
@@ -66,11 +75,18 @@ def shape_features(domain: str) -> list[float]:
         len(labels),
         sum(character.isdigit() for character in host),
         host.count("-"),
-        float(host.startswith("www.")),
         len(labels[0]),
         sum(word in host for word in SPAM_WORDS),
         len(tld(domain)),
     ]
+
+
+def indicator_features(example: "ModerationExample", use_has_text: bool = False) -> list[float]:
+    """The unscaled 0/1 features, in INDICATOR + OPTIONAL_INDICATOR name order."""
+    indicators = [float(example.domain.lower().startswith("www."))]
+    if use_has_text:
+        indicators.append(float(bool(example.text.strip())))
+    return indicators
 
 
 class Featuriser:
@@ -80,7 +96,38 @@ class Featuriser:
     training saw rather than rebuilding one from different data.
     """
 
-    def __init__(self):
+    def __init__(self, use_text: bool = True, use_has_text: bool = False):
+        """``use_text`` fits the page-text vocabulary; ``use_has_text`` the "was it crawled at
+        all" indicator. Two flags rather than one because the two can fail independently - and
+        measured against production data, they did.
+
+        The vocabulary earns its place easily: holding it out costs 0.143 normalised AP on the
+        cold-start slice (0.535 -> 0.392) and doubles the share of submissions the tool declines
+        to have an opinion about (0.118 -> 0.249).
+
+        ``has_text`` is **off, because it was measured twice and lost twice.** The idea was
+        sound - an uncrawled domain and a page whose words are all out of vocabulary produce the
+        same all-zero TF-IDF row, and they are not the same thing - and the first result had an
+        obvious excuse: evidence was crawled newest-first, so at 46% training coverage against
+        92% test coverage the indicator was a proxy for *recency*, and recency is when the .ai
+        spam wave happened. Holding it out gave normalised AP 0.521 -> 0.535, reject precision
+        0.636 -> 0.657.
+
+        Backfilling evidence over the older submissions closed that gap - 94% against 92% - and
+        it lost by *more*: 0.598 -> 0.622 normalised AP, 0.682 -> 0.707 reject precision. Which
+        is the answer, and in hindsight the obvious one. When almost everything has been crawled
+        the indicator is very nearly a constant, so it carries no information and only spends a
+        parameter. The rows it does fire on are the ones nothing could fetch, and those are
+        already settled decisively and exactly by the liveness check in mwmbl.moderation.rules,
+        for the reason this module's own docstring gives: the crawl happens now and the labels
+        are up to two years old, so "could not be fetched" is a fact about today, not about the
+        decision. It was redundant with a deterministic check the whole time.
+
+        The flag stays because ``--ablate`` still reports the row, and a crawl that silently
+        degrades would show up there as the indicator regaining value.
+        """
+        self.use_text = use_text
+        self.use_has_text = use_has_text
         # char_wb over the domain: catches the morphology of generated spam names, and the
         # word-boundary variant keeps n-grams from spanning label boundaries.
         self.domain_chars = TfidfVectorizer(
@@ -106,10 +153,12 @@ class Featuriser:
         # raises on - so a text block is only added when the text can actually support one.
         texts = [example.text for example in examples]
         try:
+            if not self.use_text:
+                raise ValueError("text block disabled for this fit")
             blocks.append(self.text.fit_transform(texts))
         except ValueError:
-            logger.info("Not enough page text to fit a text block over %d examples; "
-                        "the model will judge on the domain name alone", len(examples))
+            logger.info("No text block over %d examples (disabled, or not enough text to fit "
+                        "one); the model will judge on the domain name alone", len(examples))
             self.text = None
 
         blocks.append(self._shape_block(examples))
@@ -126,10 +175,11 @@ class Featuriser:
         blocks.append(self._shape_block(examples))
         return hstack(blocks).tocsr()
 
-    @staticmethod
-    def _shape_block(examples: list[ModerationExample]) -> csr_matrix:
-        shapes = np.array([shape_features(example.domain) for example in examples], dtype=float)
-        return csr_matrix(shapes / SHAPE_SCALE)
+    def _shape_block(self, examples: list[ModerationExample]) -> csr_matrix:
+        counts = np.array([shape_features(example.domain) for example in examples], dtype=float)
+        indicators = np.array([indicator_features(example, self.use_has_text)
+                               for example in examples], dtype=float)
+        return csr_matrix(np.hstack([counts / SHAPE_SCALE, indicators]))
 
     def feature_names(self) -> np.ndarray:
         """Feature labels in matrix order, for turning coefficients into moderator-facing text."""
@@ -140,7 +190,7 @@ class Featuriser:
         if self.text is not None:
             names.append(np.array([f"text={name}"
                                    for name in self.text.get_feature_names_out()]))
-        names.append(np.array([
-            "len", "labels", "digits", "hyphens", "www", "sld_len", "spamwords", "tld_len",
-        ]))
+        indicators = INDICATOR_FEATURE_NAMES + (
+            OPTIONAL_INDICATOR_FEATURE_NAMES if self.use_has_text else [])
+        names.append(np.array(COUNT_FEATURE_NAMES + indicators))
         return np.concatenate(names)

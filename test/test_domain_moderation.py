@@ -7,10 +7,13 @@ queue never runs a model on the request path.
 """
 import io
 import json
+import sys
 from datetime import timedelta
+from pathlib import Path
 from unittest import mock
 
 import joblib
+import numpy as np
 import pytest
 from allauth.account.models import EmailAddress
 from background_task.models import Task
@@ -27,7 +30,7 @@ from mwmbl.moderation.features import Featuriser, ModerationExample
 from mwmbl.moderation.model import (
     Suggestion, get_model, load_metrics, publish, reset_model_cache, suggest)
 from mwmbl.moderation.suggest import annotate_queue, refresh_suggestion, suggestion_for
-from mwmbl.moderation.train import _suggestion_influence, passes_gate
+from mwmbl.moderation.train import _suggestion_influence, operating_point, passes_gate
 from mwmbl.moderation.training_data import TrainingRow, is_trainable_domain
 
 QUEUE_URL = "/api/v1/platform/domain-submissions/queue"
@@ -178,6 +181,119 @@ def test_featuriser_produces_the_same_width_for_unseen_input():
     transformed = featuriser.transform([ModerationExample("unseen.example", ["nothing alike"])])
     assert transformed.shape[1] == fitted.shape[1]
     assert len(featuriser.feature_names()) == fitted.shape[1]
+
+
+def test_has_text_separates_an_uncrawled_domain_from_one_whose_words_are_unknown():
+    """Both produce an all-zero TF-IDF row, and they mean opposite things. Evidence is crawled
+    newest-first, so under a chronological split most training rows have no text and most test
+    rows do; without this indicator the model cannot tell the two cases apart and the
+    difference is absorbed into an intercept fitted on the training mix."""
+    featuriser = Featuriser(use_has_text=True)
+    featuriser.fit_transform([
+        ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+        ModerationExample("docs.python.org", ["python language reference tool"]),
+        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+    ])
+    assert featuriser.text is not None
+    column = list(featuriser.feature_names()).index("has_text")
+
+    uncrawled = featuriser.transform([ModerationExample("a.example", [])])
+    unmatched = featuriser.transform([ModerationExample("a.example", ["kanji zzz"])])
+    assert uncrawled[0, column] == 0.0
+    assert unmatched[0, column] == 1.0
+
+
+def test_the_ablation_fits_the_same_features_minus_the_text_block():
+    """--no-text has to run through the real featuriser, not a copy of it, or the ablation
+    measures the copy."""
+    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+                ModerationExample("docs.python.org", ["python language reference tool"]),
+                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+    with_text = Featuriser().fit_transform(examples).shape[1]
+    without = Featuriser(use_text=False)
+    assert without.fit_transform(examples).shape[1] < with_text
+    assert without.text is None
+
+
+def test_a_judges_most_confident_approval_is_not_read_as_a_certain_rejection(tmp_path):
+    """scripts/moderation_llm_bakeoff accepts judgements on either a 0-1 or a 0-100 scale, and
+    the scale has to be decided per file. Deciding per value reads a 1 out of 100 - the most
+    confident approval a judge can express - as a probability of 1.0, the most confident
+    rejection in the file. Both judges in the first bake-off emitted exactly one such row."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from moderation_llm_bakeoff import read_judgements
+
+    path = tmp_path / "judge.judgements.jsonl"
+    path.write_text(
+        '{"domain": "obviously-fine.org", "reject_probability": 1, "reason": ""}\n'
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 95, "reason": "SPAM"}\n')
+
+    judgements = read_judgements(path)
+    assert judgements["obviously-fine.org"] == 0.01
+    assert judgements["aislopgenerator.xyz"] == 0.95
+
+
+def test_judgements_already_on_a_zero_to_one_scale_are_left_alone(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from moderation_llm_bakeoff import read_judgements
+
+    path = tmp_path / "judge.judgements.jsonl"
+    path.write_text(
+        '{"domain": "obviously-fine.org", "reject_probability": 0.01, "reason": ""}\n'
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 0.95, "reason": "SPAM"}\n')
+
+    assert read_judgements(path) == {"obviously-fine.org": 0.01, "aislopgenerator.xyz": 0.95}
+
+
+def test_the_operating_point_is_measured_where_the_server_actually_runs():
+    """PR-AUC summarises every threshold, including ones nothing runs at. What a moderator sees
+    is decided by MODERATION_REJECT_THRESHOLD and MODERATION_APPROVE_THRESHOLD, and a model can
+    hold its ranking while its scores drift through those."""
+    truth = np.array([1, 1, 1, 0, 0, 0, 0, 0])
+    scores = np.array([0.9, 0.8, 0.4, 0.9, 0.5, 0.1, 0.1, 0.1])
+
+    point = operating_point(truth, scores)
+
+    # 0.9, 0.8 and 0.9 clear the 0.75 reject threshold: two of the three are real rejections.
+    assert point["reject_share"] == 3 / 8
+    assert point["reject_precision"] == pytest.approx(2 / 3)
+    assert point["reject_recall"] == pytest.approx(2 / 3)
+    # 0.1, 0.1, 0.1 fall under the 0.25 approve threshold, and none of them was rejected.
+    assert point["approve_share"] == 3 / 8
+    assert point["approve_error_rate"] == 0.0
+    assert point["unsure_share"] == 2 / 8
+
+
+def test_a_threshold_that_selects_nothing_reports_null_not_zero():
+    """A model that never suggests REJECT has no reject precision. Reporting 0.0 would read as
+    a model that is wrong every time instead of one that never speaks."""
+    truth = np.array([1, 1, 0, 0])
+    point = operating_point(truth, np.array([0.5, 0.5, 0.5, 0.5]))
+
+    assert point["reject_share"] == 0.0
+    assert point["reject_precision"] is None
+    assert point["approve_error_rate"] is None
+    assert point["unsure_share"] == 1.0
+
+
+def test_has_text_can_be_held_out_independently_of_the_text_block():
+    """The two halves of the page-text features can fail independently - the vocabulary can
+    earn its place while the indicator is a proxy for recency - so the ablation holds out each
+    on its own rather than both together."""
+    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+                ModerationExample("docs.python.org", ["python language reference tool"]),
+                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+
+    both = Featuriser(use_has_text=True)
+    shipped = Featuriser()
+    both.fit_transform(examples)
+    shipped.fit_transform(examples)
+
+    assert "has_text" in list(both.feature_names())
+    # Off by default: measured against production data it made every metric worse.
+    assert "has_text" not in list(shipped.feature_names())
+    assert shipped.text is not None                 # the vocabulary block is still there
+    assert shipped.transform(examples).shape[1] == both.transform(examples).shape[1] - 1
 
 
 def test_malformed_historic_names_are_excluded_from_training():
@@ -789,8 +905,22 @@ def test_redirect_check_errs_towards_reporting_nothing():
 
 # --------------------------------------------------------------------- retrain gate
 
-def metrics(pr_auc, low, high):
-    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high]}}
+def metrics(pr_auc, low, high, rows=150, positives=81):
+    """Cold-start metrics in the shape a stored artifact carries.
+
+    rows and positives are what make the PR-AUC readable: the gate corrects for prevalence, so
+    a slice cannot be described by its score alone.
+    """
+    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high],
+                           "rows": rows, "positives": positives}}
+
+
+def paired(difference, low, high, contamination_known=True):
+    return {"cold_start": metrics(0.7, 0.6, 0.8)["cold_start"],
+            "versus_incumbent": {
+                "incumbent_version": "domain-mod-2026-08-01", "rows": 150,
+                "contamination_known": contamination_known, "difference": difference,
+                "difference_ci": [low, high], "candidate_wins_fraction": 0.5}}
 
 
 def test_gate_publishes_when_there_is_no_incumbent():
@@ -802,7 +932,7 @@ def test_gate_blocks_a_model_below_the_incumbents_lower_bound():
     allowed, explanation = passes_gate(metrics(0.60, 0.51, 0.69),
                                        metrics(0.78, 0.69, 0.86))
     assert not allowed
-    assert "0.690" in explanation
+    assert "unpaired" in explanation
 
 
 def test_gate_tolerates_movement_inside_the_interval():
@@ -811,6 +941,53 @@ def test_gate_tolerates_movement_inside_the_interval():
     both directions - blocking good models and shipping bad ones."""
     allowed, _ = passes_gate(metrics(0.74, 0.65, 0.83), metrics(0.78, 0.69, 0.86))
     assert allowed
+
+
+def test_gate_is_not_fooled_by_a_change_in_prevalence():
+    """The August 2026 retrain, exactly as it happened.
+
+    Migration 0037 repaired 1,785 previously-invisible decisions into the training set, which
+    moved the cold-start rejection rate from 54% to 30%. PR-AUC's floor *is* the positive rate,
+    so the same quality of ranking scored 0.672 instead of 0.779 and the gate called it a
+    regression. Corrected for prevalence it is a small improvement, 0.519 -> 0.532, and it
+    ships."""
+    allowed, explanation = passes_gate(
+        metrics(0.6716, 0.5927, 0.7472, rows=635, positives=189),
+        metrics(0.7788, 0.6885, 0.8588, rows=150, positives=81))
+    assert allowed, explanation
+
+
+def test_the_paired_comparison_is_preferred_to_the_stored_metrics():
+    """Two numbers from two different test sets can only be compared weakly. When the incumbent
+    could be loaded and scored on the same rows, that is the answer - even when the stored
+    metrics, describing a different population, would have said otherwise."""
+    allowed, explanation = passes_gate(paired(0.02, -0.03, 0.07),
+                                       metrics(0.95, 0.93, 0.97))
+    assert allowed
+    assert "paired against domain-mod-2026-08-01" in explanation
+
+
+def test_gate_blocks_a_candidate_that_is_confidently_worse():
+    allowed, explanation = passes_gate(paired(-0.18, -0.26, -0.09), metrics(0.5, 0.4, 0.6))
+    assert not allowed
+    assert "tolerance" in explanation
+
+
+def test_gate_ships_a_small_loss_it_cannot_distinguish_from_noise():
+    """Non-inferiority, not superiority. Requiring a significant *gain* on a slice with ~80
+    positives would never ship anything, including the models that are genuinely better."""
+    allowed, _ = passes_gate(paired(-0.02, -0.045, 0.01), metrics(0.5, 0.4, 0.6))
+    assert allowed
+
+
+def test_an_incumbent_with_no_training_record_is_flagged_not_trusted_silently():
+    """Artifacts pickled before train_domains was recorded may be scored on rows they were
+    fitted on, which flatters them. The candidate still has to clear the bar - the point is
+    that the explanation says the bar was tilted."""
+    allowed, explanation = passes_gate(paired(0.01, -0.02, 0.05, contamination_known=False),
+                                       metrics(0.5, 0.4, 0.6))
+    assert allowed
+    assert "no record of its training domains" in explanation
 
 
 def test_gate_refuses_when_there_is_no_cold_start_slice():
@@ -1135,6 +1312,14 @@ class _StubModel:
         return [(self.score, "SPAM", self.score) for _ in examples]
 
 
+class _StaleFeatureSetModel:
+    """An artifact whose pickled featuriser no longer matches the code that loaded it."""
+    version = "stale"
+
+    def predict(self, examples):
+        raise ValueError("X has 8 features, but LogisticRegression is expecting 9 features")
+
+
 def artifact_bytes(model) -> bytes:
     buffer = io.BytesIO()
     joblib.dump(model, buffer)
@@ -1208,6 +1393,91 @@ def test_an_unloadable_artifact_falls_back_rather_than_failing(tmp_path, setting
         version="corrupt", model=b"not a pickle", metrics={})
 
     assert get_model().version == "bundled"
+
+
+@pytest.mark.django_db
+def test_an_artifact_from_a_different_feature_set_degrades_to_the_rules(tmp_path, settings):
+    """A featuriser is pickled whole, so adding a feature leaves every stored artifact building
+    a matrix its heads were not fitted on. That raises at predict time, inside the enrichment
+    task, for every domain - so loading probes the model once and drops it if it cannot answer,
+    which is the same degradation an unloadable pickle already gets."""
+    joblib.dump(_StaleFeatureSetModel(), tmp_path / "model.joblib")
+    settings.DOMAIN_MODERATION_MODEL_DIR = str(tmp_path)
+
+    assert get_model() is None
+    suggestion = suggest("a.com", [], [])
+    assert (suggestion.action, suggestion.model_version) == ("UNSURE", "")
+
+
+@pytest.mark.django_db
+def test_a_model_newer_than_the_code_degrades_instead_of_ending_the_run(tmp_path, settings):
+    """is_compatible() protects the running code from an artifact older than it. Nothing can
+    protect it from a *newer* one: a featuriser is pickled whole, so a model trained by code
+    with one more feature produces a matrix the workers cannot use and they cannot know that
+    until they try. A retrain from a freshly built image did exactly that in August 2026 and
+    failed all 2,409 rows of a queue rescore, retrying forever on the same exception."""
+    joblib.dump(_StaleFeatureSetModel(), tmp_path / "model.joblib")
+    settings.DOMAIN_MODERATION_MODEL_DIR = str(tmp_path)
+
+    # The model is handed in directly, as a worker holding an already-loaded one would have it,
+    # so the load-time probe is bypassed exactly the way it is in production.
+    suggestion = suggest("a.com", [], [], model=_StaleFeatureSetModel())
+
+    assert (suggestion.action, suggestion.confidence) == ("UNSURE", 0.0)
+    assert suggestion.model_version == ""
+
+
+@pytest.mark.django_db
+def test_a_decisive_check_still_wins_over_a_model_that_cannot_score():
+    """The deterministic checks do not need the model, so an unscorable one must not downgrade
+    a decisive answer to UNSURE."""
+    items = [rules.EvidenceItem(kind="http_error", direction="REJECT",
+                                label="Homepage returns 404", implies_action="REJECT",
+                                implies_reason="OTHER", implies_confidence=0.95)]
+
+    suggestion = suggest("a.com", [], items, model=_StaleFeatureSetModel())
+
+    assert suggestion.action == "REJECT"
+    assert suggestion.reason_source == "rule"
+
+
+@pytest.mark.django_db
+def test_a_sibling_deployments_artifact_does_not_evict_a_working_model(monkeypatch):
+    """api and beta share a Postgres instance, so they share this table. The newest row is
+    routinely the other deployment's, trained by code with a different feature set - and
+    swapping a working model for a fallback once a minute because a sibling retrained is worse
+    than ignoring the row."""
+    publish(_StubModel("domain-mod-2026-09-01"), {})
+    assert get_model().version == "domain-mod-2026-09-01"
+
+    monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
+    ModerationModelArtifact.objects.create(
+        version="from-the-other-app", metrics={},
+        model=artifact_bytes(_StaleFeatureSetModel()))
+
+    assert get_model().version == "domain-mod-2026-09-01"
+
+
+@pytest.mark.django_db
+def test_an_unusable_artifact_is_not_unpickled_on_every_refresh(monkeypatch):
+    """The rejection is remembered by stamp, so a sibling app's model costs one load rather
+    than one per minute for as long as it stays the newest row."""
+    publish(_StubModel("domain-mod-2026-09-01"), {})
+    get_model()
+
+    monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
+    ModerationModelArtifact.objects.create(
+        version="from-the-other-app", metrics={},
+        model=artifact_bytes(_StaleFeatureSetModel()))
+
+    loads = []
+    original = model_module._load
+    monkeypatch.setattr(model_module, "_load",
+                        lambda version: loads.append(version) or original(version))
+
+    for _ in range(3):
+        assert get_model().version == "domain-mod-2026-09-01"
+    assert loads == ["from-the-other-app"]
 
 
 # --------------------------------------------------------------------- request validation

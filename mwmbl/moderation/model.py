@@ -91,11 +91,22 @@ class Suggestion:
 class ModerationModel:
     """A fitted featuriser plus the two heads, pickled together as one artifact."""
 
-    def __init__(self, featuriser: Featuriser, reject_head, reason_head, version: str):
+    # Class-level default so an artifact pickled before training domains were recorded still
+    # answers the question. Instances always set their own in __init__.
+    train_domains: set = frozenset()
+
+    def __init__(self, featuriser: Featuriser, reject_head, reason_head, version: str,
+                 train_domains: Optional[set] = None):
         self.featuriser = featuriser
         self.reject_head = reject_head
         self.reason_head = reason_head
         self.version = version
+        # What this model was fitted on, so a later retrain can exclude those rows when it
+        # scores this model on its own held-out set. Without it, the incumbent is measured
+        # partly on data it memorised and the comparison quietly favours whatever is deployed.
+        # Empty for artifacts pickled before this was recorded; mwmbl.moderation.train reports
+        # that rather than assuming either way.
+        self.train_domains = train_domains or set()
 
     def predict(self, examples: list[ModerationExample]) -> list[tuple[float, str, float]]:
         """(reject probability, reason, reason probability) for each example, in one pass."""
@@ -144,8 +155,21 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
         return Suggestion(action="UNSURE", confidence=0.0, model_version="",
                           evidence=[item.to_dict() for item in evidence_items])
 
-    reject_probability, reason, reason_confidence = model.predict(
-        [ModerationExample(domain, page_texts)])[0]
+    try:
+        reject_probability, reason, reason_confidence = model.predict(
+            [ModerationExample(domain, page_texts)])[0]
+    except Exception:
+        # The same degradation, for a model that loaded but cannot score. is_compatible()
+        # catches this at load time, but only for artifacts *older* than the running code -
+        # it cannot protect code that is older than the artifact. A retrain run from a freshly
+        # built image publishes a model every not-yet-restarted worker then chokes on, and in
+        # August 2026 that failed all 2,409 rows of a queue rescore and left the task retrying
+        # on the same exception. One unscorable domain is a suggestion we do not have; it is
+        # not a reason to end the run.
+        logger.exception("Model %s could not score %s; falling back to the deterministic "
+                         "checks", model.version, domain)
+        return Suggestion(action="UNSURE", confidence=0.0, model_version="",
+                          evidence=[item.to_dict() for item in evidence_items])
 
     if reject_probability >= settings.MODERATION_REJECT_THRESHOLD:
         action, confidence = "REJECT", reject_probability
@@ -179,6 +203,14 @@ def get_model() -> Optional[ModerationModel]:
 
     None (until the published artifact changes) when nothing can be loaded, so a suggestion
     falls back to the deterministic checks rather than failing.
+
+    **A newer artifact this code cannot use does not evict the one it is serving.** The
+    artifact table is a single row set shared by every deployment pointed at the database -
+    api and beta share a Postgres instance - so the newest row is routinely the *other*
+    deployment's, trained by code with a different feature set. Replacing a working model with
+    a fallback once a minute because a sibling app retrained is worse than ignoring the row:
+    the stamp is recorded either way, so a rejected artifact is unpickled once rather than on
+    every refresh.
     """
     global _model, _loaded_stamp, _checked_at
     with _lock:
@@ -186,10 +218,30 @@ def get_model() -> Optional[ModerationModel]:
             return _model
         published = _published_stamp()
         if _checked_at is None or published != _loaded_stamp:
-            _model = _load(published[0] if published else None)
+            candidate = _load(published[0] if published else None)
+            if candidate is not None:
+                _model = candidate
+            elif _model is None:
+                _model = _load_bundled()
+            else:
+                logger.warning(
+                    "Published artifact %s is not usable by this code; continuing to serve %s. "
+                    "This is what a sibling deployment retraining against the same database "
+                    "looks like.", published[0] if published else "(none)", _model.version)
             _loaded_stamp = published
         _checked_at = time.monotonic()
     return _model
+
+
+def load_published_model() -> Optional[ModerationModel]:
+    """The artifact the workers are serving, for the retrain to compare itself against.
+
+    Deliberately not :func:`get_model`, whose cache exists to keep the request path cheap: a
+    retrain wants the row as it stands right now, and it wants it without disturbing what the
+    rest of the process is serving.
+    """
+    published = _published_stamp()
+    return _load(published[0] if published else None)
 
 
 def publish(model: ModerationModel, metrics: dict) -> ModerationModelArtifact:
@@ -229,6 +281,37 @@ def _published_stamp() -> Optional[tuple[str, datetime]]:
     return (row["version"], row["created_on"]) if row else None
 
 
+def is_compatible(model: ModerationModel) -> bool:
+    """Whether a loaded artifact can actually score a domain with the code that loaded it.
+
+    A featuriser is pickled whole, so a change to the feature set - one more shape column, a
+    block that moved - leaves old artifacts describing a matrix this code no longer builds, and
+    the heads raise on the width mismatch at *predict* time. In the enrichment task that means
+    every domain fails to be scored rather than one, and the failure looks like a crawl problem
+    rather than what it is.
+
+    So loading ends with one probe prediction, and a model that cannot answer it is treated
+    exactly like a model that could not be unpickled: dropped, with the deterministic checks
+    carrying on alone. A probe rather than a version stamp because it catches whatever drifted,
+    not only the drift somebody remembered to bump a number for.
+    """
+    try:
+        model.predict([ModerationExample("example.com", [])])
+    except Exception:
+        logger.exception("Moderation model %s could not score a probe domain", model.version)
+        return False
+    return True
+
+
+def _checked(model: Optional[ModerationModel], where: str) -> Optional[ModerationModel]:
+    if model is None or is_compatible(model):
+        return model
+    logger.error("Moderation model %s from %s was fitted on a different feature set than this "
+                 "code builds; ignoring it and falling back to the deterministic checks. "
+                 "Retrain to publish a compatible artifact.", model.version, where)
+    return None
+
+
 def _load(version: Optional[str]) -> Optional[ModerationModel]:
     if version is None:
         return _load_bundled()
@@ -243,7 +326,7 @@ def _load(version: Optional[str]) -> Optional[ModerationModel]:
                          "artifact", version)
         return _load_bundled()
     logger.info("Domain moderation model %s loaded from the database", model.version)
-    return model
+    return _checked(model, "the database")
 
 
 def _load_bundled() -> Optional[ModerationModel]:
@@ -260,7 +343,7 @@ def _load_bundled() -> Optional[ModerationModel]:
         logger.exception("Failed to load the domain moderation model from %s", model_path)
         return None
     logger.info("Domain moderation model %s loaded from %s", model.version, model_path)
-    return model
+    return _checked(model, str(model_path))
 
 
 def load_metrics() -> dict:

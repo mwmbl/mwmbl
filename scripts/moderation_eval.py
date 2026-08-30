@@ -6,6 +6,7 @@ sanitized judgments export, so the evaluation is reproducible on a laptop and in
 
     uv run python scripts/moderation_eval.py
     uv run python scripts/moderation_eval.py --derived 2000     # needs network
+    uv run python scripts/moderation_eval.py --write-artifact   # regenerate the warm start
 
 Reports every metric with a bootstrap interval. That is not decoration: the cold-start slice
 has ~80 positives, and the augmentation experiment that motivated the derived-data design
@@ -16,7 +17,10 @@ import gzip
 import json
 import os
 import sys
+from datetime import date
 from pathlib import Path
+
+import joblib
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 
@@ -25,10 +29,12 @@ import django
 django.setup()
 
 from mwmbl.moderation.train import train                          # noqa: E402
+from mwmbl.moderation.model import METRICS_FILENAME, MODEL_FILENAME  # noqa: E402
 from mwmbl.moderation.training_data import (                      # noqa: E402
     REAL, TrainingRow, is_trainable_domain, derived_rows, seed_rows)
 
 DEFAULT_EXPORT = Path("devdata/judgments_export/domains.jsonl.gz")
+ARTIFACT_DIR = Path("mwmbl/moderation/artifacts")
 
 
 def rows_from_export(path: Path) -> list[TrainingRow]:
@@ -61,6 +67,12 @@ def main() -> int:
     parser.add_argument("--derived", type=int, default=0,
                         help="Blocklist rows per under-represented reason (0 = skip the fetch)")
     parser.add_argument("--no-seed", action="store_true")
+    parser.add_argument(
+        "--write-artifact", action="store_true",
+        help=(f"Overwrite the committed warm start in {ARTIFACT_DIR}. Needed after a change to "
+              "the feature set: a featuriser is pickled whole, so the shipped artifact then "
+              "describes a matrix the code no longer builds, fails the load-time probe, and "
+              "every deploy degrades to the deterministic checks until the first retrain."))
     options = parser.parse_args()
 
     if not options.export.exists():
@@ -77,8 +89,21 @@ def main() -> int:
         rows += derived_rows(["OFFENSIVE"], options.derived,
                              exclude={row.domain for row in rows})
 
-    _, metrics = train(rows, "offline-eval")
+    # Dated like a retrain's, because this artifact is served in production until the first
+    # retrain publishes and "offline-eval" in a worker log says nothing about how old it is -
+    # but suffixed, because it is *not* one. DomainEvidence.model_version records which model
+    # scored a row, and a warm start sharing a retrain's version string makes "has the rescore
+    # run yet?" unanswerable from the data.
+    version = (f"domain-mod-{date.today():%Y-%m-%d}-warmstart" if options.write_artifact
+               else "offline-eval")
+    model, metrics = train(rows, version)
     print(json.dumps(metrics, indent=2))
+
+    if options.write_artifact:
+        joblib.dump(model, ARTIFACT_DIR / MODEL_FILENAME)
+        (ARTIFACT_DIR / METRICS_FILENAME).write_text(json.dumps(metrics, indent=2) + "\n")
+        print(f"\nWrote the warm start to {ARTIFACT_DIR}. This is the day-one model only - a "
+              f"retrain against the production database still replaces it.")
     return 0
 
 
