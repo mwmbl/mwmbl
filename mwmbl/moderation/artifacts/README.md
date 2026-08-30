@@ -58,21 +58,33 @@ and every deploy runs on the deterministic checks alone until the first retrain 
 probe is what turns that from an exception per domain inside the enrichment task into an honest
 "not assessed yet" — it is not a licence to leave the artifact stale.
 
-## Retrain from the image the workers are running
+## This table is shared between deployments
 
-`is_compatible()` protects the running code from an artifact **older** than it. Nothing can
-protect it from one that is *newer*: a featuriser is pickled whole, so a model trained by code
-with one more feature than the workers build produces a matrix they cannot use, and they have no
-way to know that in advance.
+`api.mwmbl.org` and `beta.mwmbl.org` point at the same Postgres instance, so they share this
+table — and the `background_task` queue with it. `_published_stamp()` returns the newest row in
+the database, not the newest row *this deployment* published, so whenever the two are running
+different code the newest row is routinely the other one's.
 
-That is not hypothetical. In August 2026 a retrain run through `dokku enter` on a freshly built
-image published a model with nine shape features while the long-running container was still on
-eight. Every one of the 2,409 rows in the queue rescore failed with `X has 57673 features, but
-LogisticRegression is expecting 57674`, and the task retried on the same exception.
+That matters because a featuriser is pickled whole. A model trained by code with one more shape
+feature than a deployment builds produces a matrix that deployment cannot use, and there is no
+way for it to know in advance. In August 2026 a retrain on beta (nine shape features) published
+into the shared table while api was still on `main` (eight); api picked it up on its next refresh
+and every one of the 2,409 rows in the queue rescore failed with `X has 57673 features, but
+LogisticRegression is expecting 57674`, retrying on the same exception. The rescore task is in
+the shared queue too, so it does not even reliably run on the deployment that scheduled it.
 
-So **deploy first, then retrain** — the process that publishes must be running the same image as
-the process that serves. If it happens anyway, delete the offending `ModerationModelArtifact` row
-and the workers fall back to the warm start here; then deploy and retrain again.
+Three things now contain this, and none of them is a substitute for the others:
+
+- `is_compatible()` probes an artifact at load and refuses one this code cannot featurise.
+- `get_model()` keeps serving what it has when the newest row is unusable, rather than dropping
+  to a fallback once a minute because a sibling deployment retrained.
+- `suggest()` degrades to UNSURE if a model that loaded still fails to score, so one unusable
+  artifact cannot fail a whole queue rescore.
+
+The standing fix is to stop sharing: either give the deployments separate databases, or scope
+the artifact table per deployment. Until then, **retrain from the deployment whose code is
+oldest**, so what it publishes is usable by both. If a bad row lands anyway, delete it — every
+deployment falls back to the warm start here.
 
 ## What this version was trained on
 

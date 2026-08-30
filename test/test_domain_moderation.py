@@ -1441,6 +1441,45 @@ def test_a_decisive_check_still_wins_over_a_model_that_cannot_score():
     assert suggestion.reason_source == "rule"
 
 
+@pytest.mark.django_db
+def test_a_sibling_deployments_artifact_does_not_evict_a_working_model(monkeypatch):
+    """api and beta share a Postgres instance, so they share this table. The newest row is
+    routinely the other deployment's, trained by code with a different feature set - and
+    swapping a working model for a fallback once a minute because a sibling retrained is worse
+    than ignoring the row."""
+    publish(_StubModel("domain-mod-2026-09-01"), {})
+    assert get_model().version == "domain-mod-2026-09-01"
+
+    monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
+    ModerationModelArtifact.objects.create(
+        version="from-the-other-app", metrics={},
+        model=artifact_bytes(_StaleFeatureSetModel()))
+
+    assert get_model().version == "domain-mod-2026-09-01"
+
+
+@pytest.mark.django_db
+def test_an_unusable_artifact_is_not_unpickled_on_every_refresh(monkeypatch):
+    """The rejection is remembered by stamp, so a sibling app's model costs one load rather
+    than one per minute for as long as it stays the newest row."""
+    publish(_StubModel("domain-mod-2026-09-01"), {})
+    get_model()
+
+    monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
+    ModerationModelArtifact.objects.create(
+        version="from-the-other-app", metrics={},
+        model=artifact_bytes(_StaleFeatureSetModel()))
+
+    loads = []
+    original = model_module._load
+    monkeypatch.setattr(model_module, "_load",
+                        lambda version: loads.append(version) or original(version))
+
+    for _ in range(3):
+        assert get_model().version == "domain-mod-2026-09-01"
+    assert loads == ["from-the-other-app"]
+
+
 # --------------------------------------------------------------------- request validation
 
 @pytest.mark.django_db

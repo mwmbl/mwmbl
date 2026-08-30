@@ -203,6 +203,14 @@ def get_model() -> Optional[ModerationModel]:
 
     None (until the published artifact changes) when nothing can be loaded, so a suggestion
     falls back to the deterministic checks rather than failing.
+
+    **A newer artifact this code cannot use does not evict the one it is serving.** The
+    artifact table is a single row set shared by every deployment pointed at the database -
+    api and beta share a Postgres instance - so the newest row is routinely the *other*
+    deployment's, trained by code with a different feature set. Replacing a working model with
+    a fallback once a minute because a sibling app retrained is worse than ignoring the row:
+    the stamp is recorded either way, so a rejected artifact is unpickled once rather than on
+    every refresh.
     """
     global _model, _loaded_stamp, _checked_at
     with _lock:
@@ -210,7 +218,16 @@ def get_model() -> Optional[ModerationModel]:
             return _model
         published = _published_stamp()
         if _checked_at is None or published != _loaded_stamp:
-            _model = _load(published[0] if published else None)
+            candidate = _load(published[0] if published else None)
+            if candidate is not None:
+                _model = candidate
+            elif _model is None:
+                _model = _load_bundled()
+            else:
+                logger.warning(
+                    "Published artifact %s is not usable by this code; continuing to serve %s. "
+                    "This is what a sibling deployment retraining against the same database "
+                    "looks like.", published[0] if published else "(none)", _model.version)
             _loaded_stamp = published
         _checked_at = time.monotonic()
     return _model
