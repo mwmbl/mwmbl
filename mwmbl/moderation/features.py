@@ -105,17 +105,26 @@ class Featuriser:
         cold-start slice (0.535 -> 0.392) and doubles the share of submissions the tool declines
         to have an opinion about (0.118 -> 0.249).
 
-        ``has_text`` is **off by default, because it was measured and did not help.** The idea
-        was sound - an uncrawled domain and a page whose words are all out of vocabulary produce
-        the same all-zero TF-IDF row, and they are not the same thing - but evidence is crawled
-        newest-first, so under a chronological split the indicator is also a proxy for *recency*
-        (46% of training rows against 92% of cold-start test rows), and recency is when the .ai
-        spam wave happened. Holding it out improved every metric measured: normalised AP 0.521
-        -> 0.535, reject precision 0.636 -> 0.657, reject recall 0.111 -> 0.121. Small against
-        their intervals, individually; consistent across all of them.
+        ``has_text`` is **off, because it was measured twice and lost twice.** The idea was
+        sound - an uncrawled domain and a page whose words are all out of vocabulary produce the
+        same all-zero TF-IDF row, and they are not the same thing - and the first result had an
+        obvious excuse: evidence was crawled newest-first, so at 46% training coverage against
+        92% test coverage the indicator was a proxy for *recency*, and recency is when the .ai
+        spam wave happened. Holding it out gave normalised AP 0.521 -> 0.535, reject precision
+        0.636 -> 0.657.
 
-        The flag stays so it can be re-measured once ``backfill_domain_evidence`` has evened out
-        the coverage, which is the condition under which it would start meaning what it says.
+        Backfilling evidence over the older submissions closed that gap - 94% against 92% - and
+        it lost by *more*: 0.598 -> 0.622 normalised AP, 0.682 -> 0.707 reject precision. Which
+        is the answer, and in hindsight the obvious one. When almost everything has been crawled
+        the indicator is very nearly a constant, so it carries no information and only spends a
+        parameter. The rows it does fire on are the ones nothing could fetch, and those are
+        already settled decisively and exactly by the liveness check in mwmbl.moderation.rules,
+        for the reason this module's own docstring gives: the crawl happens now and the labels
+        are up to two years old, so "could not be fetched" is a fact about today, not about the
+        decision. It was redundant with a deterministic check the whole time.
+
+        The flag stays because ``--ablate`` still reports the row, and a crawl that silently
+        degrades would show up there as the indicator regaining value.
         """
         self.use_text = use_text
         self.use_has_text = use_has_text

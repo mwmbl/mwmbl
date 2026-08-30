@@ -34,6 +34,12 @@ from mwmbl.moderation.train import passes_gate, train
 MIN_REAL_ROWS_PER_REASON = 30
 DERIVED_ROWS_PER_REASON = 300
 
+# How far the train and test text coverage may differ before the ablation stops comparing like
+# with like. Evidence is crawled newest-first, so before a backfill the two sides can sit at 46%
+# and 92%, at which point has_text measures recency and the text vocabulary is fitted mostly on
+# a different period than it is tested on.
+COVERAGE_GAP_TOLERANCE = 0.15
+
 
 class Command(BaseCommand):
     help = "Train the domain moderation approve/reject suggester"
@@ -140,14 +146,32 @@ class Command(BaseCommand):
                 f"{self._with_interval(at['reject_recall'], at['reject_recall_ci'])}  "
                 f"{at['unsure_share']:>7.3f}")
 
-        cold = full.get("cold_start", {})
-        self.stdout.write(
-            f"\n  {full.get('train_rows_with_text', 0)} of "
-            f"{sum(full.get('train_rows_by_source', {}).values())} training rows and "
-            f"{cold.get('rows_with_text', 0)} of {cold.get('rows', 0)} cold-start test rows "
-            f"have text.\n  A large gap between those two makes has_text a proxy for recency "
-            f"rather than for evidence, which is why it is off by default. Backfill evidence "
-            f"for the older\n  submissions to close the gap, then re-read this table.\n")
+        self.stdout.write("\n  " + self._coverage_note(full) + "\n")
+
+    @staticmethod
+    def _coverage_note(metrics: dict) -> str:
+        """How evenly the page text is spread across the split, and what that means to read.
+
+        Conditional, because the advice inverts. While evidence is crawled newest-first the two
+        sides disagree badly and has_text is a proxy for recency rather than for evidence, so
+        the table cannot be read at face value and the fix is a backfill. Once the backfill has
+        run they agree, the table means what it says - and telling someone to close a gap they
+        have already closed is worse than saying nothing.
+        """
+        cold = metrics.get("cold_start", {})
+        train_rows = sum(metrics.get("train_rows_by_source", {}).values())
+        train_share = metrics.get("train_rows_with_text", 0) / train_rows if train_rows else 0
+        test_share = (cold.get("rows_with_text", 0) / cold["rows"]) if cold.get("rows") else 0
+
+        coverage = (f"{metrics.get('train_rows_with_text', 0)} of {train_rows} training rows "
+                    f"({train_share:.0%}) and {cold.get('rows_with_text', 0)} of "
+                    f"{cold.get('rows', 0)} cold-start test rows ({test_share:.0%}) have text.")
+        if abs(train_share - test_share) > COVERAGE_GAP_TOLERANCE:
+            return (coverage + "\n  That gap makes has_text a proxy for recency rather than "
+                    "for evidence, and skews the text block's\n  vocabulary towards the test "
+                    "period. Run backfill_domain_evidence over the older submissions\n  and "
+                    "re-read this table before drawing conclusions from it.")
+        return coverage + " Coverage is even, so these rows compare like for like."
 
     @staticmethod
     def _with_interval(value, interval) -> str:

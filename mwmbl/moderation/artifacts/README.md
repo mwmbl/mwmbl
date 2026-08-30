@@ -33,13 +33,17 @@ its score distribution drifts through the two the server serves — read `reject
 model, the same model plus the `has_text` indicator, and the domain-name-only model on the same
 split; `--no-text` and `--has-text` fit those variants directly.
 
-Measured on production data, the page-text vocabulary is worth **+0.143 normalised AP** on the
-cold-start slice (0.535 against 0.392) and halves the share of submissions the tool declines to
-judge (`unsure` 0.118 against 0.249). The `has_text` indicator is **off**, because it made every
-metric worse — normalised AP 0.535 → 0.521, reject precision 0.657 → 0.636, reject recall 0.121
-→ 0.111. Evidence is crawled newest-first, so with 46% of training rows and 92% of cold-start
-test rows carrying text the indicator is a proxy for recency, and recency is when the .ai spam
-wave happened. Re-measure it with `--ablate` once `backfill_domain_evidence` has closed that gap.
+Measured on production data with evidence backfilled to even coverage (94% of training rows, 92%
+of cold-start test rows), the page-text vocabulary is worth **+0.230 normalised AP** on the
+cold-start slice — 0.622 against 0.392 for domain-name-only — and lifts reject recall from 0.111
+to 0.153. It is the largest single lever measured on this model.
+
+The `has_text` indicator is **off**. It was measured twice and lost twice: at skewed coverage
+(0.535 against 0.521) and again at even coverage, by more (0.622 against 0.598, reject precision
+0.707 against 0.682). Once nearly everything has been crawled it is close to a constant, and the
+rows it does fire on — the ones nothing could fetch — are already settled decisively by the
+liveness check in `rules.py`. `--ablate` still reports the row, so a crawl that silently degrades
+would show up as the indicator regaining value.
 
 To reproduce the numbers without a production database, train from the sanitized judgments export
 instead:

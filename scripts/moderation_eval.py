@@ -90,8 +90,11 @@ def main() -> int:
                              exclude={row.domain for row in rows})
 
     # Dated like a retrain's, because this artifact is served in production until the first
-    # retrain publishes and "offline-eval" in a worker log says nothing about how old it is.
-    version = (f"domain-mod-{date.today():%Y-%m-%d}" if options.write_artifact
+    # retrain publishes and "offline-eval" in a worker log says nothing about how old it is -
+    # but suffixed, because it is *not* one. DomainEvidence.model_version records which model
+    # scored a row, and a warm start sharing a retrain's version string makes "has the rescore
+    # run yet?" unanswerable from the data.
+    version = (f"domain-mod-{date.today():%Y-%m-%d}-warmstart" if options.write_artifact
                else "offline-eval")
     model, metrics = train(rows, version)
     print(json.dumps(metrics, indent=2))
