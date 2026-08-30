@@ -45,7 +45,43 @@ from moderation_eval import DEFAULT_EXPORT, rows_from_export      # noqa: E402
 
 DOMAINS_FILE = "domains.txt"
 TRUTH_FILE = "truth.jsonl"
+EXAMPLES_FILE = "examples.md"
 JUDGEMENT_SUFFIX = ".judgements.jsonl"
+
+
+def few_shot_examples(train_rows, wanted: int) -> list:
+    """Labelled decisions to show a judge, drawn from the training split.
+
+    From the *training* split, never the test split - the model being compared against gets
+    those same rows to fit on, and anything from the held-out side would be handing the judge
+    its own answers.
+
+    Newest first, because moderation drifts: the .ai spam wave is a 2026 phenomenon, and the
+    decisions nearest the test period describe the policy as it stands rather than as it stood
+    in 2024. Balanced between approvals and rejections, and spread across rejection reasons,
+    because the real mix is ~90% approvals from one prolific submitter and a judge shown that
+    would learn the base rate rather than the policy.
+    """
+    newest = sorted(train_rows, key=lambda row: row.timestamp or "", reverse=True)
+    approvals = [row for row in newest if not row.rejected]
+
+    by_reason = {}
+    for row in newest:
+        if row.rejected:
+            by_reason.setdefault(row.reason or "OTHER", []).append(row)
+
+    # Round-robin across reasons so a rare class - OFFENSIVE has one real example in the whole
+    # dataset - is not crowded out by SPAM, which has hundreds.
+    rejections, index = [], 0
+    while len(rejections) < wanted // 2 and any(
+            len(rows) > index for rows in by_reason.values()):
+        for reason in sorted(by_reason):
+            if len(by_reason[reason]) > index and len(rejections) < wanted // 2:
+                rejections.append(by_reason[reason][index])
+        index += 1
+
+    chosen = approvals[:wanted - len(rejections)] + rejections
+    return sorted(chosen, key=lambda row: row.domain)
 
 
 def cold_start_test_rows(export: Path):
@@ -69,6 +105,18 @@ def export(options) -> int:
     rows, scores = cold_start_test_rows(options.export)
     options.out.mkdir(parents=True, exist_ok=True)
 
+    all_rows = rows_from_export(options.export) + seed_rows()
+    train_rows, _ = split_by_time(all_rows)
+    examples = few_shot_examples(train_rows, options.examples)
+    held_out = {row.domain for row in rows}
+    assert not {row.domain for row in examples} & held_out, (
+        "a few-shot example leaked in from the held-out rows")
+
+    (options.out / EXAMPLES_FILE).write_text(
+        "\n".join(f"- `{row.domain}` -> "
+                  + (f"REJECT ({row.reason or 'OTHER'})" if row.rejected else "APPROVE")
+                  for row in examples) + "\n")
+
     (options.out / DOMAINS_FILE).write_text(
         "".join(f"{row.domain}\n" for row in rows))
     # The labels and the model's own scores stay on this side, keyed by domain, so scoring can
@@ -78,6 +126,9 @@ def export(options) -> int:
             truth.write(json.dumps({"domain": row.domain, "rejected": row.rejected,
                                     "reason": row.reason, "model_score": float(score)}) + "\n")
 
+    print(f"{len(examples)} training-split examples "
+          f"({sum(row.rejected for row in examples)} rejections) -> "
+          f"{options.out / EXAMPLES_FILE}")
     print(f"{len(rows)} cold-start held-out domains -> {options.out / DOMAINS_FILE}")
     print(f"{sum(row.rejected for row in rows)} of them were rejected "
           f"(base rate {sum(row.rejected for row in rows) / len(rows):.3f})")
@@ -184,6 +235,8 @@ def main() -> int:
     exporter = subparsers.add_parser("export")
     exporter.add_argument("--export", type=Path, default=DEFAULT_EXPORT)
     exporter.add_argument("--out", type=Path, default=Path("devdata/moderation_bakeoff"))
+    exporter.add_argument("--examples", type=int, default=60,
+                          help="Labelled training-split decisions to write for few-shot prompts")
     exporter.set_defaults(function=export)
 
     scorer = subparsers.add_parser("score")
