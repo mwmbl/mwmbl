@@ -205,6 +205,18 @@ def decisive(items: list[EvidenceItem]) -> Optional[EvidenceItem]:
     return max(decisive_items, key=lambda item: item.implies_confidence)
 
 
+def implied_detail(item: EvidenceItem) -> str:
+    """What a check's rejection tells the submitter, for a reason that says nothing on its own.
+
+    Only OTHER needs one - "spam" explains itself, "other" does not - and the check's label is
+    already that sentence: "Homepage returns HTTP 404" is exactly what was wrong. Every OTHER
+    a check implies is one of these, which is what lets the API refuse an OTHER rejection with
+    no detail (mwmbl.platform.schemas.RejectionFieldsMixin) without making the suggestion
+    untakeable.
+    """
+    return item.label if item.implies_reason == "OTHER" else ""
+
+
 def _tld(domain: str) -> str:
     labels = domain.lower().split(".")
     return labels[-1] if len(labels) > 1 else ""
