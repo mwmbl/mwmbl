@@ -3,8 +3,14 @@
     uv run manage.py train_domain_moderation_model --dry-run
     uv run manage.py train_domain_moderation_model
 
-The gate compares the new model's cold-start PR-AUC against the lower bound of the incumbent's
-bootstrap interval, so a change that only looks like an improvement does not ship.
+The gate scores the incumbent and the candidate on the *same* held-out rows and bootstraps the
+difference, so a change that only looks like an improvement does not ship - and, just as
+importantly, a change that only looks like a regression because the population moved underneath
+it is not blocked. See mwmbl.moderation.train for why raw PR-AUC cannot be compared across two
+runs.
+
+    # is the crawled page text earning its place?
+    uv run manage.py train_domain_moderation_model --dry-run --ablate
 
 Publishing writes a ModerationModelArtifact row rather than a file: the incumbent the gate
 reads and the model the workers serve are then the same object, and neither is lost to a
@@ -18,7 +24,7 @@ from django.core.management.base import BaseCommand
 from mwmbl.background import rescore_pending_submissions
 from mwmbl.models import DomainSubmission
 from mwmbl.moderation import training_data
-from mwmbl.moderation.model import load_metrics, publish
+from mwmbl.moderation.model import load_metrics, load_published_model, publish
 from mwmbl.moderation.train import passes_gate, train
 
 # A reason class with fewer real examples than this is a candidate for blocklist-derived
@@ -37,6 +43,13 @@ class Command(BaseCommand):
                             help="Train and report metrics without writing the artifact")
         parser.add_argument("--force", action="store_true",
                             help="Publish even if the gate fails")
+        parser.add_argument(
+            "--no-text", action="store_true", dest="no_text",
+            help="Fit on the domain name alone, ignoring crawled page text")
+        parser.add_argument(
+            "--ablate", action="store_true",
+            help=("Also train the domain-name-only model and report both, so the contribution "
+                  "of the crawled page text is measured on the same split rather than guessed"))
         parser.add_argument(
             "--derived", action="store_true",
             help=("Add blocklist-derived rows for reason classes short of real data. Off by "
@@ -61,8 +74,16 @@ class Command(BaseCommand):
                     exclude={row.domain for row in rows})
 
         version = f"domain-mod-{date.today():%Y-%m-%d}"
-        model, metrics = train(rows, version)
+        # The model the workers are serving right now, so the gate can score it on the same
+        # held-out rows as the candidate. None on a first run, and on an artifact this code can
+        # no longer featurise - the gate falls back to the stored metrics and says so.
+        incumbent = load_published_model()
+        model, metrics = train(rows, version, use_text=not options["no_text"],
+                               incumbent=incumbent)
         self.stdout.write(json.dumps(metrics, indent=2))
+
+        if options["ablate"]:
+            self._report_ablation(rows, version, metrics)
 
         allowed, explanation = passes_gate(metrics, load_metrics())
         self.stdout.write(("PASS: " if allowed else "FAIL: ") + explanation)
@@ -79,6 +100,31 @@ class Command(BaseCommand):
             f"Published {model.version}; every worker picks it up within a minute."))
         rescore_pending_submissions(schedule=0)
         self.stdout.write("Scheduled a rescore of the pending queue with the new model.")
+
+    def _report_ablation(self, rows, version, with_text: dict) -> None:
+        """Train the same model without the text block and print both cold-start scores.
+
+        Same rows, same split, same seed, so the difference is the text block and nothing else.
+        Normalised AP rather than PR-AUC because the two fits see identical prevalence here and
+        it keeps the number on the same scale as everything else the retrain reports.
+        """
+        _, without_text = train(rows, f"{version}-no-text", use_text=False)
+        self.stdout.write("\nAblation - does the crawled page text help?")
+        for name, metrics in (("with text", with_text), ("domain name only", without_text)):
+            cold = metrics.get("cold_start")
+            if cold is None:
+                self.stdout.write(f"  {name:>16}: no cold-start slice")
+                continue
+            self.stdout.write(
+                f"  {name:>16}: normalised AP {cold['normalised_ap']:.4f} "
+                f"[{cold['normalised_ap_ci'][0]:.4f}, {cold['normalised_ap_ci'][1]:.4f}]  "
+                f"(PR-AUC {cold['pr_auc']:.4f}, base rate {cold['base_rate']:.4f})")
+        self.stdout.write(
+            f"  {with_text.get('train_rows_with_text', 0)} of "
+            f"{sum(with_text.get('train_rows_by_source', {}).values())} training rows and "
+            f"{with_text.get('cold_start', {}).get('rows_with_text', 0)} of "
+            f"{with_text.get('cold_start', {}).get('rows', 0)} cold-start test rows have text. "
+            f"A large gap between those two is the skew to fix before reading the ablation.\n")
 
     @staticmethod
     def _reasons_needing_data(rows) -> set[str]:

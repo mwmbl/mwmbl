@@ -32,10 +32,14 @@ SPAM_WORDS = [
 # crawler (65 and 155 chars), so three pages is a few hundred characters at most.
 MAX_TEXT_CHARS = 2000
 
-NUM_SHAPE_FEATURES = 8
-# Shape features are raw counts; scaling them into roughly [0, 1] keeps the regularisation
-# comparable across them and the TF-IDF blocks.
+# Counts are scaled into roughly [0, 1] so the regularisation is comparable across them and
+# the TF-IDF blocks. Indicators are already in [0, 1] and are deliberately *not* scaled: a 0/1
+# divided by 40 forces its coefficient forty times larger to say the same thing, which the L2
+# penalty then charges for, and has_text is the one feature that most needs to be heard.
 SHAPE_SCALE = 40.0
+COUNT_FEATURE_NAMES = ["len", "labels", "digits", "hyphens", "sld_len", "spamwords", "tld_len"]
+INDICATOR_FEATURE_NAMES = ["www", "has_text"]
+NUM_SHAPE_FEATURES = len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES)
 
 
 @dataclass
@@ -59,6 +63,7 @@ def _tld_tokens(domain: str) -> list[str]:
 
 
 def shape_features(domain: str) -> list[float]:
+    """The scaled counts, in COUNT_FEATURE_NAMES order."""
     host = domain.lower()
     labels = host.split(".")
     return [
@@ -66,10 +71,24 @@ def shape_features(domain: str) -> list[float]:
         len(labels),
         sum(character.isdigit() for character in host),
         host.count("-"),
-        float(host.startswith("www.")),
         len(labels[0]),
         sum(word in host for word in SPAM_WORDS),
         len(tld(domain)),
+    ]
+
+
+def indicator_features(example: "ModerationExample") -> list[float]:
+    """The unscaled 0/1 features, in INDICATOR_FEATURE_NAMES order.
+
+    ``has_text`` exists because an empty text block and a page whose words are all out of
+    vocabulary produce the same all-zero TF-IDF row, and they are not the same thing. Evidence
+    is crawled for recent submissions first, so in a chronological split most training rows
+    have no text and most test rows do; without this the model cannot tell the two apart, and
+    the difference is silently absorbed into the intercept it fitted on the training mix.
+    """
+    return [
+        float(example.domain.lower().startswith("www.")),
+        float(bool(example.text.strip())),
     ]
 
 
@@ -80,7 +99,10 @@ class Featuriser:
     training saw rather than rebuilding one from different data.
     """
 
-    def __init__(self):
+    def __init__(self, use_text: bool = True):
+        # Set False to fit the domain-name-only model, so the ablation that answers "is the
+        # crawled page text helping?" runs through exactly this code rather than a copy of it.
+        self.use_text = use_text
         # char_wb over the domain: catches the morphology of generated spam names, and the
         # word-boundary variant keeps n-grams from spanning label boundaries.
         self.domain_chars = TfidfVectorizer(
@@ -106,10 +128,12 @@ class Featuriser:
         # raises on - so a text block is only added when the text can actually support one.
         texts = [example.text for example in examples]
         try:
+            if not self.use_text:
+                raise ValueError("text block disabled for this fit")
             blocks.append(self.text.fit_transform(texts))
         except ValueError:
-            logger.info("Not enough page text to fit a text block over %d examples; "
-                        "the model will judge on the domain name alone", len(examples))
+            logger.info("No text block over %d examples (disabled, or not enough text to fit "
+                        "one); the model will judge on the domain name alone", len(examples))
             self.text = None
 
         blocks.append(self._shape_block(examples))
@@ -128,8 +152,9 @@ class Featuriser:
 
     @staticmethod
     def _shape_block(examples: list[ModerationExample]) -> csr_matrix:
-        shapes = np.array([shape_features(example.domain) for example in examples], dtype=float)
-        return csr_matrix(shapes / SHAPE_SCALE)
+        counts = np.array([shape_features(example.domain) for example in examples], dtype=float)
+        indicators = np.array([indicator_features(example) for example in examples], dtype=float)
+        return csr_matrix(np.hstack([counts / SHAPE_SCALE, indicators]))
 
     def feature_names(self) -> np.ndarray:
         """Feature labels in matrix order, for turning coefficients into moderator-facing text."""
@@ -140,7 +165,5 @@ class Featuriser:
         if self.text is not None:
             names.append(np.array([f"text={name}"
                                    for name in self.text.get_feature_names_out()]))
-        names.append(np.array([
-            "len", "labels", "digits", "hyphens", "www", "sld_len", "spamwords", "tld_len",
-        ]))
+        names.append(np.array(COUNT_FEATURE_NAMES + INDICATOR_FEATURE_NAMES))
         return np.concatenate(names)

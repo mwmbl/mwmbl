@@ -7,7 +7,9 @@ queue never runs a model on the request path.
 """
 import io
 import json
+import sys
 from datetime import timedelta
+from pathlib import Path
 from unittest import mock
 
 import joblib
@@ -178,6 +180,69 @@ def test_featuriser_produces_the_same_width_for_unseen_input():
     transformed = featuriser.transform([ModerationExample("unseen.example", ["nothing alike"])])
     assert transformed.shape[1] == fitted.shape[1]
     assert len(featuriser.feature_names()) == fitted.shape[1]
+
+
+def test_has_text_separates_an_uncrawled_domain_from_one_whose_words_are_unknown():
+    """Both produce an all-zero TF-IDF row, and they mean opposite things. Evidence is crawled
+    newest-first, so under a chronological split most training rows have no text and most test
+    rows do; without this indicator the model cannot tell the two cases apart and the
+    difference is absorbed into an intercept fitted on the training mix."""
+    featuriser = Featuriser()
+    featuriser.fit_transform([
+        ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+        ModerationExample("docs.python.org", ["python language reference tool"]),
+        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+    ])
+    assert featuriser.text is not None
+    column = list(featuriser.feature_names()).index("has_text")
+
+    uncrawled = featuriser.transform([ModerationExample("a.example", [])])
+    unmatched = featuriser.transform([ModerationExample("a.example", ["kanji zzz"])])
+    assert uncrawled[0, column] == 0.0
+    assert unmatched[0, column] == 1.0
+
+
+def test_the_ablation_fits_the_same_features_minus_the_text_block():
+    """--no-text has to run through the real featuriser, not a copy of it, or the ablation
+    measures the copy."""
+    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+                ModerationExample("docs.python.org", ["python language reference tool"]),
+                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+    with_text = Featuriser().fit_transform(examples).shape[1]
+    without = Featuriser(use_text=False)
+    assert without.fit_transform(examples).shape[1] < with_text
+    assert without.text is None
+    assert "has_text" in list(without.feature_names())
+
+
+def test_a_judges_most_confident_approval_is_not_read_as_a_certain_rejection(tmp_path):
+    """scripts/moderation_llm_bakeoff accepts judgements on either a 0-1 or a 0-100 scale, and
+    the scale has to be decided per file. Deciding per value reads a 1 out of 100 - the most
+    confident approval a judge can express - as a probability of 1.0, the most confident
+    rejection in the file. Both judges in the first bake-off emitted exactly one such row."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from moderation_llm_bakeoff import read_judgements
+
+    path = tmp_path / "judge.judgements.jsonl"
+    path.write_text(
+        '{"domain": "obviously-fine.org", "reject_probability": 1, "reason": ""}\n'
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 95, "reason": "SPAM"}\n')
+
+    judgements = read_judgements(path)
+    assert judgements["obviously-fine.org"] == 0.01
+    assert judgements["aislopgenerator.xyz"] == 0.95
+
+
+def test_judgements_already_on_a_zero_to_one_scale_are_left_alone(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from moderation_llm_bakeoff import read_judgements
+
+    path = tmp_path / "judge.judgements.jsonl"
+    path.write_text(
+        '{"domain": "obviously-fine.org", "reject_probability": 0.01, "reason": ""}\n'
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 0.95, "reason": "SPAM"}\n')
+
+    assert read_judgements(path) == {"obviously-fine.org": 0.01, "aislopgenerator.xyz": 0.95}
 
 
 def test_malformed_historic_names_are_excluded_from_training():
@@ -789,8 +854,22 @@ def test_redirect_check_errs_towards_reporting_nothing():
 
 # --------------------------------------------------------------------- retrain gate
 
-def metrics(pr_auc, low, high):
-    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high]}}
+def metrics(pr_auc, low, high, rows=150, positives=81):
+    """Cold-start metrics in the shape a stored artifact carries.
+
+    rows and positives are what make the PR-AUC readable: the gate corrects for prevalence, so
+    a slice cannot be described by its score alone.
+    """
+    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high],
+                           "rows": rows, "positives": positives}}
+
+
+def paired(difference, low, high, contamination_known=True):
+    return {"cold_start": metrics(0.7, 0.6, 0.8)["cold_start"],
+            "versus_incumbent": {
+                "incumbent_version": "domain-mod-2026-08-01", "rows": 150,
+                "contamination_known": contamination_known, "difference": difference,
+                "difference_ci": [low, high], "candidate_wins_fraction": 0.5}}
 
 
 def test_gate_publishes_when_there_is_no_incumbent():
@@ -802,7 +881,7 @@ def test_gate_blocks_a_model_below_the_incumbents_lower_bound():
     allowed, explanation = passes_gate(metrics(0.60, 0.51, 0.69),
                                        metrics(0.78, 0.69, 0.86))
     assert not allowed
-    assert "0.690" in explanation
+    assert "unpaired" in explanation
 
 
 def test_gate_tolerates_movement_inside_the_interval():
@@ -811,6 +890,53 @@ def test_gate_tolerates_movement_inside_the_interval():
     both directions - blocking good models and shipping bad ones."""
     allowed, _ = passes_gate(metrics(0.74, 0.65, 0.83), metrics(0.78, 0.69, 0.86))
     assert allowed
+
+
+def test_gate_is_not_fooled_by_a_change_in_prevalence():
+    """The August 2026 retrain, exactly as it happened.
+
+    Migration 0037 repaired 1,785 previously-invisible decisions into the training set, which
+    moved the cold-start rejection rate from 54% to 30%. PR-AUC's floor *is* the positive rate,
+    so the same quality of ranking scored 0.672 instead of 0.779 and the gate called it a
+    regression. Corrected for prevalence it is a small improvement, 0.519 -> 0.532, and it
+    ships."""
+    allowed, explanation = passes_gate(
+        metrics(0.6716, 0.5927, 0.7472, rows=635, positives=189),
+        metrics(0.7788, 0.6885, 0.8588, rows=150, positives=81))
+    assert allowed, explanation
+
+
+def test_the_paired_comparison_is_preferred_to_the_stored_metrics():
+    """Two numbers from two different test sets can only be compared weakly. When the incumbent
+    could be loaded and scored on the same rows, that is the answer - even when the stored
+    metrics, describing a different population, would have said otherwise."""
+    allowed, explanation = passes_gate(paired(0.02, -0.03, 0.07),
+                                       metrics(0.95, 0.93, 0.97))
+    assert allowed
+    assert "paired against domain-mod-2026-08-01" in explanation
+
+
+def test_gate_blocks_a_candidate_that_is_confidently_worse():
+    allowed, explanation = passes_gate(paired(-0.18, -0.26, -0.09), metrics(0.5, 0.4, 0.6))
+    assert not allowed
+    assert "tolerance" in explanation
+
+
+def test_gate_ships_a_small_loss_it_cannot_distinguish_from_noise():
+    """Non-inferiority, not superiority. Requiring a significant *gain* on a slice with ~80
+    positives would never ship anything, including the models that are genuinely better."""
+    allowed, _ = passes_gate(paired(-0.02, -0.045, 0.01), metrics(0.5, 0.4, 0.6))
+    assert allowed
+
+
+def test_an_incumbent_with_no_training_record_is_flagged_not_trusted_silently():
+    """Artifacts pickled before train_domains was recorded may be scored on rows they were
+    fitted on, which flatters them. The candidate still has to clear the bar - the point is
+    that the explanation says the bar was tilted."""
+    allowed, explanation = passes_gate(paired(0.01, -0.02, 0.05, contamination_known=False),
+                                       metrics(0.5, 0.4, 0.6))
+    assert allowed
+    assert "no record of its training domains" in explanation
 
 
 def test_gate_refuses_when_there_is_no_cold_start_slice():
@@ -1135,6 +1261,14 @@ class _StubModel:
         return [(self.score, "SPAM", self.score) for _ in examples]
 
 
+class _StaleFeatureSetModel:
+    """An artifact whose pickled featuriser no longer matches the code that loaded it."""
+    version = "stale"
+
+    def predict(self, examples):
+        raise ValueError("X has 8 features, but LogisticRegression is expecting 9 features")
+
+
 def artifact_bytes(model) -> bytes:
     buffer = io.BytesIO()
     joblib.dump(model, buffer)
@@ -1208,6 +1342,20 @@ def test_an_unloadable_artifact_falls_back_rather_than_failing(tmp_path, setting
         version="corrupt", model=b"not a pickle", metrics={})
 
     assert get_model().version == "bundled"
+
+
+@pytest.mark.django_db
+def test_an_artifact_from_a_different_feature_set_degrades_to_the_rules(tmp_path, settings):
+    """A featuriser is pickled whole, so adding a feature leaves every stored artifact building
+    a matrix its heads were not fitted on. That raises at predict time, inside the enrichment
+    task, for every domain - so loading probes the model once and drops it if it cannot answer,
+    which is the same degradation an unloadable pickle already gets."""
+    joblib.dump(_StaleFeatureSetModel(), tmp_path / "model.joblib")
+    settings.DOMAIN_MODERATION_MODEL_DIR = str(tmp_path)
+
+    assert get_model() is None
+    suggestion = suggest("a.com", [], [])
+    assert (suggestion.action, suggestion.model_version) == ("UNSURE", "")
 
 
 # --------------------------------------------------------------------- request validation

@@ -91,11 +91,22 @@ class Suggestion:
 class ModerationModel:
     """A fitted featuriser plus the two heads, pickled together as one artifact."""
 
-    def __init__(self, featuriser: Featuriser, reject_head, reason_head, version: str):
+    # Class-level default so an artifact pickled before training domains were recorded still
+    # answers the question. Instances always set their own in __init__.
+    train_domains: set = frozenset()
+
+    def __init__(self, featuriser: Featuriser, reject_head, reason_head, version: str,
+                 train_domains: Optional[set] = None):
         self.featuriser = featuriser
         self.reject_head = reject_head
         self.reason_head = reason_head
         self.version = version
+        # What this model was fitted on, so a later retrain can exclude those rows when it
+        # scores this model on its own held-out set. Without it, the incumbent is measured
+        # partly on data it memorised and the comparison quietly favours whatever is deployed.
+        # Empty for artifacts pickled before this was recorded; mwmbl.moderation.train reports
+        # that rather than assuming either way.
+        self.train_domains = train_domains or set()
 
     def predict(self, examples: list[ModerationExample]) -> list[tuple[float, str, float]]:
         """(reject probability, reason, reason probability) for each example, in one pass."""
@@ -192,6 +203,17 @@ def get_model() -> Optional[ModerationModel]:
     return _model
 
 
+def load_published_model() -> Optional[ModerationModel]:
+    """The artifact the workers are serving, for the retrain to compare itself against.
+
+    Deliberately not :func:`get_model`, whose cache exists to keep the request path cheap: a
+    retrain wants the row as it stands right now, and it wants it without disturbing what the
+    rest of the process is serving.
+    """
+    published = _published_stamp()
+    return _load(published[0] if published else None)
+
+
 def publish(model: ModerationModel, metrics: dict) -> ModerationModelArtifact:
     """Store a trained model and its metrics as the artifact every worker will serve."""
     buffer = io.BytesIO()
@@ -229,6 +251,37 @@ def _published_stamp() -> Optional[tuple[str, datetime]]:
     return (row["version"], row["created_on"]) if row else None
 
 
+def is_compatible(model: ModerationModel) -> bool:
+    """Whether a loaded artifact can actually score a domain with the code that loaded it.
+
+    A featuriser is pickled whole, so a change to the feature set - one more shape column, a
+    block that moved - leaves old artifacts describing a matrix this code no longer builds, and
+    the heads raise on the width mismatch at *predict* time. In the enrichment task that means
+    every domain fails to be scored rather than one, and the failure looks like a crawl problem
+    rather than what it is.
+
+    So loading ends with one probe prediction, and a model that cannot answer it is treated
+    exactly like a model that could not be unpickled: dropped, with the deterministic checks
+    carrying on alone. A probe rather than a version stamp because it catches whatever drifted,
+    not only the drift somebody remembered to bump a number for.
+    """
+    try:
+        model.predict([ModerationExample("example.com", [])])
+    except Exception:
+        logger.exception("Moderation model %s could not score a probe domain", model.version)
+        return False
+    return True
+
+
+def _checked(model: Optional[ModerationModel], where: str) -> Optional[ModerationModel]:
+    if model is None or is_compatible(model):
+        return model
+    logger.error("Moderation model %s from %s was fitted on a different feature set than this "
+                 "code builds; ignoring it and falling back to the deterministic checks. "
+                 "Retrain to publish a compatible artifact.", model.version, where)
+    return None
+
+
 def _load(version: Optional[str]) -> Optional[ModerationModel]:
     if version is None:
         return _load_bundled()
@@ -243,7 +296,7 @@ def _load(version: Optional[str]) -> Optional[ModerationModel]:
                          "artifact", version)
         return _load_bundled()
     logger.info("Domain moderation model %s loaded from the database", model.version)
-    return model
+    return _checked(model, "the database")
 
 
 def _load_bundled() -> Optional[ModerationModel]:
@@ -260,7 +313,7 @@ def _load_bundled() -> Optional[ModerationModel]:
         logger.exception("Failed to load the domain moderation model from %s", model_path)
         return None
     logger.info("Domain moderation model %s loaded from %s", model.version, model_path)
-    return model
+    return _checked(model, str(model_path))
 
 
 def load_metrics() -> dict:

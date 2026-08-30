@@ -216,3 +216,4 @@ devdata/judgments_export/
 devdata/judge_train/*
 !devdata/judge_train/RESULTS.md
 !devdata/judge_train/eval_manifest.json
+devdata/moderation_bakeoff/

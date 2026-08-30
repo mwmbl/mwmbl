@@ -17,24 +17,37 @@ worker replica keeping its own copy.
     uv run manage.py train_domain_moderation_model --dry-run   # report metrics only
     uv run manage.py train_domain_moderation_model             # publish if it passes the gate
 
-The gate compares the new model's cold-start PR-AUC against the *lower bound* of the incumbent's
-bootstrap interval — the metrics stored beside the published model, falling back to `metrics.json`
-until something has been published — so a change that only looks like an improvement does not
-ship. Publishing writes a new artifact row, which every worker picks up within a minute, and
-schedules `rescore_pending_submissions` to re-score the existing queue with the new model.
+The gate loads the published model, scores it and the candidate on the *same* held-out rows, and
+bootstraps the difference; the candidate ships unless it is confidently worse. Raw PR-AUC is never
+compared across two runs, because its floor is the positive rate — the August 2026 retrain was
+blocked for a 0.11 "regression" that was entirely a shift in prevalence after migration 0037. See
+`mwmbl.moderation.train`. Publishing writes a new artifact row, which every worker picks up within
+a minute, and schedules `rescore_pending_submissions` to re-score the existing queue.
 
 To reproduce the numbers without a production database, train from the sanitized judgments export
 instead:
 
     uv run python scripts/moderation_eval.py
+    uv run python scripts/moderation_eval.py --write-artifact   # overwrite the files here
+
+**Run `--write-artifact` after any change to the feature set.** A featuriser is pickled whole, so
+adding or moving a feature leaves this artifact describing a matrix the code no longer builds. It
+then fails the probe prediction that `mwmbl.moderation.model` makes at load time and is dropped,
+and every deploy runs on the deterministic checks alone until the first retrain publishes. The
+probe is what turns that from an exception per domain inside the enrichment task into an honest
+"not assessed yet" — it is not a licence to leave the artifact stale.
 
 ## What this version was trained on
 
-The committed artifact comes from the judgments export, which carries no page text, so its
-featuriser has **no text block** — it judges on the domain name, TLD and shape alone. Once
-`backfill_domain_evidence` has crawled real submissions, a retrain picks up the titles and
-extracts of the three crawled pages and the text block appears. Expect the first post-backfill
-retrain to change the artifact substantially.
+The committed artifact comes from the judgments export, which carries no page text. Only the 21
+hand-written seed rows have any, so the text block exists but is fitted on those alone and
+contributes almost nothing: in practice this model judges on the domain name, TLD and shape, and
+`has_text` is 0 for every real row it saw. Once `backfill_domain_evidence` has crawled real
+submissions, a retrain picks up the titles and extracts of the three crawled pages and the text
+block becomes real. Expect the first post-backfill retrain to change the artifact substantially,
+and read `train_rows_with_text` against the per-slice `rows_with_text` before believing anything
+about whether the text is helping — evidence is crawled newest-first, so a chronological split
+puts most of the text on the test side.
 
 ## Format
 
