@@ -37,7 +37,7 @@ from django.utils import timezone
 
 from mwmbl.models import ModerationModelArtifact
 from mwmbl.moderation.features import Featuriser, ModerationExample
-from mwmbl.moderation.rules import APPROVE, EvidenceItem, REJECT, decisive
+from mwmbl.moderation.rules import APPROVE, EvidenceItem, REJECT, decisive, implied_detail
 
 logger = getLogger(__name__)
 
@@ -62,11 +62,22 @@ MODEL_REFRESH_SECONDS = 60
 REASON_CONFIDENCE_CAP = {"OFFENSIVE": 0.6}
 
 
+# Reasons a suggestion cannot be handed to a moderator as a one-keystroke rejection. OTHER is
+# a real class - moderators reach for it often - but it is the one reason that says nothing on
+# its own, so the API refuses it without a written detail, and the model has no sentence to
+# offer. A blank reason is here for the same reason from the other end: it names nothing at
+# all. A check that implies OTHER is unaffected; its label is the detail (see implied_detail).
+UNUSABLE_MODEL_REASONS = frozenset({"", "OTHER"})
+
+
 @dataclass
 class Suggestion:
     action: str                       # APPROVE | REJECT | UNSURE
     confidence: float
     reason: str = ""
+    # What the submitter would be told. Non-empty whenever ``reason`` is OTHER and empty
+    # otherwise: the other reasons are their own explanation.
+    reason_detail: str = ""
     reason_confidence: float = 0.0
     reason_source: str = "model"      # model | derived | rule
     model_version: str = ""
@@ -144,6 +155,7 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
             action=decisive_item.implies_action,
             confidence=decisive_item.implies_confidence,
             reason=decisive_item.implies_reason,
+            reason_detail=implied_detail(decisive_item),
             reason_confidence=decisive_item.implies_confidence,
             reason_source="rule",
             model_version=model.version if model else "",
@@ -179,6 +191,15 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
         action, confidence = "UNSURE", 1.0 - abs(reject_probability - 0.5) * 2
 
     suggested_reason = reason if action == "REJECT" else ""
+    if action == "REJECT" and suggested_reason in UNUSABLE_MODEL_REASONS:
+        # A rejection we cannot give the reason for is not one to suggest. The reason head can
+        # land on OTHER - it is trained on decisions and moderators use it - but nothing here
+        # can write the detail that goes with it, and a "Reject - other" button that fails
+        # validation when pressed is worse than no suggestion. Back to the moderator, who is
+        # the only one who can say what is wrong.
+        return Suggestion(action="UNSURE", confidence=0.0, model_version=model.version,
+                          evidence=[item.to_dict() for item in evidence_items])
+
     return Suggestion(
         action=action,
         confidence=float(confidence),

@@ -102,11 +102,14 @@ class URLDatabase:
 
             if url.status in CRAWLED_STATUSES:
                 most_recent_urls.add(url.url)
-                # The URL has just been crawled (or failed): mark it as crawled now so
-                # it isn't immediately re-queued. Without this, a first-time crawl has
-                # found_date=None (it wasn't in any bloom filter before this batch), so
-                # queue_urls treats it as never-crawled and hands it out again.
-                found_date = most_recent_date
+                # The URL has just been crawled (or failed): mark it as crawled at the
+                # time of the crawl so it isn't immediately re-queued. Without this, a
+                # first-time crawl has found_date=None (it wasn't in any bloom filter
+                # before this batch), so queue_urls treats it as never-crawled and hands
+                # it out again. The bloom filters only record the month, which is too
+                # coarse to use here: on the 31st, the start of the month is already 30
+                # days ago, which is exactly the re-queue threshold.
+                found_date = url.timestamp
 
             new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls

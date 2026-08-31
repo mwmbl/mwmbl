@@ -248,6 +248,14 @@ class SuggestionSchema(Schema):
     action: str = Field(description="`APPROVE`, `REJECT` or `UNSURE`.")
     confidence: float
     reason: str = Field(default="", description="Rejection reason; empty unless action is REJECT.")
+    reason_detail: str = Field(
+        default="",
+        description=(
+            "What the submitter would be told, to be sent back as `rejection_detail`. "
+            "Non-empty whenever `reason` is OTHER, which a decision may not carry without "
+            "one, and empty otherwise - the other reasons explain themselves."
+        ),
+    )
     reason_confidence: float = 0.0
     reason_source: str = Field(
         default="model",

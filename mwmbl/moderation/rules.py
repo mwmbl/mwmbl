@@ -205,6 +205,59 @@ def decisive(items: list[EvidenceItem]) -> Optional[EvidenceItem]:
     return max(decisive_items, key=lambda item: item.implies_confidence)
 
 
+# What a check tells the *submitter*, where its label is the wrong sentence to send. A label
+# is written for the moderator deciding the case, so it may name the exception we caught or be
+# written from our side of the transaction; a detail is read by the person whose site was
+# rejected. Most labels serve both - "Homepage returns HTTP 404" is exactly what a submitter
+# needs to hear, and naming the domain a site redirects to tells them what to submit instead -
+# and the ones that do not are overridden here. Any new check that implies OTHER needs an
+# entry unless its label reads as a sentence to the submitter.
+#
+# Keyed on kind rather than carried on the item so that evidence stored before an entry was
+# written is covered too: crawl evidence is cached and a rescore reuses it, so a new field on
+# EvidenceItem would stay empty until the domain happened to be crawled again.
+SUBMITTER_DETAIL = {
+    "unreachable": "We could not fetch this site when we tried to crawl it.",
+    "do_not_crawl": "We don't index search engines or our own site.",
+}
+
+# "Some cached check implies OTHER", as a containment test the queue's SQL can run against the
+# stored evidence. It is the same question :func:`other_detail` answers, and the two have to
+# answer alike: the queue filters and orders thousands of rows on this without being able to
+# call the Python (see mwmbl.moderation.suggest.annotate_queue), and where they disagree it
+# hides rows that are on screen. Written down here so the pair stays visible from one place.
+IMPLIES_OTHER = [{"implies_action": "REJECT", "implies_reason": "OTHER"}]
+
+
+def implied_detail(item: EvidenceItem) -> str:
+    """What a check's rejection tells the submitter, for a reason that says nothing on its own.
+
+    Only OTHER needs one - "spam" explains itself, "other" does not - and for most checks the
+    label is already that sentence; SUBMITTER_DETAIL covers the rest. Every OTHER a check
+    implies has one of these, which is what lets the API refuse an OTHER rejection with no
+    detail (mwmbl.platform.schemas.RejectionFieldsMixin) without making the suggestion
+    untakeable.
+    """
+    if item.implies_reason != "OTHER":
+        return ""
+    return SUBMITTER_DETAIL.get(item.kind, item.label)
+
+
+def other_detail(items: list[EvidenceItem]) -> str:
+    """The sentence behind an OTHER rejection a check decided, or "" when none did.
+
+    Deliberately not :func:`decisive`: the reason being explained is OTHER, so what explains it
+    is the strongest check implying OTHER, which need not be the strongest check in the list.
+    That is also the only form of the question SQL can ask of stored evidence - see
+    IMPLIES_OTHER - which is what lets the queue agree with what the moderator is shown.
+    """
+    implying_other = [item for item in items
+                      if item.implies_action == "REJECT" and item.implies_reason == "OTHER"]
+    if not implying_other:
+        return ""
+    return implied_detail(max(implying_other, key=lambda item: item.implies_confidence))
+
+
 def _tld(domain: str) -> str:
     labels = domain.lower().split(".")
     return labels[-1] if len(labels) > 1 else ""
