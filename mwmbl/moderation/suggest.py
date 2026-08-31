@@ -109,14 +109,18 @@ def suggestion_for(submission: DomainSubmission,
     reason = evidence.suggested_reason if action == "REJECT" else ""
     source = evidence.reason_source or "model"
     # OTHER is the one reason that explains nothing on its own, and a decision may not carry
-    # it without the sentence the submitter is shown. When a check decided it that sentence is
-    # the check's own label, which is what reason_source == "rule" means here; when the model
+    # it without the sentence the submitter is shown. When a check decided it that sentence
+    # comes from the check, which is what reason_source == "rule" means here; when the model
     # did there is none, and a suggestion no client can send back is not one to draw - so it
     # goes to the moderator as UNSURE instead. model.suggest already stops storing those; this
     # is for the rows stored before it did, and annotate_queue mirrors it so the queue filters
     # and orders on what is actually drawn.
-    detail = (rules.implied_detail(cached_decisive)
-              if reason == "OTHER" and source == "rule" and cached_decisive is not None else "")
+    #
+    # The stored reason is not taken as proof that a check is still behind it: reason_source
+    # says one was when the row was written, and a check that stops being decisive - or stops
+    # implying OTHER - leaves rows saying "rule" with nothing left to explain them until the
+    # next rescore. rules.other_detail asks the evidence itself, as does the queue.
+    detail = rules.other_detail(cached) if reason == "OTHER" and source == "rule" else ""
     if action == "REJECT" and reason in UNUSABLE_MODEL_REASONS and not detail:
         action, confidence, reason = "UNSURE", 0.0, ""
 
@@ -179,6 +183,12 @@ def annotate_queue(submissions):
             name=OuterRef("name"), status="REJECTED")),
         submitter_decided=Exists(DomainSubmission.objects.filter(
             DECIDED, submitted_by_id=OuterRef("submitted_by_id"))),
+        # rules.other_detail, as far as SQL can ask it: is there a cached check implying
+        # OTHER, and so a sentence to send with an OTHER rejection. A containment test rather
+        # than a column comparison because it is a question about the evidence list, and
+        # Exists rather than a lookup on the annotation above so it reads as the join it is.
+        explained_by_a_check=Exists(DomainEvidence.objects.filter(
+            domain=OuterRef("name"), evidence__contains=rules.IMPLIES_OTHER)),
     )
 
     scored = Q(evidence_state=DomainEvidence.State.READY)
@@ -195,10 +205,12 @@ def annotate_queue(submissions):
     withheld = scored & Q(evidence_action="APPROVE") & Q(submitter_decided=False)
     # suggestion_for's other downgrade: a stored REJECT nobody can send back - one whose
     # reason is OTHER with no check behind it, so there is no detail to send, or one carrying
-    # no reason at all. reason_source is again how we know a check produced it, and only then
-    # is the detail the check's own label.
+    # no reason at all. Both halves of what suggestion_for asks: reason_source says a check
+    # produced the reason, and the evidence still has to contain the check that explains it -
+    # a stale row can say "rule" and have nothing implying OTHER left in its evidence.
+    explained = Q(evidence_source="rule") & Q(explained_by_a_check=True)
     unexplained = scored & Q(evidence_action="REJECT") & (
-        (Q(evidence_reason="OTHER") & ~Q(evidence_source="rule"))
+        (Q(evidence_reason="OTHER") & ~explained)
         | Q(evidence_reason="") | Q(evidence_reason__isnull=True))
 
     submissions = submissions.annotate(

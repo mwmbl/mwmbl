@@ -167,6 +167,31 @@ def test_a_check_that_implies_other_carries_the_detail_the_submitter_is_shown():
     assert suggestion.reason_detail == "Homepage returns HTTP 404"
 
 
+def test_a_check_written_for_the_moderator_tells_the_submitter_something_readable():
+    """A label is read by whoever is deciding the case and a detail by the person whose site
+    was rejected, so a label naming the exception we caught is not the sentence to send."""
+    items = rules.crawl_evidence(
+        "example.com", {"error": "AbortError", "pages": [], "signals": {}})
+    suggestion = suggest("example.com", [], items, model=mock.Mock(version="test"))
+
+    assert (suggestion.action, suggestion.reason) == ("REJECT", "OTHER")
+    assert suggestion.reason_detail == "We could not fetch this site when we tried to crawl it."
+    # The moderator still gets the exception, in the evidence list where it belongs.
+    assert "Could not be fetched (AbortError)" in [
+        item["label"] for item in suggestion.evidence]
+
+
+def test_the_do_not_crawl_list_explains_itself_from_the_submitters_side():
+    """Its label is written from ours - "we don't crawl ourselves" - and is about our policy
+    rather than about the site the submitter sent."""
+    items = rules.crawl_evidence(
+        "google.com", {"http_status": 200, "pages": [], "signals": {}})
+    suggestion = suggest("google.com", [], items, model=mock.Mock(version="test"))
+
+    assert (suggestion.action, suggestion.reason) == ("REJECT", "OTHER")
+    assert suggestion.reason_detail == "We don't index search engines or our own site."
+
+
 def test_a_reason_that_explains_itself_needs_no_detail():
     model = mock.Mock(version="test")
     model.predict.return_value = [(0.92, "SPAM", 0.8)]
@@ -1298,6 +1323,25 @@ def test_a_previous_rejection_of_the_same_domain_says_so_as_the_detail(submitter
     assert suggestion.reason_detail == "This domain has already been rejected before"
 
 
+@pytest.mark.django_db
+def test_a_rule_scored_other_with_no_check_left_behind_it_is_not_suggested(submitter):
+    """reason_source records that a check decided the reason when the row was written, not
+    that one still does. A check that stops being decisive - or stops implying OTHER - leaves
+    stored rows claiming "rule" with nothing left to explain them, and a rejection whose
+    detail cannot be written is one the API would refuse. So it goes back as UNSURE, and the
+    detail is read off the evidence rather than assumed from the column."""
+    demoted = rules.EvidenceItem(
+        "http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()
+    submission = DomainSubmission.objects.create(name="stale.example", submitted_by=submitter)
+    evidence = ready_evidence("stale.example", suggested_action="REJECT",
+                              suggested_reason="OTHER", confidence=0.9,
+                              reason_source="rule", evidence=[demoted])
+
+    suggestion = suggestion_for(submission, evidence)
+
+    assert (suggestion.action, suggestion.reason, suggestion.reason_detail) == ("UNSURE", "", "")
+
+
 # --------------------------------------------------------------------- queue parity
 
 @pytest.mark.django_db
@@ -1326,6 +1370,13 @@ def test_queue_display_matches_suggestion_for(submitter, established):
         # A reason the model cannot explain, so not shown as a suggestion at all.
         ("unexplained.example", submitter, {"suggested_action": "REJECT",
                                             "suggested_reason": "OTHER", "confidence": 0.93}),
+        # The same, from the other side: a row that says a check decided the reason, with
+        # nothing implying OTHER left in its evidence to write the detail from.
+        ("stale-rule.example", submitter,
+         {"suggested_action": "REJECT", "suggested_reason": "OTHER", "confidence": 0.93,
+          "reason_source": "rule",
+          "evidence": [rules.EvidenceItem(
+              "http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()]}),
         ("approved-before.example", submitter, {"suggested_action": "REJECT",
                                                 "suggested_reason": "SPAM"}),
         ("rejected-before.example", submitter, {}),
