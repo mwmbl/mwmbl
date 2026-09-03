@@ -10,13 +10,14 @@ as never-crawled.
 """
 import glob
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import fakeredis
 import pytest
 
 from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
+from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.redis_url_queue import RedisURLQueue
 
 
@@ -110,6 +111,30 @@ def test_crawl_date_is_the_crawl_time_not_the_start_of_the_month(clean_bloom_fil
         new_urls = url_db.update_found_urls([found])
 
     assert new_urls[0].last_crawled == crawled_at
+
+
+def test_crawl_date_from_a_real_batch_timestamp_is_naive(clean_bloom_filters):
+    """Batch timestamps are timezone-aware, but last_crawled is compared against a naive
+    datetime.utcnow() in queue_urls, which raises if the two are mixed."""
+    crawled_at = get_datetime_from_timestamp(datetime.now(timezone.utc).timestamp())
+    found = FoundURL(
+        url="https://aware.example/page",
+        user_id_hash="user",
+        status=URLStatus.CRAWLED,
+        timestamp=crawled_at,
+        last_crawled=None,
+    )
+    with URLDatabase() as url_db:
+        new_urls = url_db.update_found_urls([found])
+
+    assert new_urls[0].last_crawled.tzinfo is None
+    assert new_urls[0].last_crawled == crawled_at.replace(tzinfo=None)
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    url_queue = RedisURLQueue(redis, lambda: set(), StaticBlacklistProvider(set()))
+    url_queue.queue_urls(new_urls)
+
+    assert url_queue.get_domain_count("aware.example") == 0
 
 
 def test_url_queue_gives_its_curated_domains_to_the_default_blacklist():

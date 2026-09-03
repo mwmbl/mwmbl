@@ -2,7 +2,7 @@
 Database storing info on URLs
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from logging import getLogger
 from pathlib import Path
@@ -108,8 +108,11 @@ class URLDatabase:
                 # before this batch), so queue_urls treats it as never-crawled and hands
                 # it out again. The bloom filters only record the month, which is too
                 # coarse to use here: on the 31st, the start of the month is already 30
-                # days ago, which is exactly the re-queue threshold.
-                found_date = url.timestamp
+                # days ago, which is exactly the re-queue threshold. Crawl timestamps
+                # are timezone-aware, while last_crawled is naive UTC everywhere else
+                # (the bloom filter dates, and the comparison in queue_urls), so convert
+                # it here.
+                found_date = url.timestamp.astimezone(timezone.utc).replace(tzinfo=None)
 
             new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls
