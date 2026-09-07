@@ -1,8 +1,7 @@
 from mwmbl.settings_common import *
 
-
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm'
+SECRET_KEY = "django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm"
 
 
 STATIC_ROOT = ""
@@ -15,14 +14,14 @@ STATICFILES_DIRS = [str(DJANGO_VITE_ASSETS_PATH)]
 DEBUG = True
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 DATA_PATH = "./devdata"
-INDEX_NAME = 'index-v2.tinysearch'
+INDEX_NAME = "index-v2.tinysearch"
 
 NUM_PAGES = 2560
 
-EXTERNAL_CACHE_INDEX_NAME = 'external-cache.tinysearch'
+EXTERNAL_CACHE_INDEX_NAME = "external-cache.tinysearch"
 EXTERNAL_CACHE_NUM_PAGES = 2560
 
 URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls-{year}-{month}.bloom")

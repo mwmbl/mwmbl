@@ -22,6 +22,7 @@ Usage::
     ... uv run python scripts/llm_relabel_pass2_collect.py               # full run
     ... uv run python scripts/llm_relabel_pass2_collect.py --status
 """
+
 import asyncio
 import json
 import os
@@ -54,8 +55,10 @@ ALWAYS_ON = {name for name in SOURCES if get_meta(name).always_on}
 # that dataset.py uses to build the existing LTR data, so the relabel is a
 # drop-in replacement (score_threshold=-inf keeps all candidates for pooling).
 _std_ranker = HeuristicAndWikiRanker(
-    RemoteIndex(), DummyCompleter(),
-    return_none_if_no_mwmbl_results=True, score_threshold=float("-inf"),
+    RemoteIndex(),
+    DummyCompleter(),
+    return_none_if_no_mwmbl_results=True,
+    score_threshold=float("-inf"),
 )
 
 
@@ -80,15 +83,34 @@ async def _collect_ss(query: str, sources: list[str]) -> tuple[list[Document], d
     return all_docs, dict(ctx.source_by_url)
 
 
-def _add(pool: dict, url: str, title: str, extract: str, state, score, *,
-         pool_tag: str, ss_source: str | None = None, gold_rank: int | None = None):
+def _add(
+    pool: dict,
+    url: str,
+    title: str,
+    extract: str,
+    state,
+    score,
+    *,
+    pool_tag: str,
+    ss_source: str | None = None,
+    gold_rank: int | None = None,
+):
     """Merge one result into the per-url pool, keeping the richest title/extract."""
     if not url:
         return
-    item = pool.setdefault(url, {
-        "url": url, "title": "", "extract": "", "state": None, "score": None,
-        "pools": [], "ss_source": None, "gold_rank": None,
-    })
+    item = pool.setdefault(
+        url,
+        {
+            "url": url,
+            "title": "",
+            "extract": "",
+            "state": None,
+            "score": None,
+            "pools": [],
+            "ss_source": None,
+            "gold_rank": None,
+        },
+    )
     if title and len(title) > len(item["title"]):
         item["title"] = title
     if extract and len(extract) > len(item["extract"]):
@@ -113,8 +135,11 @@ def collect_query(query: str, sources: list[str], gold: pd.DataFrame, std_top_k:
     # The heuristic ranker returns the whole recall set; TREC-style we pool only
     # the top-K by score (what could realistically rank), but always keep any
     # gold URL as a calibration anchor.
-    std = sorted((_std_ranker.search(query + " ", []) or []),
-                 key=lambda d: d.score if d.score is not None else float("-inf"), reverse=True)
+    std = sorted(
+        (_std_ranker.search(query + " ", []) or []),
+        key=lambda d: d.score if d.score is not None else float("-inf"),
+        reverse=True,
+    )
     kept = std[:std_top_k] + [d for d in std[std_top_k:] if d.url in gold_urls]
     for d in kept:
         _add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="standard")
@@ -129,13 +154,11 @@ def collect_query(query: str, sources: list[str], gold: pd.DataFrame, std_top_k:
         src = source_by_url.get(d.url)
         if src in stray:
             continue
-        _add(pool, d.url, d.title or "", d.extract or "", d.state, d.score,
-             pool_tag="supersearch", ss_source=src)
+        _add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="supersearch", ss_source=src)
 
     # google gold (snippet only)
     for _, row in gold.iterrows():
-        _add(pool, row["url"], "", str(row.get("snippet") or ""), None, None,
-             pool_tag="google", gold_rank=row["rank"])
+        _add(pool, row["url"], "", str(row.get("snippet") or ""), None, None, pool_tag="google", gold_rank=row["rank"])
 
     return {"query": query, "sources": sources, "candidates": list(pool.values())}
 
@@ -153,18 +176,19 @@ def _load_pass1() -> dict:
 def _done() -> set:
     if not os.path.exists(CHECKPOINT):
         return set()
-    return {json.loads(l)["query"] for l in open(CHECKPOINT) if l.strip()}
+    return {json.loads(line)["query"] for line in open(CHECKPOINT) if line.strip()}
 
 
 def cmd_status():
     p1, done = _load_pass1(), _done()
     print(f"collected {len(done)} / {len(p1)} pass-1 queries ({CHECKPOINT})")
     if done:
-        recs = [json.loads(l) for l in open(CHECKPOINT) if l.strip()]
+        recs = [json.loads(line) for line in open(CHECKPOINT) if line.strip()]
         n_cand = sum(len(r["candidates"]) for r in recs)
         from collections import Counter
+
         pools = Counter(t for r in recs for c in r["candidates"] for t in c["pools"])
-        print(f"  {n_cand} candidates total, {n_cand / max(len(recs),1):.1f} avg/query")
+        print(f"  {n_cand} candidates total, {n_cand / max(len(recs), 1):.1f} avg/query")
         print(f"  pool membership: {dict(pools)}")
 
 
@@ -179,8 +203,7 @@ def run(limit: int | None, std_top_k: int):
     print(f"collecting {len(todo)} queries (skipping {len(done)} done)")
     with open(CHECKPOINT, "a") as out:
         for i, query in enumerate(todo, 1):
-            rec = collect_query(query, p1[query]["sources"],
-                                by_query.get(query, gold_all.iloc[0:0]), std_top_k)
+            rec = collect_query(query, p1[query]["sources"], by_query.get(query, gold_all.iloc[0:0]), std_top_k)
             out.write(json.dumps(rec) + "\n")
             out.flush()
             print(f"[{i}/{len(todo)}] {query!r}: {len(rec['candidates'])} candidates", flush=True)
@@ -189,8 +212,9 @@ def run(limit: int | None, std_top_k: int):
 def main():
     parser = ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--std-top-k", type=int, default=30,
-                        help="Pool only the top-K standard candidates by score (+ any gold URL).")
+    parser.add_argument(
+        "--std-top-k", type=int, default=30, help="Pool only the top-K standard candidates by score (+ any gold URL)."
+    )
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
     if args.status:

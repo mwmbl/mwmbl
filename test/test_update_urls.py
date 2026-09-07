@@ -1,12 +1,11 @@
 from collections import defaultdict
 
 from mwmbl.crawler.batch import Link
-from mwmbl.indexer.update_urls import process_link
 from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider, StaticBlacklistProvider
+from mwmbl.indexer.update_urls import process_link
 
 
 def test_process_link_normal():
-    url_scores = {"https://somesite.com/something.html": 0.0, "https://somesite.com/": 0.0}
     url_timestamps = {}
     url_users = {}
     domain_links = defaultdict(set)

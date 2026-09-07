@@ -25,6 +25,7 @@ Input is the worklist JSON written by the caller: a list of
 Usage:
   DATABASE_URL="postgres://daoud@" uv run python scripts/auto_recipe_html.py /tmp/htmlwork.json
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,25 +39,28 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 
-import django  # noqa: E402
 import logging  # noqa: E402
+
+import django  # noqa: E402
 
 django.setup()
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("mwmbl.tinysearchengine.super_search_sources.recipe").setLevel(
-    logging.ERROR)
+logging.getLogger("mwmbl.tinysearchengine.super_search_sources.recipe").setLevel(logging.ERROR)
 
 import httpx  # noqa: E402
 import yaml  # noqa: E402
 from bs4 import BeautifulSoup  # noqa: E402
 
 from mwmbl.tinysearchengine.super_search_sources.recipe import (  # noqa: E402
-    Recipe, search_with_recipe,
+    Recipe,
+    search_with_recipe,
+)
+from mwmbl.tinysearchengine.super_search_sources.smoke import (  # noqa: E402
+    CONTROL_QUERY,
+    MAX_CONTROL_OVERLAP,
+    control_overlap,
 )
 from scripts.auto_recipe import FIELD_WORD, GENERIC_WORDS, _name  # noqa: E402
-from mwmbl.tinysearchengine.super_search_sources.smoke import (  # noqa: E402
-    CONTROL_QUERY, MAX_CONTROL_OVERLAP, control_overlap,
-)
 
 RECIPES_DIR = REPO_ROOT / "mwmbl" / "tinysearchengine" / "super_search_sources" / "recipes"
 MIN_RESULTS = 3
@@ -99,11 +103,13 @@ def _candidate_selectors(html: str) -> list[str]:
     # Keep only selectors that can isolate a result row: a heading tag, or any
     # selector carrying a class. Reject bare generic tags (li/div/p/td/...) and
     # obvious nav/menu chrome.
-    ranked = [(sel, n) for sel, n in groups.most_common()
-              if n >= MIN_RESULTS
-              and ("." in sel or sel in HEADING_TAGS)
-              and not any(bad in sel.lower()
-                          for bad in ("menu", "nav", "footer", "header"))]
+    ranked = [
+        (sel, n)
+        for sel, n in groups.most_common()
+        if n >= MIN_RESULTS
+        and ("." in sel or sel in HEADING_TAGS)
+        and not any(bad in sel.lower() for bad in ("menu", "nav", "footer", "header"))
+    ]
     return [sel for sel, _ in ranked[:3]]
 
 
@@ -120,21 +126,20 @@ async def _author(client: httpx.AsyncClient, dom: str, field: str, url_tmpl: str
             break  # network dead -> give up on this domain
         for selector in _candidate_selectors(html):
             response = {
-                "format": "html", "results": selector, "base_url": base,
+                "format": "html",
+                "results": selector,
+                "base_url": base,
                 "fields": {"title": "a", "url": {"selector": "a", "attr": "href"}},
             }
             # Reconstruct request the same way the engine will (params from the
             # template's query string) by just pointing url at the templated form.
-            request = {"url": url_tmpl.split("?")[0],
-                       "params": _params_from(url_tmpl)}
-            recipe = Recipe(name=name, request=request, response=response,
-                            domain=dom, field=field)
+            request = {"url": url_tmpl.split("?")[0], "params": _params_from(url_tmpl)}
+            recipe = Recipe(name=name, request=request, response=response, domain=dom, field=field)
             try:
                 docs = await search_with_recipe(client, recipe, word, 10)
             except Exception:  # noqa: BLE001
                 docs = []
-            if len(docs) < MIN_RESULTS or not any(
-                    word in (d.title or "").lower() for d in docs):
+            if len(docs) < MIN_RESULTS or not any(word in (d.title or "").lower() for d in docs):
                 continue
             # Query-invariance guard (same as the hardened smoke gate): reject
             # selectors that return the same URLs for an unrelated control query.
@@ -145,19 +150,23 @@ async def _author(client: httpx.AsyncClient, dom: str, field: str, url_tmpl: str
             overlap = control_overlap(docs, control)
             if overlap is not None and overlap >= MAX_CONTROL_OVERLAP:
                 continue
-            doc = {"name": name, "domain": dom, "field": field,
-                   "request": request, "response": response,
-                   "smoke": {"query": word, "expect_title_contains": word}}
-            (RECIPES_DIR / f"{name}.yaml").write_text(
-                yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
-            return {"domain": dom, "status": "pass",
-                    "selector": selector, "word": word, "n": len(docs)}
+            doc = {
+                "name": name,
+                "domain": dom,
+                "field": field,
+                "request": request,
+                "response": response,
+                "smoke": {"query": word, "expect_title_contains": word},
+            }
+            (RECIPES_DIR / f"{name}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+            return {"domain": dom, "status": "pass", "selector": selector, "word": word, "n": len(docs)}
     return {"domain": dom, "status": "fail"}
 
 
 def _params_from(url_tmpl: str) -> dict:
     """Turn the query string of a templated URL into a recipe params map."""
-    from urllib.parse import urlsplit, parse_qsl
+    from urllib.parse import parse_qsl, urlsplit
+
     qs = urlsplit(url_tmpl).query
     params = {}
     for k, v in parse_qsl(qs, keep_blank_values=True):
@@ -169,12 +178,15 @@ def _params_from(url_tmpl: str) -> dict:
 async def _run(work: list[list]) -> list[dict]:
     sem = asyncio.Semaphore(CONCURRENCY)
     async with httpx.AsyncClient(
-        follow_redirects=True, timeout=TIMEOUT,
+        follow_redirects=True,
+        timeout=TIMEOUT,
         headers={"User-Agent": "mwmbl-super-search-smoke/0.1 (+https://mwmbl.org)"},
     ) as client:
+
         async def guarded(w):
             async with sem:
                 return await _author(client, w[0], w[1], w[3])
+
         return await asyncio.gather(*[guarded(w) for w in work])
 
 
@@ -190,9 +202,11 @@ def main() -> int:
     passes = [r for r in results if r["status"] == "pass"]
     for r in passes:
         print(f"PASS {r['domain']}  (results={r['selector']!r}, q={r['word']!r}, {r['n']})")
-    print(f"\n{len(passes)} passed, "
-          f"{sum(1 for r in results if r['status']=='exists')} existed, "
-          f"{sum(1 for r in results if r['status']=='fail')} failed.")
+    print(
+        f"\n{len(passes)} passed, "
+        f"{sum(1 for r in results if r['status'] == 'exists')} existed, "
+        f"{sum(1 for r in results if r['status'] == 'fail')} failed."
+    )
     return 0
 
 

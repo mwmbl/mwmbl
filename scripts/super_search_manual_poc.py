@@ -16,6 +16,7 @@ Usage::
 Needs the local index + LTR model (via search_setup), network access for the first
 Super Search run (joblib-cached afterwards), and Redis for crawl/robots caching.
 """
+
 import asyncio
 import os
 from argparse import ArgumentParser
@@ -55,10 +56,15 @@ def collect_super_search(query: str) -> list[dict]:
         if event_type == "results":
             captured.clear()
             for item in data.results:
-                captured.append({
-                    "url": item.url, "title": item.title, "extract": item.extract,
-                    "score": item.score, "source": item.source,
-                })
+                captured.append(
+                    {
+                        "url": item.url,
+                        "title": item.title,
+                        "extract": item.extract,
+                        "score": item.score,
+                        "source": item.source,
+                    }
+                )
 
     async def run():
         await _emit_final_results(query, docs, emit, [None], asyncio.Lock())
@@ -94,8 +100,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--num", type=int, default=10, help="Number of queries to sample.")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed for sampling.")
-    parser.add_argument("--out", default=os.path.join(
-        os.environ.get("CLAUDE_SCRATCHPAD", "."), "ss_manual_poc.md"))
+    parser.add_argument("--out", default=os.path.join(os.environ.get("CLAUDE_SCRATCHPAD", "."), "ss_manual_poc.md"))
     args = parser.parse_args()
 
     dataset = pd.read_csv(RANKINGS_DATASET_TRAIN_PATH)
@@ -112,16 +117,16 @@ def main():
 
     for n, query in enumerate(sample, 1):
         print(f"[{n}/{len(sample)}] {query!r}")
-        gold = (dataset[dataset["query"] == query]
-                .sort_values("rank")
-                .head(NUM_RESULTS_FOR_EVAL))
-        gold_rows = [{"url": r.url, "title": None, "extract": r.snippet,
-                      "score": None, "source": ""} for r in gold.itertuples()]
+        gold = dataset[dataset["query"] == query].sort_values("rank").head(NUM_RESULTS_FOR_EVAL)
+        gold_rows = [
+            {"url": r.url, "title": None, "extract": r.snippet, "score": None, "source": ""} for r in gold.itertuples()
+        ]
         gold_domains = {domain(r["url"]) for r in gold_rows}
 
         std_docs = ranker.search(query, [])
-        std_rows = [{"url": d.url, "title": d.title, "extract": d.extract,
-                     "score": d.score, "source": ""} for d in std_docs]
+        std_rows = [
+            {"url": d.url, "title": d.title, "extract": d.extract, "score": d.score, "source": ""} for d in std_docs
+        ]
 
         try:
             ss_rows = collect_super_search(query)

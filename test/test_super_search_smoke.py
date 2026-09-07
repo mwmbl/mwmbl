@@ -13,6 +13,7 @@ search_with_recipe swallows transport/parse errors and returns [], so a
 blocked or reformatted site surfaces here as an empty result list — which the
 assertions below turn into a clear failure.
 """
+
 import httpx
 import pytest
 

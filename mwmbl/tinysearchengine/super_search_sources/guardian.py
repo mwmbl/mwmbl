@@ -5,6 +5,7 @@ Without a key the source is a no-op (returns []), so it degrades gracefully in
 environments where the key isn't configured. Covers the "news" intent that the
 tech/academic-skewed catalog otherwise misses.
 """
+
 import logging
 
 import httpx
@@ -23,13 +24,16 @@ async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Docu
     if not api_key:
         return []
     try:
-        response = await client.get(ENDPOINT, params={
-            "q": query,
-            "api-key": api_key,
-            "show-fields": "trailText",
-            "order-by": "relevance",
-            "page-size": max(1, min(limit, 10)),
-        })
+        response = await client.get(
+            ENDPOINT,
+            params={
+                "q": query,
+                "api-key": api_key,
+                "show-fields": "trailText",
+                "order-by": "relevance",
+                "page-size": max(1, min(limit, 10)),
+            },
+        )
         response.raise_for_status()
         results = response.json().get("response", {}).get("results", [])
     except (httpx.HTTPError, ValueError) as e:

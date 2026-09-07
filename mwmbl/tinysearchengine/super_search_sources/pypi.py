@@ -3,6 +3,7 @@
 PyPI has no public full-text search endpoint, so we treat the query as a
 package name and look it up directly. Returns at most one Document.
 """
+
 import logging
 import re
 

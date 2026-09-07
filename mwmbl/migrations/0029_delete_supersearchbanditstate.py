@@ -4,13 +4,12 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0028_remove_sourceprovenance_query_and_more'),
+        ("mwmbl", "0028_remove_sourceprovenance_query_and_more"),
     ]
 
     operations = [
         migrations.DeleteModel(
-            name='SuperSearchBanditState',
+            name="SuperSearchBanditState",
         ),
     ]

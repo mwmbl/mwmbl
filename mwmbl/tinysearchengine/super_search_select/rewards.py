@@ -10,6 +10,7 @@ per-request state (which sources were selected, which URL came from which
 source, and the judge scores from the final re-rank) from the pipeline to the
 completion hook, where reward computation and ``log_impression`` run.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SelectionContext:
     """Per-request selection state, populated as the pipeline runs."""
-    candidates: list[str] = field(default_factory=list)   # full action space
-    selected: list[str] = field(default_factory=list)     # sources actually queried
+
+    candidates: list[str] = field(default_factory=list)  # full action space
+    selected: list[str] = field(default_factory=list)  # sources actually queried
     source_by_url: dict[str, str] = field(default_factory=dict)  # url -> originating source
     features: dict[str, list[float]] = field(default_factory=dict)  # source -> feature vector
     judge_scores: dict[str, float] = field(default_factory=dict)  # url -> judge score (final pool)
@@ -71,8 +73,7 @@ def compute_judge_rewards(ctx: SelectionContext) -> dict[str, float] | None:
         if source in totals:
             totals[source][0] += score
             totals[source][1] += 1
-    return {name: total / count if count else 0.0
-            for name, (total, count) in totals.items()}
+    return {name: total / count if count else 0.0 for name, (total, count) in totals.items()}
 
 
 def log_impression(ctx: SelectionContext, rewards: dict[str, float]) -> None:
@@ -107,10 +108,7 @@ def record_source_provenance(ctx: SelectionContext) -> None:
     try:
         from mwmbl.models import SourceProvenance
 
-        rows = [
-            SourceProvenance(url=url, source=source, depth=0)
-            for url, source in ctx.source_by_url.items()
-        ]
+        rows = [SourceProvenance(url=url, source=source, depth=0) for url, source in ctx.source_by_url.items()]
         SourceProvenance.objects.bulk_create(rows, ignore_conflicts=True)
     except Exception:
         logger.exception("failed to record super-search source provenance")

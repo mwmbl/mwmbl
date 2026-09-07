@@ -4,7 +4,6 @@ Environment variables configuration for the crawler module.
 
 import os
 
-
 # Crawler worker configuration
 CRAWLER_WORKERS = int(os.environ.get("CRAWLER_WORKERS", "2"))
 CRAWL_THREADS = int(os.environ.get("CRAWL_THREADS", "20"))

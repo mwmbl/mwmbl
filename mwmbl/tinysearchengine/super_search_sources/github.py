@@ -4,6 +4,7 @@ Unauthenticated calls are limited to 10 requests/minute for the search endpoint,
 which is acceptable for the initial Super Search release. Add a token later
 to lift the cap.
 """
+
 import logging
 
 import httpx

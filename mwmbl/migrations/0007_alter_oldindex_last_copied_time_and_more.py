@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0006_remove_oldindex_index_total_pages_and_more'),
+        ("mwmbl", "0006_remove_oldindex_index_total_pages_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='oldindex',
-            name='last_copied_time',
+            model_name="oldindex",
+            name="last_copied_time",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='oldindex',
-            name='last_page_copied',
+            model_name="oldindex",
+            name="last_page_copied",
             field=models.IntegerField(blank=True, null=True),
         ),
     ]

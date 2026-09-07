@@ -9,6 +9,7 @@ updates, and lets its trees interact it with the rest of the context.
 
 Aggregate per-source statistics only — nothing query-derived is stored here.
 """
+
 from __future__ import annotations
 
 import redis
@@ -39,10 +40,7 @@ def get_stats(sites: list[str]) -> dict[str, SiteStats]:
     for site in sites:
         pipe.get(_REWARD_EMA.format(site=site))
     values = pipe.execute()
-    return {
-        site: SiteStats(contribution_ema=float(v) if v is not None else 0.0)
-        for site, v in zip(sites, values)
-    }
+    return {site: SiteStats(contribution_ema=float(v) if v is not None else 0.0) for site, v in zip(sites, values)}
 
 
 def update(rewards: dict[str, float]) -> None:

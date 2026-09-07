@@ -10,6 +10,7 @@ The query goes in the URL path (not a query-string param), so this can't be a
 declarative recipe; the path is bucketed by the query's first alphanumeric char,
 as the endpoint expects.
 """
+
 import logging
 from urllib.parse import quote
 

@@ -1,6 +1,7 @@
 """
 Pretend to be an index but retrieve results from a remote index.
 """
+
 import time
 from logging import getLogger
 
@@ -8,7 +9,6 @@ import requests
 
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.utils import request_cache
-
 
 logger = getLogger(__name__)
 

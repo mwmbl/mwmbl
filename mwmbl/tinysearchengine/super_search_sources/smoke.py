@@ -9,6 +9,7 @@ a substantially different set of URLs. A recipe that's really scraping
 nav/boilerplate returns the same links regardless of query, so a high overlap
 with the control query's results is a failure.
 """
+
 from __future__ import annotations
 
 import httpx

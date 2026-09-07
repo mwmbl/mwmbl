@@ -5,33 +5,45 @@ from logging import getLogger
 from typing import Optional
 from urllib.parse import urlencode
 
-from mwmbl import justext
 import objgraph
 import psutil
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.forms import ModelForm, RadioSelect, CharField
+from django.forms import CharField, ModelForm, RadioSelect
 from django.http import HttpResponseBadRequest
-from django.shortcuts import render, redirect
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
-from mwmbl.justext.core import html_to_dom, ParagraphMaker, classify_paragraphs, revise_paragraph_classification, \
-    LENGTH_LOW_DEFAULT, STOPWORDS_LOW_DEFAULT, MAX_LINK_DENSITY_DEFAULT, NO_HEADINGS_DEFAULT, LENGTH_HIGH_DEFAULT, \
-    STOPWORDS_HIGH_DEFAULT, MAX_HEADING_DISTANCE_DEFAULT, DEFAULT_ENCODING, DEFAULT_ENC_ERRORS, preprocessor
 from requests.exceptions import RequestException
 
 from mwmbl.crawler.app import stats_manager
 from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
+from mwmbl.justext.core import (
+    DEFAULT_ENC_ERRORS,
+    DEFAULT_ENCODING,
+    LENGTH_HIGH_DEFAULT,
+    LENGTH_LOW_DEFAULT,
+    MAX_HEADING_DISTANCE_DEFAULT,
+    MAX_LINK_DENSITY_DEFAULT,
+    NO_HEADINGS_DEFAULT,
+    STOPWORDS_HIGH_DEFAULT,
+    STOPWORDS_LOW_DEFAULT,
+    ParagraphMaker,
+    classify_paragraphs,
+    html_to_dom,
+    preprocessor,
+    revise_paragraph_classification,
+)
 from mwmbl.justext.utils import get_stoplist
-from mwmbl.models import Curation, FlagCuration, DomainSubmission
-from mwmbl.search_setup import ranker, index_path
+from mwmbl.models import Curation, DomainSubmission, FlagCuration
+from mwmbl.search_setup import index_path, ranker
 from mwmbl.settings import NUM_EXTRACT_CHARS
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.tinysearchengine.rank import fix_document_state
 from mwmbl.tokenizer import tokenize
-from mwmbl.utils import add_term_infos, normalize_domain, parse_url, validate_domain, float_or_none
+from mwmbl.utils import add_term_infos, float_or_none, normalize_domain, parse_url, validate_domain
 
 MAX_CURATED_SCORE = 1_111_111.0
 
@@ -39,12 +51,20 @@ MAX_CURATED_SCORE = 1_111_111.0
 logger = getLogger(__name__)
 
 
-def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
-        length_high=LENGTH_HIGH_DEFAULT, stopwords_low=STOPWORDS_LOW_DEFAULT,
-        stopwords_high=STOPWORDS_HIGH_DEFAULT, max_link_density=MAX_LINK_DENSITY_DEFAULT,
-        max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT, no_headings=NO_HEADINGS_DEFAULT,
-        encoding=None, default_encoding=DEFAULT_ENCODING,
-        enc_errors=DEFAULT_ENC_ERRORS):
+def justext_with_dom(
+    html_text,
+    stoplist,
+    length_low=LENGTH_LOW_DEFAULT,
+    length_high=LENGTH_HIGH_DEFAULT,
+    stopwords_low=STOPWORDS_LOW_DEFAULT,
+    stopwords_high=STOPWORDS_HIGH_DEFAULT,
+    max_link_density=MAX_LINK_DENSITY_DEFAULT,
+    max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT,
+    no_headings=NO_HEADINGS_DEFAULT,
+    encoding=None,
+    default_encoding=DEFAULT_ENCODING,
+    enc_errors=DEFAULT_ENC_ERRORS,
+):
     """
     Converts an HTML page into a list of classified paragraphs. Each paragraph
     is represented as instance of class ˙˙justext.paragraph.Paragraph˙˙.
@@ -58,8 +78,9 @@ def justext_with_dom(html_text, stoplist, length_low=LENGTH_LOW_DEFAULT,
 
     paragraphs = ParagraphMaker.make_paragraphs(dom)
 
-    classify_paragraphs(paragraphs, stoplist, length_low, length_high,
-        stopwords_low, stopwords_high, max_link_density, no_headings)
+    classify_paragraphs(
+        paragraphs, stoplist, length_low, length_high, stopwords_low, stopwords_high, max_link_density, no_headings
+    )
     revise_paragraph_classification(paragraphs, max_heading_distance)
 
     return paragraphs, title
@@ -79,13 +100,17 @@ def _prepare_results(results: Optional[list[Document]]) -> Optional[dict[str, li
 
 def index(request):
     activity, query, results = _get_results_and_activity(request, use_external_search=True)
-    return render(request, "index.html", {
-        "results": _prepare_results(results),
-        "query": query,
-        "user": request.user,
-        "activity": activity,
-        "footer_links": settings.FOOTER_LINKS,
-    })
+    return render(
+        request,
+        "index.html",
+        {
+            "results": _prepare_results(results),
+            "query": query,
+            "user": request.user,
+            "activity": activity,
+            "footer_links": settings.FOOTER_LINKS,
+        },
+    )
 
 
 def home_fragment(request):
@@ -95,11 +120,15 @@ def home_fragment(request):
     # query cost us a dozen Wikipedia calls to answer one question - see mwmbl.templates.
     use_external_search = request.GET.get("external") == "1"
     activity, query, results = _get_results_and_activity(request, use_external_search)
-    response = render(request, "home.html", {
-        "results": _prepare_results(results),
-        "query": query,
-        "activity": activity,
-    })
+    response = render(
+        request,
+        "home.html",
+        {
+            "results": _prepare_results(results),
+            "query": query,
+            "activity": activity,
+        },
+    )
 
     # Encode the new query string
     if query:
@@ -117,24 +146,30 @@ def _get_results_and_activity(request, use_external_search: bool):
         # There may be extra results in the request that we need to add in
         # format is ?enhanced=google&title=title1&url=url1&extract=extract1&title=title2&url=url2&extract=extract2
         # source = request.GET.get("enhanced", "unknown")
-        titles = request.GET.getlist(f"title")
-        urls = request.GET.getlist(f"url")
-        extracts = request.GET.getlist(f"extract")
+        titles = request.GET.getlist("title")
+        urls = request.GET.getlist("url")
+        extracts = request.GET.getlist("extract")
 
         term = " ".join(tokenize(query))
 
         # For now, we only support the Google source
         additional_results = [
-            Document(title=title, url=url, extract=extract, score=100.0 * 2 ** -i, term=term, state=DocumentState.FROM_GOOGLE)
+            Document(
+                title=title, url=url, extract=extract, score=100.0 * 2**-i, term=term, state=DocumentState.FROM_GOOGLE
+            )
             for i, (title, url, extract) in enumerate(zip(titles, urls, extracts))
         ]
 
-        results = ranker.search(query, additional_results=additional_results,
-                                use_external_search=use_external_search)
+        results = ranker.search(query, additional_results=additional_results, use_external_search=use_external_search)
         activity = None
     else:
         results = None
-        activity = Curation.objects.filter(flag_curation_set__isnull=True).order_by("-timestamp")[:8].select_related("user").prefetch_related("flag_curation_set")
+        activity = (
+            Curation.objects.filter(flag_curation_set__isnull=True)
+            .order_by("-timestamp")[:8]
+            .select_related("user")
+            .prefetch_related("flag_curation_set")
+        )
     return activity, query, results
 
 
@@ -156,14 +191,16 @@ def add_url(request):
 
     print("Content", response.encoding)
     paragraphs, title = justext_with_dom(response.text, get_stoplist("English"))
-    good_paragraphs = [p for p in paragraphs if p.class_type == 'good']
+    good_paragraphs = [p for p in paragraphs if p.class_type == "good"]
 
-    extract = ' '.join([p.text for p in good_paragraphs])
+    extract = " ".join([p.text for p in good_paragraphs])
     if len(extract) > NUM_EXTRACT_CHARS:
-        extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
+        extract = extract[: NUM_EXTRACT_CHARS - 1] + "…"
 
     term = " ".join(tokenize(query))
-    result = Document(title=title, url=new_url, extract=extract, score=0.0, term=term, state=DocumentState.FROM_USER_APPROVED)
+    result = Document(
+        title=title, url=new_url, extract=extract, score=0.0, term=term, state=DocumentState.FROM_USER_APPROVED
+    )
 
     documents = _get_documents(request, term)
     reranked_documents = _insert_document(documents, result)
@@ -171,12 +208,16 @@ def add_url(request):
 
     _save_to_index(query, reranked_documents)
 
-    return render(request, "home.html", {
-        "results": _prepare_results(reranked_documents),
-        "query": query,
-        "activity": None,
-        "curation": curation,
-    })
+    return render(
+        request,
+        "home.html",
+        {
+            "results": _prepare_results(reranked_documents),
+            "query": query,
+            "activity": None,
+            "curation": curation,
+        },
+    )
 
 
 class DomainSubmissionForm(ModelForm):
@@ -270,12 +311,16 @@ def approve(request):
 
     _save_to_index(query, reranked_documents)
 
-    response = render(request, "home.html", {
-        "results": _prepare_results(reranked_documents),
-        "query": query,
-        "activity": None,
-        "curation": curation,
-    })
+    response = render(
+        request,
+        "home.html",
+        {
+            "results": _prepare_results(reranked_documents),
+            "query": query,
+            "activity": None,
+            "curation": curation,
+        },
+    )
 
     return response
 
@@ -292,16 +337,20 @@ def revert_current_curation(request):
 
     original_documents_unfixed = [Document(**doc) for doc in curation.original_results]
     original_documents = [fix_document_state(doc) for doc in original_documents_unfixed]
-    return render(request, "home.html", {
-        "results": _prepare_results(original_documents),
-        "query": (curation.query),
-        "activity": None,
-        "curation": None,
-    })
+    return render(
+        request,
+        "home.html",
+        {
+            "results": _prepare_results(original_documents),
+            "query": (curation.query),
+            "activity": None,
+            "curation": None,
+        },
+    )
 
 
 def _revert_curation(curation):
-    with TinyIndex(Document, index_path, 'w') as indexer:
+    with TinyIndex(Document, index_path, "w") as indexer:
         term = " ".join(tokenize(curation.query))
         documents = [Document(**doc) for doc in curation.original_index_results]
 
@@ -310,8 +359,7 @@ def _revert_curation(curation):
             # Replace all existing documents for the term with the original documents
             all_documents = documents + [doc for doc in page.documents if doc.term != term]
             num_stored = page.store(all_documents)
-            logger.info(f"Reverted to {num_stored} of {len(all_documents)} documents "
-                        f"at page {page_index}")
+            logger.info(f"Reverted to {num_stored} of {len(all_documents)} documents at page {page_index}")
 
 
 def _get_curation(request, query, documents, reranked_documents):
@@ -327,7 +375,7 @@ def _get_curation(request, query, documents, reranked_documents):
         if not user.is_authenticated:
             user = None
 
-        with TinyIndex(Document, index_path, 'r') as indexer:
+        with TinyIndex(Document, index_path, "r") as indexer:
             tokens = tokenize(query)
             term = " ".join(tokens)
             original_index_results = [doc for doc in indexer.retrieve(term) if doc.term == term]
@@ -376,12 +424,13 @@ def _get_documents(request, term: str):
         except ValueError:
             state_enum = None
         documents[url] = Document(
-            title=title, url=url, extract=extract, score=float_or_none(score), term=term, state=state_enum)
+            title=title, url=url, extract=extract, score=float_or_none(score), term=term, state=state_enum
+        )
     return documents
 
 
 def _save_to_index(query: str, new_results: list[Document]):
-    with TinyIndex(Document, index_path, 'w') as indexer:
+    with TinyIndex(Document, index_path, "w") as indexer:
         term = " ".join(tokenize(query))
         documents = [
             Document(
@@ -402,8 +451,10 @@ def _save_to_index(query: str, new_results: list[Document]):
             existing_documents = add_term_infos(page.documents, indexer, page_index)
             new_urls = {doc.url for doc in documents}
             other_documents = [doc for doc in existing_documents if doc.url not in new_urls]
-            logger.info(f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
-                        f"with terms { {doc.term for doc in other_documents} }")
+            logger.info(
+                f"Found {len(other_documents)} other documents for term {term} at page {page_index} "
+                f"with terms { {doc.term for doc in other_documents} }"
+            )
 
             # Update state for other documents
             states = {doc.url: doc.state for doc in new_results}
@@ -439,7 +490,9 @@ class CurationsView(ListView):
     template_name = "mwmbl/curations.html"
 
     def get_queryset(self):
-        return Curation.objects.select_related("user").prefetch_related('flag_curation_set').all().order_by("-timestamp")
+        return (
+            Curation.objects.select_related("user").prefetch_related("flag_curation_set").all().order_by("-timestamp")
+        )
 
 
 class CurationDetailView(DetailView):
@@ -544,8 +597,12 @@ def memory_view(request):
     memory_info = process.memory_info()
     most_common_objects = objgraph.most_common_types(limit=100)
     growth = objgraph.growth(limit=100)
-    return render(request, "mwmbl/memory.html", {
-        "most_common_objects": most_common_objects,
-        "growth": growth,
-        "memory_info": memory_info,
-    })
+    return render(
+        request,
+        "mwmbl/memory.html",
+        {
+            "most_common_objects": most_common_objects,
+            "growth": growth,
+            "memory_info": memory_info,
+        },
+    )

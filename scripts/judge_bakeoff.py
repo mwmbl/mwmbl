@@ -34,6 +34,7 @@ only ever be reported in this mode.
 
 Run:  uv run --with fastembed python scripts/judge_bakeoff.py [--judges a,b,...]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,6 +67,7 @@ def load_dataset() -> list[dict]:
 
 # --- judges -----------------------------------------------------------------
 
+
 def tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", text.lower())
 
@@ -86,16 +88,15 @@ def score_nomic_cosine(rows: list[dict]) -> np.ndarray:
 
     model = TextEmbedding("nomic-ai/nomic-embed-text-v1.5")
     queries = sorted({row["query"] for row in rows})
-    query_vectors = dict(zip(queries, model.embed(
-        [f"search_query: {q}" for q in queries], batch_size=64)))
-    doc_vectors = model.embed(
-        [f"search_document: {row['doc_text']}" for row in rows], batch_size=64)
+    query_vectors = dict(zip(queries, model.embed([f"search_query: {q}" for q in queries], batch_size=64)))
+    doc_vectors = model.embed([f"search_document: {row['doc_text']}" for row in rows], batch_size=64)
 
     scores = np.zeros(len(rows))
     for i, (row, doc_vector) in enumerate(zip(rows, doc_vectors)):
         query_vector = query_vectors[row["query"]]
-        scores[i] = float(np.dot(query_vector, doc_vector) /
-                          (np.linalg.norm(query_vector) * np.linalg.norm(doc_vector) + 1e-9))
+        scores[i] = float(
+            np.dot(query_vector, doc_vector) / (np.linalg.norm(query_vector) * np.linalg.norm(doc_vector) + 1e-9)
+        )
         if (i + 1) % 5000 == 0:
             print(f"  nomic: {i + 1}/{len(rows)}", flush=True)
     return scores
@@ -111,8 +112,7 @@ def _cross_encoder(rows: list[dict], model_name: str, label: str) -> np.ndarray:
         by_query[row["query"]].append(i)
     done = 0
     for query, indexes in by_query.items():
-        for index, score in zip(indexes, model.rerank(
-                query, [rows[i]["doc_text"] for i in indexes], batch_size=64)):
+        for index, score in zip(indexes, model.rerank(query, [rows[i]["doc_text"] for i in indexes], batch_size=64)):
             scores[index] = float(score)
         done += len(indexes)
         if done // 5000 != (done - len(indexes)) // 5000:
@@ -128,9 +128,9 @@ def score_jina_turbo_ce(rows: list[dict]) -> np.ndarray:
     return _cross_encoder(rows, "jinaai/jina-reranker-v1-turbo-en", "jina_turbo_ce")
 
 
-def onnx_cross_encoder(rows: list[dict], onnx_dir: Path, model_file: str,
-                       label: str, max_length: int = 256,
-                       batch_size: int = 64) -> np.ndarray:
+def onnx_cross_encoder(
+    rows: list[dict], onnx_dir: Path, model_file: str, label: str, max_length: int = 256, batch_size: int = 64
+) -> np.ndarray:
     """Score (query, doc_text) rows with a local exported cross-encoder."""
     import onnxruntime
     from tokenizers import Tokenizer
@@ -143,24 +143,27 @@ def onnx_cross_encoder(rows: list[dict], onnx_dir: Path, model_file: str,
 
     scores = np.zeros(len(rows))
     for start in range(0, len(rows), batch_size):
-        batch = rows[start:start + batch_size]
-        encodings = tokenizer.encode_batch(
-            [(row["query"], row["doc_text"]) for row in batch])
-        feed = {"input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
-                "attention_mask": np.array([e.attention_mask for e in encodings],
-                                           dtype=np.int64)}
+        batch = rows[start : start + batch_size]
+        encodings = tokenizer.encode_batch([(row["query"], row["doc_text"]) for row in batch])
+        feed = {
+            "input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
+            "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
+        }
         if "token_type_ids" in input_names:
-            feed["token_type_ids"] = np.array([e.type_ids for e in encodings],
-                                              dtype=np.int64)
+            feed["token_type_ids"] = np.array([e.type_ids for e in encodings], dtype=np.int64)
         logits = session.run(None, feed)[0][:, 0]
-        scores[start:start + len(batch)] = 1 / (1 + np.exp(-logits.astype(np.float64)))
+        scores[start : start + len(batch)] = 1 / (1 + np.exp(-logits.astype(np.float64)))
         if (start + batch_size) % 4992 < batch_size:
             print(f"  {label}: {start + len(batch)}/{len(rows)}", flush=True)
     return scores
 
 
-SCORERS = {"term_overlap": score_term_overlap, "nomic_cosine": score_nomic_cosine,
-           "minilm_ce": score_minilm_ce, "jina_turbo_ce": score_jina_turbo_ce}
+SCORERS = {
+    "term_overlap": score_term_overlap,
+    "nomic_cosine": score_nomic_cosine,
+    "minilm_ce": score_minilm_ce,
+    "jina_turbo_ce": score_jina_turbo_ce,
+}
 
 
 def register_finetuned(model_dir: Path) -> list[str]:
@@ -171,8 +174,7 @@ def register_finetuned(model_dir: Path) -> list[str]:
     for suffix, model_file in (("", "model.onnx"), ("_int8", "model.int8.onnx")):
         if (onnx_dir / model_file).exists():
             name = f"ft_{run}{suffix}"
-            SCORERS[name] = lambda rows, f=model_file, n=f"ft_{run}{suffix}": \
-                onnx_cross_encoder(rows, onnx_dir, f, n)
+            SCORERS[name] = lambda rows, f=model_file, n=f"ft_{run}{suffix}": onnx_cross_encoder(rows, onnx_dir, f, n)
             names.append(name)
     torch_scores = model_dir / "llm_scores.npy"
     if torch_scores.exists():
@@ -200,6 +202,7 @@ def judge_scores(name: str, rows: list[dict]) -> np.ndarray:
 
 # --- metrics ----------------------------------------------------------------
 
+
 def rankdata(values) -> np.ndarray:
     values = np.asarray(values, dtype=float)
     order = np.argsort(values)
@@ -225,13 +228,13 @@ def roc_auc(labels: np.ndarray, scores: np.ndarray) -> float:
     if not len(positive) or not len(negative):
         return float("nan")
     ranks = rankdata(scores)
-    return float((ranks[labels].sum() - len(positive) * (len(positive) - 1) / 2)
-                 / (len(positive) * len(negative)))
+    return float((ranks[labels].sum() - len(positive) * (len(positive) - 1) / 2) / (len(positive) * len(negative)))
 
 
 def ndcg_at_k(gains_in_rank_order: list[float], ideal: list[float], k: int = 10) -> float:
     def dcg(gains):
         return sum(g / math.log2(i + 2) for i, g in enumerate(gains[:k]))
+
     ideal_dcg = dcg(sorted(ideal, reverse=True))
     return dcg(gains_in_rank_order) / ideal_dcg if ideal_dcg > 0 else float("nan")
 
@@ -266,9 +269,11 @@ def evaluate(name: str, rows: list[dict], scores: np.ndarray) -> dict:
             source_rows[row["query"]][row["ss_source"]].append(i)
     within_query_rho, best_agree, eligible = [], 0, 0
     for query, sources in source_rows.items():
-        aggregates = {s: (float(np.mean(scores[np.array(ix)])),
-                          float(np.mean(overall[np.array(ix)])))
-                      for s, ix in sources.items() if len(ix) >= 2}
+        aggregates = {
+            s: (float(np.mean(scores[np.array(ix)])), float(np.mean(overall[np.array(ix)])))
+            for s, ix in sources.items()
+            if len(ix) >= 2
+        }
         if len(aggregates) < 2:
             continue
         eligible += 1
@@ -288,8 +293,7 @@ def evaluate(name: str, rows: list[dict], scores: np.ndarray) -> dict:
         "auc_rel2": round(roc_auc(relevance >= 2, scores), 3),
         "ndcg@10": round(float(np.mean(ndcgs)), 3),
         "ndcg@10_random": round(float(np.mean(random_ndcgs)), 3),
-        "source_within_query_spearman": round(float(np.mean(within_query_rho)), 3)
-        if within_query_rho else None,
+        "source_within_query_spearman": round(float(np.mean(within_query_rho)), 3) if within_query_rho else None,
         "source_best_agree@1": round(best_agree / eligible, 3) if eligible else None,
         "source_eligible_queries": eligible,
     }
@@ -297,21 +301,28 @@ def evaluate(name: str, rows: list[dict], scores: np.ndarray) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--judges", default=None,
-                        help=f"comma-separated subset of {ALL_JUDGES} and any "
-                             "registered ft_* judges (default: all)")
-    parser.add_argument("--model-dir", type=Path, action="append", default=[],
-                        help="fine-tuned model artifact dir (repeatable); "
-                             "registers ft_<run>[,_int8,_torch] judges")
-    parser.add_argument("--eval-manifest", type=Path, default=None,
-                        help="eval_manifest.json: compute metrics on its "
-                             "held-out rows only (results_heldout.json)")
+    parser.add_argument(
+        "--judges",
+        default=None,
+        help=f"comma-separated subset of {ALL_JUDGES} and any registered ft_* judges (default: all)",
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        action="append",
+        default=[],
+        help="fine-tuned model artifact dir (repeatable); registers ft_<run>[,_int8,_torch] judges",
+    )
+    parser.add_argument(
+        "--eval-manifest",
+        type=Path,
+        default=None,
+        help="eval_manifest.json: compute metrics on its held-out rows only (results_heldout.json)",
+    )
     args = parser.parse_args()
 
-    finetuned = [name for model_dir in args.model_dir
-                 for name in register_finetuned(model_dir)]
-    judges = (args.judges.split(",") if args.judges
-              else list(ALL_JUDGES) + finetuned)
+    finetuned = [name for model_dir in args.model_dir for name in register_finetuned(model_dir)]
+    judges = args.judges.split(",") if args.judges else list(ALL_JUDGES) + finetuned
 
     rows = load_dataset()
     print(f"dataset: {len(rows)} rows, {len({r['query'] for r in rows})} queries")
@@ -323,12 +334,15 @@ def main():
         eval_slice = np.array(manifest["llm_eval_row_indexes"])
         eval_rows = [rows[i] for i in eval_slice]
         results_file = "results_heldout.json"
-        print(f"held-out eval: {len(eval_rows)} rows, "
-              f"{len({r['query'] for r in eval_rows})} queries "
-              f"({manifest['source_eligible_eval_queries']} source-eligible)")
+        print(
+            f"held-out eval: {len(eval_rows)} rows, "
+            f"{len({r['query'] for r in eval_rows})} queries "
+            f"({manifest['source_eligible_eval_queries']} source-eligible)"
+        )
     elif finetuned:
-        parser.error("fine-tuned judges must be evaluated with --eval-manifest "
-                     "(their training saw the non-held-out queries)")
+        parser.error(
+            "fine-tuned judges must be evaluated with --eval-manifest (their training saw the non-held-out queries)"
+        )
 
     results = []
     for name in judges:
@@ -342,8 +356,7 @@ def main():
     keys = list(results[0].keys())
     print(" | ".join(f"{k:>28s}" if i == 0 else k for i, k in enumerate(keys)))
     for result in results:
-        print(" | ".join(f"{str(result[k]):>28s}" if i == 0 else str(result[k])
-                         for i, k in enumerate(keys)))
+        print(" | ".join(f"{str(result[k]):>28s}" if i == 0 else str(result[k]) for i, k in enumerate(keys)))
 
 
 if __name__ == "__main__":

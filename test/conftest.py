@@ -10,8 +10,6 @@ callback that runs longer than 100 ms triggers a warning. Combined with
 `-W error::RuntimeWarning` (set per test if desired), this catches most
 accidental sync calls leaking into async paths.
 """
-import asyncio
-import sys
 
 import pytest
 

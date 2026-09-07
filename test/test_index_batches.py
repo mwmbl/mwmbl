@@ -8,10 +8,13 @@ import pytest
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import (
-    sort_documents, combine_documents, _merge_user_ids, MAX_USER_IDS,
-    index_results_against_query, index_documents,
+    _merge_user_ids,
+    combine_documents,
+    index_documents,
+    index_results_against_query,
+    sort_documents,
 )
-from mwmbl.tinysearchengine.indexer import Document, DocumentState, PAGE_SIZE, TinyIndex
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentState, TinyIndex
 
 
 class UrlRanker:
@@ -31,7 +34,6 @@ def test_sort_documents():
     documents = [
         Document(title="title5", url="2", extract="extract5", term="term1"),
         Document(title="title6", url="3", extract="extract6", term="term2"),
-
     ]
 
     # Sort the documents
@@ -59,7 +61,6 @@ def test_sort_documents_curated_items_first():
     documents = [
         Document(title="title5", url="2", extract="extract5", term="term1"),
         Document(title="title6", url="3", extract="extract6", term="term2"),
-
     ]
 
     # Sort the documents
@@ -99,6 +100,7 @@ def test_sort_documents_duplicates_keep_synced_state():
 # index_results_against_query
 # ---------------------------------------------------------------------------
 
+
 def test_index_results_against_query():
     # "rust", "async" and the bigram "rust async" land on distinct pages here,
     # so cross-term URL dedup within a page does not interfere with the asserts.
@@ -109,7 +111,7 @@ def test_index_results_against_query():
     docs = [a, b, c]
 
     with TemporaryDirectory() as temp_dir:
-        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
         with TinyIndex.create(Document, index_path, num_pages=num_pages, page_size=4096):
             pass
 
@@ -118,7 +120,7 @@ def test_index_results_against_query():
         # All three pages are newly added (each matches at least one term).
         assert new_count == 3
 
-        with TinyIndex(Document, index_path, 'r') as indexer:
+        with TinyIndex(Document, index_path, "r") as indexer:
             rust_urls = {d.url for d in indexer.retrieve("rust")}
             async_urls = {d.url for d in indexer.retrieve("async")}
             bigram_urls = {d.url for d in indexer.retrieve("rust async")}
@@ -142,14 +144,14 @@ def test_index_results_against_query_keeps_title_only_documents():
     docs = [doc]
 
     with TemporaryDirectory() as temp_dir:
-        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
         with TinyIndex.create(Document, index_path, num_pages=num_pages, page_size=4096):
             pass
 
         new_count = index_results_against_query(docs, "kitsas", index_path)
         assert new_count == 1
 
-        with TinyIndex(Document, index_path, 'r') as indexer:
+        with TinyIndex(Document, index_path, "r") as indexer:
             kitsas_urls = {d.url for d in indexer.retrieve("kitsas")}
         assert kitsas_urls == {doc.url}
 
@@ -157,6 +159,7 @@ def test_index_results_against_query_keeps_title_only_documents():
 # ---------------------------------------------------------------------------
 # _merge_user_ids
 # ---------------------------------------------------------------------------
+
 
 def test_merge_user_ids_empty_existing():
     assert _merge_user_ids(None, [1]) == [1]
@@ -182,6 +185,7 @@ def test_merge_user_ids_both_none():
 # ---------------------------------------------------------------------------
 # combine_documents: user_ids and last_crawled merging
 # ---------------------------------------------------------------------------
+
 
 def test_combine_documents_merges_user_ids_for_same_url():
     existing = [Document(title="t", url="http://a.com", extract="e", term="q", user_ids=[1])]
@@ -229,8 +233,7 @@ def snapshot_blacklist(domains: set[str]) -> SnapshotBlacklist:
     as its built-in rules keeps these tests off the snapshot machinery, which
     test_blacklist_snapshot.py covers.
     """
-    return SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(domains),
-                             redis_client=fakeredis.FakeRedis())
+    return SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(domains), redis_client=fakeredis.FakeRedis())
 
 
 @pytest.fixture

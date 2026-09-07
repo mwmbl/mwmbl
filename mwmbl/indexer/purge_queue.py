@@ -25,6 +25,7 @@ serialised JSON is byte-identical between retrievals and SET dedupe works on it.
 The same URL under two different terms is two entries, which is correct: they are two
 copies on two pages, and each needs its own removal.
 """
+
 import json
 import threading
 import time
@@ -89,13 +90,16 @@ def get_redis() -> redis.Redis:
 
 
 def _payload(document: Document) -> str:
-    return json.dumps({
-        "url": document.url,
-        "title": document.title,
-        "extract": document.extract,
-        "score": document.score,
-        "term": document.term,
-    }, sort_keys=True)
+    return json.dumps(
+        {
+            "url": document.url,
+            "title": document.title,
+            "extract": document.extract,
+            "score": document.score,
+            "term": document.term,
+        },
+        sort_keys=True,
+    )
 
 
 def enqueue_for_purge(documents: Iterable[Document], redis_client: Optional[redis.Redis] = None) -> int:
@@ -108,8 +112,7 @@ def enqueue_for_purge(documents: Iterable[Document], redis_client: Optional[redi
     try:
         client = redis_client if redis_client is not None else get_redis()
         if client.scard(PURGE_QUEUE_KEY) >= MAX_QUEUE_SIZE:
-            logger.warning("Blacklist purge queue is full (%d); dropping %d documents",
-                           MAX_QUEUE_SIZE, len(payloads))
+            logger.warning("Blacklist purge queue is full (%d); dropping %d documents", MAX_QUEUE_SIZE, len(payloads))
             return 0
         added = client.sadd(PURGE_QUEUE_KEY, *payloads)
     except Exception:
@@ -130,9 +133,15 @@ def _documents_from_payloads(payloads: Iterable[str]) -> list[Document]:
             fields = json.loads(payload)
             # "term" is fetched with .get because entries queued before it joined the
             # payload are still in Redis; those purge by token pages alone, as they did.
-            documents.append(Document(title=fields["title"], url=fields["url"],
-                                      extract=fields["extract"], score=fields["score"],
-                                      term=fields.get("term")))
+            documents.append(
+                Document(
+                    title=fields["title"],
+                    url=fields["url"],
+                    extract=fields["extract"],
+                    score=fields["score"],
+                    term=fields.get("term"),
+                )
+            )
         except (ValueError, KeyError, TypeError):
             logger.warning("Discarding unreadable purge queue entry: %r", payload)
     return documents

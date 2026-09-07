@@ -16,6 +16,7 @@ Usage:
   uv run python scripts/fetch_url.py "https://example.com/api?q=test" --max-chars 12000
   uv run python scripts/fetch_url.py "https://example.com/search?q=test" --out /tmp/page.html
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,7 +34,9 @@ TIMEOUT = 15.0
 async def _fetch(url: str, max_chars: int, out: str | None) -> int:
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=TIMEOUT, headers=ENGINE_HEADERS,
+            follow_redirects=True,
+            timeout=TIMEOUT,
+            headers=ENGINE_HEADERS,
         ) as client:
             r = await client.get(url)
     except Exception as e:  # noqa: BLE001

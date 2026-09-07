@@ -6,6 +6,7 @@ gone is everything that existed only because cache entries shared a file with re
 content: the anonymisation gate, the Redis queue, the general-indexing path, and the guards
 stopping a cache term reaching curation or /raw.
 """
+
 import json
 import random
 import string
@@ -26,37 +27,49 @@ from mwmbl.indexer.external_cache import (
     store_external_results,
 )
 from mwmbl.tinysearchengine import rank
-from mwmbl.tinysearchengine.indexer import (PAGE_SIZE, Document, DocumentSource, DocumentState,
-                                            TinyIndex)
-from mwmbl.tinysearchengine.rank import (WIKI_FETCH_LIMIT, Ranker, get_wiki_results,
-                                          wiki_score)
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
+from mwmbl.tinysearchengine.rank import WIKI_FETCH_LIMIT, Ranker, get_wiki_results, wiki_score
 
 NUM_PAGES = 8
 
 # state and source are set because get_wiki_results sets them, and the cache preserves what
 # the provider produced rather than stamping its own. The scores are not preserved - what
 # an entry stores is the rank - and the tests below rely on that.
-PYTHON = Document("Python (programming language)", "https://en.wikipedia.org/wiki/Python",
-                  "A high-level programming language.", 3.0, state=DocumentState.FROM_WIKI,
-                  source=DocumentSource.WIKIPEDIA)
-MONTY = Document("Monty Python", "https://en.wikipedia.org/wiki/Monty_Python",
-                 "A British comedy troupe.", 2.0, state=DocumentState.FROM_WIKI,
-                 source=DocumentSource.WIKIPEDIA)
+PYTHON = Document(
+    "Python (programming language)",
+    "https://en.wikipedia.org/wiki/Python",
+    "A high-level programming language.",
+    3.0,
+    state=DocumentState.FROM_WIKI,
+    source=DocumentSource.WIKIPEDIA,
+)
+MONTY = Document(
+    "Monty Python",
+    "https://en.wikipedia.org/wiki/Monty_Python",
+    "A British comedy troupe.",
+    2.0,
+    state=DocumentState.FROM_WIKI,
+    source=DocumentSource.WIKIPEDIA,
+)
 
 
 @pytest.fixture
 def cache_index(tmp_path):
     """A real, empty external results cache index that the module-level helpers pick up."""
-    with override_settings(DATA_PATH=str(tmp_path), EXTERNAL_CACHE_INDEX_NAME="external-cache.tinysearch",
-                           EXTERNAL_CACHE_NUM_PAGES=NUM_PAGES, EXTERNAL_CACHE_ENABLED=True):
-        TinyIndex.create(item_factory=Document, index_path=str(external_cache_path()),
-                         num_pages=NUM_PAGES, page_size=PAGE_SIZE)
+    with override_settings(
+        DATA_PATH=str(tmp_path),
+        EXTERNAL_CACHE_INDEX_NAME="external-cache.tinysearch",
+        EXTERNAL_CACHE_NUM_PAGES=NUM_PAGES,
+        EXTERNAL_CACHE_ENABLED=True,
+    ):
+        TinyIndex.create(
+            item_factory=Document, index_path=str(external_cache_path()), num_pages=NUM_PAGES, page_size=PAGE_SIZE
+        )
         yield str(external_cache_path())
 
 
 def _wiki_api_response(*titles):
-    return {"query": {"search": [{"title": title, "snippet": f"<b>{title}</b> snippet"}
-                                 for title in titles]}}
+    return {"query": {"search": [{"title": title, "snippet": f"<b>{title}</b> snippet"} for title in titles]}}
 
 
 def _patched_wikipedia(response):
@@ -75,6 +88,7 @@ def _patched_wikipedia(response):
 # ---------------------------------------------------------------------------
 # The cache term
 # ---------------------------------------------------------------------------
+
 
 def test_cache_term_is_stable_and_normalised():
     """Whitespace and case must not split one query across several entries. The disk cache
@@ -119,6 +133,7 @@ def test_cache_term_is_keyed_so_it_cannot_be_recomputed_without_the_secret():
 # ---------------------------------------------------------------------------
 # Round trip
 # ---------------------------------------------------------------------------
+
 
 def test_results_come_back_from_the_index(cache_index):
     store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON, MONTY])
@@ -175,7 +190,7 @@ def test_a_query_we_have_never_asked_about_is_a_miss(cache_index):
 def _all_stored_documents(index_path):
     """Every document in the file, decompressed. Grepping the raw bytes proves little: the
     pages are zstd-compressed, so plaintext would not show up there either way."""
-    with TinyIndex(Document, index_path, 'r') as index:
+    with TinyIndex(Document, index_path, "r") as index:
         return [document for page in range(index.num_pages) for document in index.get_page(page)]
 
 
@@ -198,8 +213,13 @@ def test_the_file_holds_no_query_text(cache_index):
 # alone, so the tests below exercise it even though nothing fetches from it yet.
 OTHER_SOURCE = DocumentSource.STAAN
 
-STAAN_RESULT = Document("Python tutorial", "https://example.com/python",
-                        "Somewhere that is not Wikipedia.", 9.0, source=DocumentSource.STAAN)
+STAAN_RESULT = Document(
+    "Python tutorial",
+    "https://example.com/python",
+    "Somewhere that is not Wikipedia.",
+    9.0,
+    source=DocumentSource.STAAN,
+)
 
 
 def test_two_providers_do_not_share_an_entry_for_the_same_query(cache_index):
@@ -245,7 +265,7 @@ def test_both_providers_results_for_a_query_live_on_one_page(cache_index):
     store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
     store_external_results(OTHER_SOURCE, "python", [STAAN_RESULT])
 
-    with TinyIndex(Document, cache_index, 'r') as index:
+    with TinyIndex(Document, cache_index, "r") as index:
         page = index.get_page(index.get_key_page_index(external_cache_term("python")))
 
     assert {document.source for document in page} == {DocumentSource.WIKIPEDIA, DocumentSource.STAAN}
@@ -276,6 +296,7 @@ def test_a_providers_state_and_source_survive_the_round_trip(cache_index):
 # Freshness
 # ---------------------------------------------------------------------------
 
+
 def test_a_stale_entry_is_not_a_cache_hit(cache_index):
     now = int(time.time())
     store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON], now=now)
@@ -303,7 +324,7 @@ def test_stale_entries_are_dropped_when_the_page_is_rewritten(cache_index):
     much_later = now + 27 * 7 * 24 * 60 * 60
     store_external_results(DocumentSource.WIKIPEDIA, new_query, [MONTY], now=much_later)
 
-    with TinyIndex(Document, cache_index, 'r') as index:
+    with TinyIndex(Document, cache_index, "r") as index:
         page = index.get_page(index.get_key_page_index(external_cache_term(new_query)))
 
     assert [document.url for document in page] == [MONTY.url]
@@ -312,6 +333,7 @@ def test_stale_entries_are_dropped_when_the_page_is_rewritten(cache_index):
 # ---------------------------------------------------------------------------
 # Negative caching
 # ---------------------------------------------------------------------------
+
 
 def test_a_query_a_provider_has_nothing_for_is_remembered(cache_index):
     """Without this the query is re-fetched forever - #357 listed it as unfixable, because
@@ -360,6 +382,7 @@ def test_documents_without_a_url_or_title_are_not_stored(cache_index):
 # ---------------------------------------------------------------------------
 # The fetch path
 # ---------------------------------------------------------------------------
+
 
 def test_a_cache_miss_calls_wikipedia_and_stores_the_result(cache_index):
     mock, session = _patched_wikipedia(_wiki_api_response("Python (programming language)"))
@@ -448,8 +471,9 @@ def test_a_cache_hit_scores_the_same_as_the_live_fetch_that_filled_it(cache_inde
 
     cached = get_wiki_results("python", 3)
 
-    assert [(document.url, document.score) for document in cached] == \
-           [(document.url, document.score) for document in live]
+    assert [(document.url, document.score) for document in cached] == [
+        (document.url, document.score) for document in live
+    ]
 
 
 def test_a_hit_is_served_while_the_circuit_breaker_is_open(cache_index):
@@ -518,6 +542,7 @@ def test_the_query_is_truncated_before_it_reaches_wikipedia(cache_index):
 # The kill switch
 # ---------------------------------------------------------------------------
 
+
 def test_the_kill_switch_stops_reads_and_writes(cache_index):
     with override_settings(EXTERNAL_CACHE_ENABLED=False):
         store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
@@ -527,8 +552,9 @@ def test_the_kill_switch_stops_reads_and_writes(cache_index):
 
 
 def test_a_missing_cache_file_is_a_miss_rather_than_an_error(tmp_path):
-    with override_settings(DATA_PATH=str(tmp_path), EXTERNAL_CACHE_INDEX_NAME="absent.tinysearch",
-                           EXTERNAL_CACHE_ENABLED=True):
+    with override_settings(
+        DATA_PATH=str(tmp_path), EXTERNAL_CACHE_INDEX_NAME="absent.tinysearch", EXTERNAL_CACHE_ENABLED=True
+    ):
         assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python") is None
 
 
@@ -536,9 +562,10 @@ def test_a_missing_cache_file_is_a_miss_rather_than_an_error(tmp_path):
 # Page competition
 # ---------------------------------------------------------------------------
 
+
 def _colliding_queries(index_path):
     """Two queries whose cache terms land on the same page."""
-    with TinyIndex(Document, index_path, 'r') as index:
+    with TinyIndex(Document, index_path, "r") as index:
         first = "collide-0"
         first_page = index.get_key_page_index(external_cache_term(first))
         for i in range(1, 10000):
@@ -559,8 +586,7 @@ def test_the_newest_entry_survives_a_full_page_and_the_oldest_is_evicted(cache_i
     ordering, which would evict by relevance instead of by age."""
     old_query, new_query = _colliding_queries(cache_index)
     now = int(time.time())
-    bulky = [Document(f"Title {i}", f"https://en.wikipedia.org/wiki/{i}", _filler(2000), 3.0)
-             for i in range(4)]
+    bulky = [Document(f"Title {i}", f"https://en.wikipedia.org/wiki/{i}", _filler(2000), 3.0) for i in range(4)]
 
     store_external_results(DocumentSource.WIKIPEDIA, old_query, bulky, now=now)
     assert get_cached_external_results(DocumentSource.WIKIPEDIA, old_query, now=now) is not None
@@ -582,6 +608,7 @@ def test_an_entry_replaces_its_own_previous_results(cache_index):
 # Keeping Wikipedia off the keystroke path
 # ---------------------------------------------------------------------------
 
+
 class _RecordingRanker(Ranker):
     """The smallest thing that exercises Ranker.search's external_search plumbing, which is
     what LTRRanker inherits and what the production ranker therefore uses."""
@@ -602,7 +629,7 @@ def test_search_does_not_call_external_search_when_it_is_turned_off(cache_index)
     """The search-as-you-type trigger passes use_external_search=False. Typing a
     15-character query otherwise costs a Wikipedia call per keystroke, and 92% of those
     prefixes are ones nobody ever searches for, so no cache can absorb them."""
-    with TinyIndex(Document, cache_index, 'r') as index:
+    with TinyIndex(Document, cache_index, "r") as index:
         ranker = _RecordingRanker(index)
         ranker.search("python", [], use_external_search=False)
 
@@ -610,7 +637,7 @@ def test_search_does_not_call_external_search_when_it_is_turned_off(cache_index)
 
 
 def test_search_calls_external_search_by_default(cache_index):
-    with TinyIndex(Document, cache_index, 'r') as index:
+    with TinyIndex(Document, cache_index, "r") as index:
         ranker = _RecordingRanker(index)
         ranker.search("python", [])
 
@@ -621,6 +648,7 @@ def test_search_calls_external_search_by_default(cache_index):
 # Bootstrap
 # ---------------------------------------------------------------------------
 
+
 def test_a_resized_cache_index_is_rebuilt_rather_than_crashing_startup(tmp_path):
     """Resizing a cache should be a config change, not a startup crash - the cost of
     rebuilding is re-fetching."""
@@ -630,7 +658,7 @@ def test_a_resized_cache_index_is_rebuilt_rather_than_crashing_startup(tmp_path)
     with override_settings(DATA_PATH=str(tmp_path)):
         create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
 
-    with TinyIndex(Document, str(path), 'r') as index:
+    with TinyIndex(Document, str(path), "r") as index:
         assert index.num_pages == 16
 
 
@@ -654,7 +682,7 @@ def test_an_unreadable_cache_index_is_rebuilt_rather_than_crashing_startup(tmp_p
     with override_settings(DATA_PATH=str(tmp_path)):
         create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
 
-    with TinyIndex(Document, str(path), 'r') as index:
+    with TinyIndex(Document, str(path), "r") as index:
         assert index.num_pages == 16
 
 
@@ -681,8 +709,7 @@ def test_a_rebuild_leaves_no_window_with_the_index_missing(tmp_path):
         seen.append((path.exists(), kwargs.get("index_path", args[1] if len(args) > 1 else None)))
         return real_create(*args, **kwargs)
 
-    with override_settings(DATA_PATH=str(tmp_path)), \
-            patch.object(TinyIndex, "create", side_effect=watched_create):
+    with override_settings(DATA_PATH=str(tmp_path)), patch.object(TinyIndex, "create", side_effect=watched_create):
         create_index("external-cache.tinysearch", 16, rebuild_on_mismatch=True)
 
     assert seen, "nothing was rebuilt, so this would pass for the wrong reason"

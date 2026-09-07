@@ -22,6 +22,7 @@ propagates out of source selection. The only quiet path is the designed one —
 no artifact in the runtime dir yet (normal before the first online retrain),
 in which case the repo-bundled warm-start artifact is used.
 """
+
 from __future__ import annotations
 
 import json
@@ -70,6 +71,7 @@ XGB_PARAMS = {
 # Encoding
 # ---------------------------------------------------------------------------
 
+
 def build_vocab(names: Iterable[str]) -> list[str]:
     """Frozen, sorted source vocabulary for the identity one-hot block."""
     return sorted(set(names))
@@ -89,10 +91,9 @@ def encode(shared: Sequence[float], source: str, vocab_index: dict[str, int]) ->
     """
     v = np.asarray(shared, dtype=np.float64)
     if v.ndim != 1 or v.size > NUM_FEATURES:
-        raise ValueError(
-            f"shared feature vector has {v.shape} shape; expected <= {NUM_FEATURES} values")
+        raise ValueError(f"shared feature vector has {v.shape} shape; expected <= {NUM_FEATURES} values")
     x = np.zeros(NUM_FEATURES + len(vocab_index), dtype=np.float64)
-    x[:v.size] = v
+    x[: v.size] = v
     idx = vocab_index.get(source)
     if idx is not None:
         x[NUM_FEATURES + idx] = 1.0
@@ -102,6 +103,7 @@ def encode(shared: Sequence[float], source: str, vocab_index: dict[str, int]) ->
 # ---------------------------------------------------------------------------
 # Training data
 # ---------------------------------------------------------------------------
+
 
 def build_training_data(
     rows: Iterable[tuple[dict[str, Sequence[float]], dict[str, float]]],
@@ -141,14 +143,16 @@ def build_training_data_from_matrix(
     if list(matrix.feature_names) != list(FEATURE_NAMES):
         raise ValueError(
             f"matrix feature names {matrix.feature_names} do not match the "
-            f"running code's FEATURE_NAMES {list(FEATURE_NAMES)}; rebuild the matrix")
+            f"running code's FEATURE_NAMES {list(FEATURE_NAMES)}; rebuild the matrix"
+        )
     vocab = build_vocab(matrix.sources)
     vocab_index = {name: i for i, name in enumerate(vocab)}
     ema_i = FEATURE_NAMES.index("contribution_ema")
     counts = matrix.mask.sum(axis=0)
     sums = (matrix.R * matrix.mask).sum(axis=0)
-    source_means = {matrix.sources[s]: float(sums[s] / counts[s]) if counts[s] else 0.0
-                    for s in range(len(matrix.sources))}
+    source_means = {
+        matrix.sources[s]: float(sums[s] / counts[s]) if counts[s] else 0.0 for s in range(len(matrix.sources))
+    }
     xs, ys = [], []
     for q in range(matrix.X.shape[0]):
         for s in range(matrix.X.shape[1]):
@@ -169,7 +173,9 @@ def train(X: np.ndarray, y: np.ndarray, params: dict | None = None):
 
 
 def train_and_save_from_impressions(
-    window_days: int, min_rows: int, out_dir: str | Path,
+    window_days: int,
+    min_rows: int,
+    out_dir: str | Path,
 ) -> dict | None:
     """Batch retrain from logged ``SuperSearchImpression`` rows.
 
@@ -186,26 +192,24 @@ def train_and_save_from_impressions(
     from mwmbl.tinysearchengine.super_search_sources import SOURCES
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
-    rows = list(SuperSearchImpression.objects.filter(timestamp__gte=cutoff)
-                .values_list("features", "rewards"))
+    rows = list(SuperSearchImpression.objects.filter(timestamp__gte=cutoff).values_list("features", "rewards"))
     n_pairs = sum(len(set(f) & set(r)) for f, r in rows)
     if n_pairs < min_rows:
-        logger.info("super-search xgb retrain skipped: %d pairs in %d days "
-                    "(need %d)", n_pairs, window_days, min_rows)
+        logger.info("super-search xgb retrain skipped: %d pairs in %d days (need %d)", n_pairs, window_days, min_rows)
         return None
     names = {name for f, _ in rows for name in f} | set(SOURCES)
     vocab = build_vocab(names)
     X, y = build_training_data(rows, vocab)
     model = train(X, y)
     metrics = {"train_rmse": float(np.sqrt(np.mean((model.predict(X) - y) ** 2)))}
-    save_artifact(model, vocab, out_dir, reward_kind="judge",
-                  n_rows=len(y), metrics=metrics)
+    save_artifact(model, vocab, out_dir, reward_kind="judge", n_rows=len(y), metrics=metrics)
     return metrics
 
 
 # ---------------------------------------------------------------------------
 # Artifact save / load
 # ---------------------------------------------------------------------------
+
 
 def save_artifact(
     model,
@@ -240,13 +244,12 @@ def save_artifact(
     tmp_meta = model_dir / (META_FILE + ".tmp")
     tmp_meta.write_text(json.dumps(meta, indent=2))
     os.replace(tmp_meta, model_dir / META_FILE)
-    logger.info("saved super-search xgb artifact to %s (%d rows, reward=%s)",
-                model_dir, n_rows, reward_kind)
+    logger.info("saved super-search xgb artifact to %s (%d rows, reward=%s)", model_dir, n_rows, reward_kind)
 
 
 @dataclass
 class XgbSourceModel:
-    model: object            # fitted XGBRegressor
+    model: object  # fitted XGBRegressor
     vocab: list[str]
     vocab_index: dict[str, int]
     meta: dict
@@ -269,14 +272,13 @@ def load_artifact(model_dir: str | Path) -> XgbSourceModel:
     model_dir = Path(model_dir)
     meta = json.loads((model_dir / META_FILE).read_text())
     if meta["format_version"] != FORMAT_VERSION:
-        raise ValueError(
-            f"artifact {model_dir} has format_version {meta['format_version']}, "
-            f"expected {FORMAT_VERSION}")
+        raise ValueError(f"artifact {model_dir} has format_version {meta['format_version']}, expected {FORMAT_VERSION}")
     if meta["shared_feature_names"] != list(FEATURE_NAMES):
         raise ValueError(
             f"artifact {model_dir} was trained on features "
             f"{meta['shared_feature_names']} but the running code has "
-            f"{list(FEATURE_NAMES)}; retrain the artifact")
+            f"{list(FEATURE_NAMES)}; retrain the artifact"
+        )
     model = XGBRegressor()
     model.load_model(model_dir / MODEL_FILE)
     vocab = list(meta["source_vocab"])
@@ -289,7 +291,8 @@ def load_artifact(model_dir: str | Path) -> XgbSourceModel:
 
 
 def save_profiles(
-    profiles: dict[str, tuple[np.ndarray, np.ndarray]], model_dir: str | Path,
+    profiles: dict[str, tuple[np.ndarray, np.ndarray]],
+    model_dir: str | Path,
 ) -> None:
     """Write the batch content profiles the model was trained against
     (``profiles.npz``: sources + bow/cng matrices) into the artifact dir."""
@@ -309,8 +312,7 @@ def save_profiles(
 
 def load_profiles(model_dir: str | Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     arrs = np.load(Path(model_dir) / PROFILES_FILE)
-    return {str(site): (arrs["bow"][i], arrs["cng"][i])
-            for i, site in enumerate(arrs["sources"])}
+    return {str(site): (arrs["bow"][i], arrs["cng"][i]) for i, site in enumerate(arrs["sources"])}
 
 
 def seed_online_state() -> dict[str, int]:
@@ -377,8 +379,12 @@ def get_model() -> XgbSourceModel:
         if key != _cached_key:
             _cached = load_artifact(model_dir)
             _cached_key = key
-            logger.info("super-search xgb model loaded from %s (trained %s, %d sources)",
-                        model_dir, _cached.meta.get("trained_at"), len(_cached.vocab))
+            logger.info(
+                "super-search xgb model loaded from %s (trained %s, %d sources)",
+                model_dir,
+                _cached.meta.get("trained_at"),
+                len(_cached.vocab),
+            )
         _next_check = time.monotonic() + RELOAD_CHECK_SECONDS
         return _cached
 

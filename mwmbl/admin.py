@@ -3,7 +3,17 @@ from django.contrib import admin
 from django.contrib.admin import ModelAdmin
 from django.contrib.auth.admin import UserAdmin
 
-from mwmbl.models import MwmblUser, OldIndex, Curation, FlagCuration, DomainSubmission, ApiKey, MarketingConsent, UserBilling, generate_api_key
+from mwmbl.models import (
+    ApiKey,
+    Curation,
+    DomainSubmission,
+    FlagCuration,
+    MarketingConsent,
+    MwmblUser,
+    OldIndex,
+    UserBilling,
+    generate_api_key,
+)
 
 
 class ApiKeyForm(forms.ModelForm):
@@ -50,6 +60,8 @@ admin.site.register(Curation, ModelAdmin)
 admin.site.register(OldIndex, ModelAdmin)
 admin.site.register(FlagCuration, ModelAdmin)
 admin.site.register(DomainSubmission, ModelAdmin)
+
+
 class MarketingConsentAdmin(ModelAdmin):
     list_display = ("user", "source", "opted_in", "timestamp")
     list_filter = ("source", "opted_in")
@@ -57,7 +69,13 @@ class MarketingConsentAdmin(ModelAdmin):
 
 
 class UserBillingAdmin(ModelAdmin):
-    list_display = ("user", "max_monthly_spend_cents", "polar_customer_id", "current_period_end", "cancel_at_period_end")
+    list_display = (
+        "user",
+        "max_monthly_spend_cents",
+        "polar_customer_id",
+        "current_period_end",
+        "cancel_at_period_end",
+    )
     readonly_fields = ("polar_customer_id", "polar_subscription_id", "current_period_end")
     search_fields = ("user__username", "user__email", "polar_customer_id")
 

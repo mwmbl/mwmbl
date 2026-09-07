@@ -10,14 +10,19 @@ from urllib3.exceptions import MaxRetryError, ResponseError
 from mwmbl.tinysearchengine import rank
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import (NUM_WIKI_RESULTS, HeuristicAndWikiRanker,
-                                         HeuristicRanker, get_wiki_results, wiki_score)
+from mwmbl.tinysearchengine.rank import (
+    NUM_WIKI_RESULTS,
+    HeuristicAndWikiRanker,
+    HeuristicRanker,
+    get_wiki_results,
+    wiki_score,
+)
 
 
 def test_order_result():
-    doc1 = Document(title='title2', url='https://something.com', extract='extract2', score=2.0)
-    doc2 = Document(title='title3', url='https://something.com', extract='extract3', score=3.0)
-    doc3 = Document(title='Bananas and apples', url='https://something.com', extract='extract1', score=1.0)
+    doc1 = Document(title="title2", url="https://something.com", extract="extract2", score=2.0)
+    doc2 = Document(title="title3", url="https://something.com", extract="extract3", score=3.0)
+    doc3 = Document(title="Bananas and apples", url="https://something.com", extract="extract1", score=1.0)
 
     documents = [doc1, doc2, doc3]
 
@@ -26,7 +31,7 @@ def test_order_result():
     # Sort the documents
     ordered_results = ranker.order_results(["bananas"], documents, True)
 
-    assert ordered_results[0].title == 'Bananas and apples'
+    assert ordered_results[0].title == "Bananas and apples"
 
 
 class _TrackingRanker(HeuristicRanker):
@@ -77,8 +82,7 @@ def _reset_wiki_circuit():
 def _get_wiki_results_with_session(session):
     # The cache is off in these tests: they are about what the fetch does when Wikipedia
     # misbehaves, and a hit would return before the fetch ever ran.
-    with override_settings(EXTERNAL_CACHE_ENABLED=False), \
-            patch.object(rank.requests, "Session") as mock_session:
+    with override_settings(EXTERNAL_CACHE_ENABLED=False), patch.object(rank.requests, "Session") as mock_session:
         mock_session.return_value.__enter__.return_value = session
         return get_wiki_results("query", 5)
 
@@ -117,8 +121,7 @@ def test_wiki_query_text_containing_429_is_not_mistaken_for_rate_limit():
 def test_open_wiki_circuit_short_circuits_without_calling_wikipedia():
     rank._trip_wiki_circuit()
 
-    with override_settings(EXTERNAL_CACHE_ENABLED=False), \
-            patch.object(rank.requests, "Session") as mock_session:
+    with override_settings(EXTERNAL_CACHE_ENABLED=False), patch.object(rank.requests, "Session") as mock_session:
         results = get_wiki_results("query", 5)
 
     mock_session.assert_not_called()
@@ -136,6 +139,7 @@ def test_is_wiki_rate_limited_ignores_non_429_reason():
 # ---------------------------------------------------------------------------
 # Keeping the wiki results the model is served the ones it was trained on
 # ---------------------------------------------------------------------------
+
 
 def test_the_wiki_score_depends_on_rank_alone():
     """`score` is a feature of the LTR model. It used to be max_wiki_results + 1 - i, so a

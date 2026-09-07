@@ -1,6 +1,7 @@
 """
 Authentication for the search API using the X-API-Key header.
 """
+
 import hashlib
 
 from asgiref.sync import sync_to_async
@@ -76,7 +77,7 @@ async def authenticate_user(request) -> MwmblUser:
         from ninja_jwt.authentication import AsyncJWTAuth
         from ninja_jwt.exceptions import AuthenticationFailed, TokenError
 
-        token = auth_header[len("Bearer "):]
+        token = auth_header[len("Bearer ") :]
         try:
             return await AsyncJWTAuth().async_jwt_authenticate(request, token)
         except (TokenError, AuthenticationFailed):

@@ -11,6 +11,7 @@ If int8 fails, serve the fp32 model.
 Run:  uv run --with onnxruntime --with tokenizers python \
           scripts/judge_verify_onnx.py --model-dir devdata/judge_train/models/<run>
 """
+
 import argparse
 import json
 import sys
@@ -40,18 +41,22 @@ def main():
     fp32 = onnx_cross_encoder(sample, onnx_dir, "model.onnx", "fp32")
     fp32_diff = float(np.max(np.abs(fp32 - torch_scores)))
     fp32_ok = fp32_diff < args.fp32_tol
-    print(f"fp32 vs torch: max|diff| {fp32_diff:.2e} "
-          f"(spearman {spearman(fp32, torch_scores):.6f}) "
-          f"-> {'PASS' if fp32_ok else 'FAIL'}")
+    print(
+        f"fp32 vs torch: max|diff| {fp32_diff:.2e} "
+        f"(spearman {spearman(fp32, torch_scores):.6f}) "
+        f"-> {'PASS' if fp32_ok else 'FAIL'}"
+    )
 
     int8_ok = True
     if (onnx_dir / "model.int8.onnx").exists():
         int8 = onnx_cross_encoder(sample, onnx_dir, "model.int8.onnx", "int8")
         rho = spearman(int8, fp32)
         int8_ok = rho > args.int8_min_spearman
-        print(f"int8 vs fp32: spearman {rho:.6f}, "
-              f"max|diff| {float(np.max(np.abs(int8 - fp32))):.2e} "
-              f"-> {'PASS' if int8_ok else 'FAIL (serve fp32)'}")
+        print(
+            f"int8 vs fp32: spearman {rho:.6f}, "
+            f"max|diff| {float(np.max(np.abs(int8 - fp32))):.2e} "
+            f"-> {'PASS' if int8_ok else 'FAIL (serve fp32)'}"
+        )
     else:
         print("int8 model not found, skipping")
 

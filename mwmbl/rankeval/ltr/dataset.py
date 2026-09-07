@@ -1,16 +1,13 @@
 """
 Generate a learn-to-rank dataset.
 """
-import sys
 
 import pandas as pd
 
-from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentState
-from mwmbl.tinysearchengine.rank import HeuristicRanker, HeuristicAndWikiRanker
-
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter
-from mwmbl.rankeval.paths import RANKINGS_DATASET_TRAIN_PATH, LEARNING_TO_RANK_DATASET_PATH
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
+from mwmbl.rankeval.paths import LEARNING_TO_RANK_DATASET_PATH, RANKINGS_DATASET_TRAIN_PATH
+from mwmbl.tinysearchengine.rank import HeuristicAndWikiRanker
 
 
 def run():
@@ -26,15 +23,15 @@ def get_dataset(completer):
         index,
         completer,
         return_none_if_no_mwmbl_results=True,
-        score_threshold=float('-inf'),
+        score_threshold=float("-inf"),
     )
     gold_standard = pd.read_csv(RANKINGS_DATASET_TRAIN_PATH, index_col=0)
     dataset = []
-    for query, rankings in gold_standard.groupby('query'):
+    for query, rankings in gold_standard.groupby("query"):
         print("Query", query)
-        gold_standard = dict(zip(rankings['url'].tolist(), rankings.index.tolist()))
+        gold_standard = dict(zip(rankings["url"].tolist(), rankings.index.tolist()))
 
-        predicted = ranker.search(query + ' ', [])
+        predicted = ranker.search(query + " ", [])
 
         if len(predicted) == 0:
             continue
@@ -45,15 +42,17 @@ def get_dataset(completer):
         found_gold = False
         for item in predicted:
             in_gold_standard = item.url in gold_standard
-            new_items.append({
-                'gold_standard_rank': gold_standard.get(item.url),
-                'query': query,
-                'url': item.url,
-                'title': item.title,
-                'extract': item.extract,
-                'state': item.state,
-                'score': item.score,
-            })
+            new_items.append(
+                {
+                    "gold_standard_rank": gold_standard.get(item.url),
+                    "query": query,
+                    "url": item.url,
+                    "title": item.title,
+                    "extract": item.extract,
+                    "state": item.state,
+                    "score": item.score,
+                }
+            )
             if in_gold_standard:
                 found_gold = True
         if found_gold:
@@ -62,5 +61,5 @@ def get_dataset(completer):
     return dataset
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

@@ -19,14 +19,14 @@ typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 from ninja import Field
 from ninja_extra import NinjaExtraAPI, api_controller, http_post
 from ninja_extra.permissions import AllowAny
-from ninja_jwt.controller import TokenVerificationController, TokenObtainPairController
+from ninja_jwt.controller import TokenObtainPairController, TokenVerificationController
 from ninja_jwt.schema import TokenObtainPairInputSchema
 from ninja_jwt.schema_control import SchemaControl
 from ninja_jwt.settings import api_settings
-
-from mwmbl.exceptions import InvalidRequest
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
+
+from mwmbl.exceptions import InvalidRequest
 
 _schema = SchemaControl(api_settings)
 
@@ -58,6 +58,7 @@ class MwmblTokenController(TokenVerificationController, TokenObtainPairControlle
     def obtain_token(self, user_token: MwmblTokenObtainSchema):
         user_token.check_user_authentication_rule()
         return user_token.to_response_schema()
+
 
 api = NinjaExtraAPI(
     title="Mwmbl API",
@@ -137,9 +138,9 @@ def register_routers(ranker, batch_cache, queued_batches):
     This is called from urls.py after Django app setup is complete, so that
     dependencies (ranker, batch_cache, queued_batches) are available.
     """
+    import mwmbl.crawler.app as crawler_module
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.tinysearchengine.super_search as super_search_module
-    import mwmbl.crawler.app as crawler_module
     from mwmbl.platform.api import router as platform_router
 
     # Initialise routers that depend on runtime objects

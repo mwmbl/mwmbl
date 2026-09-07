@@ -7,10 +7,11 @@ Also contains Django Background Tasks for periodic maintenance:
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
 """
+
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
-from logging import getLogger, basicConfig
+from logging import basicConfig, getLogger
 from pathlib import Path
 from time import sleep
 
@@ -23,7 +24,7 @@ from redis import Redis
 
 from mwmbl import pricing
 from mwmbl.crawler.stats import StatsManager
-from mwmbl.indexer import index_batches, historical
+from mwmbl.indexer import historical, index_batches
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
@@ -105,6 +106,7 @@ def copy_indexes_continuously():
 # Periodic quota maintenance tasks (Django Background Tasks)
 # ---------------------------------------------------------------------------
 
+
 @background(schedule=0)
 def sync_search_counts():
     """
@@ -141,7 +143,9 @@ def sync_search_counts():
             month = int(parts[4])
             count = cache.get(key, default=0)
             UsageBucket.objects.update_or_create(
-                user_id=user_id, year=year, month=month,
+                user_id=user_id,
+                year=year,
+                month=month,
                 defaults={"count": count},
             )
         except Exception:
@@ -151,6 +155,7 @@ def sync_search_counts():
 # ---------------------------------------------------------------------------
 # Blacklisted-domain maintenance (Django Background Tasks)
 # ---------------------------------------------------------------------------
+
 
 @background(schedule=0)
 def refresh_blacklist_snapshot():
@@ -179,14 +184,18 @@ def purge_blacklisted_from_queue():
 
     blacklist = get_snapshot_blacklist()
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
-    with TinyIndex(Document, str(index_path), 'w') as index:
+    with TinyIndex(Document, str(index_path), "w") as index:
         removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
 
     num_removed = sum(removed_by_domain.values())
     stats_manager.record_blacklisted_removed(num_removed)
 
-    logger.info("Purged %d documents from the index across %d domains; %d still queued",
-                num_removed, len(removed_by_domain), queue_size())
+    logger.info(
+        "Purged %d documents from the index across %d domains; %d still queued",
+        num_removed,
+        len(removed_by_domain),
+        queue_size(),
+    )
 
 
 @background(schedule=0)
@@ -216,11 +225,13 @@ def report_usage_to_polar():
         if delta <= 0:
             continue
 
-        events.append({
-            "name": "search_request",
-            "external_customer_id": str(bucket.user.id),
-            "metadata": {"quantity": delta},
-        })
+        events.append(
+            {
+                "name": "search_request",
+                "external_customer_id": str(bucket.user.id),
+                "metadata": {"quantity": delta},
+            }
+        )
         bucket.reported_overage = total_overage
         buckets_to_update.append(bucket)
 
@@ -241,6 +252,7 @@ def report_usage_to_polar():
 # Domain moderation suggestions (Django Background Tasks)
 # ---------------------------------------------------------------------------
 
+
 @background(schedule=0)
 def enrich_domain_submission(domain: str):
     """Crawl a submitted domain and store the suggestion the moderation queue will read.
@@ -253,11 +265,14 @@ def enrich_domain_submission(domain: str):
     a domain whose evidence is still fresh is left alone. That matters because 615 of 6,949
     distinct submitted domains have been submitted more than once.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        days=settings.MODERATION_EVIDENCE_MAX_AGE_DAYS)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.MODERATION_EVIDENCE_MAX_AGE_DAYS)
     existing = DomainEvidence.objects.filter(domain=domain).first()
-    if (existing is not None and existing.state == DomainEvidence.State.READY
-            and existing.fetched_at and existing.fetched_at > cutoff):
+    if (
+        existing is not None
+        and existing.state == DomainEvidence.State.READY
+        and existing.fetched_at
+        and existing.fetched_at > cutoff
+    ):
         logger.info("Evidence for %s is still fresh, skipping crawl", domain)
         return
 
@@ -278,8 +293,7 @@ def enrich_domain_submission(domain: str):
     with transaction.atomic():
         evidence = store_evidence(domain, crawl)
         refresh_suggestion(evidence)
-    logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action,
-                evidence.confidence or 0.0)
+    logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action, evidence.confidence or 0.0)
 
 
 @background(schedule=0)
@@ -291,11 +305,8 @@ def rescore_pending_submissions():
     - the page text is already stored - so the whole backlog re-scores in seconds.
     """
     reset_model_cache()
-    pending_domains = set(DomainSubmission.objects
-                          .filter(status="PENDING")
-                          .values_list("name", flat=True))
-    queryset = DomainEvidence.objects.filter(domain__in=pending_domains,
-                                             state=DomainEvidence.State.READY)
+    pending_domains = set(DomainSubmission.objects.filter(status="PENDING").values_list("name", flat=True))
+    queryset = DomainEvidence.objects.filter(domain__in=pending_domains, state=DomainEvidence.State.READY)
 
     rescored = 0
     for evidence in queryset.iterator():

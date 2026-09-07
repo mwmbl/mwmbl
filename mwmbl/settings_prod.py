@@ -2,7 +2,6 @@ import os
 
 from mwmbl.settings_common import *
 
-
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 
@@ -18,20 +17,20 @@ CSRF_TRUSTED_ORIGINS = [f"https://{domain}" for domain in ALLOWED_HOSTS]
 
 
 # Sendgrid email settings
-EMAIL_HOST = 'smtp.sendgrid.net'
-EMAIL_HOST_USER = 'apikey'
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+EMAIL_HOST = "smtp.sendgrid.net"
+EMAIL_HOST_USER = "apikey"
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
 
 DATA_PATH = "/app/storage"
-INDEX_NAME = 'index-v2-400G.tinysearch'
+INDEX_NAME = "index-v2-400G.tinysearch"
 
 # 400GB index
 NUM_PAGES = 102400000
 
-EXTERNAL_CACHE_INDEX_NAME = 'external-cache.tinysearch'
+EXTERNAL_CACHE_INDEX_NAME = "external-cache.tinysearch"
 # ~15 GB. Sized by page occupancy rather than by naive capacity, because pages are assigned
 # by hash: the queries per page are Poisson-distributed, not evenly spread, so the pages
 # that run over start truncating while empty ones sit unused.

@@ -16,6 +16,7 @@ arrays are cached in devdata/judge_bakeoff/pairscores_{judge}.npz.
 Run:  uv run --with fastembed python scripts/judge_pairs_eval.py \
           [--judges a,b] [--model-dir devdata/judge_train/models/<run>]
 """
+
 import argparse
 import gzip
 import json
@@ -37,8 +38,7 @@ def load_pairs() -> list[dict]:
         return [json.loads(line) for line in f]
 
 
-def pair_scores(name: str, pairs: list[dict],
-                model_dirs: list[Path]) -> tuple[np.ndarray, np.ndarray]:
+def pair_scores(name: str, pairs: list[dict], model_dirs: list[Path]) -> tuple[np.ndarray, np.ndarray]:
     cache = CACHE_DIR / f"pairscores_{name}.npz"
     if cache.exists():
         data = np.load(cache)
@@ -55,10 +55,8 @@ def pair_scores(name: str, pairs: list[dict],
     else:
         print(f"scoring {name} ({len(pairs)} pairs)...", flush=True)
         docs = judge_bakeoff.DOC_CHARS
-        pos = SCORERS[name]([{"query": p["query"], "doc_text": p["pos"][:docs]}
-                             for p in pairs])
-        neg = SCORERS[name]([{"query": p["query"], "doc_text": p["neg"][:docs]}
-                             for p in pairs])
+        pos = SCORERS[name]([{"query": p["query"], "doc_text": p["pos"][:docs]} for p in pairs])
+        neg = SCORERS[name]([{"query": p["query"], "doc_text": p["neg"][:docs]} for p in pairs])
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(cache, pos=pos, neg=neg)
     return pos, neg
@@ -79,10 +77,8 @@ def main():
     parser.add_argument("--model-dir", type=Path, action="append", default=[])
     args = parser.parse_args()
 
-    finetuned = [name for model_dir in args.model_dir
-                 for name in register_finetuned(model_dir)]
-    judges = (args.judges.split(",") if args.judges
-              else list(ALL_JUDGES) + finetuned)
+    finetuned = [name for model_dir in args.model_dir for name in register_finetuned(model_dir)]
+    judges = args.judges.split(",") if args.judges else list(ALL_JUDGES) + finetuned
 
     pairs = load_pairs()
     rules = sorted({p["rule"] for p in pairs})
@@ -102,14 +98,12 @@ def main():
         results.append(row)
         print(json.dumps(row))
 
-    (CACHE_DIR / "results_pairs_eval.json").write_text(
-        json.dumps(results, indent=2))
+    (CACHE_DIR / "results_pairs_eval.json").write_text(json.dumps(results, indent=2))
     print("\n=== pairs-eval accuracy ===")
     keys = list(results[0].keys())
     print(" | ".join(f"{k:>24s}" if i == 0 else k for i, k in enumerate(keys)))
     for row in results:
-        print(" | ".join(f"{str(row[k]):>24s}" if i == 0 else str(row[k])
-                         for i, k in enumerate(keys)))
+        print(" | ".join(f"{str(row[k]):>24s}" if i == 0 else str(row[k]) for i, k in enumerate(keys)))
 
 
 if __name__ == "__main__":

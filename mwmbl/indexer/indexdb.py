@@ -1,6 +1,7 @@
 """
 Database interface for batches of crawled data.
 """
+
 from dataclasses import dataclass
 from enum import Enum
 
@@ -8,10 +9,10 @@ from psycopg2.extras import execute_values
 
 
 class BatchStatus(Enum):
-    REMOTE = 0           # The batch only exists in long term storage
-    LOCAL = 10           # We have a copy of the batch locally in Postgresql
-    URLS_UPDATED = 20    # We've updated URLs from the batch
-    INDEXED = 30         # The batch has been indexed
+    REMOTE = 0  # The batch only exists in long term storage
+    LOCAL = 10  # We have a copy of the batch locally in Postgresql
+    URLS_UPDATED = 20  # We've updated URLs from the batch
+    INDEXED = 30  # The batch has been indexed
 
 
 @dataclass
@@ -54,7 +55,7 @@ class IndexDatabase:
         """
 
         with self.connection.cursor() as cursor:
-            cursor.execute(sql, {'status': status.value, 'num_batches': num_batches})
+            cursor.execute(sql, {"status": status.value, "num_batches": num_batches})
             results = cursor.fetchall()
             return [BatchInfo(url, user_id_hash, status) for url, user_id_hash, status in results]
 
@@ -68,4 +69,4 @@ class IndexDatabase:
         """
 
         with self.connection.cursor() as cursor:
-            cursor.execute(sql, {'status': status.value, 'urls': tuple(batch_urls)})
+            cursor.execute(sql, {"status": status.value, "urls": tuple(batch_urls)})

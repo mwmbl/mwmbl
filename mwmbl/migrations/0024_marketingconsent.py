@@ -6,23 +6,38 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0023_userbilling_cancel_at_period_end'),
+        ("mwmbl", "0023_userbilling_cancel_at_period_end"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='MarketingConsent',
+            name="MarketingConsent",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('source', models.CharField(choices=[('GUI', 'Consumer site (mwmbl.org)'), ('API', 'Developer site (developer.mwmbl.org)')], max_length=10)),
-                ('opted_in', models.BooleanField()),
-                ('timestamp', models.DateTimeField(auto_now_add=True)),
-                ('user', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='marketing_consents', to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "source",
+                    models.CharField(
+                        choices=[("GUI", "Consumer site (mwmbl.org)"), ("API", "Developer site (developer.mwmbl.org)")],
+                        max_length=10,
+                    ),
+                ),
+                ("opted_in", models.BooleanField()),
+                ("timestamp", models.DateTimeField(auto_now_add=True)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="marketing_consents",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'indexes': [models.Index(fields=['user', 'source', '-timestamp'], name='mwmbl_marke_user_id_c00b4e_idx')],
+                "indexes": [
+                    models.Index(fields=["user", "source", "-timestamp"], name="mwmbl_marke_user_id_c00b4e_idx")
+                ],
             },
         ),
     ]

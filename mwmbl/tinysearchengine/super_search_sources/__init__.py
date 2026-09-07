@@ -5,6 +5,7 @@ and is responsible for one external API. Adapters never raise on HTTP/parse
 errors — they log and return an empty list so one slow source can't sink the
 orchestrator.
 """
+
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
 from mwmbl.tinysearchengine.super_search_sources.hn import search as search_hn

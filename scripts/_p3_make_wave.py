@@ -9,12 +9,18 @@ Usage::
     DJANGO_SETTINGS_MODULE=... uv run python scripts/_p3_make_wave.py \
         --tag w1 --n-queries 32 --chunk-queries 4 --outdir /path/to/scratch
 """
+
 import json
 import os
 from argparse import ArgumentParser
 
 from llm_relabel_pass3_judge import (
-    JUDGE_PROMPT, EXTRACT_CHARS, MANIFEST, _pool, _intents, _done_pairs,
+    EXTRACT_CHARS,
+    JUDGE_PROMPT,
+    MANIFEST,
+    _done_pairs,
+    _intents,
+    _pool,
 )
 
 
@@ -27,9 +33,8 @@ def main():
     a = p.parse_args()
 
     pool, intents, done = _pool(), _intents(), _done_pairs()
-    todo = [q for q, r in pool.items()
-            if any((q, c["url"]) not in done for c in r["candidates"])]
-    batch = todo[:a.n_queries]
+    todo = [q for q, r in pool.items() if any((q, c["url"]) not in done for c in r["candidates"])]
+    batch = todo[: a.n_queries]
 
     manifest, blocks, cid = [], [], 0
     for q in batch:
@@ -52,7 +57,7 @@ def main():
     os.makedirs(a.outdir, exist_ok=True)
     n = 0
     for i in range(0, len(blocks), a.chunk_queries):
-        chunk = blocks[i:i + a.chunk_queries]
+        chunk = blocks[i : i + a.chunk_queries]
         path = f"{a.outdir}/p3_{a.tag}_chunk{i // a.chunk_queries}.txt"
         with open(path, "w") as f:
             f.write(JUDGE_PROMPT + "\n".join(chunk))

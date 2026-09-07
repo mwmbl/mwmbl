@@ -21,6 +21,7 @@ Skips domains that already have a recipe. Runs entirely in the main thread.
 Usage:
   uv run python scripts/prescreen_sites.py --all --out prescreen.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,10 +44,18 @@ CONCURRENCY = 16
 
 # Substrings that mark a bot-challenge / block page (lowercased body match).
 BLOCK_MARKERS = (
-    "just a moment", "checking your browser", "attention required",
-    "cf-chl", "cf-challenge", "enable javascript and cookies",
-    "ddos protection by", "access denied", "request unsuccessful",
-    "are you a robot", "captcha-delivery", "px-captcha",
+    "just a moment",
+    "checking your browser",
+    "attention required",
+    "cf-chl",
+    "cf-challenge",
+    "enable javascript and cookies",
+    "ddos protection by",
+    "access denied",
+    "request unsuccessful",
+    "are you a robot",
+    "captcha-delivery",
+    "px-captcha",
 )
 BLOCK_STATUSES = {401, 403, 405, 406, 429, 503}
 SEARCH_INPUT_NAMES = {"q", "s", "query", "search", "keyword", "keywords", "term", "k"}
@@ -87,8 +96,7 @@ def _harvest(base: str, html: str) -> dict:
         text_names = [
             (i.get("name") or "").strip()
             for i in form.find_all("input")
-            if (i.get("name") or "").strip()
-            and (i.get("type") or "text").lower() in ("", "text", "search")
+            if (i.get("name") or "").strip() and (i.get("type") or "text").lower() in ("", "text", "search")
         ]
         hit = [n for n in text_names if n.lower() in SEARCH_INPUT_NAMES]
         cls = (form.get("class") or [""])[0]
@@ -120,8 +128,7 @@ async def _screen(client: httpx.AsyncClient, entry: dict) -> dict:
     except Exception as e:  # noqa: BLE001
         return {"domain": domain, "status": "error", "detail": repr(e)[:120]}
     cls = _classify(r.status_code, r.text)
-    out = {"domain": domain, "field": entry.get("field", ""),
-           "status": cls, "http": r.status_code}
+    out = {"domain": domain, "field": entry.get("field", ""), "status": cls, "http": r.status_code}
     if cls == "ok":
         out.update(_harvest(str(r.url), r.text))
     return out
@@ -129,11 +136,12 @@ async def _screen(client: httpx.AsyncClient, entry: dict) -> dict:
 
 async def _run(entries: list[dict]) -> list[dict]:
     sem = asyncio.Semaphore(CONCURRENCY)
-    async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT,
-                                 headers=ENGINE_HEADERS) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT, headers=ENGINE_HEADERS) as client:
+
         async def guarded(e):
             async with sem:
                 return await _screen(client, e)
+
         return await asyncio.gather(*[guarded(e) for e in entries])
 
 
@@ -154,8 +162,7 @@ def main() -> int:
     ap.add_argument("--out", default="prescreen.json")
     args = ap.parse_args()
 
-    paths = sorted(str(p) for p in CHUNKS_DIR.glob("input_*.json")) if args.all \
-        else args.batches
+    paths = sorted(str(p) for p in CHUNKS_DIR.glob("input_*.json")) if args.all else args.batches
     if not paths:
         print("no batch files (use --all or list files)", file=sys.stderr)
         return 2
@@ -171,13 +178,14 @@ def main() -> int:
     with_search = [r for r in reachable if r.get("opensearch") or r.get("forms")]
     Path(args.out).write_text(json.dumps(results, indent=2))
 
-    print(f"\n  ok/reachable : {len(reachable)}  "
-          f"(of which {len(with_search)} expose an OpenSearch/form search URL)")
+    print(f"\n  ok/reachable : {len(reachable)}  (of which {len(with_search)} expose an OpenSearch/form search URL)")
     print(f"  blocked      : {len(by.get('blocked', []))}")
     print(f"  error        : {len(by.get('error', []))}")
     print(f"  already exist: {len(by.get('exists', []))}")
-    print(f"\nWrote {args.out}. Reachable sites with a discoverable search URL "
-          f"are the worthwhile targets for the generation stage.")
+    print(
+        f"\nWrote {args.out}. Reachable sites with a discoverable search URL "
+        f"are the worthwhile targets for the generation stage."
+    )
     return 0
 
 

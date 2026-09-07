@@ -15,8 +15,7 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import DomainSubmission, MwmblUser
 
-normalize_names = importlib.import_module(
-    "mwmbl.migrations.0032_normalize_domain_submission_names").normalize_names
+normalize_names = importlib.import_module("mwmbl.migrations.0032_normalize_domain_submission_names").normalize_names
 fix_names = importlib.import_module("mwmbl.migrations.0033_fix_domain_submission_names").fix_names
 
 
@@ -164,7 +163,7 @@ def test_api_update_submission_status_grants_moderator_permission(client, verifi
 
 @pytest.mark.django_db
 def test_api_update_status_rejects_a_moderation_action_as_a_status(client, verified_user, access_token):
-    """"APPROVE" is the word a client shows its moderator; "APPROVED" is the status.
+    """ "APPROVE" is the word a client shows its moderator; "APPROVED" is the status.
 
     Posting the former used to be accepted and written straight to the column - `choices` is
     checked by full_clean(), which save() never calls - and the submission then matched
@@ -172,8 +171,9 @@ def test_api_update_status_rejects_a_moderation_action_as_a_status(client, verif
     naming the field now.
     """
     submission = DomainSubmission.objects.create(name="example.com", submitted_by=verified_user)
-    verified_user.user_permissions.add(Permission.objects.get(
-        codename="change_domain_submission_status", content_type__app_label="mwmbl"))
+    verified_user.user_permissions.add(
+        Permission.objects.get(codename="change_domain_submission_status", content_type__app_label="mwmbl")
+    )
 
     response = client.post(
         f"/api/v1/platform/domain-submissions/ids/{submission.id}",
@@ -193,8 +193,9 @@ def test_api_update_status_accepts_an_approval_without_rejection_fields(client, 
     """Both rejection columns are NOT NULL, and ninja types them Optional, so omitting them
     on an approval sent None into the column and came back as a 500."""
     submission = DomainSubmission.objects.create(name="example.com", submitted_by=verified_user)
-    verified_user.user_permissions.add(Permission.objects.get(
-        codename="change_domain_submission_status", content_type__app_label="mwmbl"))
+    verified_user.user_permissions.add(
+        Permission.objects.get(codename="change_domain_submission_status", content_type__app_label="mwmbl")
+    )
 
     response = client.post(
         f"/api/v1/platform/domain-submissions/ids/{submission.id}",

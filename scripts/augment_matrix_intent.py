@@ -12,6 +12,7 @@ Usage:
       scripts/augment_matrix_intent.py --in devdata/ss_eval_matrix \
                                         --out devdata/ss_eval_matrix_intent
 """
+
 import argparse
 import os
 import sys
@@ -20,12 +21,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 import django  # noqa: E402
+
 django.setup()
 
 import numpy as np  # noqa: E402
+
 from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.features import (  # noqa: E402
-    FEATURE_NAMES, INTENT_NAMES, classify_intent,
+    FEATURE_NAMES,
+    INTENT_NAMES,
+    classify_intent,
 )
 
 
@@ -40,7 +45,8 @@ def main():
     intent_names = [f"intent_{n}" for n in INTENT_NAMES]
     assert m.feature_names == FEATURE_NAMES[:F], (
         f"matrix feature_names {m.feature_names} are not the prefix of the current "
-        f"FEATURE_NAMES; refusing to append (rebuild via build-matrix instead).")
+        f"FEATURE_NAMES; refusing to append (rebuild via build-matrix instead)."
+    )
     assert FEATURE_NAMES[F:] == intent_names, "intent block must be the appended tail"
 
     # (Q, n_intents) one-hot, then broadcast across the S source axis.
@@ -48,9 +54,9 @@ def main():
     intent_block = np.broadcast_to(per_query[:, None, :], (Q, S, len(INTENT_NAMES)))
     X_aug = np.concatenate([m.X, intent_block], axis=2)
 
-    aug = RewardMatrix(queries=m.queries, sources=m.sources,
-                       feature_names=list(FEATURE_NAMES),
-                       X=X_aug, R=m.R, mask=m.mask)
+    aug = RewardMatrix(
+        queries=m.queries, sources=m.sources, feature_names=list(FEATURE_NAMES), X=X_aug, R=m.R, mask=m.mask
+    )
     aug.save(args.out)
 
     fired = per_query.sum(axis=0)

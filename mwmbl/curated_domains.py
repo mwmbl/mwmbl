@@ -10,6 +10,7 @@ This lives outside search_setup because search_setup imports blacklist_snapshot,
 blacklist code needs to import this. The curated set is only ever read where a blacklist is
 *constructed* (build_snapshot, CombinedBlacklistProvider), never per query.
 """
+
 from django.conf import settings
 from django.core.cache import cache
 
@@ -27,6 +28,6 @@ def get_curated_domains() -> set[str]:
 
     curated_domains = cache.get(CURATED_DOMAINS_CACHE_KEY)
     if curated_domains is None:
-        curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list('name', flat=True))
+        curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list("name", flat=True))
         cache.set(CURATED_DOMAINS_CACHE_KEY, curated_domains, CURATED_DOMAINS_CACHE_TIMEOUT)
     return curated_domains

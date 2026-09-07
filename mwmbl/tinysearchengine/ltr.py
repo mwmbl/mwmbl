@@ -8,14 +8,14 @@ Contains:
 - RustXGBPipeline: thin Python shim over the Rust mwmbl_rank.RustXGBPipeline,
   providing a sklearn-compatible interface (fit / predict / save_model / load_model).
 """
-from pathlib import Path
+
 from typing import Any
 
-import mwmbl_rank
 import numpy as np
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 
+import mwmbl_rank
 from mwmbl.tinysearchengine.rank import get_features
 
 
@@ -37,8 +37,8 @@ class ThresholdPredictor(BaseEstimator, RegressorMixin):
 
 
 def get_features_as_series(item: Series):
-    terms = item['query'].lower().split()
-    features = get_features(terms, item['title'], item['url'], item['extract'], item['score'], True)
+    terms = item["query"].lower().split()
+    features = get_features(terms, item["title"], item["url"], item["extract"], item["score"], True)
     return Series(features)
 
 
@@ -47,19 +47,16 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: DataFrame, y=None):
-        records = X.to_dict('records')
+        records = X.to_dict("records")
         all_features = []
 
         for item in records:
-            terms = item['query'].lower().split()
+            terms = item["query"].lower().split()
 
-            features = get_features(
-                terms, item['title'], item['url'],
-                item['extract'], item['score'], True
-            )
+            features = get_features(terms, item["title"], item["url"], item["extract"], item["score"], True)
             all_features.append(features)
 
-        return DataFrame(all_features).values.astype('float32')
+        return DataFrame(all_features).values.astype("float32")
 
 
 class RankingPredictor(BaseEstimator, RegressorMixin):
@@ -140,14 +137,14 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
     @staticmethod
     def _df_to_records(X: DataFrame) -> list:
         """Convert a DataFrame to a list of dicts for the Rust boundary."""
-        cols = ['query', 'url', 'title', 'extract', 'score']
+        cols = ["query", "url", "title", "extract", "score"]
         subset = X[cols].copy()
-        subset['title'] = subset['title'].fillna('')
-        subset['extract'] = subset['extract'].fillna('')
-        subset['score'] = subset['score'].fillna(0.0)
-        return subset.to_dict('records')
+        subset["title"] = subset["title"].fillna("")
+        subset["extract"] = subset["extract"].fillna("")
+        subset["score"] = subset["score"].fillna(0.0)
+        return subset.to_dict("records")
 
-    def fit(self, X: DataFrame, y, sample_weight=None) -> 'RustXGBPipeline':
+    def fit(self, X: DataFrame, y, sample_weight=None) -> "RustXGBPipeline":
         """
         Train the XGBoost model.
 
@@ -158,6 +155,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         sample_weight : optional array-like of per-row weights
         """
         import time
+
         t0 = time.time()
         print(f"[RustXGBPipeline.fit] Converting {len(X)} rows to records...", flush=True)
         records = self._df_to_records(X)
@@ -167,10 +165,15 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         weights = None if sample_weight is None else list(np.asarray(sample_weight, dtype=np.float32))
         print(f"[RustXGBPipeline.fit] Labels ready in {time.time() - t1:.2f}s. Getting inner pipeline...", flush=True)
         t2 = time.time()
-        print(f"[RustXGBPipeline.fit] Inner pipeline ready in {time.time() - t2:.2f}s. Calling Rust fit()...", flush=True)
+        print(
+            f"[RustXGBPipeline.fit] Inner pipeline ready in {time.time() - t2:.2f}s. Calling Rust fit()...", flush=True
+        )
         t3 = time.time()
         self._inner.fit(records, labels, weights)
-        print(f"[RustXGBPipeline.fit] Rust fit() completed in {time.time() - t3:.2f}s (total: {time.time() - t0:.2f}s).", flush=True)
+        print(
+            f"[RustXGBPipeline.fit] Rust fit() completed in {time.time() - t3:.2f}s (total: {time.time() - t0:.2f}s).",
+            flush=True,
+        )
         return self
 
     def predict(self, X: DataFrame | list[dict[str, Any]]) -> np.ndarray:
@@ -195,7 +198,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         """Save the trained model to disk (XGBoost binary format)."""
         self._inner.save_model(path)
 
-    def load_model(self, path: str) -> 'RustXGBPipeline':
+    def load_model(self, path: str) -> "RustXGBPipeline":
         """Load a model from disk (XGBoost binary format)."""
         self._inner.load_model(path)
         return self
@@ -212,7 +215,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         min_child_weight: float | None = None,
         gamma: float | None = None,
         subsample: float | None = None,
-    ) -> 'RustXGBPipeline':
+    ) -> "RustXGBPipeline":
         """Load a pre-trained model from disk and return a ready-to-predict pipeline."""
         pipeline = cls(
             threshold=threshold,

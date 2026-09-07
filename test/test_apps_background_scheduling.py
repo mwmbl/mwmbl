@@ -92,6 +92,7 @@ def test_a_one_off_snapshot_rebuild_does_not_suppress_the_periodic_one():
     six-hourly task being registered - that would silently leave the snapshot to whatever
     approvals happened to trigger."""
     from mwmbl.background import refresh_blacklist_snapshot
+
     refresh_blacklist_snapshot(schedule=600)
 
     MwmblConfig._schedule_background_tasks()

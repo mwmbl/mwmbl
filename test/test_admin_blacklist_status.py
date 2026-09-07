@@ -1,4 +1,5 @@
 """Tests for the blacklist status admin page (mwmbl.admin_views)."""
+
 import fakeredis
 import numpy as np
 import pytest
@@ -8,7 +9,10 @@ from redis import ConnectionError as RedisConnectionError
 from mwmbl import admin_views
 from mwmbl.indexer import blacklist_snapshot, purge_queue
 from mwmbl.indexer.blacklist_snapshot import (
-    HASH_DTYPE, SnapshotBlacklist, hash_domains, publish_snapshot,
+    HASH_DTYPE,
+    SnapshotBlacklist,
+    hash_domains,
+    publish_snapshot,
 )
 from mwmbl.indexer.purge_queue import drain_purge_queue, enqueue_for_purge, peek_purge_queue, queue_size
 from mwmbl.tinysearchengine.indexer import Document
@@ -57,8 +61,7 @@ def wired_redis(monkeypatch, redis_server, redis_client):
     binary_client = fakeredis.FakeRedis(server=redis_server)
     monkeypatch.setattr(blacklist_snapshot, "_redis", binary_client)
     monkeypatch.setattr(purge_queue, "_redis", redis_client)
-    monkeypatch.setattr(blacklist_snapshot, "_snapshot_blacklist",
-                        SnapshotBlacklist(redis_client=binary_client))
+    monkeypatch.setattr(blacklist_snapshot, "_snapshot_blacklist", SnapshotBlacklist(redis_client=binary_client))
     return redis_client
 
 
@@ -72,6 +75,7 @@ def staff_client(client, db):
 # ---------------------------------------------------------------------------
 # peek_purge_queue
 # ---------------------------------------------------------------------------
+
 
 def test_peek_does_not_consume_the_queue(redis_client, documents):
     enqueue_for_purge(documents, redis_client)
@@ -100,6 +104,7 @@ def test_peek_on_an_empty_queue(redis_client):
 # ---------------------------------------------------------------------------
 # Status gathering
 # ---------------------------------------------------------------------------
+
 
 def test_snapshot_status_reports_a_published_blob(wired_redis):
     blob = np.array([1, 2, 3], dtype=HASH_DTYPE).tobytes()
@@ -169,6 +174,7 @@ def test_removed_counts_covers_the_requested_window(wired_redis):
 # The view
 # ---------------------------------------------------------------------------
 
+
 def test_view_requires_staff(client, db):
     user = User.objects.create_user(username="ordinary_user_2", password="correctpassword")
     client.force_login(user)
@@ -216,8 +222,7 @@ def test_view_reports_the_background_tasks(staff_client, wired_redis):
     assert task_names == [admin_views.SNAPSHOT_TASK_NAME, admin_views.PURGE_TASK_NAME]
     # Nothing scheduled in the test DB, which is what a missing process_tasks worker looks
     # like - the page has to render that rather than assume the rows exist.
-    assert all(task["task"] is None and task["last_completed"] is None
-               for task in response.context["tasks"])
+    assert all(task["task"] is None and task["last_completed"] is None for task in response.context["tasks"])
 
 
 def test_admin_index_links_to_the_status_page(staff_client):
@@ -229,6 +234,7 @@ def test_admin_index_links_to_the_status_page(staff_client):
 # ---------------------------------------------------------------------------
 # Curated domains
 # ---------------------------------------------------------------------------
+
 
 def test_curated_status_reports_nothing_still_blacklisted(wired_redis, monkeypatch):
     monkeypatch.setattr(admin_views, "get_curated_domains", lambda: {"pudding.cool"})

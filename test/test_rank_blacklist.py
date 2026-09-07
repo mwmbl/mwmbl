@@ -1,5 +1,6 @@
 """Retrieval-time blacklist filtering: the guarantee that a blacklisted domain is never
 shown, plus the enqueueing that lets the background purge clean the index up afterwards."""
+
 from unittest.mock import patch
 
 import fakeredis
@@ -14,10 +15,8 @@ from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 BLACKLISTED_DOMAIN = "badsite.test"
 
-BAD = Document(title="Bananas", url=f"https://{BLACKLISTED_DOMAIN}/bananas",
-               extract="bananas and apples", score=1.0)
-GOOD = Document(title="Bananas", url="https://example.test/bananas",
-                extract="bananas and apples", score=1.0)
+BAD = Document(title="Bananas", url=f"https://{BLACKLISTED_DOMAIN}/bananas", extract="bananas and apples", score=1.0)
+GOOD = Document(title="Bananas", url="https://example.test/bananas", extract="bananas and apples", score=1.0)
 
 
 class FakeIndex:
@@ -53,15 +52,16 @@ def redis_client():
 def blacklist(redis_client):
     """A snapshot-free blacklist: the built-in rules alone are enough to decide here, so
     these tests exercise the ranker rather than the snapshot machinery."""
-    return SnapshotBlacklist(built_in_rules=StaticBlacklistProvider({BLACKLISTED_DOMAIN}),
-                             redis_client=redis_client)
+    return SnapshotBlacklist(built_in_rules=StaticBlacklistProvider({BLACKLISTED_DOMAIN}), redis_client=redis_client)
 
 
 @pytest.fixture
 def ranker(blacklist, redis_client, request):
     documents = getattr(request, "param", [BAD, GOOD])
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=redis_client):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=redis_client),
+    ):
         yield HeuristicRanker(FakeIndex(documents), FakeCompleter())
 
 
@@ -129,12 +129,19 @@ def test_complete_does_not_suggest_blacklisted_urls(ranker):
 def test_curated_blacklisted_documents_are_dropped(blacklist, redis_client):
     """Curated items bypass order_results entirely - they are prepended straight into
     deduplicate() - so they need filtering separately from the ranked candidates."""
-    curated = Document(title="Bananas", url=f"https://{BLACKLISTED_DOMAIN}/curated",
-                       extract="bananas", score=1.0, term="bananas",
-                       state=DocumentState.ORGANIC_APPROVED)
+    curated = Document(
+        title="Bananas",
+        url=f"https://{BLACKLISTED_DOMAIN}/curated",
+        extract="bananas",
+        score=1.0,
+        term="bananas",
+        state=DocumentState.ORGANIC_APPROVED,
+    )
 
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=redis_client):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=redis_client),
+    ):
         ranker = HeuristicRanker(FakeIndex([curated, GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [])]
 
@@ -145,11 +152,18 @@ def test_curated_blacklisted_documents_are_dropped(blacklist, redis_client):
 def test_additional_results_are_filtered_but_not_queued(blacklist, redis_client):
     """Caller-supplied results (the Google-sourced documents the search page passes in)
     must be filtered too, but there is nothing in our index to purge for them."""
-    additional = Document(title="Bananas", url=f"https://{BLACKLISTED_DOMAIN}/from-google",
-                          extract="bananas", score=1.0, state=DocumentState.FROM_GOOGLE)
+    additional = Document(
+        title="Bananas",
+        url=f"https://{BLACKLISTED_DOMAIN}/from-google",
+        extract="bananas",
+        score=1.0,
+        state=DocumentState.FROM_GOOGLE,
+    )
 
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=redis_client):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=redis_client),
+    ):
         ranker = HeuristicRanker(FakeIndex([GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [additional])]
 
@@ -167,12 +181,15 @@ def test_filtering_can_be_switched_off(ranker, settings):
 def test_a_redis_failure_does_not_break_search(blacklist):
     """Enqueueing is best-effort: losing an entry just means the next query re-queues it,
     but a search response must never fail because of it."""
+
     class BrokenRedis:
         def scard(self, key):
             raise ConnectionError("redis is down")
 
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=BrokenRedis()):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=BrokenRedis()),
+    ):
         ranker = HeuristicRanker(FakeIndex([BAD, GOOD]), FakeCompleter())
         urls = [result.url for result in ranker.search("bananas", [])]
 
@@ -184,6 +201,7 @@ def test_a_failed_enqueue_is_retried_rather_than_suppressed(blacklist, redis_cli
     """The recently-queued record exists to stop re-queueing what is already on the queue.
     Recording a document before the Redis write lands would suppress it for the whole TTL
     on the strength of an attempt that failed, stalling the purge for it."""
+
     class BrokenRedis:
         def scard(self, key):
             raise ConnectionError("redis is down")
@@ -201,15 +219,19 @@ def test_a_failed_enqueue_is_retried_rather_than_suppressed(blacklist, redis_cli
 
 
 def test_a_full_queue_does_not_suppress_the_next_attempt(blacklist, redis_client):
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=redis_client), \
-            patch.object(purge_queue, "MAX_QUEUE_SIZE", 0):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=redis_client),
+        patch.object(purge_queue, "MAX_QUEUE_SIZE", 0),
+    ):
         ranker = HeuristicRanker(FakeIndex([BAD, GOOD]), FakeCompleter())
         ranker.search("bananas", [])
         assert redis_client.scard(PURGE_QUEUE_KEY) == 0
 
-    with patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist), \
-            patch.object(purge_queue, "get_redis", return_value=redis_client):
+    with (
+        patch("mwmbl.tinysearchengine.rank.get_snapshot_blacklist", return_value=blacklist),
+        patch.object(purge_queue, "get_redis", return_value=redis_client),
+    ):
         ranker.search("bananas", [])
 
     assert [d.url for d in drain_purge_queue(10, redis_client)] == [BAD.url]

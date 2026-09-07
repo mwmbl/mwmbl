@@ -1,6 +1,7 @@
 """
 Create a bunch of requests to the back end to stress test it.
 """
+
 import multiprocessing
 from random import Random
 
@@ -13,7 +14,7 @@ def random_query(query):
     url = f"http://localhost:5000/api/v1/search/?s={query}"
     print(url)
     response = requests.get(url)
-    data = response.json()
+    response.json()
     # print(data)
 
 
@@ -25,5 +26,5 @@ def run():
     print("End")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

@@ -6,6 +6,7 @@ and django-background-tasks' answer is `manage.py process_tasks`. Until this wor
 existed there was no way to deploy one from the app image, and every periodic task in
 production had sat pending, unattempted, for months.
 """
+
 import pytest
 from background_task.models import Task
 from background_task.tasks import tasks
@@ -22,6 +23,7 @@ def clear_schedule_lock():
     cache.delete(MwmblConfig._SCHEDULE_LOCK_KEY)
     yield
     cache.delete(MwmblConfig._SCHEDULE_LOCK_KEY)
+
 
 # The names apps.py schedules Task rows under.
 SCHEDULED_TASK_NAMES = [
@@ -85,6 +87,7 @@ def stop_after_two_runs(monkeypatch, recorded_commands):
         assert seconds == main.TASK_QUEUE_RESTART_SECONDS
         if recorded_commands.count("process_tasks") >= 2:
             raise StopLoop
+
     monkeypatch.setattr(main, "sleep", fake_sleep)
 
 
@@ -101,6 +104,7 @@ def test_the_queue_is_restarted_if_it_ever_exits(recorded_commands, stop_after_t
 
 class FakeGunicorn:
     """Stands in for BaseApplication so the server branch does not start a real server."""
+
     runs = 0
 
     def __init__(self, *args, **kwargs):
@@ -116,8 +120,7 @@ def fake_server(monkeypatch):
     monkeypatch.setattr(main, "BaseApplication", FakeGunicorn)
 
     spawned = []
-    monkeypatch.setattr(main.multiprocessing, "get_context",
-                        lambda method: _FakeContext(method, spawned))
+    monkeypatch.setattr(main.multiprocessing, "get_context", lambda method: _FakeContext(method, spawned))
     monkeypatch.setenv("MWMBL_APP", "server")
     return spawned
 

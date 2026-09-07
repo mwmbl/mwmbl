@@ -1,14 +1,11 @@
-import os
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Sequence, Optional
+from typing import Optional, Sequence
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from redis import Redis
-from requests_cache import CachedSession, RedisCache
-from requests.adapters import Retry, HTTPAdapter
+from requests_cache import CachedSession
 
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -22,7 +19,7 @@ def batch(items: Sequence, batch_size):
     """
     length = len(items)
     for ndx in range(0, length, batch_size):
-        yield items[ndx:min(ndx + batch_size, length)]
+        yield items[ndx : min(ndx + batch_size, length)]
 
 
 def get_domain(url):

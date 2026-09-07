@@ -21,13 +21,12 @@ from requests.exceptions import RetryError
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
-from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.indexer.external_cache import get_cached_external_results, store_external_results
+from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, DocumentSource, DocumentState
-from mwmbl.tokenizer import tokenize, get_bigrams
+from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
+from mwmbl.tokenizer import get_bigrams, tokenize
 from mwmbl.utils import get_domain
-
 
 logger = getLogger(__name__)
 
@@ -38,7 +37,7 @@ SCORE_THRESHOLD = 0.0
 LENGTH_PENALTY = 0.04
 MATCH_EXPONENT = 2
 DOMAIN_SCORE_SMOOTHING = 0.1
-HTTPS_STRING = 'https://'
+HTTPS_STRING = "https://"
 WIKI_SCORES = json.load(open(Path(__file__).parent.parent / "resources" / "wiki_stats.json"))
 WIKI_MAX_SCORE = next(iter(WIKI_SCORES.values()))
 DOCUMENT_FREQUENCIES = json.load(open(Path(__file__).parent.parent / "resources" / "document_counts.json"))
@@ -49,14 +48,19 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
     features = get_features(terms, result.title, result.url, result.extract, result.score, is_complete)
 
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    match_score = (4 * features['match_score_title'] + features['match_score_extract'] + 2 * features[
-        'match_score_domain'] + 2 * features['match_score_domain_tokenized'] + features['match_score_path'])
+    match_score = (
+        4 * features["match_score_title"]
+        + features["match_score_extract"]
+        + 2 * features["match_score_domain"]
+        + 2 * features["match_score_domain_tokenized"]
+        + features["match_score_path"]
+    )
 
-    if features[f'match_terms'] <= len(terms) / 2 and result.state is None:
+    if features["match_terms"] <= len(terms) / 2 and result.state is None:
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
-        return match_score * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+        return match_score * length_penalty * (features["domain_score"] + DOMAIN_SCORE_SMOOTHING) / 10
 
     return 0.0
 
@@ -71,14 +75,14 @@ def score_result_whole(terms: list[str], result: Document, is_complete: bool) ->
         return 0.0
     features = get_features(
         terms,
-        result.title or '',
+        result.title or "",
         result.url,
-        result.extract or '',
+        result.extract or "",
         result.score or 0.0,
         is_complete,
     )
     length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    return features['match_score_whole'] * length_penalty * (features['domain_score'] + DOMAIN_SCORE_SMOOTHING) / 10
+    return features["match_score_whole"] * length_penalty * (features["domain_score"] + DOMAIN_SCORE_SMOOTHING) / 10
 
 
 def score_match(last_match_char, match_length, total_possible_match_length):
@@ -140,35 +144,39 @@ def get_features(terms, title, url, extract, score, is_complete):
     domain = parsed_url.netloc
     path = parsed_url.path
     query = parsed_url.query
-    whole = title + ' ' + extract + ' ' + domain + ' ' + path + ' ' + query
-    for part, name, is_url in [(title, 'title', False),
-                               (extract, 'extract', False),
-                               (domain, 'domain', True),
-                               (domain, 'domain_tokenized', False),
-                               (path, 'path', True),
-                               (query, 'query', False),
-                               (whole, 'whole', False)]:
-        last_match_char, match_length, total_possible_match_length, match_terms, match_counts = \
-            get_match_features(terms, part, is_complete, is_url)
-        features[f'last_match_char_{name}'] = last_match_char
-        features[f'match_length_{name}'] = match_length
-        features[f'total_possible_match_length_{name}'] = total_possible_match_length
-        features[f'match_score_{name}'] = score_match(last_match_char, match_length, total_possible_match_length)
-        features[f'match_terms_{name}'] = match_terms
-        features[f'match_term_proportion_{name}'] = match_terms / len(terms)
+    whole = title + " " + extract + " " + domain + " " + path + " " + query
+    for part, name, is_url in [
+        (title, "title", False),
+        (extract, "extract", False),
+        (domain, "domain", True),
+        (domain, "domain_tokenized", False),
+        (path, "path", True),
+        (query, "query", False),
+        (whole, "whole", False),
+    ]:
+        last_match_char, match_length, total_possible_match_length, match_terms, match_counts = get_match_features(
+            terms, part, is_complete, is_url
+        )
+        features[f"last_match_char_{name}"] = last_match_char
+        features[f"match_length_{name}"] = match_length
+        features[f"total_possible_match_length_{name}"] = total_possible_match_length
+        features[f"match_score_{name}"] = score_match(last_match_char, match_length, total_possible_match_length)
+        features[f"match_terms_{name}"] = match_terms
+        features[f"match_term_proportion_{name}"] = match_terms / len(terms)
 
         # tf_idf_features = get_tf_idf_features(match_counts)
         # features.update({f"{name}_{k}": v for k, v in tf_idf_features.items()})
 
-    features['num_terms'] = len(terms)
-    features['num_chars'] = len(' '.join(terms))
-    features['domain_score'] = get_domain_score(url)
-    features['path_length'] = len(path)
-    features['domain_length'] = len(domain)
-    features['wiki_score'] = get_wiki_score(url)
-    features['item_score'] = score
-    features['match_terms'] = max(features[f'match_terms_{name}']
-                                  for name in ['title', 'extract', 'domain', 'domain_tokenized', 'path'])
+    features["num_terms"] = len(terms)
+    features["num_chars"] = len(" ".join(terms))
+    features["domain_score"] = get_domain_score(url)
+    features["path_length"] = len(path)
+    features["domain_length"] = len(domain)
+    features["wiki_score"] = get_wiki_score(url)
+    features["item_score"] = score
+    features["match_terms"] = max(
+        features[f"match_terms_{name}"] for name in ["title", "extract", "domain", "domain_tokenized", "path"]
+    )
 
     return features
 
@@ -210,7 +218,7 @@ def get_match_features(terms, result_string, is_complete, is_url):
 
 
 def get_wiki_score(url):
-    title = url.split('/')[-1]
+    title = url.split("/")[-1]
     return WIKI_SCORES.get(title, 0.0) / WIKI_MAX_SCORE
 
 
@@ -278,8 +286,7 @@ class Ranker:
     def order_results(self, terms: list[str], pages: list[Document], is_complete: bool):
         pass
 
-    def search(self, s: str, additional_results: list[Document],
-               use_external_search: bool = True) -> list[Document]:
+    def search(self, s: str, additional_results: list[Document], use_external_search: bool = True) -> list[Document]:
         # use_external_search=False is how the search-as-you-type path avoids a Wikipedia
         # call per keystroke; get_results has taken the flag all along, but only complete()
         # could reach it. See mwmbl.views.
@@ -303,23 +310,26 @@ class Ranker:
         ordered_results, terms, completions = self.get_results(q, [], use_external_search=False)
         if len(ordered_results) == 0:
             # There are no results so suggest Google searches instead
-            completion_queries = [' '.join(terms[:-1] + [t]) for t in completions]
+            completion_queries = [" ".join(terms[:-1] + [t]) for t in completions]
             adjusted_completions = completion_queries if q in completion_queries else [q] + completion_queries
             completed = ["search: google.com " + t for t in adjusted_completions]
             return [q, completed]
         else:
             adjusted_completions = [c for c in completions if c != terms[-1]]
 
-            urls = ["go: " + item.url[len(HTTPS_STRING):].rstrip('/') for item in ordered_results[:5]
-                    if item.url.startswith(HTTPS_STRING) and all(term in item.url for term in terms)][:1]
-            completed = [' '.join(terms[:-1] + [t]) for t in adjusted_completions]
+            urls = [
+                "go: " + item.url[len(HTTPS_STRING) :].rstrip("/")
+                for item in ordered_results[:5]
+                if item.url.startswith(HTTPS_STRING) and all(term in item.url for term in terms)
+            ][:1]
+            completed = [" ".join(terms[:-1] + [t]) for t in adjusted_completions]
             return [q, urls + completed]
 
     def get_results(self, q: str, additional_results: list[Document], use_external_search: bool = True):
         logger.info(f"Get results with {len(additional_results)} additional results")
         terms = tokenize(q)
 
-        is_complete = q.endswith(' ')
+        is_complete = q.endswith(" ")
         if len(terms) > 0 and not is_complete:
             completions = self.completer.complete(terms[-1])
             retrieval_terms = set(terms + completions)
@@ -330,8 +340,7 @@ class Ranker:
         # Check for curation
         curation_term = " ".join(terms)
         curation_items = self.tiny_index.retrieve(curation_term)
-        curated_items = [d for d in curation_items if d.state is not None
-                         and d.term == curation_term]
+        curated_items = [d for d in curation_items if d.state is not None and d.term == curation_term]
 
         bigrams = set(get_bigrams(len(terms), terms))
 
@@ -343,13 +352,17 @@ class Ranker:
             else:
                 items_wrong_state = self.tiny_index.retrieve(term)
                 # If this is not a curation term, it is not curated for the current term
-                items = [Document(result.title,
-                                  result.url,
-                                  result.extract,
-                                  result.score,
-                                  result.term,
-                                  remove_curate_state(result.state))
-                         for result in items_wrong_state]
+                items = [
+                    Document(
+                        result.title,
+                        result.url,
+                        result.extract,
+                        result.score,
+                        result.term,
+                        remove_curate_state(result.state),
+                    )
+                    for result in items_wrong_state
+                ]
 
             if items is not None:
                 pages += items
@@ -364,8 +377,9 @@ class Ranker:
         return state_fixed, terms, completions
 
     @staticmethod
-    def _remove_blacklisted(candidates: list[Document], curated_items: list[Document],
-                            index_items: list[Document]) -> tuple[list[Document], list[Document]]:
+    def _remove_blacklisted(
+        candidates: list[Document], curated_items: list[Document], index_items: list[Document]
+    ) -> tuple[list[Document], list[Document]]:
         """Drop blacklisted documents from a result set and queue the indexed ones for purging.
 
         Curated items are filtered separately because they bypass order_results entirely -
@@ -387,15 +401,17 @@ class Ranker:
 
         enqueue_for_purge([d for d in index_items if d.url in blacklisted_urls])
 
-        return ([d for d in candidates if d.url not in blacklisted_urls],
-                [d for d in curated_items if d.url not in blacklisted_urls])
+        return (
+            [d for d in candidates if d.url not in blacklisted_urls],
+            [d for d in curated_items if d.url not in blacklisted_urls],
+        )
 
     def external_search(self, q: str):
         return []
 
     def get_raw_results(self, query: str):
         tokens = tokenize(query)
-        term = ' '.join(tokens)
+        term = " ".join(tokens)
         results = self.tiny_index.retrieve(term)
         # /raw bypasses get_results(), so it needs its own filter or it is a way to read
         # blacklisted documents straight out of the index.
@@ -426,8 +442,9 @@ class HeuristicRanker(Ranker):
         return filtered_results
 
 
-WIKI_SEARCH_API_URL = ("https://en.wikipedia.org/w/api.php?action=query&list=search"
-                       "&srsearch={query}&srlimit={limit}&format=json")
+WIKI_SEARCH_API_URL = (
+    "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&srlimit={limit}&format=json"
+)
 WIKI_URL_FORMAT = "https://en.wikipedia.org/wiki/{title}"
 
 # How many wiki results a caller gets unless it says otherwise, and the number the LTR
@@ -458,8 +475,13 @@ WIKI_TOP_SCORE = 6.0
 # backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
 # query's wiki results. Live search never bursts, so this adds no latency in
 # normal operation. Successful responses are cached for months (see mwmbl.indexer.external_cache).
-WIKI_RETRY = Retry(total=4, backoff_factor=0.5, status_forcelist=(429, 502, 503, 504),
-                   allowed_methods=frozenset({"GET"}), respect_retry_after_header=True)
+WIKI_RETRY = Retry(
+    total=4,
+    backoff_factor=0.5,
+    status_forcelist=(429, 502, 503, 504),
+    allowed_methods=frozenset({"GET"}),
+    respect_retry_after_header=True,
+)
 
 # If Wikipedia has already rate-limited us hard enough that WIKI_RETRY exhausted its
 # retries, hammering it again on the very next query just makes things worse. Trip a
@@ -498,11 +520,11 @@ def _is_wiki_rate_limited(e: RetryError) -> bool:
     return reason is not None and "429" in str(reason)
 
 
-HTML_TAG_REGEX = re.compile(r'<[^>]+>')
+HTML_TAG_REGEX = re.compile(r"<[^>]+>")
 
 
 def clean_html(s: str):
-    return html.unescape(HTML_TAG_REGEX.sub('', s))
+    return html.unescape(HTML_TAG_REGEX.sub("", s))
 
 
 def wiki_score(rank: int) -> float:
@@ -530,23 +552,19 @@ def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[D
     if _wiki_circuit_open():
         return []
 
-    escaped_query = urllib.parse.quote(query, safe='')
-    headers = {
-        'User-Agent': 'Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)'
-    }
+    escaped_query = urllib.parse.quote(query, safe="")
+    headers = {"User-Agent": "Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)"}
     try:
         with requests.Session() as session:
             session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(
-                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT),
-                headers=headers, timeout=5)
+                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT), headers=headers, timeout=5
+            )
             wiki_response = response.json()
     except RetryError as e:
         if _is_wiki_rate_limited(e):
             _trip_wiki_circuit()
-            logger.warning(
-                "Wikipedia is rate-limiting us; pausing wiki lookups for %ds", WIKI_CIRCUIT_COOLDOWN_SECONDS
-            )
+            logger.warning("Wikipedia is rate-limiting us; pausing wiki lookups for %ds", WIKI_CIRCUIT_COOLDOWN_SECONDS)
         else:
             # Don't log str(e)/exc_info here - RetryError embeds the request URL, which
             # embeds the (private) user query, and logger.exception would log both.
@@ -556,17 +574,25 @@ def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[D
         logger.warning("Failed to fetch Wikipedia results: %s", type(e).__name__)
         return []
 
-    if 'query' not in wiki_response or 'search' not in wiki_response['query']:
-        if 'error' in wiki_response:
+    if "query" not in wiki_response or "search" not in wiki_response["query"]:
+        if "error" in wiki_response:
             # Don't log the error body - it can echo back the (private) user query.
             logger.warning("Wikipedia API returned an error response")
 
         return []
 
-    wiki_results = [Document(result['title'], get_wiki_url(result['title']), clean_html(result['snippet']),
-                             wiki_score(rank), query, state=DocumentState.FROM_WIKI,
-                             source=DocumentSource.WIKIPEDIA)
-                    for rank, result in enumerate(wiki_response['query']['search'][:WIKI_FETCH_LIMIT])]
+    wiki_results = [
+        Document(
+            result["title"],
+            get_wiki_url(result["title"]),
+            clean_html(result["snippet"]),
+            wiki_score(rank),
+            query,
+            state=DocumentState.FROM_WIKI,
+            source=DocumentSource.WIKIPEDIA,
+        )
+        for rank, result in enumerate(wiki_response["query"]["search"][:WIKI_FETCH_LIMIT])
+    ]
 
     # Only a well-formed answer is stored, including one with no results in it. Every path
     # above returns [] without storing, so a transient failure is never remembered as
@@ -581,19 +607,18 @@ def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[D
 
 class HeuristicAndWikiRanker(HeuristicRanker):
     def __init__(
-            self,
-            tiny_index: TinyIndex,
-            completer: Completer,
-            return_none_if_no_mwmbl_results: bool = False,
-            score_threshold: float = 0.0,
-            max_wiki_results: int = NUM_WIKI_RESULTS
+        self,
+        tiny_index: TinyIndex,
+        completer: Completer,
+        return_none_if_no_mwmbl_results: bool = False,
+        score_threshold: float = 0.0,
+        max_wiki_results: int = NUM_WIKI_RESULTS,
     ):
         super().__init__(tiny_index, completer, score_threshold)
         self.return_none_if_no_mwmbl_results = return_none_if_no_mwmbl_results
         self.max_wiki_results = max_wiki_results
 
-    def search(self, s: str, additional_results: list[Document],
-               use_external_search: bool = True) -> list[Document]:
+    def search(self, s: str, additional_results: list[Document], use_external_search: bool = True) -> list[Document]:
         s_shortened = s[:MAX_QUERY_CHARS]
 
         wiki_results = get_wiki_results(s_shortened, self.max_wiki_results) if use_external_search else []

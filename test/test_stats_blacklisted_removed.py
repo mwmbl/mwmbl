@@ -5,6 +5,7 @@ Retrieval filters blacklisted domains out of results whether or not the backgrou
 ever removes them, so a broken purge loop is invisible from the search results alone.
 This counter is the only signal that the removals are actually happening.
 """
+
 from datetime import datetime
 from unittest.mock import patch
 
@@ -58,13 +59,16 @@ def test_the_purge_task_records_what_it_removed():
     redis = fakeredis.FakeRedis(decode_responses=True)
     queued = [object()]
 
-    with patch("mwmbl.background.drain_purge_queue", return_value=queued), \
-            patch("mwmbl.background.get_snapshot_blacklist"), \
-            patch("mwmbl.background.TinyIndex"), \
-            patch("mwmbl.background.queue_size", return_value=0), \
-            patch("mwmbl.background.purge_documents", return_value={"bad.test": 2, "worse.test": 3}), \
-            patch("mwmbl.background.stats_manager", StatsManager(redis)):
+    with (
+        patch("mwmbl.background.drain_purge_queue", return_value=queued),
+        patch("mwmbl.background.get_snapshot_blacklist"),
+        patch("mwmbl.background.TinyIndex"),
+        patch("mwmbl.background.queue_size", return_value=0),
+        patch("mwmbl.background.purge_documents", return_value={"bad.test": 2, "worse.test": 3}),
+        patch("mwmbl.background.stats_manager", StatsManager(redis)),
+    ):
         from mwmbl.background import purge_blacklisted_from_queue
+
         purge_blacklisted_from_queue.now()
 
     key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
@@ -74,9 +78,12 @@ def test_the_purge_task_records_what_it_removed():
 def test_the_purge_task_records_nothing_when_the_queue_is_empty():
     redis = fakeredis.FakeRedis(decode_responses=True)
 
-    with patch("mwmbl.background.drain_purge_queue", return_value=[]), \
-            patch("mwmbl.background.stats_manager", StatsManager(redis)):
+    with (
+        patch("mwmbl.background.drain_purge_queue", return_value=[]),
+        patch("mwmbl.background.stats_manager", StatsManager(redis)),
+    ):
         from mwmbl.background import purge_blacklisted_from_queue
+
         purge_blacklisted_from_queue.now()
 
     assert redis.get(BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())) is None

@@ -1,10 +1,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from mwmbl.tinysearchengine.copy_index import copy_pages
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-
 from django.conf import settings
+
+from mwmbl.tinysearchengine.copy_index import copy_pages
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 
 NUM_PAGES = 10000
 

@@ -14,6 +14,7 @@ Usage:
 
 Prints "PASS <name>" or "FAIL <name>: <reason>" and exits 0/1 accordingly.
 """
+
 import asyncio
 import os
 import sys
@@ -36,7 +37,8 @@ from mwmbl.tinysearchengine.super_search_sources.smoke import check_recipe  # no
 async def _run(path: str) -> int:
     recipe = load_recipe(path)
     async with httpx.AsyncClient(
-        follow_redirects=True, timeout=15.0,
+        follow_redirects=True,
+        timeout=15.0,
         headers={"User-Agent": "mwmbl-super-search-smoke/0.1 (+https://mwmbl.org)"},
     ) as client:
         ok, reason = await check_recipe(client, recipe)

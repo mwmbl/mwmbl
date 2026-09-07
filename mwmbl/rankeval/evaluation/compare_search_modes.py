@@ -17,6 +17,7 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
         uv run python -m mwmbl.rankeval.evaluation.compare_search_modes --fraction 0.05
 """
+
 import os
 from argparse import ArgumentParser
 
@@ -42,12 +43,11 @@ NEW_SOURCES = ["www_gov_uk", "imdb"]
 
 def run():
     parser = ArgumentParser()
-    parser.add_argument("--fraction", type=float, default=0.05,
-                        help="Fraction of gold test queries to sample.")
-    parser.add_argument("--train", action="store_true",
-                        help="Evaluate on the train split instead of test.")
-    parser.add_argument("--clear-cache", action="store_true",
-                        help="Clear the Super Search doc-pool cache before evaluating.")
+    parser.add_argument("--fraction", type=float, default=0.05, help="Fraction of gold test queries to sample.")
+    parser.add_argument("--train", action="store_true", help="Evaluate on the train split instead of test.")
+    parser.add_argument(
+        "--clear-cache", action="store_true", help="Clear the Super Search doc-pool cache before evaluating."
+    )
     args = parser.parse_args()
 
     if args.clear_cache:

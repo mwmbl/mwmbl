@@ -1,6 +1,6 @@
 import pytest
-from django.contrib.auth import get_user_model
 from allauth.account.models import EmailAddress
+from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
@@ -14,9 +14,7 @@ def verified_user(db):
         email="user@example.com",
         password="correctpassword",
     )
-    EmailAddress.objects.create(
-        user=user, email="user@example.com", verified=True, primary=True
-    )
+    EmailAddress.objects.create(user=user, email="user@example.com", verified=True, primary=True)
     return user
 
 
@@ -27,9 +25,7 @@ def unverified_user(db):
         email="unverified@example.com",
         password="correctpassword",
     )
-    EmailAddress.objects.create(
-        user=user, email="unverified@example.com", verified=False, primary=True
-    )
+    EmailAddress.objects.create(user=user, email="unverified@example.com", verified=False, primary=True)
     return user
 
 
@@ -102,7 +98,8 @@ def test_login_email_and_username_return_same_user(client, verified_user):
         content_type="application/json",
     ).json()
     # Both tokens are for the same user — decode the subject claim to verify
-    import base64, json as _json
+    import base64
+    import json as _json
 
     def subject(token):
         payload = token.split(".")[1]

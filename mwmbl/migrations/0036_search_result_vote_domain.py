@@ -38,20 +38,19 @@ def backfill_domains(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0035_moderationmodelartifact_and_more'),
+        ("mwmbl", "0035_moderationmodelartifact_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='searchresultvote',
-            name='domain',
+            model_name="searchresultvote",
+            name="domain",
             field=models.CharField(blank=True, max_length=300),
         ),
         migrations.RunPython(backfill_domains, migrations.RunPython.noop),
         migrations.AddIndex(
-            model_name='searchresultvote',
-            index=models.Index(fields=['domain', 'vote_type'], name='mwmbl_searc_domain_7f4ebd_idx'),
+            model_name="searchresultvote",
+            index=models.Index(fields=["domain", "vote_type"], name="mwmbl_searc_domain_7f4ebd_idx"),
         ),
     ]

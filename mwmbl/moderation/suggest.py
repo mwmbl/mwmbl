@@ -18,20 +18,32 @@ decide which ones to return.
 queryset into the row-per-domain the moderator actually reviews. Both are SQL for the same
 reason.
 """
+
 from __future__ import annotations
 
 from logging import getLogger
 from typing import Iterable
 
 from django.db.models import (
-    Case, CharField, Count, Exists, F, FloatField, IntegerField, OuterRef, Q, Subquery, Value,
-    When)
+    Case,
+    CharField,
+    Count,
+    Exists,
+    F,
+    FloatField,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce, Substr
 
 from mwmbl.models import DomainEvidence, DomainSubmission, SearchResultVote
 from mwmbl.moderation import rules
 from mwmbl.moderation.evidence import page_texts
-from mwmbl.moderation.model import Suggestion, UNUSABLE_MODEL_REASONS, suggest
+from mwmbl.moderation.model import UNUSABLE_MODEL_REASONS, Suggestion, suggest
 
 logger = getLogger(__name__)
 
@@ -48,17 +60,26 @@ def refresh_suggestion(evidence: DomainEvidence) -> DomainEvidence:
     evidence.reason_source = suggestion.reason_source
     evidence.model_version = suggestion.model_version
     evidence.evidence = suggestion.evidence
-    evidence.save(update_fields=[
-        "suggested_action", "suggested_reason", "confidence", "reason_confidence",
-        "reason_source", "model_version", "evidence",
-    ])
+    evidence.save(
+        update_fields=[
+            "suggested_action",
+            "suggested_reason",
+            "confidence",
+            "reason_confidence",
+            "reason_source",
+            "model_version",
+            "evidence",
+        ]
+    )
     return evidence
 
 
-def suggestion_for(submission: DomainSubmission,
-                   evidence: DomainEvidence | None,
-                   submitter: dict | None = None,
-                   prior: dict | None = None) -> Suggestion | None:
+def suggestion_for(
+    submission: DomainSubmission,
+    evidence: DomainEvidence | None,
+    submitter: dict | None = None,
+    prior: dict | None = None,
+) -> Suggestion | None:
     """The stored suggestion, plus live evidence. None while the domain is still being crawled.
 
     Returning None rather than a default is deliberate: a queue row that says "not assessed
@@ -81,8 +102,8 @@ def suggestion_for(submission: DomainSubmission,
     cached = [rules.EvidenceItem(**item) for item in (evidence.evidence or [])]
     cached_decisive = rules.decisive(cached)
     if decisive_live is not None and (
-            cached_decisive is None
-            or decisive_live.implies_confidence > cached_decisive.implies_confidence):
+        cached_decisive is None or decisive_live.implies_confidence > cached_decisive.implies_confidence
+    ):
         return Suggestion(
             action=decisive_live.implies_action,
             confidence=decisive_live.implies_confidence,
@@ -177,29 +198,25 @@ def annotate_queue(submissions):
         evidence_source=Subquery(evidence.values("reason_source")[:1]),
         # The live checks, as one boolean each. Only PENDING submissions are ever queued, so
         # a submission never counts itself in either of these.
-        prior_approved=Exists(DomainSubmission.objects.filter(
-            name=OuterRef("name"), status="APPROVED")),
-        prior_rejected=Exists(DomainSubmission.objects.filter(
-            name=OuterRef("name"), status="REJECTED")),
-        submitter_decided=Exists(DomainSubmission.objects.filter(
-            DECIDED, submitted_by_id=OuterRef("submitted_by_id"))),
+        prior_approved=Exists(DomainSubmission.objects.filter(name=OuterRef("name"), status="APPROVED")),
+        prior_rejected=Exists(DomainSubmission.objects.filter(name=OuterRef("name"), status="REJECTED")),
+        submitter_decided=Exists(DomainSubmission.objects.filter(DECIDED, submitted_by_id=OuterRef("submitted_by_id"))),
         # rules.other_detail, as far as SQL can ask it: is there a cached check implying
         # OTHER, and so a sentence to send with an OTHER rejection. A containment test rather
         # than a column comparison because it is a question about the evidence list, and
         # Exists rather than a lookup on the annotation above so it reads as the join it is.
-        explained_by_a_check=Exists(DomainEvidence.objects.filter(
-            domain=OuterRef("name"), evidence__contains=rules.IMPLIES_OTHER)),
+        explained_by_a_check=Exists(
+            DomainEvidence.objects.filter(domain=OuterRef("name"), evidence__contains=rules.IMPLIES_OTHER)
+        ),
     )
 
     scored = Q(evidence_state=DomainEvidence.State.READY)
     # A prior decision only overrides the stored suggestion when it is stronger than the check
     # that produced it. reason_source is how we know a check produced it at all: when it did,
     # the stored confidence *is* that check's implied confidence (see model.suggest).
-    stored_check_holds = (Q(evidence_source="rule")
-                          & Q(evidence_confidence__gte=rules.PRIOR_DECISION_CONFIDENCE))
+    stored_check_holds = Q(evidence_source="rule") & Q(evidence_confidence__gte=rules.PRIOR_DECISION_CONFIDENCE)
     prior_approval = scored & Q(prior_approved=True) & ~stored_check_holds
-    prior_rejection = (scored & Q(prior_rejected=True) & Q(prior_approved=False)
-                       & ~stored_check_holds)
+    prior_rejection = scored & Q(prior_rejected=True) & Q(prior_approved=False) & ~stored_check_holds
     # No cached check implies APPROVE - they are all reasons to reject - so a stored APPROVE
     # is always the model's, which is what the withheld-approval rule is about.
     withheld = scored & Q(evidence_action="APPROVE") & Q(submitter_decided=False)
@@ -209,9 +226,11 @@ def annotate_queue(submissions):
     # produced the reason, and the evidence still has to contain the check that explains it -
     # a stale row can say "rule" and have nothing implying OTHER left in its evidence.
     explained = Q(evidence_source="rule") & Q(explained_by_a_check=True)
-    unexplained = scored & Q(evidence_action="REJECT") & (
-        (Q(evidence_reason="OTHER") & ~explained)
-        | Q(evidence_reason="") | Q(evidence_reason__isnull=True))
+    unexplained = (
+        scored
+        & Q(evidence_action="REJECT")
+        & ((Q(evidence_reason="OTHER") & ~explained) | Q(evidence_reason="") | Q(evidence_reason__isnull=True))
+    )
 
     submissions = submissions.annotate(
         displayed_action=Case(
@@ -224,8 +243,7 @@ def annotate_queue(submissions):
             output_field=CharField(),
         ),
         displayed_confidence=Case(
-            When(prior_approval | prior_rejection,
-                 then=Value(rules.PRIOR_DECISION_CONFIDENCE)),
+            When(prior_approval | prior_rejection, then=Value(rules.PRIOR_DECISION_CONFIDENCE)),
             When(unexplained, then=Value(0.0)),
             When(withheld, then=Value(0.0)),
             When(scored, then=F("evidence_confidence")),
@@ -234,8 +252,7 @@ def annotate_queue(submissions):
         ),
         displayed_reason=Case(
             When(prior_rejection, then=Value(rules.PRIOR_DECISION_REASON)),
-            When(scored & Q(evidence_action="REJECT") & ~prior_approval & ~unexplained,
-                 then=F("evidence_reason")),
+            When(scored & Q(evidence_action="REJECT") & ~prior_approval & ~unexplained, then=F("evidence_reason")),
             When(scored, then=Value("")),
             default=Value(None),
             output_field=CharField(),
@@ -291,17 +308,18 @@ def one_row_per_domain(submissions, status: str | None = "PENDING", pick: str = 
     if pick == "first":
         beats = same_domain.filter(
             Q(submitted_on__lt=OuterRef("submitted_on"))
-            | Q(submitted_on=OuterRef("submitted_on"), pk__lt=OuterRef("pk")))
+            | Q(submitted_on=OuterRef("submitted_on"), pk__lt=OuterRef("pk"))
+        )
     else:
         beats = same_domain.annotate(touched=touched).filter(
-            Q(touched__gt=OuterRef("touched"))
-            | Q(touched=OuterRef("touched"), pk__gt=OuterRef("pk")))
+            Q(touched__gt=OuterRef("touched")) | Q(touched=OuterRef("touched"), pk__gt=OuterRef("pk"))
+        )
 
     return submissions.annotate(
         submission_count=Coalesce(
-            Subquery(same_domain.values("name").annotate(n=Count("pk")).values("n"),
-                     output_field=IntegerField()),
-            Value(0)),
+            Subquery(same_domain.values("name").annotate(n=Count("pk")).values("n"), output_field=IntegerField()),
+            Value(0),
+        ),
     ).filter(~Exists(beats))
 
 
@@ -316,17 +334,23 @@ def annotate_votes(submissions):
     Coalesced to zero rather than left NULL: a domain nobody has voted on has no votes, and
     ordering on NULL would scatter those rows through the sort instead of ending it.
     """
+
     def counted(vote_type):
         return Coalesce(
-            Subquery(SearchResultVote.objects
-                     .filter(domain=OuterRef("bare_name"), vote_type=vote_type)
-                     .values("domain").annotate(n=Count("pk")).values("n"),
-                     output_field=IntegerField()),
-            Value(0))
+            Subquery(
+                SearchResultVote.objects.filter(domain=OuterRef("bare_name"), vote_type=vote_type)
+                .values("domain")
+                .annotate(n=Count("pk"))
+                .values("n"),
+                output_field=IntegerField(),
+            ),
+            Value(0),
+        )
 
     return submissions.annotate(
-        bare_name=Case(When(name__startswith="www.", then=Substr("name", 5)),
-                       default=F("name"), output_field=CharField()),
+        bare_name=Case(
+            When(name__startswith="www.", then=Substr("name", 5)), default=F("name"), output_field=CharField()
+        ),
     ).annotate(upvotes=counted("upvote"), downvotes=counted("downvote"))
 
 
@@ -337,32 +361,30 @@ def submitter_record(user_id: int) -> dict:
     rejected 54% of the time against 1% for an established one, which is a bigger effect than
     anything the model reads off the domain name.
     """
-    counts = (DomainSubmission.objects
-              .filter(submitted_by_id=user_id)
-              .aggregate(approved=Count("pk", filter=Q(status="APPROVED")),
-                         rejected=Count("pk", filter=Q(status="REJECTED"))))
+    counts = DomainSubmission.objects.filter(submitted_by_id=user_id).aggregate(
+        approved=Count("pk", filter=Q(status="APPROVED")), rejected=Count("pk", filter=Q(status="REJECTED"))
+    )
     return {"approved": counts["approved"] or 0, "rejected": counts["rejected"] or 0}
 
 
 def prior_decisions(submission: DomainSubmission) -> dict:
     """How other submissions of the same domain were decided."""
-    counts = (DomainSubmission.objects
-              .filter(name=submission.name)
-              .exclude(pk=submission.pk)
-              .aggregate(approved=Count("pk", filter=Q(status="APPROVED")),
-                         rejected=Count("pk", filter=Q(status="REJECTED"))))
+    counts = (
+        DomainSubmission.objects.filter(name=submission.name)
+        .exclude(pk=submission.pk)
+        .aggregate(approved=Count("pk", filter=Q(status="APPROVED")), rejected=Count("pk", filter=Q(status="REJECTED")))
+    )
     return {"approved": counts["approved"] or 0, "rejected": counts["rejected"] or 0}
 
 
 def submitter_records(user_ids: Iterable[int]) -> dict[int, dict]:
     """Decision counts for several submitters in one query, for rendering a queue page."""
-    counts = (DomainSubmission.objects
-              .filter(submitted_by_id__in=list(user_ids))
-              .values("submitted_by_id")
-              .annotate(approved=Count("pk", filter=Q(status="APPROVED")),
-                        rejected=Count("pk", filter=Q(status="REJECTED"))))
-    return {row["submitted_by_id"]: {"approved": row["approved"], "rejected": row["rejected"]}
-            for row in counts}
+    counts = (
+        DomainSubmission.objects.filter(submitted_by_id__in=list(user_ids))
+        .values("submitted_by_id")
+        .annotate(approved=Count("pk", filter=Q(status="APPROVED")), rejected=Count("pk", filter=Q(status="REJECTED")))
+    )
+    return {row["submitted_by_id"]: {"approved": row["approved"], "rejected": row["rejected"]} for row in counts}
 
 
 def prior_decision_counts(names: Iterable[str]) -> dict[str, dict]:
@@ -372,10 +394,9 @@ def prior_decision_counts(names: Iterable[str]) -> dict[str, dict]:
     the row being rendered. That is harmless here because the queue only ever shows PENDING
     submissions, which are by definition not counted.
     """
-    counts = (DomainSubmission.objects
-              .filter(name__in=list(names))
-              .values("name")
-              .annotate(approved=Count("pk", filter=Q(status="APPROVED")),
-                        rejected=Count("pk", filter=Q(status="REJECTED"))))
-    return {row["name"]: {"approved": row["approved"], "rejected": row["rejected"]}
-            for row in counts}
+    counts = (
+        DomainSubmission.objects.filter(name__in=list(names))
+        .values("name")
+        .annotate(approved=Count("pk", filter=Q(status="APPROVED")), rejected=Count("pk", filter=Q(status="REJECTED")))
+    )
+    return {row["name"]: {"approved": row["approved"], "rejected": row["rejected"]} for row in counts}

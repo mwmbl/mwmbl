@@ -13,6 +13,7 @@ feature vectors used for the decision are stashed on the ``SelectionContext``
 so the reward attribution at request completion is consistent with the action
 taken.
 """
+
 from __future__ import annotations
 
 import random
@@ -76,7 +77,9 @@ def select_sources(
             elif name not in ctx.features:
                 # pinned sources weren't scored; compute their features too.
                 ctx.features[name] = feature_vector(
-                    qctx, get_meta(name), profs.get(name, (None, None)),
+                    qctx,
+                    get_meta(name),
+                    profs.get(name, (None, None)),
                     pinned_stats.get(name),
                 ).tolist()
 
@@ -96,8 +99,8 @@ def _select_xgb(selectable, feats, budget) -> list[str]:
     ranked = sorted(selectable, key=lambda n: scores[n], reverse=True)
     epsilon = settings.SUPER_SEARCH_XGB_EPSILON
     n_explore = sum(random.random() < epsilon for _ in range(budget))
-    chosen = ranked[:budget - n_explore]
-    rest = ranked[budget - n_explore:]
+    chosen = ranked[: budget - n_explore]
+    rest = ranked[budget - n_explore :]
     chosen += random.sample(rest, min(n_explore, len(rest)))
     return chosen
 

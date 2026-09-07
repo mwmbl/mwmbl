@@ -18,6 +18,7 @@ Newly approved domains are subtracted from the remote blocklists when the snapsh
 rebuilt (BLACKLIST_SNAPSHOT_REFRESH_SECONDS, six hours), and get_curated_domains caches for
 five minutes, so both catch up on their own rather than being poked from a migration.
 """
+
 from django.db import migrations, models
 
 REPAIRS = {"APPROVE": "APPROVED", "REJECT": "REJECTED"}
@@ -35,7 +36,6 @@ def noop_reverse(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("mwmbl", "0036_search_result_vote_domain"),
     ]
@@ -53,8 +53,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="domainsubmission",
             constraint=models.CheckConstraint(
-                condition=models.Q(
-                    rejection_reason__in=["", "SPAM", "OFFENSIVE", "LANGUAGE", "OTHER"]),
+                condition=models.Q(rejection_reason__in=["", "SPAM", "OFFENSIVE", "LANGUAGE", "OTHER"]),
                 name="domain_submission_rejection_reason_valid",
             ),
         ),

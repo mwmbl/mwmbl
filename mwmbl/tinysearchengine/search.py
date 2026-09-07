@@ -7,10 +7,9 @@ from ninja.errors import HttpError
 
 from mwmbl import pricing
 from mwmbl.format import format_result, format_result_v2
-from mwmbl.models import ApiKey, MwmblUser
+from mwmbl.models import MwmblUser
 from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
 from mwmbl.search_auth import SearchApiKeyAuth
-from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logger = getLogger(__name__)
@@ -19,16 +18,18 @@ logger = getLogger(__name__)
 SCORE_THRESHOLD = 0.25
 
 # Module-level routers
-router = Router(tags=["Search"])    # v1
-v2_router = Router(tags=["Search"]) # v2
+router = Router(tags=["Search"])  # v1
+v2_router = Router(tags=["Search"])  # v2
 
 
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class TextSegment(Schema):
     """A fragment of a title or extract, optionally highlighted."""
+
     value: str
     is_bold: bool
 
@@ -44,6 +45,7 @@ class TextSegment(Schema):
 
 class SearchResult(Schema):
     """A single formatted search result returned by the main search endpoint."""
+
     url: str
     title: list[TextSegment]
     extract: list[TextSegment]
@@ -81,6 +83,7 @@ class SearchHit(Schema):
 
 class SearchResponse(Schema):
     """Search response with optional Mwmbl usage metadata."""
+
     query: str
     number_of_results: int
     results: list[SearchHit]
@@ -90,6 +93,7 @@ class SearchResponse(Schema):
 
 class RawDocument(Schema):
     """A raw, unformatted document as stored in the index."""
+
     title: str
     url: str
     extract: str
@@ -116,6 +120,7 @@ class RawDocument(Schema):
 
 class RawSearchResponse(Schema):
     """Response from the raw search endpoint."""
+
     query: str
     results: list[RawDocument]
 
@@ -155,10 +160,10 @@ _COMPLETE_RESPONSE_SCHEMA = {
             "type": "array",
             "description": (
                 "List of suggestion strings. Each entry is one of:\n"
-                "- A completed query term, e.g. `\"python tutorial\"`.\n"
-                "- A direct-navigation URL prefixed with `\"go: \"`, "
-                "e.g. `\"go: docs.python.org/3/tutorial\"`.\n"
-                "- A Google fallback prefixed with `\"search: google.com \"` "
+                '- A completed query term, e.g. `"python tutorial"`.\n'
+                '- A direct-navigation URL prefixed with `"go: "`, '
+                'e.g. `"go: docs.python.org/3/tutorial"`.\n'
+                '- A Google fallback prefixed with `"search: google.com "` '
                 "when no index results exist."
             ),
             "items": {"type": "string"},
@@ -195,21 +200,20 @@ _COMPLETE_RESPONSE_SCHEMA = {
 # Upgrade message helper
 # ---------------------------------------------------------------------------
 
+
 def _upgrade_message(max_monthly_spend_cents: int) -> str:
     if max_monthly_spend_cents <= 0:
         return (
             "Increase your monthly spend limit at https://mwmbl.org/pricing to continue "
             "past the free 2,000 requests/month (billed at $5.00 per 1,000 additional queries)."
         )
-    return (
-        "Increase your monthly spend limit at https://mwmbl.org/pricing to allow more "
-        "requests this month."
-    )
+    return "Increase your monthly spend limit at https://mwmbl.org/pricing to allow more requests this month."
 
 
 # ---------------------------------------------------------------------------
 # Route registration helpers
 # ---------------------------------------------------------------------------
+
 
 def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register the v1 search endpoint: returns a plain list of SearchResult."""
@@ -346,10 +350,10 @@ def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "The response is a two-element list:\n"
             "1. The original query string (echoed back).\n"
             "2. A list of suggestion strings. Each suggestion is either:\n"
-            "   - A completed query term (e.g. `\"python tutorial\"`).\n"
-            "   - A direct URL prefixed with `\"go: \"` when the partial query "
-            "matches a URL in the index (e.g. `\"go: docs.python.org/3/tutorial\"`).\n"
-            "   - A Google search suggestion prefixed with `\"search: google.com \"` "
+            '   - A completed query term (e.g. `"python tutorial"`).\n'
+            '   - A direct URL prefixed with `"go: "` when the partial query '
+            'matches a URL in the index (e.g. `"go: docs.python.org/3/tutorial"`).\n'
+            '   - A Google search suggestion prefixed with `"search: google.com "` '
             "when no index results are found.\n\n"
             "**Query parameter:** `q` — the partial query string (required)."
         ),
@@ -364,9 +368,7 @@ def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             ],
             "responses": {
                 "200": {
-                    "description": (
-                        "A two-element list: the echoed query string and a list of suggestions."
-                    ),
+                    "description": ("A two-element list: the echoed query string and a list of suggestions."),
                     "content": {
                         "application/json": {
                             "schema": _COMPLETE_RESPONSE_SCHEMA,
@@ -397,7 +399,7 @@ def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                         }
                     },
                 }
-            }
+            },
         },
     )
     def complete(request, q: str):

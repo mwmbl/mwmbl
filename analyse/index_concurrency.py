@@ -1,11 +1,10 @@
-import multiprocessing
 import os
 import string
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from random import Random
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 random = Random(2)
 
@@ -16,8 +15,9 @@ def random_string():
 
 
 DOCUMENTS = [
-    Document(title=f"Document {i}", url=f"https://something.com/{i}.html", extract=random_string(), score=i) for
-    i in range(1000)]
+    Document(title=f"Document {i}", url=f"https://something.com/{i}.html", extract=random_string(), score=i)
+    for i in range(1000)
+]
 
 PAGES = [random.randint(0, 10240000) for _ in range(20)]
 
@@ -33,13 +33,13 @@ try:
 except FileExistsError:
     pass
 
-indexer = TinyIndex(Document, str(INDEX_PATH), 'r')
+indexer = TinyIndex(Document, str(INDEX_PATH), "r")
 indexer.__enter__()
 
 
 def read_page(page_index: int):
     try:
-        page = indexer.get_page(page_index)
+        indexer.get_page(page_index)
     except Exception as e:
         print(e)
         return
@@ -56,5 +56,5 @@ def index_reading_writing_multithreading():
         print("End")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     index_reading_writing_multithreading()

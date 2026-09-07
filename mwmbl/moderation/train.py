@@ -24,6 +24,7 @@ a different population. It is :func:`compare_models`: score the incumbent and th
 the *same* held-out rows and bootstrap the *difference*, which cancels the shared test-set
 variance and is far more sensitive than comparing two independent intervals.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -57,8 +58,15 @@ GATE_TOLERANCE = 0.05
 # Statistics bootstrapped alongside PR-AUC. Named here rather than inferred from the point
 # estimate, so a statistic that is undefined in *every* resample - reject precision on a slice
 # where nothing clears the threshold - still reports, as null, rather than vanishing.
-OPERATING_POINT_KEYS = ["reject_share", "reject_precision", "reject_recall", "approve_share",
-                        "approve_error_rate", "unsure_share", "recall_at_precision_75"]
+OPERATING_POINT_KEYS = [
+    "reject_share",
+    "reject_precision",
+    "reject_recall",
+    "approve_share",
+    "approve_error_rate",
+    "unsure_share",
+    "recall_at_precision_75",
+]
 
 
 @dataclass
@@ -85,8 +93,7 @@ class Evaluation:
             "pr_auc": round(self.pr_auc, 4),
             "pr_auc_ci": [round(self.pr_auc_ci[0], 4), round(self.pr_auc_ci[1], 4)],
             "normalised_ap": round(self.normalised_ap, 4),
-            "normalised_ap_ci": [round(self.normalised_ap_ci[0], 4),
-                                 round(self.normalised_ap_ci[1], 4)],
+            "normalised_ap_ci": [round(self.normalised_ap_ci[0], 4), round(self.normalised_ap_ci[1], 4)],
             # What a moderator actually experiences. PR-AUC is a summary over every threshold,
             # including ones nothing runs at; the server suggests REJECT at
             # MODERATION_REJECT_THRESHOLD and APPROVE at MODERATION_APPROVE_THRESHOLD, and a
@@ -112,16 +119,19 @@ def split_by_time(rows: list[TrainingRow]) -> tuple[list[TrainingRow], list[Trai
     phenomenon that does not appear in 2024 - and a random split would let the model learn
     from the future it is being tested on.
     """
-    real = sorted((row for row in rows if row.source == REAL),
-                  key=lambda row: row.timestamp or "")
+    real = sorted((row for row in rows if row.source == REAL), key=lambda row: row.timestamp or "")
     other = [row for row in rows if row.source != REAL]
     cut = int((1 - TEST_FRACTION) * len(real))
     return real[:cut] + other, real[cut:]
 
 
-def train(rows: list[TrainingRow], version: str, use_text: bool = True,
-          use_has_text: bool = False,
-          incumbent: Optional[ModerationModel] = None) -> tuple[ModerationModel, dict]:
+def train(
+    rows: list[TrainingRow],
+    version: str,
+    use_text: bool = True,
+    use_has_text: bool = False,
+    incumbent: Optional[ModerationModel] = None,
+) -> tuple[ModerationModel, dict]:
     """Fit both heads and evaluate on held-out real rows only.
 
     ``use_text`` and ``use_has_text`` are the two halves of the page-text ablation - the
@@ -132,8 +142,12 @@ def train(rows: list[TrainingRow], version: str, use_text: bool = True,
     test rows, which is the only comparison that means anything.
     """
     train_rows, test_rows = split_by_time(rows)
-    logger.info("Training on %d rows (%d real), testing on %d real rows",
-                len(train_rows), sum(r.source == REAL for r in train_rows), len(test_rows))
+    logger.info(
+        "Training on %d rows (%d real), testing on %d real rows",
+        len(train_rows),
+        sum(r.source == REAL for r in train_rows),
+        len(test_rows),
+    )
 
     featuriser = Featuriser(use_text=use_text, use_has_text=use_has_text)
     features = featuriser.fit_transform([row.to_example() for row in train_rows])
@@ -141,23 +155,25 @@ def train(rows: list[TrainingRow], version: str, use_text: bool = True,
     # The binary head sees real rows only: blanket augmentation was measured and did not help.
     real_mask = np.array([row.source == REAL for row in train_rows])
     reject_head = LogisticRegression(max_iter=4000, C=4.0, class_weight="balanced")
-    reject_head.fit(features[real_mask],
-                    [row.rejected for row, keep in zip(train_rows, real_mask) if keep])
+    reject_head.fit(features[real_mask], [row.rejected for row, keep in zip(train_rows, real_mask) if keep])
 
     # The reason head sees every source, because that is the whole point of the derived rows.
     reason_mask = np.array([row.rejected and bool(row.reason) for row in train_rows])
     reason_head = LogisticRegression(max_iter=4000, C=4.0, class_weight="balanced")
-    reason_head.fit(features[reason_mask],
-                    [row.reason for row, keep in zip(train_rows, reason_mask) if keep])
+    reason_head.fit(features[reason_mask], [row.reason for row, keep in zip(train_rows, reason_mask) if keep])
 
-    model = ModerationModel(featuriser, reject_head, reason_head, version,
-                            train_domains={row.domain for row in train_rows})
+    model = ModerationModel(
+        featuriser, reject_head, reason_head, version, train_domains={row.domain for row in train_rows}
+    )
     return model, evaluate(model, train_rows, test_rows, incumbent)
 
 
-def evaluate(model: ModerationModel, train_rows: list[TrainingRow],
-             test_rows: list[TrainingRow],
-             incumbent: Optional[ModerationModel] = None) -> dict:
+def evaluate(
+    model: ModerationModel,
+    train_rows: list[TrainingRow],
+    test_rows: list[TrainingRow],
+    incumbent: Optional[ModerationModel] = None,
+) -> dict:
     if not test_rows:
         return {"error": "no held-out real rows to evaluate on"}
 
@@ -184,20 +200,22 @@ def evaluate(model: ModerationModel, train_rows: list[TrainingRow],
     metrics["train_rows_by_source"] = _count_sources(train_rows)
     # Fit-time text coverage, alongside the per-slice test coverage above. A large gap between
     # the two is the train/test skew that makes the text block look worse than it is.
-    metrics["train_rows_with_text"] = sum(
-        1 for row in train_rows if row.to_example().text.strip())
+    metrics["train_rows_with_text"] = sum(1 for row in train_rows if row.to_example().text.strip())
     metrics["uses_text"] = model.featuriser.text is not None
     metrics["uses_has_text"] = model.featuriser.use_has_text
     metrics["suggestion_influence"] = _suggestion_influence(train_rows + test_rows)
     if incumbent is not None:
-        metrics["versus_incumbent"] = compare_models(
-            model, incumbent, test_rows, cold, reject_scores)
+        metrics["versus_incumbent"] = compare_models(model, incumbent, test_rows, cold, reject_scores)
     return metrics
 
 
-def compare_models(candidate: ModerationModel, incumbent: ModerationModel,
-                   test_rows: list[TrainingRow], cold: np.ndarray,
-                   candidate_scores: np.ndarray) -> dict:
+def compare_models(
+    candidate: ModerationModel,
+    incumbent: ModerationModel,
+    test_rows: list[TrainingRow],
+    cold: np.ndarray,
+    candidate_scores: np.ndarray,
+) -> dict:
     """Paired bootstrap of candidate minus incumbent on identical cold-start rows.
 
     Two models scored on the same rows share all the variance that comes from *which* rows
@@ -211,16 +229,19 @@ def compare_models(candidate: ModerationModel, incumbent: ModerationModel,
     they trained on; the comparison still runs, and says so, because a candidate that wins under
     a bias in the incumbent's favour has won.
     """
-    incumbent_scores = np.array([prediction[0] for prediction in
-                                 incumbent.predict([row.to_example() for row in test_rows])])
+    incumbent_scores = np.array(
+        [prediction[0] for prediction in incumbent.predict([row.to_example() for row in test_rows])]
+    )
 
     contamination_known = bool(incumbent.train_domains)
     seen = incumbent.train_domains or set()
     clean = np.array([row.domain not in seen for row in test_rows])
     mask = cold & clean
     if not _has_both_classes(np.array([row.rejected for row in test_rows], dtype=int)[mask]):
-        return {"note": "not enough uncontaminated cold-start rows to compare on",
-                "incumbent_version": incumbent.version}
+        return {
+            "note": "not enough uncontaminated cold-start rows to compare on",
+            "incumbent_version": incumbent.version,
+        }
 
     truth = np.array([row.rejected for row in test_rows], dtype=int)[mask]
     candidate_slice = candidate_scores[mask]
@@ -235,11 +256,13 @@ def compare_models(candidate: ModerationModel, incumbent: ModerationModel,
         base = truth[indices].mean()
         differences.append(
             normalise(average_precision_score(truth[indices], candidate_slice[indices]), base)
-            - normalise(average_precision_score(truth[indices], incumbent_slice[indices]), base))
+            - normalise(average_precision_score(truth[indices], incumbent_slice[indices]), base)
+        )
 
     base_rate = float(truth.mean())
-    difference = (normalise(average_precision_score(truth, candidate_slice), base_rate)
-                  - normalise(average_precision_score(truth, incumbent_slice), base_rate))
+    difference = normalise(average_precision_score(truth, candidate_slice), base_rate) - normalise(
+        average_precision_score(truth, incumbent_slice), base_rate
+    )
     return {
         "slice": "cold_start",
         "incumbent_version": incumbent.version,
@@ -249,13 +272,13 @@ def compare_models(candidate: ModerationModel, incumbent: ModerationModel,
         # False means the incumbent predates train-domain recording, so some of these rows may
         # be its own training data and the comparison leans in its favour.
         "contamination_known": contamination_known,
-        "candidate_normalised_ap": round(
-            normalise(average_precision_score(truth, candidate_slice), base_rate), 4),
-        "incumbent_normalised_ap": round(
-            normalise(average_precision_score(truth, incumbent_slice), base_rate), 4),
+        "candidate_normalised_ap": round(normalise(average_precision_score(truth, candidate_slice), base_rate), 4),
+        "incumbent_normalised_ap": round(normalise(average_precision_score(truth, incumbent_slice), base_rate), 4),
         "difference": round(difference, 4),
-        "difference_ci": [round(float(np.percentile(differences, 2.5)), 4),
-                          round(float(np.percentile(differences, 97.5)), 4)],
+        "difference_ci": [
+            round(float(np.percentile(differences, 2.5)), 4),
+            round(float(np.percentile(differences, 97.5)), 4),
+        ],
         # How often the candidate won a resample. Reads more directly than the interval when
         # the interval straddles zero, which on this much data it usually will.
         "candidate_wins_fraction": round(float(np.mean(np.array(differences) > 0)), 4),
@@ -292,8 +315,7 @@ def operating_point(truth: np.ndarray, scores: np.ndarray) -> dict:
     }
 
 
-def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray,
-                    has_text: np.ndarray) -> Evaluation:
+def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray, has_text: np.ndarray) -> Evaluation:
     generator = np.random.default_rng(0)
     samples, normalised = [], []
     points: dict[str, list] = {key: [] for key in OPERATING_POINT_KEYS}
@@ -324,11 +346,15 @@ def _evaluate_slice(name: str, truth: np.ndarray, scores: np.ndarray,
         positives=int(truth.sum()),
         base_rate=base_rate,
         pr_auc=float(average_precision_score(truth, scores)),
-        pr_auc_ci=(float(np.percentile(samples, 2.5)) if samples else 0.0,
-                   float(np.percentile(samples, 97.5)) if samples else 0.0),
+        pr_auc_ci=(
+            float(np.percentile(samples, 2.5)) if samples else 0.0,
+            float(np.percentile(samples, 97.5)) if samples else 0.0,
+        ),
         normalised_ap=normalise(float(average_precision_score(truth, scores)), base_rate),
-        normalised_ap_ci=(float(np.percentile(normalised, 2.5)) if normalised else 0.0,
-                          float(np.percentile(normalised, 97.5)) if normalised else 0.0),
+        normalised_ap_ci=(
+            float(np.percentile(normalised, 2.5)) if normalised else 0.0,
+            float(np.percentile(normalised, 97.5)) if normalised else 0.0,
+        ),
         operating_point=measured,
         rows_with_text=int(has_text.sum()),
     )
@@ -338,8 +364,7 @@ def _interval(values: list) -> Optional[list]:
     """A 95% interval, or None when no resample could measure the statistic at all."""
     if not values:
         return None
-    return [round(float(np.percentile(values, 2.5)), 4),
-            round(float(np.percentile(values, 97.5)), 4)]
+    return [round(float(np.percentile(values, 2.5)), 4), round(float(np.percentile(values, 97.5)), 4)]
 
 
 def _evaluate_reason_head(predictions, test_rows: list[TrainingRow]) -> dict:
@@ -388,8 +413,7 @@ def _suggestion_influence(rows: list[TrainingRow]) -> dict:
     # side, and a decision made against one agrees with nothing: it counts as shown, but is
     # not part of the population agreement is measured over.
     took_a_side = [row for row in shown if row.suggested_status in ("APPROVE", "REJECT")]
-    agreed = [row for row in took_a_side
-              if (row.suggested_status == "REJECT") == row.rejected]
+    agreed = [row for row in took_a_side if (row.suggested_status == "REJECT") == row.rejected]
     return {
         "real_rows": len(real),
         "shown_a_suggestion": len(shown),
@@ -420,8 +444,7 @@ def normalised_ap_of(slice_metrics: dict) -> Optional[tuple[float, float]]:
     if not slice_metrics.get("rows"):
         return None
     base_rate = slice_metrics["positives"] / slice_metrics["rows"]
-    return (normalise(slice_metrics["pr_auc"], base_rate),
-            normalise(slice_metrics["pr_auc_ci"][0], base_rate))
+    return (normalise(slice_metrics["pr_auc"], base_rate), normalise(slice_metrics["pr_auc_ci"][0], base_rate))
 
 
 def passes_gate(new: dict, current: dict) -> tuple[bool, str]:
@@ -446,33 +469,41 @@ def passes_gate(new: dict, current: dict) -> tuple[bool, str]:
 
     comparison = new.get("versus_incumbent")
     if comparison is not None and "difference" in comparison:
-        caveat = "" if comparison["contamination_known"] else (
-            "; the incumbent has no record of its training domains, so some of these rows may "
-            "be its own and the comparison favours it")
+        caveat = (
+            ""
+            if comparison["contamination_known"]
+            else (
+                "; the incumbent has no record of its training domains, so some of these rows may "
+                "be its own and the comparison favours it"
+            )
+        )
         if comparison["difference_ci"][0] < -GATE_TOLERANCE:
             return False, (
                 f"paired against {comparison['incumbent_version']} on {comparison['rows']} "
                 f"cold-start rows, normalised AP is {comparison['difference']:+.3f} with "
                 f"interval [{comparison['difference_ci'][0]:.3f}, "
                 f"{comparison['difference_ci'][1]:.3f}], which admits a loss worse than the "
-                f"{GATE_TOLERANCE:.2f} tolerance{caveat}")
+                f"{GATE_TOLERANCE:.2f} tolerance{caveat}"
+            )
         return True, (
             f"paired against {comparison['incumbent_version']} on {comparison['rows']} "
             f"cold-start rows, normalised AP is {comparison['difference']:+.3f} "
             f"[{comparison['difference_ci'][0]:.3f}, {comparison['difference_ci'][1]:.3f}], "
-            f"winning {comparison['candidate_wins_fraction']:.0%} of resamples{caveat}")
+            f"winning {comparison['candidate_wins_fraction']:.0%} of resamples{caveat}"
+        )
 
     current_cold = current.get("cold_start")
     incumbent = normalised_ap_of(current_cold) if current_cold else None
     if incumbent is None:
-        return True, (f"no readable incumbent to compare against; cold-start normalised AP "
-                      f"{candidate[0]:.3f}")
+        return True, (f"no readable incumbent to compare against; cold-start normalised AP {candidate[0]:.3f}")
 
     point, floor = incumbent
     if candidate[0] < floor:
         return False, (
             f"cold-start normalised AP {candidate[0]:.3f} is below the incumbent's lower bound "
             f"{floor:.3f} (unpaired: the incumbent model could not be loaded, so these are "
-            f"different test sets and the comparison is weak)")
-    return True, (f"cold-start normalised AP {candidate[0]:.3f} "
-                  f"(incumbent {point:.3f}, lower bound {floor:.3f}; unpaired)")
+            f"different test sets and the comparison is weak)"
+        )
+    return True, (
+        f"cold-start normalised AP {candidate[0]:.3f} (incumbent {point:.3f}, lower bound {floor:.3f}; unpaired)"
+    )

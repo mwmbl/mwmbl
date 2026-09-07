@@ -21,6 +21,7 @@ class UsernameOrEmailBackend:
 
     def authenticate(self, request, username=None, password=None, **kwargs):
         from django.contrib.auth import get_user_model
+
         UserModel = get_user_model()
 
         if not username or not password:
@@ -46,6 +47,7 @@ class UsernameOrEmailBackend:
 
     def get_user(self, user_id):
         from django.contrib.auth import get_user_model
+
         UserModel = get_user_model()
         try:
             return UserModel.objects.get(pk=user_id)

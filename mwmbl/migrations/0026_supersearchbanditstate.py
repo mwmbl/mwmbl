@@ -4,21 +4,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0025_supersearchimpression'),
+        ("mwmbl", "0025_supersearchimpression"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='SuperSearchBanditState',
+            name="SuperSearchBanditState",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('site', models.CharField(max_length=128, unique=True)),
-                ('dim', models.IntegerField()),
-                ('a', models.BinaryField()),
-                ('b', models.BinaryField()),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("site", models.CharField(max_length=128, unique=True)),
+                ("dim", models.IntegerField()),
+                ("a", models.BinaryField()),
+                ("b", models.BinaryField()),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
         ),
     ]

@@ -19,6 +19,7 @@ for the queries that surface them, which is what makes the loop converge: every 
 removes at least the copy that was queued, so no document can churn through the queue
 forever.
 """
+
 from collections import defaultdict
 from logging import getLogger
 from typing import Callable, Iterable, Optional
@@ -43,8 +44,9 @@ def pages_for_document(index: TinyIndex, document: Document) -> set[int]:
     return pages
 
 
-def purge_documents(index: TinyIndex, documents: Iterable[Document],
-                    is_blacklisted: Optional[Callable[[str], bool]] = None) -> dict[str, int]:
+def purge_documents(
+    index: TinyIndex, documents: Iterable[Document], is_blacklisted: Optional[Callable[[str], bool]] = None
+) -> dict[str, int]:
     """Remove exactly these documents, by URL, from every page they are filed under.
 
     Returns a count of removed documents by domain.
@@ -94,8 +96,9 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
                             removed_urls_by_domain[document.url].add(document.url)
                 num_stored = page.store(kept)
                 if num_stored < len(kept):
-                    logger.warning("Page %d only held %d of %d documents kept after purging",
-                                   page_index, num_stored, len(kept))
+                    logger.warning(
+                        "Page %d only held %d of %d documents kept after purging", page_index, num_stored, len(kept)
+                    )
         except PageError:
             # The caller has already drained these documents out of the purge queue, so
             # letting one unreadable page propagate would lose the whole batch - including
@@ -105,6 +108,10 @@ def purge_documents(index: TinyIndex, documents: Iterable[Document],
 
     removed_by_domain = {domain: len(urls) for domain, urls in removed_urls_by_domain.items()}
     if removed_by_domain:
-        logger.info("Purged %d documents across %d pages from %d URLs",
-                    sum(removed_by_domain.values()), len(pages_to_urls), len(target_urls))
+        logger.info(
+            "Purged %d documents across %d pages from %d URLs",
+            sum(removed_by_domain.values()),
+            len(pages_to_urls),
+            len(target_urls),
+        )
     return removed_by_domain

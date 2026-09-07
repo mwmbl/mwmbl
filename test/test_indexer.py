@@ -3,8 +3,17 @@ from tempfile import TemporaryDirectory
 
 from zstandard import ZstdCompressor
 
-from mwmbl.tinysearchengine.indexer import STATE_INDEX, TinyIndex, Document, DocumentSource, \
-    DocumentState, _binary_search_fitting_size, _trim_items_to_page, _pad_to_page_size, _get_page_data
+from mwmbl.tinysearchengine.indexer import (
+    STATE_INDEX,
+    Document,
+    DocumentSource,
+    DocumentState,
+    TinyIndex,
+    _binary_search_fitting_size,
+    _get_page_data,
+    _pad_to_page_size,
+    _trim_items_to_page,
+)
 
 
 def test_create_index():
@@ -12,61 +21,64 @@ def test_create_index():
     page_size = 4096
 
     with TemporaryDirectory() as temp_dir:
-        index_path = Path(temp_dir) / 'temp-index.tinysearch'
+        index_path = Path(temp_dir) / "temp-index.tinysearch"
         with TinyIndex.create(Document, str(index_path), num_pages=num_pages, page_size=page_size) as indexer:
             for i in range(num_pages):
                 page = indexer.get_page(i)
                 assert page == []
 
+
 def test_binary_search_fitting_size_all_fit():
-    items = [1,2,3,4,5,6,7,8,9]
+    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
     compressor = ZstdCompressor()
     page_size = 4096
-    count_fit, data = _binary_search_fitting_size(compressor,page_size,items,0,len(items))
-    
+    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
+
     # We should fit everything
     assert count_fit == len(items)
-    
+
+
 def test_binary_search_fitting_size_subset_fit():
-    items = [1,2,3,4,5,6,7,8,9]
+    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
     compressor = ZstdCompressor()
     page_size = 15
-    count_fit, data = _binary_search_fitting_size(compressor,page_size,items,0,len(items))
-    
+    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
+
     # We should not fit everything
     assert count_fit < len(items)
-    
+
+
 def test_binary_search_fitting_size_none_fit():
-    items = [1,2,3,4,5,6,7,8,9]
+    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
     compressor = ZstdCompressor()
     page_size = 5
-    count_fit, data = _binary_search_fitting_size(compressor,page_size,items,0,len(items))
-    
+    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
+
     # We should not fit anything
     assert count_fit == -1
     assert data is None
 
 
 def test_get_page_data_single_doc():
-    document1 = Document(title='title1',url='url1',extract='extract1',score=1.0)
+    document1 = Document(title="title1", url="url1", extract="extract1", score=1.0)
     items = [document1.as_tuple()]
 
     compressor = ZstdCompressor()
     page_size = 4096
-    
+
     # Trim data
-    num_fitting,trimmed_data = _trim_items_to_page(compressor,4096,items)
-    
+    num_fitting, trimmed_data = _trim_items_to_page(compressor, 4096, items)
+
     # We should be able to fit the 1 item into a page
     assert num_fitting == 1
-    
+
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmmed data, then it should be equal to the data we persist
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
     serialized_data, num_stored = _get_page_data(page_size, items)
     assert serialized_data == padded_trimmed_data
     assert num_stored == num_fitting
-    
+
 
 def test_get_page_data_many_docs_all_fit():
     # Build giant documents item
@@ -74,23 +86,23 @@ def test_get_page_data_many_docs_all_fit():
     documents_len = 500
     page_size = 4096
     for x in range(documents_len):
-        txt = 'text{}'.format(x)
-        document = Document(title=txt,url=txt,extract=txt,score=x)
+        txt = "text{}".format(x)
+        document = Document(title=txt, url=txt, extract=txt, score=x)
         documents.append(document)
     items = [document.as_tuple() for document in documents]
-    
+
     # Trim the items
     compressor = ZstdCompressor()
-    num_fitting,trimmed_data = _trim_items_to_page(compressor,page_size,items)
-    
+    num_fitting, trimmed_data = _trim_items_to_page(compressor, page_size, items)
+
     # We should be able to fit all items
     assert num_fitting == documents_len
-    
+
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmed data, then it should be equal to the data we persist
     serialized_data, num_stored = _get_page_data(page_size, items)
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-    
+
     assert serialized_data == padded_trimmed_data
     assert num_stored == num_fitting
 
@@ -101,59 +113,59 @@ def test_get_page_data_many_docs_subset_fit():
     documents_len = 5000
     page_size = 4096
     for x in range(documents_len):
-        txt = 'text{}'.format(x)
-        document = Document(title=txt,url=txt,extract=txt,score=x)
+        txt = "text{}".format(x)
+        document = Document(title=txt, url=txt, extract=txt, score=x)
         documents.append(document)
     items = [document.as_tuple() for document in documents]
-    
+
     # Trim the items
     compressor = ZstdCompressor()
-    num_fitting,trimmed_data = _trim_items_to_page(compressor,page_size,items)
-    
+    num_fitting, trimmed_data = _trim_items_to_page(compressor, page_size, items)
+
     # We should be able to fit a subset of the items onto the page
     assert num_fitting > 1
     assert num_fitting < documents_len
-    
+
     # Compare the trimmed data to the actual data we're persisting
     # We need to pad the trimmed data, then it should be equal to the data we persist
     serialized_data, num_stored = _get_page_data(page_size, items)
     padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-    
+
     assert serialized_data == padded_trimmed_data
     # The count is what store() reports back, so it has to match what was actually kept.
     assert num_stored == num_fitting
 
 
 def test_constructing_document_removes_none():
-    document = Document(title=None,url='url',extract=None,score=1.0)
-    assert document.title == ''
-    assert document.extract == ''
+    document = Document(title=None, url="url", extract=None, score=1.0)
+    assert document.title == ""
+    assert document.extract == ""
 
 
 def test_as_tuple_with_new_fields():
-    doc = Document(title='t', url='u', extract='e', user_ids=[1, 2], last_crawled=1700000000)
-    assert doc.as_tuple() == ('t', 'u', 'e', None, None, None, [1, 2], 1700000000)
+    doc = Document(title="t", url="u", extract="e", user_ids=[1, 2], last_crawled=1700000000)
+    assert doc.as_tuple() == ("t", "u", "e", None, None, None, [1, 2], 1700000000)
 
 
 def test_as_tuple_strips_trailing_nones():
-    doc = Document(title='t', url='u', extract='e')
-    assert doc.as_tuple() == ('t', 'u', 'e')
+    doc = Document(title="t", url="u", extract="e")
+    assert doc.as_tuple() == ("t", "u", "e")
 
 
 def test_as_tuple_only_last_crawled_none_strips_it():
-    doc = Document(title='t', url='u', extract='e', user_ids=[1])
-    assert doc.as_tuple() == ('t', 'u', 'e', None, None, None, [1])
+    doc = Document(title="t", url="u", extract="e", user_ids=[1])
+    assert doc.as_tuple() == ("t", "u", "e", None, None, None, [1])
 
 
 def test_document_round_trip_with_new_fields():
-    doc = Document(title='t', url='u', extract='e', term='q', user_ids=[42], last_crawled=1700000000)
+    doc = Document(title="t", url="u", extract="e", term="q", user_ids=[42], last_crawled=1700000000)
     restored = Document(*doc.as_tuple())
     assert restored.user_ids == [42]
     assert restored.last_crawled == 1700000000
 
 
 def test_document_backward_compat_old_six_element_tuple():
-    old_tuple = ('title', 'https://example.com', 'extract', None, 'term', None)
+    old_tuple = ("title", "https://example.com", "extract", None, "term", None)
     doc = Document(*old_tuple)
     assert doc.user_ids is None
     assert doc.last_crawled is None
@@ -161,8 +173,17 @@ def test_document_backward_compat_old_six_element_tuple():
 
 def test_state_index_matches_the_tuple_layout():
     """get_page blanks the state by position, so the constant has to track as_tuple()."""
-    document = Document("Title", "https://example.com", "Extract", 1.0, "term",
-                        DocumentState.FROM_WIKI, None, 123, DocumentSource.WIKIPEDIA)
+    document = Document(
+        "Title",
+        "https://example.com",
+        "Extract",
+        1.0,
+        "term",
+        DocumentState.FROM_WIKI,
+        None,
+        123,
+        DocumentSource.WIKIPEDIA,
+    )
 
     assert document.as_tuple()[STATE_INDEX] == DocumentState.FROM_WIKI.value
 
@@ -173,15 +194,14 @@ def test_a_document_with_an_unreadable_state_keeps_its_other_values():
     tuple - source follows it on external cache entries - so stripping the tail would take
     source off instead, leave the bad state in place, and drop the document on the retry."""
     with TemporaryDirectory() as temp_dir:
-        index_path = str(Path(temp_dir) / 'temp-index.tinysearch')
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
         TinyIndex.create(Document, index_path, num_pages=2, page_size=4096)
         # title, url, extract, score, term, state, user_ids, last_crawled, source
-        item = ["Title", "https://example.com", "Extract", 1.0, "term", 99, None, 123,
-                DocumentSource.WIKIPEDIA.value]
-        with TinyIndex(Document, index_path, 'w') as index:
+        item = ["Title", "https://example.com", "Extract", 1.0, "term", 99, None, 123, DocumentSource.WIKIPEDIA.value]
+        with TinyIndex(Document, index_path, "w") as index:
             index._write_page([item], 0)
 
-        with TinyIndex(Document, index_path, 'r') as index:
+        with TinyIndex(Document, index_path, "r") as index:
             documents = index.get_page(0)
 
     assert len(documents) == 1

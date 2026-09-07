@@ -28,6 +28,7 @@ Outputs (devdata/judge_train/, refuses to overwrite without --force):
 
 Run:  uv run python scripts/judge_train_prep.py [--force]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,8 +71,7 @@ def split_queries(queries: set[str], buckets: tuple[int, int, int]) -> dict[str,
     hundred queries. Deterministic for a fixed query set; the manifest freezes
     the input files so the set is fixed.
     """
-    ordered = sorted(queries, key=lambda q: hashlib.md5(
-        normalize_query(q).encode()).hexdigest())
+    ordered = sorted(queries, key=lambda q: hashlib.md5(normalize_query(q).encode()).hexdigest())
     n = len(ordered)
     train_end = round(n * buckets[0] / 100)
     val_end = train_end + round(n * buckets[1] / 100)
@@ -87,8 +87,7 @@ def source_eligible_queries(rows: list[dict]) -> set[str]:
     for row in rows:
         if row["ss_source"] and "supersearch" in row["pools"]:
             sources[row["query"]][row["ss_source"]] += 1
-    return {query for query, counts in sources.items()
-            if sum(count >= 2 for count in counts.values()) >= 2}
+    return {query for query, counts in sources.items() if sum(count >= 2 for count in counts.values()) >= 2}
 
 
 def load_pairs() -> list[dict]:
@@ -99,8 +98,8 @@ def load_pairs() -> list[dict]:
 def doc_text(doc: dict, url_fallback: bool) -> str | None:
     title, extract = doc.get("title") or "", doc.get("extract") or ""
     if title and extract:
-        return f"{title}. {extract}"[:judge_bakeoff.DOC_CHARS]
-    return doc["url"][:judge_bakeoff.DOC_CHARS] if url_fallback else None
+        return f"{title}. {extract}"[: judge_bakeoff.DOC_CHARS]
+    return doc["url"][: judge_bakeoff.DOC_CHARS] if url_fallback else None
 
 
 def sha256_file(path: Path) -> str:
@@ -120,15 +119,17 @@ def write_jsonl_gz(path: Path, records: list[dict]) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--force", action="store_true",
-                        help="overwrite an existing devdata/judge_train/")
-    parser.add_argument("--url-fallback", action="store_true",
-                        help="use the URL as doc text when title/extract missing")
+    parser.add_argument("--force", action="store_true", help="overwrite an existing devdata/judge_train/")
+    parser.add_argument(
+        "--url-fallback", action="store_true", help="use the URL as doc text when title/extract missing"
+    )
     args = parser.parse_args()
 
     if OUT_DIR.exists() and any(OUT_DIR.iterdir()) and not args.force:
-        sys.exit(f"{OUT_DIR} already exists; pass --force to regenerate "
-                 "(this invalidates any models trained on the old split)")
+        sys.exit(
+            f"{OUT_DIR} already exists; pass --force to regenerate "
+            "(this invalidates any models trained on the old split)"
+        )
 
     rng = random.Random(SEED)
 
@@ -136,8 +137,7 @@ def main():
     rows = judge_bakeoff.load_dataset()
     queries = {row["query"] for row in rows}
     eligible = source_eligible_queries(rows)
-    print(f"LLM set: {len(rows)} rows, {len(queries)} queries, "
-          f"{len(eligible)} source-eligible")
+    print(f"LLM set: {len(rows)} rows, {len(queries)} queries, {len(eligible)} source-eligible")
 
     llm_split = {}
     llm_split.update(split_queries(eligible, LLM_BUCKETS))
@@ -150,24 +150,24 @@ def main():
         if part == "eval":
             eval_row_indexes.append(i)
         else:
-            pointwise[part].append({
-                "query": row["query"],
-                "doc_text": row["doc_text"],
-                "label": row["overall"] / LABEL_SCALE,
-            })
+            pointwise[part].append(
+                {
+                    "query": row["query"],
+                    "doc_text": row["doc_text"],
+                    "label": row["overall"] / LABEL_SCALE,
+                }
+            )
 
     split_queries_by_part = defaultdict(set)
     for query, part in llm_split.items():
         split_queries_by_part[part].add(query)
     for part in ("train", "val", "eval"):
         n_eligible = len(split_queries_by_part[part] & eligible)
-        print(f"  llm {part}: {len(split_queries_by_part[part])} queries "
-              f"({n_eligible} source-eligible)")
+        print(f"  llm {part}: {len(split_queries_by_part[part])} queries ({n_eligible} source-eligible)")
 
     # --- preference pairs ------------------------------------------------------
     raw_pairs = load_pairs()
-    llm_heldout = {normalize_query(q)
-                   for q in split_queries_by_part["val"] | split_queries_by_part["eval"]}
+    llm_heldout = {normalize_query(q) for q in split_queries_by_part["val"] | split_queries_by_part["eval"]}
 
     pairs, seen = [], set()
     dropped = Counter()
@@ -185,8 +185,9 @@ def main():
         if key[0] in llm_heldout:
             dropped["llm_heldout_leakage"] += 1
             continue
-        pairs.append({"query": pair["query"], "pos": pos_text, "neg": neg_text,
-                      "rule": pair["rule"], "user": pair["user"]})
+        pairs.append(
+            {"query": pair["query"], "pos": pos_text, "neg": neg_text, "rule": pair["rule"], "user": pair["user"]}
+        )
     print(f"pairs: {len(raw_pairs)} raw -> {len(pairs)} kept, dropped {dict(dropped)}")
 
     pair_split = split_queries({pair["query"] for pair in pairs}, PAIR_BUCKETS)
@@ -204,8 +205,7 @@ def main():
             if len(query_pairs) > PAIR_CAP_PER_QUERY:
                 query_pairs = rng.sample(query_pairs, PAIR_CAP_PER_QUERY)
             capped.extend(query_pairs)
-        print(f"  pairs {part}: {len(pair_parts[part])} -> {len(capped)} "
-              f"after per-query cap")
+        print(f"  pairs {part}: {len(pair_parts[part])} -> {len(capped)} after per-query cap")
         pair_parts[part] = capped
 
     # per-user share cap on train only
@@ -220,14 +220,18 @@ def main():
         top_pairs = [p for p in train if p["user"] == top_user]
         kept = set(map(id, rng.sample(top_pairs, keep)))
         train = [p for p in train if p["user"] != top_user or id(p) in kept]
-        print(f"  pairs train: capped {top_user} {top_count} -> {keep} "
-              f"({max_share:.0%} -> {keep / len(train):.0%}); total {len(train)}")
+        print(
+            f"  pairs train: capped {top_user} {top_count} -> {keep} "
+            f"({max_share:.0%} -> {keep / len(train):.0%}); total {len(train)}"
+        )
         pair_parts["train"] = train
 
     for part, part_pairs in pair_parts.items():
         rule_counts = Counter(pair["rule"] for pair in part_pairs)
-        print(f"  pairs {part}: {len(part_pairs)} pairs, "
-              f"{len({p['query'] for p in part_pairs})} queries, rules {dict(rule_counts)}")
+        print(
+            f"  pairs {part}: {len(part_pairs)} pairs, "
+            f"{len({p['query'] for p in part_pairs})} queries, rules {dict(rule_counts)}"
+        )
 
     # --- write outputs ---------------------------------------------------------
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -255,9 +259,11 @@ def main():
         },
     }
     (OUT_DIR / "eval_manifest.json").write_text(json.dumps(manifest, indent=2))
-    print(f"  wrote {OUT_DIR / 'eval_manifest.json'} "
-          f"({len(eval_row_indexes)} eval rows, "
-          f"{manifest['source_eligible_eval_queries']} source-eligible eval queries)")
+    print(
+        f"  wrote {OUT_DIR / 'eval_manifest.json'} "
+        f"({len(eval_row_indexes)} eval rows, "
+        f"{manifest['source_eligible_eval_queries']} source-eligible eval queries)"
+    )
 
 
 if __name__ == "__main__":

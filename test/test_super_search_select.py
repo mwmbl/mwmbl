@@ -1,11 +1,17 @@
 """Tests for Super Search source selection: profiles, features, policy."""
+
 import fakeredis
 import numpy as np
 import pytest
 
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.super_search_select import (
-    features, policy, profiles, rewards, rstats, vectors,
+    features,
+    policy,
+    profiles,
+    rewards,
+    rstats,
+    vectors,
 )
 from mwmbl.tinysearchengine.super_search_select.features import QueryContext, SiteStats
 from mwmbl.tinysearchengine.super_search_select.registry import SiteMeta
@@ -30,6 +36,7 @@ def _doc(title, extract=""):
 # ---------------------------------------------------------------------------
 # Profiles
 # ---------------------------------------------------------------------------
+
 
 def test_unseen_profile_is_none(fake_profile_redis):
     assert profiles.get_profile("nope") == (None, None)
@@ -77,6 +84,7 @@ def test_batch_profiles(fake_profile_redis):
 # Features
 # ---------------------------------------------------------------------------
 
+
 def _qctx(query):
     bow = vectors.project_bow(query, DIM)
     cng = vectors.project_char_ngrams(query, DIM)
@@ -109,6 +117,7 @@ def test_feature_vector_uses_stats():
 # Policy
 # ---------------------------------------------------------------------------
 
+
 def test_select_returns_all_when_fewer_than_k(fake_profile_redis):
     names = ["a", "b", "c"]
     assert set(policy.select_sources("q", names, k=10)) == set(names)
@@ -134,6 +143,7 @@ def test_select_respects_budget_and_records_features(fake_profile_redis):
 # ---------------------------------------------------------------------------
 # Rewards
 # ---------------------------------------------------------------------------
+
 
 def test_compute_rewards_fraction_in_top_k():
     ctx = SelectionContext(selected=["a", "b", "c"], per_source_limit=10)

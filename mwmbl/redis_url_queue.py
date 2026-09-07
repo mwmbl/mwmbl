@@ -8,7 +8,7 @@ from typing import Callable
 
 from redis import Redis
 
-from mwmbl.crawler.domains import DomainLinkDatabase, TOP_DOMAINS
+from mwmbl.crawler.domains import TOP_DOMAINS, DomainLinkDatabase
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
@@ -52,13 +52,14 @@ def get_domain_max_urls(domain: str, curated_domains: set[str]):
 
 
 class RedisURLQueue:
-    def __init__(self, redis: Redis, get_curated_domains_function: Callable[[], set[str]], blacklist_provider=None) -> None:
+    def __init__(
+        self, redis: Redis, get_curated_domains_function: Callable[[], set[str]], blacklist_provider=None
+    ) -> None:
         self.redis = redis
         self.get_curated_domains_function = get_curated_domains_function
         # Curated domains override the blacklist, and the queue already knows where to get
         # them - over HTTP in the standalone crawler, which has no database.
-        self.blacklist_provider = blacklist_provider or get_default_blacklist_provider(
-            get_curated_domains_function)
+        self.blacklist_provider = blacklist_provider or get_default_blacklist_provider(get_curated_domains_function)
 
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()
@@ -67,20 +68,23 @@ class RedisURLQueue:
         domain_scores = {}
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
-                time_since_crawled = (datetime.utcnow() - url.last_crawled
-                                      if url.last_crawled is not None else MAX_TIME_DELTA)
+                time_since_crawled = (
+                    datetime.utcnow() - url.last_crawled if url.last_crawled is not None else MAX_TIME_DELTA
+                )
 
                 # Skip URLs crawled in the last month
                 if time_since_crawled < timedelta(days=30):
                     continue
 
                 domain = parse_url(url.url).netloc
-                url_score = 1/len(url.url)
+                url_score = 1 / len(url.url)
 
                 # Discount URLs that were crawled recently
                 score_multiplier = 1 - math.exp(-time_since_crawled.total_seconds() / SCORE_TIME_CONSTANT)
                 url_score *= score_multiplier
-                logger.info(f"URL score: {url_score}, score multiplier: {score_multiplier} for domain {domain} and age {time_since_crawled}")
+                logger.info(
+                    f"URL score: {url_score}, score multiplier: {score_multiplier} for domain {domain} and age {time_since_crawled}"
+                )
 
                 url_scores[domain].append((url.url, url_score))
                 domain_score = link_db.get_domain_score(domain) + url_score
@@ -131,7 +135,8 @@ class RedisURLQueue:
 
             # Update the domain score if we removed a URL
             new_domain_scores = self.redis.zrangebyscore(
-                DOMAIN_URLS_KEY.format(domain=domain), "-inf", "+inf", start=0, num=1, withscores=True)
+                DOMAIN_URLS_KEY.format(domain=domain), "-inf", "+inf", start=0, num=1, withscores=True
+            )
             if new_domain_scores:
                 new_domain_score = new_domain_scores[0][1]
                 self.redis.zadd(DOMAIN_SCORE_KEY, {domain: new_domain_score}, gt=True)

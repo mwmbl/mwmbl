@@ -15,12 +15,12 @@ running it again picks up where it stopped.
 made up to two years ago, so the further back you reach the more the page text describes a
 site that has changed since a moderator judged it.
 """
+
 import time
 
 from django.core.management.base import BaseCommand
-from django.utils.dateparse import parse_date
-
 from django.db import transaction
+from django.utils.dateparse import parse_date
 
 from mwmbl.crawler.env_vars import CRAWL_DELAY_SECONDS
 from mwmbl.indexer.blacklist_snapshot import get_redis
@@ -34,12 +34,12 @@ class Command(BaseCommand):
     help = "Crawl submitted domains that have no moderation evidence yet"
 
     def add_arguments(self, parser):
-        parser.add_argument("--status", action="append", default=None,
-                            choices=list(DomainSubmission.DOMAIN_SUBMISSION_STATUS))
+        parser.add_argument(
+            "--status", action="append", default=None, choices=list(DomainSubmission.DOMAIN_SUBMISSION_STATUS)
+        )
         parser.add_argument("--since", type=parse_date, default=None)
         parser.add_argument("--limit", type=int, default=None)
-        parser.add_argument("--delay", type=float, default=CRAWL_DELAY_SECONDS,
-                            help="Seconds to wait between domains")
+        parser.add_argument("--delay", type=float, default=CRAWL_DELAY_SECONDS, help="Seconds to wait between domains")
 
     def handle(self, *args, **options):
         domains = self._domains_to_crawl(options)
@@ -54,8 +54,8 @@ class Command(BaseCommand):
                     evidence = store_evidence(domain, crawl_domain(domain, redis))
                     refresh_suggestion(evidence)
                 self.stdout.write(
-                    f"[{number}/{len(domains)}] {domain}: {evidence.suggested_action or '?'} "
-                    f"({evidence.state})")
+                    f"[{number}/{len(domains)}] {domain}: {evidence.suggested_action or '?'} ({evidence.state})"
+                )
             except Exception as exception:
                 # One unfetchable domain must not end a backfill of thousands.
                 store_failure(domain, type(exception).__name__)

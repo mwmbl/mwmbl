@@ -1,4 +1,5 @@
 """ArXiv search via the public Atom API."""
+
 import logging
 from xml.etree.ElementTree import ParseError
 

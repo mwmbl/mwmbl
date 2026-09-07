@@ -7,7 +7,9 @@ These tests require the mwmbl_rank Rust extension to be built:
 Run with:
     pytest test/test_rust_features.py -v
 """
+
 import math
+
 import pytest
 
 # Skip the entire module if the Rust extension is not built
@@ -21,9 +23,7 @@ ATOL = 1e-4
 
 def rust_get_features(terms, title, url, extract, score, is_complete):
     """Call the Rust get_features_py function."""
-    return mwmbl_rank.get_features_py(
-        list(terms), title, url, extract, float(score), is_complete
-    )
+    return mwmbl_rank.get_features_py(list(terms), title, url, extract, float(score), is_complete)
 
 
 # ---------------------------------------------------------------------------
@@ -115,21 +115,15 @@ def test_feature_parity(terms, title, url, extract, score, is_complete):
     assert len(rust_feats) == mwmbl_rank.NUM_FEATURES, (
         f"Expected {mwmbl_rank.NUM_FEATURES} features, got {len(rust_feats)}"
     )
-    assert len(py_feats) == len(rust_feats), (
-        f"Feature count mismatch: Python={len(py_feats)}, Rust={len(rust_feats)}"
-    )
+    assert len(py_feats) == len(rust_feats), f"Feature count mismatch: Python={len(py_feats)}, Rust={len(rust_feats)}"
 
     feature_names = mwmbl_rank.FEATURE_NAMES
     mismatches = []
     for i, (py_val, rust_val) in enumerate(zip(py_feats.values(), rust_feats)):
         if not math.isclose(float(py_val), float(rust_val), abs_tol=ATOL, rel_tol=1e-3):
-            mismatches.append(
-                f"  [{i}] {feature_names[i]}: Python={py_val:.6f}, Rust={rust_val:.6f}"
-            )
+            mismatches.append(f"  [{i}] {feature_names[i]}: Python={py_val:.6f}, Rust={rust_val:.6f}")
 
-    assert not mismatches, (
-        f"Feature mismatches for query={terms!r}, url={url!r}:\n" + "\n".join(mismatches)
-    )
+    assert not mismatches, f"Feature mismatches for query={terms!r}, url={url!r}:\n" + "\n".join(mismatches)
 
 
 def test_feature_names_match():
@@ -139,11 +133,7 @@ def test_feature_names_match():
     py_feats = py_get_features(["test"], "Test", "https://example.com/", "Extract", 1.0, True)
     py_names = list(py_feats.keys())
 
-    assert rust_names == py_names, (
-        f"Feature name mismatch.\n"
-        f"Rust: {rust_names}\n"
-        f"Python: {py_names}"
-    )
+    assert rust_names == py_names, f"Feature name mismatch.\nRust: {rust_names}\nPython: {py_names}"
 
 
 def test_num_features():
@@ -157,16 +147,13 @@ def test_no_nan_in_features():
         rust_feats = rust_get_features(terms, title, url, extract, score, is_complete)
         for i, val in enumerate(rust_feats):
             assert not math.isnan(val), (
-                f"NaN at feature {i} ({mwmbl_rank.FEATURE_NAMES[i]}) "
-                f"for query={terms!r}, url={url!r}"
+                f"NaN at feature {i} ({mwmbl_rank.FEATURE_NAMES[i]}) for query={terms!r}, url={url!r}"
             )
 
 
 def test_domain_score_known_domain():
     """paulgraham.com is in the HN top domains list; domain_score should be > 0."""
-    rust_feats = rust_get_features(
-        ["paul"], "Paul Graham", "https://paulgraham.com/articles.html", "", 1.0, True
-    )
+    rust_feats = rust_get_features(["paul"], "Paul Graham", "https://paulgraham.com/articles.html", "", 1.0, True)
     feature_names = list(mwmbl_rank.FEATURE_NAMES)
     domain_score_idx = feature_names.index("domain_score")
     assert rust_feats[domain_score_idx] > 0.0
@@ -175,9 +162,7 @@ def test_domain_score_known_domain():
 @pytest.mark.skip("TODO: this test is failing because there's a bug")
 def test_wiki_score_zero_for_non_wiki():
     """A non-Wikipedia URL should have wiki_score = 0."""
-    rust_feats = rust_get_features(
-        ["test"], "Test", "https://example.com/test", "", 1.0, True
-    )
+    rust_feats = rust_get_features(["test"], "Test", "https://example.com/test", "", 1.0, True)
     feature_names = list(mwmbl_rank.FEATURE_NAMES)
     wiki_score_idx = feature_names.index("wiki_score")
     assert rust_feats[wiki_score_idx] == 0.0

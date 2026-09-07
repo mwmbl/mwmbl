@@ -18,6 +18,7 @@ Loading mirrors mwmbl.tinysearchengine.super_search_select.judge: a lazy singlet
 lock, memoized failure, and graceful degradation to rules-only when no artifact can be loaded
 so a deploy without one keeps working.
 """
+
 from __future__ import annotations
 
 import io
@@ -37,7 +38,7 @@ from django.utils import timezone
 
 from mwmbl.models import ModerationModelArtifact
 from mwmbl.moderation.features import Featuriser, ModerationExample
-from mwmbl.moderation.rules import APPROVE, EvidenceItem, REJECT, decisive, implied_detail
+from mwmbl.moderation.rules import APPROVE, REJECT, EvidenceItem, decisive, implied_detail
 
 logger = getLogger(__name__)
 
@@ -72,14 +73,14 @@ UNUSABLE_MODEL_REASONS = frozenset({"", "OTHER"})
 
 @dataclass
 class Suggestion:
-    action: str                       # APPROVE | REJECT | UNSURE
+    action: str  # APPROVE | REJECT | UNSURE
     confidence: float
     reason: str = ""
     # What the submitter would be told. Non-empty whenever ``reason`` is OTHER and empty
     # otherwise: the other reasons are their own explanation.
     reason_detail: str = ""
     reason_confidence: float = 0.0
-    reason_source: str = "model"      # model | derived | rule
+    reason_source: str = "model"  # model | derived | rule
     model_version: str = ""
     evidence: list[dict] = field(default_factory=list)
 
@@ -106,8 +107,9 @@ class ModerationModel:
     # answers the question. Instances always set their own in __init__.
     train_domains: set = frozenset()
 
-    def __init__(self, featuriser: Featuriser, reject_head, reason_head, version: str,
-                 train_domains: Optional[set] = None):
+    def __init__(
+        self, featuriser: Featuriser, reject_head, reason_head, version: str, train_domains: Optional[set] = None
+    ):
         self.featuriser = featuriser
         self.reject_head = reject_head
         self.reason_head = reason_head
@@ -132,14 +134,14 @@ class ModerationModel:
         confidences = reason_probabilities[np.arange(len(examples)), best]
 
         return [
-            (float(reject), str(reason), min(float(confidence),
-                                             REASON_CONFIDENCE_CAP.get(str(reason), 1.0)))
+            (float(reject), str(reason), min(float(confidence), REASON_CONFIDENCE_CAP.get(str(reason), 1.0)))
             for reject, reason, confidence in zip(reject_probabilities, reasons, confidences)
         ]
 
 
-def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceItem],
-            model: Optional[ModerationModel] = None) -> Suggestion:
+def suggest(
+    domain: str, page_texts: list[str], evidence_items: list[EvidenceItem], model: Optional[ModerationModel] = None
+) -> Suggestion:
     """Compose a suggestion from the deterministic checks and, where they are silent, the model.
 
     A decisive check always wins. "Homepage returns 404" is not a matter of opinion, and
@@ -164,12 +166,12 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
 
     if model is None:
         # Rules-only degradation: say we don't know rather than inventing a default.
-        return Suggestion(action="UNSURE", confidence=0.0, model_version="",
-                          evidence=[item.to_dict() for item in evidence_items])
+        return Suggestion(
+            action="UNSURE", confidence=0.0, model_version="", evidence=[item.to_dict() for item in evidence_items]
+        )
 
     try:
-        reject_probability, reason, reason_confidence = model.predict(
-            [ModerationExample(domain, page_texts)])[0]
+        reject_probability, reason, reason_confidence = model.predict([ModerationExample(domain, page_texts)])[0]
     except Exception:
         # The same degradation, for a model that loaded but cannot score. is_compatible()
         # catches this at load time, but only for artifacts *older* than the running code -
@@ -178,10 +180,10 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
         # August 2026 that failed all 2,409 rows of a queue rescore and left the task retrying
         # on the same exception. One unscorable domain is a suggestion we do not have; it is
         # not a reason to end the run.
-        logger.exception("Model %s could not score %s; falling back to the deterministic "
-                         "checks", model.version, domain)
-        return Suggestion(action="UNSURE", confidence=0.0, model_version="",
-                          evidence=[item.to_dict() for item in evidence_items])
+        logger.exception("Model %s could not score %s; falling back to the deterministic checks", model.version, domain)
+        return Suggestion(
+            action="UNSURE", confidence=0.0, model_version="", evidence=[item.to_dict() for item in evidence_items]
+        )
 
     if reject_probability >= settings.MODERATION_REJECT_THRESHOLD:
         action, confidence = "REJECT", reject_probability
@@ -197,8 +199,12 @@ def suggest(domain: str, page_texts: list[str], evidence_items: list[EvidenceIte
         # can write the detail that goes with it, and a "Reject - other" button that fails
         # validation when pressed is worse than no suggestion. Back to the moderator, who is
         # the only one who can say what is wrong.
-        return Suggestion(action="UNSURE", confidence=0.0, model_version=model.version,
-                          evidence=[item.to_dict() for item in evidence_items])
+        return Suggestion(
+            action="UNSURE",
+            confidence=0.0,
+            model_version=model.version,
+            evidence=[item.to_dict() for item in evidence_items],
+        )
 
     return Suggestion(
         action=action,
@@ -248,7 +254,10 @@ def get_model() -> Optional[ModerationModel]:
                 logger.warning(
                     "Published artifact %s is not usable by this code; continuing to serve %s. "
                     "This is what a sibling deployment retraining against the same database "
-                    "looks like.", published[0] if published else "(none)", _model.version)
+                    "looks like.",
+                    published[0] if published else "(none)",
+                    _model.version,
+                )
             _loaded_stamp = published
         _checked_at = time.monotonic()
     return _model
@@ -274,9 +283,8 @@ def publish(model: ModerationModel, metrics: dict) -> ModerationModelArtifact:
     # what tells the other workers this row has changed, since the version they compare
     # against has not.
     artifact, _ = ModerationModelArtifact.objects.update_or_create(
-        version=model.version,
-        defaults={"model": buffer.getvalue(), "metrics": metrics,
-                  "created_on": timezone.now()})
+        version=model.version, defaults={"model": buffer.getvalue(), "metrics": metrics, "created_on": timezone.now()}
+    )
     reset_model_cache()
     return artifact
 
@@ -297,8 +305,7 @@ def _published_stamp() -> Optional[tuple[str, datetime]]:
     same day replaces that row's bytes under the same version, and a worker comparing versions
     alone would keep serving the superseded pickle until it restarted.
     """
-    row = (ModerationModelArtifact.objects.order_by("-created_on")
-           .values("version", "created_on").first())
+    row = ModerationModelArtifact.objects.order_by("-created_on").values("version", "created_on").first()
     return (row["version"], row["created_on"]) if row else None
 
 
@@ -327,9 +334,13 @@ def is_compatible(model: ModerationModel) -> bool:
 def _checked(model: Optional[ModerationModel], where: str) -> Optional[ModerationModel]:
     if model is None or is_compatible(model):
         return model
-    logger.error("Moderation model %s from %s was fitted on a different feature set than this "
-                 "code builds; ignoring it and falling back to the deterministic checks. "
-                 "Retrain to publish a compatible artifact.", model.version, where)
+    logger.error(
+        "Moderation model %s from %s was fitted on a different feature set than this "
+        "code builds; ignoring it and falling back to the deterministic checks. "
+        "Retrain to publish a compatible artifact.",
+        model.version,
+        where,
+    )
     return None
 
 
@@ -343,8 +354,7 @@ def _load(version: Optional[str]) -> Optional[ModerationModel]:
         # An artifact pickled by a different scikit-learn version is the realistic case, and
         # it must not take the enrichment task down with it: fall back to the model shipped
         # with this code, which was pickled by the dependencies this code is running.
-        logger.exception("Failed to load moderation model %s; falling back to the bundled "
-                         "artifact", version)
+        logger.exception("Failed to load moderation model %s; falling back to the bundled artifact", version)
         return _load_bundled()
     logger.info("Domain moderation model %s loaded from the database", model.version)
     return _checked(model, "the database")
@@ -356,7 +366,9 @@ def _load_bundled() -> Optional[ModerationModel]:
     if not model_path.exists():
         logger.warning(
             "Domain moderation model not found at %s and none published; suggestions will "
-            "use the deterministic checks only", model_path)
+            "use the deterministic checks only",
+            model_path,
+        )
         return None
     try:
         model = joblib.load(model_path)

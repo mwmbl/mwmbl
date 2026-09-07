@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0022_add_useragreement'),
+        ("mwmbl", "0022_add_useragreement"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='userbilling',
-            name='cancel_at_period_end',
+            model_name="userbilling",
+            name="cancel_at_period_end",
             field=models.BooleanField(default=False),
         ),
     ]

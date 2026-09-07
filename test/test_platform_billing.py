@@ -104,6 +104,7 @@ def test_cancel_subscription_success(api_client, access_token, verified_user_wit
 def test_cancel_subscription_already_canceled(api_client, access_token, verified_user_with_billing):
     """Test that canceling an already canceled subscription returns 409."""
     from unittest.mock import Mock
+
     from polar_sdk.models import AlreadyCanceledSubscription
 
     billing = UserBilling.objects.get(user=verified_user_with_billing)
@@ -112,12 +113,12 @@ def test_cancel_subscription_already_canceled(api_client, access_token, verified
 
     with patch("mwmbl.platform.api.Polar") as MockPolar:
         mock_polar_instance = MockPolar.return_value.__enter__.return_value
-        
+
         # Create a mock response
         mock_response = Mock()
         mock_response.status_code = 409
         mock_response.text = "Subscription is already canceled"
-        
+
         # Create AlreadyCanceledSubscription with proper arguments
         mock_data = Mock()
         mock_data.detail = "Subscription is already canceled"
@@ -226,7 +227,9 @@ def test_uncancel_subscription_unauthenticated(api_client):
 def test_update_spend_limit_requires_subscription_first(api_client, access_token, db):
     """Raising the spend limit above $0 without an active subscription returns 409."""
     user = User.objects.create_user(
-        username="nobilling", email="nobilling@example.com", password="testpass123",
+        username="nobilling",
+        email="nobilling@example.com",
+        password="testpass123",
     )
     EmailAddress.objects.create(user=user, email="nobilling@example.com", verified=True, primary=True)
     token = str(RefreshToken.for_user(user).access_token)
@@ -296,8 +299,10 @@ def test_checkout_uses_single_usage_product(api_client, access_token, verified_u
     """Checkout always targets the single usage product and always sets external_customer_id."""
     from django.conf import settings
 
-    with patch.object(settings, "POLAR_PRODUCT_ID_USAGE", "prod_usage123"), \
-         patch("mwmbl.platform.api.Polar") as MockPolar:
+    with (
+        patch.object(settings, "POLAR_PRODUCT_ID_USAGE", "prod_usage123"),
+        patch("mwmbl.platform.api.Polar") as MockPolar,
+    ):
         mock_polar_instance = MockPolar.return_value.__enter__.return_value
         mock_polar_instance.checkouts.create.return_value.url = "https://polar.example/checkout/abc"
 
@@ -339,6 +344,7 @@ def test_checkout_not_configured_returns_503(api_client, access_token, verified_
 
 def _mock_webhook_event(event_type, user_id, **data_overrides):
     from unittest.mock import Mock
+
     event = Mock()
     event.TYPE = event_type
     event.data = Mock()
@@ -356,7 +362,9 @@ def test_webhook_subscription_active_sets_billing_fields_not_spend_limit(api_cli
     billing.max_monthly_spend_cents = 2_500
     billing.save()
 
-    event = _mock_webhook_event("subscription.active", verified_user_with_billing.id, customer_id="cust_abc", subscription_id="sub_abc")
+    event = _mock_webhook_event(
+        "subscription.active", verified_user_with_billing.id, customer_id="cust_abc", subscription_id="sub_abc"
+    )
     with patch("mwmbl.platform.api.validate_event", return_value=event):
         response = api_client.post(
             "/api/v1/platform/billing/webhook",

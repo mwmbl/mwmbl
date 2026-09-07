@@ -1,4 +1,5 @@
 """Hacker News via the Algolia search API (no auth required)."""
+
 import logging
 
 import httpx

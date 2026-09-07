@@ -4,6 +4,7 @@ Approved domains are subtracted from the remote blocklists when the snapshot is 
 without this an approval would sit inert until the next periodic rebuild - six hours by
 default. The scheduling is debounced because moderators work through the queue in batches.
 """
+
 from datetime import timedelta
 
 import pytest
@@ -61,6 +62,7 @@ def test_a_rebuild_already_due_inside_the_window_suppresses_a_new_one(user):
     """The periodic task's own row counts, so an approval shortly before the six-hourly
     rebuild adds nothing at all."""
     from mwmbl.background import refresh_blacklist_snapshot
+
     refresh_blacklist_snapshot(repeat=6 * 60 * 60, repeat_until=None)
     assert snapshot_tasks().count() == 1
 
@@ -73,6 +75,7 @@ def test_a_rebuild_already_due_inside_the_window_suppresses_a_new_one(user):
 @override_settings(BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS=APPROVAL_DELAY)
 def test_a_rebuild_due_after_the_window_does_not_suppress_a_new_one(user):
     from mwmbl.background import refresh_blacklist_snapshot
+
     refresh_blacklist_snapshot(schedule=APPROVAL_DELAY * 10)
     assert snapshot_tasks().count() == 1
 

@@ -22,9 +22,7 @@ def verified_user(db):
         email="user@example.com",
         password="correctpassword",
     )
-    EmailAddress.objects.create(
-        user=user, email="user@example.com", verified=True, primary=True
-    )
+    EmailAddress.objects.create(user=user, email="user@example.com", verified=True, primary=True)
     return user
 
 
@@ -42,6 +40,7 @@ def _register(client, **extra):
 # ---------------------------------------------------------------------------
 # Registration records consent
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_register_with_opt_in_records_consent(client):
@@ -76,6 +75,7 @@ def test_register_without_source_records_nothing(client):
 # ---------------------------------------------------------------------------
 # Authenticated view + update
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_get_marketing_consent_returns_latest_per_source(client, verified_user, access_token):
@@ -134,6 +134,7 @@ def test_marketing_consent_requires_auth(client):
 # ---------------------------------------------------------------------------
 # One-click unsubscribe (RFC 8058)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_unsubscribe_token_roundtrip_records_opt_out(client, verified_user):

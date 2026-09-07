@@ -1,18 +1,15 @@
 """
 Database storing info on URLs
 """
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from logging import getLogger
-from pathlib import Path
 from typing import Optional
 
 from django.conf import settings
-from psycopg2.extras import execute_values
 from pybloomfilter import BloomFilter
-
-from mwmbl.utils import batch
 
 # URL database configuration constants
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
@@ -30,17 +27,24 @@ class URLStatus(Enum):
     """
     URL state update is idempotent and can only progress forwards.
     """
-    NEW = 0                   # One user has identified this URL
-    QUEUED = 5                # The URL has been queued for crawling
-    ASSIGNED = 10             # The crawler has given the URL to a user to crawl
-    ERROR_TIMEOUT = 20        # Timeout while retrieving
-    ERROR_404 = 30            # 404 response
-    ERROR_OTHER = 40          # Some other error
+
+    NEW = 0  # One user has identified this URL
+    QUEUED = 5  # The URL has been queued for crawling
+    ASSIGNED = 10  # The crawler has given the URL to a user to crawl
+    ERROR_TIMEOUT = 20  # Timeout while retrieving
+    ERROR_404 = 30  # 404 response
+    ERROR_OTHER = 40  # Some other error
     ERROR_ROBOTS_DENIED = 50  # Robots disallow this page
-    CRAWLED = 100             # At least one user has crawled the URL
+    CRAWLED = 100  # At least one user has crawled the URL
 
 
-CRAWLED_STATUSES = {URLStatus.CRAWLED, URLStatus.ERROR_TIMEOUT, URLStatus.ERROR_404, URLStatus.ERROR_OTHER, URLStatus.ERROR_ROBOTS_DENIED}
+CRAWLED_STATUSES = {
+    URLStatus.CRAWLED,
+    URLStatus.ERROR_TIMEOUT,
+    URLStatus.ERROR_404,
+    URLStatus.ERROR_OTHER,
+    URLStatus.ERROR_ROBOTS_DENIED,
+}
 
 
 @dataclass

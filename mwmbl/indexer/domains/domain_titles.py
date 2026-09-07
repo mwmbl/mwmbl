@@ -1,6 +1,7 @@
 """
 Retrieve titles for each domain in the list of top domains
 """
+
 from multiprocessing import Process
 from time import sleep
 from urllib.parse import urlsplit, urlunsplit
@@ -9,7 +10,7 @@ import bs4
 import requests
 
 from mwmbl.indexer.fsqueue import FSQueue, ZstdJsonSerializer
-from mwmbl.indexer.paths import TINYSEARCH_DATA_DIR, DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME
+from mwmbl.indexer.paths import DOMAINS_QUEUE_NAME, DOMAINS_TITLES_QUEUE_NAME, TINYSEARCH_DATA_DIR
 
 NUM_PROCESSES = 10
 
@@ -23,10 +24,10 @@ def get_redirect_no_cookies(url, max_redirects=5):
         print("Unable to get with SSL", e)
         result = requests.get(url, allow_redirects=False, verify=False, timeout=10)
     if result.status_code // 100 == 3:
-        location = result.headers['Location']
-        if not location.startswith('http'):
+        location = result.headers["Location"]
+        if not location.startswith("http"):
             parsed_url = urlsplit(url)
-            location = urlunsplit(parsed_url[:2] + (location, '', ''))
+            location = urlunsplit(parsed_url[:2] + (location, "", ""))
 
         return get_redirect_no_cookies(location, max_redirects=max_redirects - 1)
     return result
@@ -64,8 +65,7 @@ def retrieve_title(domain):
         result = get_redirect_no_cookies(original_url)
         status = result.status_code
         url = result.url
-    except (RecursionError, requests.exceptions.ConnectionError,
-            requests.exceptions.ReadTimeout) as e:
+    except (RecursionError, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
         print("Error retrieving URL", str(e))
         status = None
         url = None
@@ -74,7 +74,7 @@ def retrieve_title(domain):
     if status != 200:
         title = None
     else:
-        title_tag = bs4.BeautifulSoup(result.content, features="lxml").find('title')
+        title_tag = bs4.BeautifulSoup(result.content, features="lxml").find("title")
         title = str(title_tag.string) if title_tag is not None else domain
         # print("Title", domain, title)
     return status, title, url
@@ -87,5 +87,5 @@ def run():
         sleep(3)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

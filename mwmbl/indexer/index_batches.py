@@ -1,10 +1,9 @@
 """
 Index batches that are stored locally.
 """
-import math
-from collections import defaultdict, Counter
+
+from collections import Counter, defaultdict
 from datetime import datetime
-from functools import reduce
 from logging import getLogger
 from typing import Collection, Iterable, Optional
 from urllib.parse import unquote
@@ -14,24 +13,21 @@ from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import process_batch
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
-from mwmbl.indexer.index import tokenize_document, prepare_url_for_tokenizing
+from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.tinysearchengine.indexer import (
-    CURATED_STATES, Document, DocumentState, PageError, TinyIndex)
-from mwmbl.tinysearchengine.rank import score_result, DOCUMENT_FREQUENCIES, N_DOCUMENTS, HeuristicRanker
-from mwmbl.tokenizer import tokenize, get_bigrams
-from mwmbl.utils import add_term_infos, get_domain
+from mwmbl.tinysearchengine.indexer import CURATED_STATES, Document, DocumentState, PageError, TinyIndex
+from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.tokenizer import get_bigrams, tokenize
+from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
 
 MAX_USER_IDS = 2
 
 
-def _merge_user_ids(
-    existing: Optional[list[int]], incoming: Optional[list[int]]
-) -> Optional[list[int]]:
+def _merge_user_ids(existing: Optional[list[int]], incoming: Optional[list[int]]) -> Optional[list[int]]:
     combined = list(existing or [])
-    for uid in (incoming or []):
+    for uid in incoming or []:
         if uid in combined:
             combined.remove(uid)
         combined.append(uid)
@@ -43,7 +39,9 @@ def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[Doc
         for item in batch.items:
             if item.content is not None and not item.content.links_only:
                 yield Document(
-                    item.content.title, item.url, item.content.extract,
+                    item.content.title,
+                    item.url,
+                    item.content.extract,
                     last_crawled=int(item.timestamp / 1000),
                 )
 
@@ -59,7 +57,7 @@ def run(batch_cache: BatchCache, index_path: str):
 
 def get_url_score(url):
     # TODO: compute a proper score for each document
-    return 1/len(url)
+    return 1 / len(url)
 
 
 def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
@@ -113,15 +111,17 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
-    with TinyIndex(Document, index_path, 'w') as indexer:
-        ranker = HeuristicRanker(indexer, None, score_threshold=float('-inf'))
+    with TinyIndex(Document, index_path, "w") as indexer:
+        ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
         for page_index, documents in page_documents.items():
             try:
                 with indexer.page(page_index) as page:
                     combined_documents = combine_documents(page.documents, documents, mark_synced, ranker)
                     num_stored = page.store(combined_documents)
-                    logger.info(f"Storing {num_stored} of {len(combined_documents)} documents for "
-                                f"page {page_index}, originally {len(page.documents)}")
+                    logger.info(
+                        f"Storing {num_stored} of {len(combined_documents)} documents for "
+                        f"page {page_index}, originally {len(page.documents)}"
+                    )
             except PageError:
                 # One page we cannot safely write costs the documents bound for it, not the
                 # rest of the batch. Letting it propagate would abort every remaining page,
@@ -130,17 +130,18 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            term_new_doc_counts.update(document.term for document in combined_documents[:num_stored]
-                                       if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
+            term_new_doc_counts.update(
+                document.term
+                for document in combined_documents[:num_stored]
+                if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX
+            )
     return term_new_doc_counts
 
 
 def _document_token_set(doc: Document) -> set[str]:
     """Unigram tokens of a document's title, URL and extract (no bigrams)."""
     prepared_url = prepare_url_for_tokenizing(unquote(doc.url))
-    return (set(tokenize(doc.title))
-            | set(tokenize(prepared_url))
-            | set(tokenize(doc.extract)))
+    return set(tokenize(doc.title)) | set(tokenize(prepared_url)) | set(tokenize(doc.extract))
 
 
 def index_results_against_query(documents: list[Document], query: str, index_path: str) -> int:
@@ -168,7 +169,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     # Read pass: build per-page candidates and track which (term, url) are new.
     page_documents: dict[int, list[Document]] = defaultdict(list)
     new_urls: set[str] = set()
-    with TinyIndex(Document, index_path, 'r') as indexer:
+    with TinyIndex(Document, index_path, "r") as indexer:
         existing_keys: dict[int, set[tuple]] = {}
         for doc in documents:
             if not (doc.url and doc.title):
@@ -178,10 +179,15 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
                 if not (words <= doc_tokens):
                     continue
                 page = indexer.get_key_page_index(term)
-                page_documents[page].append(Document(
-                    doc.title, doc.url, doc.extract,
-                    term=term, last_crawled=doc.last_crawled,
-                ))
+                page_documents[page].append(
+                    Document(
+                        doc.title,
+                        doc.url,
+                        doc.extract,
+                        term=term,
+                        last_crawled=doc.last_crawled,
+                    )
+                )
                 if page not in existing_keys:
                     try:
                         existing_keys[page] = {(d.term, d.url) for d in indexer.get_page(page)}
@@ -255,7 +261,7 @@ def sort_documents(documents, all_existing_documents, ranker):
 
 def preprocess_documents(documents, index_path):
     page_documents = defaultdict(list)
-    with TinyIndex(Document, index_path, 'r') as indexer:
+    with TinyIndex(Document, index_path, "r") as indexer:
         for i, document in enumerate(documents):
             if i % 1000 == 0:
                 logger.info(f"Preprocessing document {i} of {len(documents)}")
@@ -264,7 +270,9 @@ def preprocess_documents(documents, index_path):
             for token in tokenized.tokens:
                 page = indexer.get_key_page_index(token)
                 term_document = Document(
-                    document.title, document.url, document.extract,
+                    document.title,
+                    document.url,
+                    document.extract,
                     term=token,
                     user_ids=document.user_ids,
                     last_crawled=document.last_crawled,
@@ -278,8 +286,8 @@ def get_url_error_status(item: Item):
     if item.status == 404:
         return URLStatus.ERROR_404
     if item.error is not None:
-        if item.error.name == 'AbortError':
+        if item.error.name == "AbortError":
             return URLStatus.ERROR_TIMEOUT
-        elif item.error.name == 'RobotsDenied':
+        elif item.error.name == "RobotsDenied":
             return URLStatus.ERROR_ROBOTS_DENIED
     return URLStatus.ERROR_OTHER

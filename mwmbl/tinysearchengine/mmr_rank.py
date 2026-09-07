@@ -7,6 +7,7 @@ search() output so near-duplicate / same-domain results are demoted rather than 
 It can wrap any ranker (LTRRanker, HeuristicRanker, ...), which also makes it easy to
 evaluate a ranker with and without diversity.
 """
+
 import math
 from collections import Counter
 from urllib.parse import urlparse
@@ -14,7 +15,6 @@ from urllib.parse import urlparse
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import Ranker
 from mwmbl.tokenizer import tokenize
-
 
 # MMR tuning parameters.
 MMR_LAMBDA = 0.7  # weight on relevance vs. diversity (1.0 = pure relevance, 0.0 = max diversity)
@@ -89,8 +89,7 @@ class MMRRanker:
     def __init__(self, ranker: Ranker):
         self.ranker = ranker
 
-    def search(self, s: str, additional_results: list[Document],
-               use_external_search: bool = True) -> list[Document]:
+    def search(self, s: str, additional_results: list[Document], use_external_search: bool = True) -> list[Document]:
         return mmr_rerank(self.ranker.search(s, additional_results, use_external_search))
 
     def complete(self, q: str):

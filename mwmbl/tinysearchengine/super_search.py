@@ -11,14 +11,15 @@ and used to generate the OpenAPI documentation, so the two cannot drift.
 
 See plan: /api/v2/super-search/
 """
+
 import asyncio
 import copy
 import heapq
-from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
@@ -95,6 +96,7 @@ async def _crawl(url: str):
 # the wrong shape.
 # ---------------------------------------------------------------------------
 
+
 class ResultItem(Schema):
     """A single ranked search result.
 
@@ -102,14 +104,17 @@ class ResultItem(Schema):
     list. ``title`` and ``extract`` are nullable because upstream sources may
     omit them.
     """
-    url: str = Field(description="Canonical URL of the result.",
-                     examples=["https://docs.rs/tokio"])
-    title: str | None = Field(default=None, description="Page title, if known.",
-                              examples=["Tokio — asynchronous Rust runtime"])
-    extract: str | None = Field(default=None, description="Short text snippet, if known.",
-                                examples=["Tokio is an asynchronous runtime for Rust…"])
-    score: float = Field(description="Relevance score (higher is better), rounded to 4 dp.",
-                         examples=[1.8423])
+
+    url: str = Field(description="Canonical URL of the result.", examples=["https://docs.rs/tokio"])
+    title: str | None = Field(
+        default=None, description="Page title, if known.", examples=["Tokio — asynchronous Rust runtime"]
+    )
+    extract: str | None = Field(
+        default=None,
+        description="Short text snippet, if known.",
+        examples=["Tokio is an asynchronous runtime for Rust…"],
+    )
+    score: float = Field(description="Relevance score (higher is better), rounded to 4 dp.", examples=[1.8423])
     source: str = Field(
         description=(
             "Originating source for `result_promoted` (one of the Super Search "
@@ -129,21 +134,23 @@ class ResultItem(Schema):
 
 class SourceStartedEvent(Schema):
     """`source_started` — a source's query task has been launched (one per source)."""
-    source: str = Field(description="Name of the source whose query just started.",
-                        examples=["hn"])
+
+    source: str = Field(description="Name of the source whose query just started.", examples=["hn"])
 
 
 class SourceReturnedEvent(Schema):
     """`source_returned` — a source finished successfully."""
+
     source: str = Field(description="Name of the source that returned.", examples=["github"])
     count: int = Field(description="Number of raw documents the source returned.", examples=[10])
 
 
 class SourceFailedEvent(Schema):
     """`source_failed` — a source errored or timed out and contributed nothing."""
+
     source: str = Field(description="Name of the source that failed.", examples=["arxiv"])
     error: str = Field(
-        description="Failure reason: `\"timeout\"` or an exception message.",
+        description='Failure reason: `"timeout"` or an exception message.',
         examples=["timeout"],
     )
 
@@ -157,20 +164,20 @@ class ResultPromotedEvent(ResultItem):
 
 class PageFetchedEvent(Schema):
     """`page_fetched` — a promoted page was crawled."""
-    url: str = Field(description="URL of the crawled page.",
-                     examples=["https://docs.rs/tokio"])
-    links: int = Field(description="Number of outbound links discovered on the page.",
-                       examples=[42])
+
+    url: str = Field(description="URL of the crawled page.", examples=["https://docs.rs/tokio"])
+    links: int = Field(description="Number of outbound links discovered on the page.", examples=[42])
 
 
 class LinkFollowedEvent(Schema):
     """`link_followed` — an outbound link from a crawled page was fetched and added
     to the candidate pool.
     """
-    url: str = Field(description="URL of the followed link.",
-                     examples=["https://tokio.rs/tokio/tutorial"])
-    from_: str = Field(alias="from", description="URL of the parent page the link came from.",
-                       examples=["https://docs.rs/tokio"])
+
+    url: str = Field(description="URL of the followed link.", examples=["https://tokio.rs/tokio/tutorial"])
+    from_: str = Field(
+        alias="from", description="URL of the parent page the link came from.", examples=["https://docs.rs/tokio"]
+    )
 
 
 class ResultsEvent(Schema):
@@ -179,31 +186,35 @@ class ResultsEvent(Schema):
     Emitted progressively after each source returns, and once more as the final
     ranking. Clients should **replace** their displayed list on each event.
     """
+
     results: list[ResultItem] = Field(description="Ranked results, best first.")
     count: int = Field(description="Number of results in this ranking.", examples=[100])
 
 
 class ErrorEvent(Schema):
     """`error` — the pipeline crashed; the stream will end."""
+
     message: str = Field(description="Error message.", examples=["internal error"])
 
 
 class DoneEvent(Schema):
     """`done` — terminal event sent once when the stream finishes."""
+
     reason: Literal["complete", "timed_out", "cancelled", "error"] = Field(
-        description="Why the stream ended.", examples=["complete"],
+        description="Why the stream ended.",
+        examples=["complete"],
     )
-    elapsed_seconds: float = Field(description="Total wall-clock time for the request.",
-                                   examples=[8.123])
-    monthly_usage: int = Field(description="Caller's Super Search requests used this month "
-                                           "(including this one).", examples=[3])
+    elapsed_seconds: float = Field(description="Total wall-clock time for the request.", examples=[8.123])
+    monthly_usage: int = Field(
+        description="Caller's Super Search requests used this month (including this one).", examples=[3]
+    )
     monthly_limit: int = Field(description="Caller's monthly Super Search quota.", examples=[100])
     pages_indexed: int = Field(
         default=0,
         description="Number of distinct new pages (URLs) added to the Mwmbl index as a "
-                    "result of this search. Can exceed the number of results returned, "
-                    "since a page may match a unigram or bigram of the query without "
-                    "matching the whole query.",
+        "result of this search. Can exceed the number of results returned, "
+        "since a page may match a unigram or bigram of the query without "
+        "matching the whole query.",
         examples=[7],
     )
 
@@ -259,6 +270,7 @@ def _event_oneof() -> list[dict]:
 # SSE helpers
 # ---------------------------------------------------------------------------
 
+
 def _sse_frame(event_type: str, data: Any) -> bytes:
     if isinstance(data, BaseModel):
         data = data.model_dump(by_alias=True)
@@ -287,10 +299,7 @@ def _doc_passes_term_filter(doc: Document, terms: list[str]) -> bool:
     if not terms:
         return True
     text = f"{doc.title or ''} {doc.extract or ''} {doc.url or ''}".lower()
-    matches = sum(
-        1 for t in terms
-        if re.search(rf'\b{re.escape(t)}\b', text)
-    )
+    matches = sum(1 for t in terms if re.search(rf"\b{re.escape(t)}\b", text))
     return matches > len(terms) / 2
 
 
@@ -330,7 +339,7 @@ def _url_term_score(url: str, terms: list[str]) -> int:
     "kagi.com/discord" correctly matches both "kagi" and "discord".
     """
     url_lower = url.lower()
-    return sum(1 for t in terms if re.search(rf'\b{re.escape(t)}\b', url_lower))
+    return sum(1 for t in terms if re.search(rf"\b{re.escape(t)}\b", url_lower))
 
 
 def _title_from_url(url: str) -> str:
@@ -347,10 +356,10 @@ def _title_from_url(url: str) -> str:
     return _URL_TOKEN_RE.sub(" ", last).strip() or parsed.netloc
 
 
-
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
 
 async def _call_source(name: str, fn, client: httpx.AsyncClient, query: str, limit: int):
     try:
@@ -367,8 +376,12 @@ async def _call_source(name: str, fn, client: httpx.AsyncClient, query: str, lim
 
 
 async def _follow_links(
-    parent: Document, query: str, emit, all_docs: list[Document],
-    last_results_key: list, lock: asyncio.Lock,
+    parent: Document,
+    query: str,
+    emit,
+    all_docs: list[Document],
+    last_results_key: list,
+    lock: asyncio.Lock,
 ) -> None:
     """Crawl the parent URL, score its outbound links, and collect the best for final ranking."""
     max_links = settings.SUPER_SEARCH_MAX_LINKS_PER_PAGE
@@ -398,8 +411,7 @@ async def _follow_links(
 
     terms = tokenize(query)
     # Filtered before the crawl below, so a blacklisted link is never even fetched.
-    proxy_docs = _drop_blacklisted(
-        [Document(title=_title_from_url(u), url=u, extract="") for u in raw_links])
+    proxy_docs = _drop_blacklisted([Document(title=_title_from_url(u), url=u, extract="") for u in raw_links])
     proxy_scores = [_url_term_score(d.url, terms) for d in proxy_docs]
 
     ranked = sorted(zip(proxy_docs, proxy_scores), key=lambda x: -x[1])[:max_links]
@@ -423,11 +435,13 @@ async def _follow_links(
         # pseudo-result, not worth ranking or indexing. The extract may be empty.
         crawled_title = (c.get("title") or "").strip()
         if proxy_doc.url and crawled_title:
-            all_docs.append(Document(
-                title=crawled_title,
-                url=proxy_doc.url,
-                extract=c.get("extract") or "",
-            ))
+            all_docs.append(
+                Document(
+                    title=crawled_title,
+                    url=proxy_doc.url,
+                    extract=c.get("extract") or "",
+                )
+            )
 
     await _emit_final_results(query, all_docs, emit, last_results_key, lock)
 
@@ -467,10 +481,13 @@ async def _emit_final_results(
         if key == last_results_key[0]:
             return
         last_results_key[0] = key
-        await emit("results", ResultsEvent(
-            results=[_result_payload(doc, score, "", "final") for doc, score in ranked],
-            count=len(ranked),
-        ))
+        await emit(
+            "results",
+            ResultsEvent(
+                results=[_result_payload(doc, score, "", "final") for doc, score in ranked],
+                count=len(ranked),
+            ),
+        )
 
 
 async def _index_results(query: str, docs: list[Document]) -> int:
@@ -482,17 +499,13 @@ async def _index_results(query: str, docs: list[Document]) -> int:
     if not docs:
         return 0
     try:
-        return await asyncio.to_thread(
-            index_results_against_query, docs, query, str(index_path)
-        )
+        return await asyncio.to_thread(index_results_against_query, docs, query, str(index_path))
     except Exception:
         logger.exception("super-search failed to index results")
         return 0
 
 
-async def _run_pipeline(
-    query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock
-) -> None:
+async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
@@ -528,9 +541,7 @@ async def _run_pipeline(
         source_tasks = []
         for name, fn in SOURCES.items():
             await emit("source_started", SourceStartedEvent(source=name))
-            source_tasks.append(
-                asyncio.create_task(_call_source(name, fn, client, query, per_source_limit))
-            )
+            source_tasks.append(asyncio.create_task(_call_source(name, fn, client, query, per_source_limit)))
 
         secondary: list[asyncio.Task] = []
 
@@ -566,6 +577,7 @@ async def _run_pipeline(
 # ---------------------------------------------------------------------------
 # SSE generator
 # ---------------------------------------------------------------------------
+
 
 async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
     queue: asyncio.Queue = asyncio.Queue()
@@ -618,13 +630,16 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
             event_type, data = item
             yield _sse_frame(event_type, data)
 
-        yield _sse_frame("done", DoneEvent(
-            reason=reason,
-            elapsed_seconds=round(time.monotonic() - started, 3),
-            monthly_usage=monthly_usage,
-            monthly_limit=monthly_limit,
-            pages_indexed=pages_indexed,
-        ))
+        yield _sse_frame(
+            "done",
+            DoneEvent(
+                reason=reason,
+                elapsed_seconds=round(time.monotonic() - started, 3),
+                monthly_usage=monthly_usage,
+                monthly_limit=monthly_limit,
+                pages_indexed=pages_indexed,
+            ),
+        )
     finally:
         if not task.done():
             task.cancel()
@@ -637,6 +652,7 @@ async def _sse_stream(query: str, monthly_usage: int, monthly_limit: int):
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
+
 
 def init_router() -> None:
     @router.get(
@@ -662,23 +678,25 @@ def init_router() -> None:
             "|---|---|---|\n"
             "| `source_started` | `{source}` | A source's query task was launched (one per source). |\n"
             "| `source_returned` | `{source, count}` | A source finished; `count` is the number of raw results it returned. |\n"
-            "| `source_failed` | `{source, error}` | A source errored or timed out; `error` is `\"timeout\"` or an exception message. |\n"
-            "| `result_promoted` | result item (`origin=\"direct\"`) | A result entered the live top-K and will have its outbound links followed. |\n"
+            '| `source_failed` | `{source, error}` | A source errored or timed out; `error` is `"timeout"` or an exception message. |\n'
+            '| `result_promoted` | result item (`origin="direct"`) | A result entered the live top-K and will have its outbound links followed. |\n'
             "| `page_fetched` | `{url, links}` | A promoted page was crawled; `links` is the number of outbound links found. |\n"
             "| `link_followed` | `{url, from}` | An outbound link from a crawled page was fetched and added to the candidate pool. |\n"
-            "| `results` | `{results[], count}` | The current authoritative ranking (items have `origin=\"final\"`). Emitted progressively after each source and once more at the end — **replace** your displayed list on each. |\n"
+            '| `results` | `{results[], count}` | The current authoritative ranking (items have `origin="final"`). Emitted progressively after each source and once more at the end — **replace** your displayed list on each. |\n'
             "| `error` | `{message}` | The pipeline crashed; the stream ends. |\n"
             "| `done` | `{reason, elapsed_seconds, monthly_usage, monthly_limit, pages_indexed}` | Terminal event. `reason` is `complete`, `timed_out`, `cancelled` or `error`; `pages_indexed` is the number of new pages added to the Mwmbl index by this search. |\n\n"
             "The exact JSON shape of every payload is given by the `oneOf` schema "
             "of the 200 response below."
         ),
         openapi_extra={
-            "parameters": [{
-                "name": "q",
-                "in": "query",
-                "required": True,
-                "schema": {"type": "string", "example": "rust async runtimes"},
-            }],
+            "parameters": [
+                {
+                    "name": "q",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string", "example": "rust async runtimes"},
+                }
+            ],
             "responses": {
                 "200": {
                     "description": (

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from ninja import Schema, Field
+from ninja import Field, Schema
 
 
 class Link(Schema):
@@ -131,8 +131,7 @@ class NewBatchRequest(Schema):
 
     user_id: str = Field(
         description=(
-            "The crawler's private user ID (a 64-character hex string). "
-            "Used to assign URLs to this specific crawler."
+            "The crawler's private user ID (a 64-character hex string). Used to assign URLs to this specific crawler."
         ),
         example="a" * 64,
     )

@@ -11,6 +11,7 @@ The page is read-only, and deliberately cheap: the snapshot's size comes from ST
 page load never pulls the ~11 MB blob out of Redis, and the queue is sampled with
 SRANDMEMBER so looking at it cannot consume it.
 """
+
 import os
 from datetime import datetime, timedelta
 from logging import getLogger
@@ -25,7 +26,10 @@ from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
 from mwmbl.indexer.blacklist_snapshot import (
-    HASH_DTYPE, SNAPSHOT_KEY, SNAPSHOT_VERSION_KEY, get_snapshot_blacklist,
+    HASH_DTYPE,
+    SNAPSHOT_KEY,
+    SNAPSHOT_VERSION_KEY,
+    get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
 
@@ -132,11 +136,13 @@ def _task_status() -> list[dict]:
     statuses = []
     for task_name in task_names:
         last_completed = CompletedTask.objects.filter(task_name=task_name).order_by("-run_at").first()
-        statuses.append({
-            "name": task_name,
-            "task": pending.get(task_name),
-            "last_completed": last_completed,
-        })
+        statuses.append(
+            {
+                "name": task_name,
+                "task": pending.get(task_name),
+                "last_completed": last_completed,
+            }
+        )
     return statuses
 
 

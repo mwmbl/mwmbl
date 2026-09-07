@@ -7,6 +7,7 @@ making the system more flexible and testable.
 
 from abc import ABC, abstractmethod
 from typing import Callable, Optional, Set
+
 import requests
 
 
@@ -26,10 +27,10 @@ def domain_and_parents(domain: str) -> list[str]:
         >>> domain_and_parents("nyou.booru.org")
         ['nyou.booru.org', 'booru.org']
     """
-    parts = domain.split('.')
+    parts = domain.split(".")
     if len(parts) < 2:
         return [domain]
-    return ['.'.join(parts[i:]) for i in range(len(parts) - 1)]
+    return [".".join(parts[i:]) for i in range(len(parts) - 1)]
 
 
 def domains_to_unblock(curated_domains: Set[str]) -> Set[str]:
@@ -41,13 +42,13 @@ def domains_to_unblock(curated_domains: Set[str]) -> Set[str]:
     entry on the strength of an approved subdomain would unblock every one of its siblings.
     """
     unblocked = set(curated_domains)
-    unblocked.update(domain[len("www."):] for domain in curated_domains if domain.startswith("www."))
+    unblocked.update(domain[len("www.") :] for domain in curated_domains if domain.startswith("www."))
     return unblocked
 
 
 class BlacklistProvider(ABC):
     """Abstract base class for blacklist providers."""
-    
+
     @abstractmethod
     def is_domain_blacklisted(self, domain: str) -> bool:
         """Check if a domain should be blacklisted."""
@@ -56,10 +57,10 @@ class BlacklistProvider(ABC):
 
 class StaticBlacklistProvider(BlacklistProvider):
     """Provider that uses a static set of domains."""
-    
+
     def __init__(self, domains: Set[str]):
         self.domains = domains.copy()
-    
+
     def is_domain_blacklisted(self, domain: str) -> bool:
         """Check if domain is in the static blacklist."""
         return domain in self.domains
@@ -67,16 +68,16 @@ class StaticBlacklistProvider(BlacklistProvider):
 
 class BuiltInRulesBlacklistProvider(BlacklistProvider):
     """Provider that implements the built-in spam detection and exclusion rules."""
-    
+
     def __init__(self):
         # Import here to avoid circular imports
-        from mwmbl.settings import EXCLUDED_DOMAINS, DOMAIN_BLACKLIST_REGEX
         from mwmbl.hn_top_domains_filtered import DOMAINS
-        
+        from mwmbl.settings import DOMAIN_BLACKLIST_REGEX, EXCLUDED_DOMAINS
+
         self.excluded_domains = EXCLUDED_DOMAINS
         self.blacklist_regex = DOMAIN_BLACKLIST_REGEX
         self.trusted_domains = DOMAINS
-    
+
     def is_domain_blacklisted(self, domain: str) -> bool:
         """Check if domain should be blacklisted based on built-in rules."""
         # Check excluded domains. Matched as a suffix, so an apex entry covers its
@@ -84,11 +85,11 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
         # that host and below, which is what they were added for.
         if any(candidate in self.excluded_domains for candidate in domain_and_parents(domain)):
             return True
-        
+
         # Check regex patterns (adult/spam content)
         if self.blacklist_regex.search(domain):
             return True
-        
+
         # Trusted domains are never blacklisted
         if domain in self.trusted_domains:
             return False
@@ -101,14 +102,14 @@ class BuiltInRulesBlacklistProvider(BlacklistProvider):
         # groups.google.com, images.example.com and every other three-label .com site with
         # a 6- or 8-character subdomain. Generated-hostname spam is better handled by the
         # threat feed than by guessing at label lengths.
-        domain_parts = domain.split('.')
+        domain_parts = domain.split(".")
 
         # Domains with all-numeric generated-looking subdomains, e.g. 59648.etnomurcia.com.
         # Restricted to len > 2 so this doesn't catch a numeric *apex* domain like 350.org,
         # where the numeric part is the actual site name rather than a generated subdomain.
         if len(domain_parts) > 2 and set(domain_parts[0]) <= set("1234567890"):
             return True
-        
+
         return False
 
 
@@ -158,13 +159,13 @@ class RemoteListBlacklistProvider(BlacklistProvider):
         response.raise_for_status()
 
         domains = set()
-        for line in response.text.split('\n'):
-            line = line.split('#')[0].strip()
+        for line in response.text.split("\n"):
+            line = line.split("#")[0].strip()
             if not line:
                 continue
             # Hosts format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
             parts = line.split()
-            domains.add(parts[1] if len(parts) >= 2 and parts[0] in ('0.0.0.0', '127.0.0.1') else parts[0])
+            domains.add(parts[1] if len(parts) >= 2 and parts[0] in ("0.0.0.0", "127.0.0.1") else parts[0])
 
         self._domains = domains
         return domains
@@ -198,16 +199,16 @@ class HaGeZiBlacklistProvider(RemoteListBlacklistProvider):
     """
 
     HAGEZI_URLS = {
-        'light': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt',
-        'normal': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt',
-        'pro': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt',
-        'ultimate': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt',
-        'tif': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt',
-        'tif_medium': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt',
-        'tif_mini': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt',
+        "light": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
+        "normal": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
+        "pro": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
+        "ultimate": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt",
+        "tif": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt",
+        "tif_medium": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt",
+        "tif_mini": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt",
     }
 
-    def __init__(self, list_type: str = 'tif_medium'):
+    def __init__(self, list_type: str = "tif_medium"):
         if list_type not in self.HAGEZI_URLS:
             raise ValueError(f"Invalid list_type. Must be one of: {list(self.HAGEZI_URLS.keys())}")
 
@@ -222,7 +223,7 @@ class AdultContentBlacklistProvider(RemoteListBlacklistProvider):
     regex/domain rules (aimed at spam and a handful of known-bad domains) don't.
     """
 
-    URL = 'https://raw.githubusercontent.com/blocklistproject/Lists/master/porn.txt'
+    URL = "https://raw.githubusercontent.com/blocklistproject/Lists/master/porn.txt"
 
     def __init__(self):
         super().__init__(self.URL)
@@ -237,8 +238,7 @@ class CombinedBlacklistProvider(BlacklistProvider):
     crawler - and the result is resolved once and held, like the remote lists themselves.
     """
 
-    def __init__(self, providers: list[BlacklistProvider],
-                 get_exempt_domains: Optional[Callable[[], Set[str]]] = None):
+    def __init__(self, providers: list[BlacklistProvider], get_exempt_domains: Optional[Callable[[], Set[str]]] = None):
         self.providers = providers
         self.get_exempt_domains = get_exempt_domains
         self._exempt_domains: Optional[Set[str]] = None
@@ -248,7 +248,7 @@ class CombinedBlacklistProvider(BlacklistProvider):
             return False
         if self._exempt_domains is None:
             self._exempt_domains = domains_to_unblock(self.get_exempt_domains())
-        apex = domain[len("www."):] if domain.startswith("www.") else domain
+        apex = domain[len("www.") :] if domain.startswith("www.") else domain
         return domain in self._exempt_domains or apex in self._exempt_domains
 
     def is_domain_blacklisted(self, domain: str) -> bool:
@@ -263,5 +263,5 @@ class CombinedBlacklistProvider(BlacklistProvider):
             except Exception as e:
                 print(f"Warning: Error from blacklist provider {provider.__class__.__name__}: {e}")
                 continue
-        
+
         return False

@@ -1,8 +1,8 @@
 """Unit tests for Super Search vector utilities (no DB / Redis needed)."""
+
 import numpy as np
 
 from mwmbl.tinysearchengine.super_search_select import vectors
-
 
 DIM = 64
 

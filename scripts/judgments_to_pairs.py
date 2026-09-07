@@ -33,6 +33,7 @@ first filled from a free local lookup (every documented URL in the export plus
 the Pass-2 candidate pool); ``--backfill`` then crawls the remainder over HTTP
 (checkpointed to backfill_cache.jsonl.gz, resumable).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,10 +44,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-PAIR_CAP = 5              # max losers per positive event
-MIN_ADDS_FOR_SPAM = 20    # dominance filter threshold
+PAIR_CAP = 5  # max losers per positive event
+MIN_ADDS_FOR_SPAM = 20  # dominance filter threshold
 SPAM_DOMAIN_SHARE = 0.5
-APPROVED_STATE = 7        # DocumentState values >= this are curated/approved
+APPROVED_STATE = 7  # DocumentState values >= this are curated/approved
 PASS2_POOL = Path("devdata/llm_relabel/pass2_pool.jsonl")
 
 
@@ -72,7 +73,8 @@ NSFW_RE = re.compile(
     r"brazzers|onlyfans|camgirls?|camsex|livejasmin|chaturbate|stripchat|"
     r"erotic\w*|escorts?|sex|sexcam\w*|blowjob\w*|anal|cumshot\w*|gangbang\w*|"
     r"nudes?|naked|fetish\w*|bdsm|dildos?|masturbat\w*)\b",
-    re.IGNORECASE)
+    re.IGNORECASE,
+)
 
 
 def is_nsfw(*texts) -> bool:
@@ -124,8 +126,7 @@ def find_spammers(curations: list[dict], user_curations: list[dict]) -> dict[str
 
 
 def flagged_users(curations: list[dict]) -> set[str]:
-    return {c["user"] for c in curations
-            if c["user"] and any(f["status"] == "ACCEPTED" for f in c["flags"])}
+    return {c["user"] for c in curations if c["user"] and any(f["status"] == "ACCEPTED" for f in c["flags"])}
 
 
 class TextLookup:
@@ -149,9 +150,11 @@ class TextLookup:
 
 
 def slim(doc: dict) -> dict:
-    return {"url": doc["url"],
-            "title": (doc.get("title") or "").strip() or None,
-            "extract": (doc.get("extract") or "").strip() or None}
+    return {
+        "url": doc["url"],
+        "title": (doc.get("title") or "").strip() or None,
+        "extract": (doc.get("extract") or "").strip() or None,
+    }
 
 
 class PairEmitter:
@@ -175,12 +178,16 @@ class PairEmitter:
             if key in self.seen:
                 continue
             self.seen.add(key)
-            self.pairs.append({
-                "query": query,
-                "pos": slim(self.lookup.fill(pos)),
-                "neg": slim(self.lookup.fill(neg)),
-                "rule": rule, "table": table, "user": user,
-            })
+            self.pairs.append(
+                {
+                    "query": query,
+                    "pos": slim(self.lookup.fill(pos)),
+                    "neg": slim(self.lookup.fill(neg)),
+                    "rule": rule,
+                    "table": table,
+                    "user": user,
+                }
+            )
             self.rule_counts[rule] += 1
 
 
@@ -190,18 +197,15 @@ def pairs_from_curation(curation: dict, emitter: PairEmitter):
     original, new = curation["original_results"], curation["new_results"]
     original_urls = {d["url"] for d in original}
     original_rank = {d["url"]: i for i, d in enumerate(original)}
-    curated_now = {d["url"] for d in new
-                   if d["url"] not in original_urls or (d.get("state") or 0) >= APPROVED_STATE}
+    curated_now = {d["url"] for d in new if d["url"] not in original_urls or (d.get("state") or 0) >= APPROVED_STATE}
 
     for position, doc in enumerate(new):
-        below = [d for d in new[position + 1:]
-                 if d["url"] in original_urls and d["url"] not in curated_now]
+        below = [d for d in new[position + 1 :] if d["url"] in original_urls and d["url"] not in curated_now]
         if doc["url"] not in original_urls:
             emitter.emit(query, doc, below, "add", "curations", user)
         else:
             # order inversions: originals this doc now outranks but didn't before
-            passed = [d for d in below
-                      if original_rank[d["url"]] < original_rank[doc["url"]]]
+            passed = [d for d in below if original_rank[d["url"]] < original_rank[doc["url"]]]
             if passed:
                 rule = "approve" if (doc.get("state") or 0) >= APPROVED_STATE else "move"
                 emitter.emit(query, doc, passed, rule, "curations", user)
@@ -210,7 +214,7 @@ def pairs_from_curation(curation: dict, emitter: PairEmitter):
 def pairs_from_user_curations(events: list[dict], emitter: PairEmitter, pointwise: list[dict]):
     """Old interface: per-action events; results list is post-action."""
     last_results: dict[tuple, list[dict]] = {}
-    for event in sorted(events, key=lambda e: (e["timestamp"] or "")):
+    for event in sorted(events, key=lambda e: e["timestamp"] or ""):
         query, user = event["query"], event["user"]
         if not query:
             continue
@@ -221,20 +225,18 @@ def pairs_from_user_curations(events: list[dict], emitter: PairEmitter, pointwis
         if kind == "curate_move":
             old, new = action.get("old_index"), action.get("new_index")
             if old is not None and new is not None and 0 <= new < old <= len(results):
-                emitter.emit(query, results[new], results[new + 1:old + 1],
-                             "move", "user_curations", user)
+                emitter.emit(query, results[new], results[new + 1 : old + 1], "move", "user_curations", user)
         elif kind == "curate_add":
             index = action.get("insert_index")
             if index is not None and 0 <= index < len(results):
-                emitter.emit(query, results[index], results[index + 1:],
-                             "add", "user_curations", user)
+                emitter.emit(query, results[index], results[index + 1 :], "add", "user_curations", user)
         elif kind == "curate_delete":
             index = action.get("delete_index")
             previous = last_results.get(session)
             if previous and index is not None and 0 <= index < len(previous):
                 deleted = previous[index]
                 kept = {d["url"] for d in results}
-                winners = [d for d in previous[index + 1:] if d["url"] in kept]
+                winners = [d for d in previous[index + 1 :] if d["url"] in kept]
                 for winner in winners[:PAIR_CAP]:
                     emitter.emit(query, winner, [deleted], "delete", "user_curations", user)
         elif kind == "curate_validate":
@@ -243,8 +245,9 @@ def pairs_from_user_curations(events: list[dict], emitter: PairEmitter, pointwis
                 doc = slim(emitter.lookup.fill(results[index]))
                 if is_nsfw(query, doc["url"], doc["title"], doc["extract"]):
                     continue
-                pointwise.append({"query": query, **doc, "label": 1,
-                                  "rule": "validate", "table": "user_curations", "user": user})
+                pointwise.append(
+                    {"query": query, **doc, "label": 1, "rule": "validate", "table": "user_curations", "user": user}
+                )
 
         if results:
             last_results[session] = results
@@ -252,8 +255,8 @@ def pairs_from_user_curations(events: list[dict], emitter: PairEmitter, pointwis
 
 TITLE_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 META_DESC_RE = re.compile(
-    rb'<meta[^>]+(?:name|property)=["\'](?:og:)?description["\'][^>]+content=["\']([^"\']+)',
-    re.IGNORECASE)
+    rb'<meta[^>]+(?:name|property)=["\'](?:og:)?description["\'][^>]+content=["\']([^"\']+)', re.IGNORECASE
+)
 PARAGRAPH_RE = re.compile(rb"<p[^>]*>(.*?)</p>", re.IGNORECASE | re.DOTALL)
 TAG_RE = re.compile(rb"<[^>]+>")
 
@@ -261,6 +264,7 @@ TAG_RE = re.compile(rb"<[^>]+>")
 def extract_text(body: bytes) -> tuple[str | None, str | None]:
     def clean(raw: bytes) -> str:
         import html
+
         return html.unescape(TAG_RE.sub(b" ", raw).decode("utf-8", "replace")).strip()
 
     title_match = TITLE_RE.search(body)
@@ -275,8 +279,9 @@ def extract_text(body: bytes) -> tuple[str | None, str | None]:
     return title, None
 
 
-def crawl_backfill(urls: list[str], cache_path: Path, limit: int | None,
-                   workers: int = 16) -> dict[str, tuple[str, str]]:
+def crawl_backfill(
+    urls: list[str], cache_path: Path, limit: int | None, workers: int = 16
+) -> dict[str, tuple[str, str]]:
     """Fetch missing texts over HTTP in parallel; checkpointed and resumable."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -302,9 +307,11 @@ def crawl_backfill(urls: list[str], cache_path: Path, limit: int | None,
             row["status"] = f"error: {type(exc).__name__}"
         return row
 
-    with gzip.open(cache_path, "at") as out, \
-            httpx.Client(follow_redirects=True, timeout=10.0, headers=headers) as client, \
-            ThreadPoolExecutor(max_workers=workers) as pool:
+    with (
+        gzip.open(cache_path, "at") as out,
+        httpx.Client(follow_redirects=True, timeout=10.0, headers=headers) as client,
+        ThreadPoolExecutor(max_workers=workers) as pool,
+    ):
         futures = [pool.submit(fetch, url, client) for url in todo]
         for n, future in enumerate(as_completed(futures), 1):
             row = future.result()
@@ -314,15 +321,15 @@ def crawl_backfill(urls: list[str], cache_path: Path, limit: int | None,
                 out.flush()
                 print(f"  fetched {n}/{len(todo)}", flush=True)
 
-    return {u: (r["title"], r["extract"]) for u, r in cache.items()
-            if r.get("title") and r.get("extract")}
+    return {u: (r["title"], r["extract"]) for u, r in cache.items() if r.get("title") and r.get("extract")}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--export-dir", default="devdata/judgments_export", type=Path)
-    parser.add_argument("--backfill", action="store_true",
-                        help="crawl URLs whose title/extract can't be filled locally")
+    parser.add_argument(
+        "--backfill", action="store_true", help="crawl URLs whose title/extract can't be filled locally"
+    )
     parser.add_argument("--backfill-limit", type=int, default=None)
     args = parser.parse_args()
 
@@ -333,9 +340,11 @@ def main():
     spammers = find_spammers(curations, user_curations)
     flagged = flagged_users(curations)
     dropped_users = set(spammers) | flagged
-    print(f"dropping {len(dropped_users)} users: "
-          f"{len(spammers)} domain spammers {dict(list(spammers.items())[:5])}, "
-          f"{len(flagged)} with accepted flags")
+    print(
+        f"dropping {len(dropped_users)} users: "
+        f"{len(spammers)} domain spammers {dict(list(spammers.items())[:5])}, "
+        f"{len(flagged)} with accepted flags"
+    )
 
     lookup = TextLookup()
     for curation in curations:
@@ -354,22 +363,19 @@ def main():
     pointwise: list[dict] = []
     report = {"dropped_users": len(dropped_users), "spammer_domains": spammers}
 
-    kept = [c for c in curations
-            if c["user"] not in dropped_users and not is_urlish_query(c["query"])]
+    kept = [c for c in curations if c["user"] not in dropped_users and not is_urlish_query(c["query"])]
     urlish = sum(1 for c in curations if is_urlish_query(c["query"]))
     no_ops = 0
     for curation in kept:
-        if [d["url"] for d in curation["original_results"]] == \
-                [d["url"] for d in curation["new_results"]]:
+        if [d["url"] for d in curation["original_results"]] == [d["url"] for d in curation["new_results"]]:
             no_ops += 1
             continue
         pairs_from_curation(curation, emitter)
-    report["curations"] = {"total": len(curations), "kept": len(kept),
-                           "urlish_queries": urlish, "no_ops": no_ops}
+    report["curations"] = {"total": len(curations), "kept": len(kept), "urlish_queries": urlish, "no_ops": no_ops}
 
-    kept_events = [e for e in user_curations
-                   if e["user"] not in dropped_users
-                   and not (e["query"] and is_urlish_query(e["query"]))]
+    kept_events = [
+        e for e in user_curations if e["user"] not in dropped_users and not (e["query"] and is_urlish_query(e["query"]))
+    ]
     pairs_from_user_curations(kept_events, emitter, pointwise)
     report["user_curations"] = {"total": len(user_curations), "kept": len(kept_events)}
 
@@ -379,9 +385,16 @@ def main():
         filled = lookup.fill({"url": vote["url"], "title": None, "extract": None})
         if is_nsfw(vote["query"], vote["url"], filled.get("title"), filled.get("extract")):
             continue
-        pointwise.append({"query": vote["query"], **slim(filled),
-                          "label": 1 if vote["vote_type"] == "upvote" else -1,
-                          "rule": "vote", "table": "votes", "user": vote["user"]})
+        pointwise.append(
+            {
+                "query": vote["query"],
+                **slim(filled),
+                "label": 1 if vote["vote_type"] == "upvote" else -1,
+                "rule": "vote",
+                "table": "votes",
+                "user": vote["user"],
+            }
+        )
 
     def missing_urls() -> list[str]:
         urls = set()
@@ -393,8 +406,7 @@ def main():
         return sorted(urls)
 
     if args.backfill:
-        crawled = crawl_backfill(missing_urls(), args.export_dir / "backfill_cache.jsonl.gz",
-                                 args.backfill_limit)
+        crawled = crawl_backfill(missing_urls(), args.export_dir / "backfill_cache.jsonl.gz", args.backfill_limit)
         lookup.texts.update(crawled)
         for pair in emitter.pairs:
             for side in ("pos", "neg"):
@@ -410,14 +422,15 @@ def main():
         for point in pointwise:
             f.write(json.dumps(point) + "\n")
 
-    complete = sum(1 for p in emitter.pairs
-                   if all(p[s]["title"] and p[s]["extract"] for s in ("pos", "neg")))
-    report["pairs"] = {"total": len(emitter.pairs), "by_rule": dict(emitter.rule_counts),
-                       "distinct_queries": len({p["query"] for p in emitter.pairs}),
-                       "both_sides_have_text": complete,
-                       "urls_still_missing_text": len(missing_urls())}
-    report["pointwise"] = {"total": len(pointwise),
-                           "by_rule": dict(Counter(p["rule"] for p in pointwise))}
+    complete = sum(1 for p in emitter.pairs if all(p[s]["title"] and p[s]["extract"] for s in ("pos", "neg")))
+    report["pairs"] = {
+        "total": len(emitter.pairs),
+        "by_rule": dict(emitter.rule_counts),
+        "distinct_queries": len({p["query"] for p in emitter.pairs}),
+        "both_sides_have_text": complete,
+        "urls_still_missing_text": len(missing_urls()),
+    }
+    report["pointwise"] = {"total": len(pointwise), "by_rule": dict(Counter(p["rule"] for p in pointwise))}
     print(json.dumps(report, indent=2))
     (args.export_dir / "transform_report.json").write_text(json.dumps(report, indent=2))
 

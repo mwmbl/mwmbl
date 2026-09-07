@@ -4,53 +4,68 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0033_fix_domain_submission_names'),
+        ("mwmbl", "0033_fix_domain_submission_names"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='domainsubmission',
-            name='suggested_reason',
+            model_name="domainsubmission",
+            name="suggested_reason",
             field=models.CharField(blank=True, max_length=20),
         ),
         migrations.AddField(
-            model_name='domainsubmission',
-            name='suggested_status',
+            model_name="domainsubmission",
+            name="suggested_status",
             field=models.CharField(blank=True, max_length=20),
         ),
         migrations.AddField(
-            model_name='domainsubmission',
-            name='suggestion_confidence',
+            model_name="domainsubmission",
+            name="suggestion_confidence",
             field=models.FloatField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='domainsubmission',
-            name='suggestion_model_version',
+            model_name="domainsubmission",
+            name="suggestion_model_version",
             field=models.CharField(blank=True, max_length=50),
         ),
         migrations.CreateModel(
-            name='DomainEvidence',
+            name="DomainEvidence",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('domain', models.CharField(max_length=300, unique=True)),
-                ('state', models.CharField(choices=[('PENDING', 'Queued for crawling'), ('READY', 'Crawled and scored'), ('FAILED', 'Crawling failed')], default='PENDING', max_length=20)),
-                ('fetched_at', models.DateTimeField(blank=True, null=True)),
-                ('http_status', models.IntegerField(blank=True, null=True)),
-                ('final_domain', models.CharField(blank=True, max_length=300)),
-                ('error', models.CharField(blank=True, max_length=100)),
-                ('pages', models.JSONField(default=list)),
-                ('signals', models.JSONField(default=dict)),
-                ('suggested_action', models.CharField(blank=True, max_length=10)),
-                ('suggested_reason', models.CharField(blank=True, max_length=20)),
-                ('confidence', models.FloatField(blank=True, null=True)),
-                ('review_priority', models.FloatField(blank=True, null=True)),
-                ('evidence', models.JSONField(default=list)),
-                ('model_version', models.CharField(blank=True, max_length=50)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("domain", models.CharField(max_length=300, unique=True)),
+                (
+                    "state",
+                    models.CharField(
+                        choices=[
+                            ("PENDING", "Queued for crawling"),
+                            ("READY", "Crawled and scored"),
+                            ("FAILED", "Crawling failed"),
+                        ],
+                        default="PENDING",
+                        max_length=20,
+                    ),
+                ),
+                ("fetched_at", models.DateTimeField(blank=True, null=True)),
+                ("http_status", models.IntegerField(blank=True, null=True)),
+                ("final_domain", models.CharField(blank=True, max_length=300)),
+                ("error", models.CharField(blank=True, max_length=100)),
+                ("pages", models.JSONField(default=list)),
+                ("signals", models.JSONField(default=dict)),
+                ("suggested_action", models.CharField(blank=True, max_length=10)),
+                ("suggested_reason", models.CharField(blank=True, max_length=20)),
+                ("confidence", models.FloatField(blank=True, null=True)),
+                ("review_priority", models.FloatField(blank=True, null=True)),
+                ("evidence", models.JSONField(default=list)),
+                ("model_version", models.CharField(blank=True, max_length=50)),
             ],
             options={
-                'indexes': [models.Index(fields=['state', '-review_priority'], name='mwmbl_domai_state_1c3406_idx'), models.Index(fields=['suggested_action', 'suggested_reason'], name='mwmbl_domai_suggest_68cee1_idx')],
+                "indexes": [
+                    models.Index(fields=["state", "-review_priority"], name="mwmbl_domai_state_1c3406_idx"),
+                    models.Index(
+                        fields=["suggested_action", "suggested_reason"], name="mwmbl_domai_suggest_68cee1_idx"
+                    ),
+                ],
             },
         ),
     ]

@@ -14,6 +14,7 @@ deploys without the model artifact keep working unchanged.
 
 Queries pass through this module in memory only; nothing is persisted.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,8 +26,8 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DOC_CHARS = 1000   # matches judge training (scripts/judge_bakeoff.py DOC_CHARS)
-MAX_TOKENS = 256   # matches training max_length
+DOC_CHARS = 1000  # matches judge training (scripts/judge_bakeoff.py DOC_CHARS)
+MAX_TOKENS = 256  # matches training max_length
 BATCH_SIZE = 64
 
 
@@ -43,24 +44,21 @@ class Judge:
         self.tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
         self.tokenizer.enable_truncation(max_length=MAX_TOKENS)
         self.tokenizer.enable_padding()
-        self.session = onnxruntime.InferenceSession(
-            str(model_dir / "model.onnx"), providers=["CPUExecutionProvider"])
+        self.session = onnxruntime.InferenceSession(str(model_dir / "model.onnx"), providers=["CPUExecutionProvider"])
         self.input_names = {i.name for i in self.session.get_inputs()}
 
     def score(self, query: str, doc_texts: list[str]) -> list[float]:
         """Relevance of each doc text to the query, each in [0, 1]."""
         scores: list[float] = []
         for start in range(0, len(doc_texts), BATCH_SIZE):
-            batch = doc_texts[start:start + BATCH_SIZE]
+            batch = doc_texts[start : start + BATCH_SIZE]
             encodings = self.tokenizer.encode_batch([(query, text) for text in batch])
             feed = {
                 "input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
-                "attention_mask": np.array([e.attention_mask for e in encodings],
-                                           dtype=np.int64),
+                "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
             }
             if "token_type_ids" in self.input_names:
-                feed["token_type_ids"] = np.array([e.type_ids for e in encodings],
-                                                  dtype=np.int64)
+                feed["token_type_ids"] = np.array([e.type_ids for e in encodings], dtype=np.int64)
             logits = self.session.run(None, feed)[0][:, 0].astype(np.float64)
             scores.extend(float(s) for s in 1 / (1 + np.exp(-logits)))
         return scores
@@ -86,8 +84,8 @@ def get_judge() -> Judge | None:
                 logger.info("relevance judge loaded from %s", model_dir)
             else:
                 logger.warning(
-                    "relevance judge model not found at %s; falling back to "
-                    "LTR ranking and survival rewards", model_dir)
+                    "relevance judge model not found at %s; falling back to LTR ranking and survival rewards", model_dir
+                )
         except Exception:
             logger.exception("failed to load relevance judge from %s", model_dir)
         _load_attempted = True

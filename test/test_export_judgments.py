@@ -12,8 +12,15 @@ User = get_user_model()
 
 
 def doc(url, title="title", extract="extract", score=1.0, state=None, user_ids=None):
-    return {"url": url, "title": title, "extract": extract, "score": score,
-            "state": state, "term": "secret term", "user_ids": user_ids or [42]}
+    return {
+        "url": url,
+        "title": title,
+        "extract": extract,
+        "score": score,
+        "state": state,
+        "term": "secret term",
+        "user_ids": user_ids or [42],
+    }
 
 
 @pytest.fixture
@@ -42,20 +49,30 @@ def curation(user):
 @pytest.mark.django_db
 def test_export_writes_sanitized_records(tmp_path, user, flagger, curation):
     FlagCuration.objects.create(
-        user=flagger, timestamp=datetime(2025, 3, 2, tzinfo=timezone.utc),
-        curation=curation, flag="PROMOTION", status="ACCEPTED", reason="self promo")
+        user=flagger,
+        timestamp=datetime(2025, 3, 2, tzinfo=timezone.utc),
+        curation=curation,
+        flag="PROMOTION",
+        status="ACCEPTED",
+        reason="self promo",
+    )
     UserCuration.objects.create(
-        user=user, timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        user=user,
+        timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
         url="https://mwmbl.org/?q=old+query",
         results=[doc("https://c.com")],
         curation_type="curate_delete",
         curation={"delete_index": 0},
     )
-    SearchResultVote.objects.create(
-        user=user, url="https://a.com", query="test query", vote_type="upvote")
+    SearchResultVote.objects.create(user=user, url="https://a.com", query="test query", vote_type="upvote")
     DomainSubmission.objects.create(
-        name="spammy.example.com", submitted_by=user, status="REJECTED",
-        status_changed_by=flagger, rejection_reason="SPAM", rejection_detail="link farm")
+        name="spammy.example.com",
+        submitted_by=user,
+        status="REJECTED",
+        status_changed_by=flagger,
+        rejection_reason="SPAM",
+        rejection_detail="link farm",
+    )
 
     call_command("export_judgments", output_dir=str(tmp_path))
 
@@ -112,9 +129,14 @@ def test_stats_only_writes_no_files(tmp_path, curation):
 @pytest.mark.django_db
 def test_since_filters_old_records(tmp_path, user, curation):
     Curation.objects.create(
-        user=user, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        query="recent query", original_index_results=[], original_results=[],
-        new_results=[], num_changes=1)
+        user=user,
+        timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        query="recent query",
+        original_index_results=[],
+        original_results=[],
+        new_results=[],
+        num_changes=1,
+    )
 
     call_command("export_judgments", output_dir=str(tmp_path), since="2026-01-01")
 
@@ -126,9 +148,14 @@ def test_since_filters_old_records(tmp_path, user, curation):
 @pytest.mark.django_db
 def test_anonymous_and_malformed_data(tmp_path):
     Curation.objects.create(
-        user=None, timestamp=datetime(2025, 5, 1, tzinfo=timezone.utc),
-        query="anon query", original_index_results=[], original_results="garbage",
-        new_results=[doc("https://a.com")], num_changes=1)
+        user=None,
+        timestamp=datetime(2025, 5, 1, tzinfo=timezone.utc),
+        query="anon query",
+        original_index_results=[],
+        original_results="garbage",
+        new_results=[doc("https://a.com")],
+        num_changes=1,
+    )
 
     call_command("export_judgments", output_dir=str(tmp_path))
 

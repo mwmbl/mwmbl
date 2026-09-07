@@ -4,15 +4,17 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0014_remove_searchresultvote_mwmbl_searchresultvote_user_url_query_unique_and_more'),
+        ("mwmbl", "0014_remove_searchresultvote_mwmbl_searchresultvote_user_url_query_unique_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='searchresultvote',
-            name='vote_type',
-            field=models.CharField(choices=[('upvote', 'User upvoted this result'), ('downvote', 'User downvoted this result')], max_length=10),
+            model_name="searchresultvote",
+            name="vote_type",
+            field=models.CharField(
+                choices=[("upvote", "User upvoted this result"), ("downvote", "User downvoted this result")],
+                max_length=10,
+            ),
         ),
     ]

@@ -1,4 +1,5 @@
 """Trigger logic for the Super-Search-as-fallback ranking model (no network)."""
+
 from mwmbl.rankeval.evaluation.evaluate import RankingModel
 
 
@@ -17,6 +18,7 @@ def _fallback(primary_urls, fallback_urls, threshold, fb_calls=None):
     # Imported lazily so the module's django.setup()/search_setup import cost is only
     # paid when these tests actually run.
     from mwmbl.rankeval.evaluation.evaluate_fallback import FallbackRankingModel
+
     return FallbackRankingModel(
         _FixedModel(primary_urls),
         _FixedModel(fallback_urls, calls=fb_calls),

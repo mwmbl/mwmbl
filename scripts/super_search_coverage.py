@@ -20,6 +20,7 @@ Run:
   DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
       uv run python scripts/super_search_coverage.py
 """
+
 import argparse
 import os
 import sys
@@ -50,8 +51,7 @@ from mwmbl.tinysearchengine.super_search_select.registry import get_registry  # 
 
 def load_gold() -> pd.DataFrame:
     frames = []
-    for split, path in (("train", RANKINGS_DATASET_TRAIN_PATH),
-                        ("test", RANKINGS_DATASET_TEST_PATH)):
+    for split, path in (("train", RANKINGS_DATASET_TRAIN_PATH), ("test", RANKINGS_DATASET_TEST_PATH)):
         df = pd.read_csv(path)
         df["split"] = split
         frames.append(df)
@@ -89,7 +89,7 @@ def cmd_report():
     q_reg: dict[str, set[str]] = defaultdict(set)
     exact_rows = reg_rows = 0
     exact_mass = total_mass = 0.0
-    rank_hist_exact: Counter = Counter()        # rank -> hit count (exact)
+    rank_hist_exact: Counter = Counter()  # rank -> hit count (exact)
     source_queries_exact: dict[str, set[str]] = defaultdict(set)
     source_queries_reg: dict[str, set[str]] = defaultdict(set)
 
@@ -239,6 +239,7 @@ def cmd_recall(source: str, per_source_limit: int, max_queries: int):
     print(f"source {source!r} (registrable domain {dom}): {len(qs)} gold queries touch it")
     if max_queries and len(qs) > max_queries:
         import random as _random
+
         _random.Random(0).shuffle(qs)
         qs = qs[:max_queries]
         print(f"sampling {len(qs)} of them")
@@ -247,8 +248,9 @@ def cmd_recall(source: str, per_source_limit: int, max_queries: int):
     timeout = max(float(settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT), 10.0)
 
     async def run() -> dict[str, list[str]]:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
-                                     headers={"User-Agent": "mwmbl-super-search-eval/0.1"}) as client:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=timeout, headers={"User-Agent": "mwmbl-super-search-eval/0.1"}
+        ) as client:
             out: dict[str, list[str]] = {}
             for q in qs:
                 try:
@@ -274,8 +276,8 @@ def cmd_recall(source: str, per_source_limit: int, max_queries: int):
         if not ex and len(misses) < 10:
             misses.append((q, sorted(tgt)[0], ret[:2]))
     n = len(qs) or 1
-    print(f"\nexact-URL recall:           {exact}/{len(qs)} ({100*exact/n:.1f}%)")
-    print(f"near-match recall (host+path): {near}/{len(qs)} ({100*near/n:.1f}%)")
+    print(f"\nexact-URL recall:           {exact}/{len(qs)} ({100 * exact / n:.1f}%)")
+    print(f"near-match recall (host+path): {near}/{len(qs)} ({100 * near / n:.1f}%)")
     print(f"queries where source returned nothing: {empty}/{len(qs)}")
     print("\nmisses (gold target vs our top returns):")
     for q, t, ret in misses:
@@ -312,10 +314,10 @@ def cmd_missing(top: int):
     miss.sort(key=lambda x: -x[1])
     ours_mass = sum(m for d, m in mass.items() if d in ours)
     print(f"total gold mass {total:.0f} | distinct domains {len(mass)} | missing {len(miss)}")
-    print(f"domains already a source (registrable match) = {100*ours_mass/total:.2f}% of gold mass\n")
+    print(f"domains already a source (registrable match) = {100 * ours_mass / total:.2f}% of gold mass\n")
     print(f"{'#':>3} {'domain':32} {'mass':>7} {'%mass':>6} {'queries':>8} {'rows':>6} {'rank1-3':>7}")
     for i, (d, m, nq, nr, t3) in enumerate(miss[:top]):
-        print(f"{i+1:>3} {d:32} {m:7.1f} {100*m/total:5.1f}% {nq:8} {nr:6} {t3:7}")
+        print(f"{i + 1:>3} {d:32} {m:7.1f} {100 * m / total:5.1f}% {nq:8} {nr:6} {t3:7}")
     print()
     for n in (10, 20, 40):
         share = 100 * sum(x[1] for x in miss[:n]) / total
@@ -323,8 +325,7 @@ def cmd_missing(top: int):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("report", help="gold-coverage feasibility report (default)")
     sub.add_parser("missing", help="rank gold domains we lack by gold mass")
