@@ -107,7 +107,7 @@ def _add_found_urls_to_db_and_queue(found_urls, new_item_queue):
 
 def add_hn_links(new_item_queue: RedisURLQueue):
     hn_count = new_item_queue.get_domain_count("news.ycombinator.com")
-    max_count = get_domain_max_urls("news.ycombinator.com")
+    max_count = get_domain_max_urls("news.ycombinator.com", new_item_queue.get_curated_domains_function())
 
     max_item = requests.get("https://hacker-news.firebaseio.com/v0/maxitem.json").json()
     logger.info(f"Adding HN links, current count: {hn_count}, max count: {max_count}, max item ID: {max_item}")

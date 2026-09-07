@@ -45,6 +45,7 @@ from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls, score_result_whole
+from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext
 from mwmbl.tinysearchengine.super_search_sources import SOURCES
 from mwmbl.tokenizer import tokenize
 
@@ -505,7 +506,14 @@ async def _index_results(query: str, docs: list[Document]) -> int:
         return 0
 
 
-async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results_key: list, lock: asyncio.Lock) -> None:
+async def _run_pipeline(
+    query: str,
+    emit,
+    all_docs: list[Document],
+    last_results_key: list,
+    lock: asyncio.Lock,
+    ctx: SelectionContext | None = None,
+) -> None:
     per_source_limit = settings.SUPER_SEARCH_RESULTS_PER_SOURCE
     top_k = getattr(settings, "SUPER_SEARCH_TOP_K", 10)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
@@ -542,6 +550,10 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
         for name, fn in SOURCES.items():
             await emit("source_started", SourceStartedEvent(source=name))
             source_tasks.append(asyncio.create_task(_call_source(name, fn, client, query, per_source_limit)))
+        if ctx is not None:
+            ctx.candidates = list(SOURCES)
+            ctx.selected = list(SOURCES)
+            ctx.per_source_limit = per_source_limit
 
         secondary: list[asyncio.Task] = []
 
@@ -552,6 +564,8 @@ async def _run_pipeline(query: str, emit, all_docs: list[Document], last_results
                 continue
             docs = _drop_blacklisted(docs)
             await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
+            if ctx is not None:
+                ctx.record_results(name, [doc.url for doc in docs])
             if not docs:
                 continue
 

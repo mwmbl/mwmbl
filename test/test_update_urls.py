@@ -26,7 +26,6 @@ def test_process_link_normal():
 
 
 def test_process_link_excludes_porn():
-    url_scores = {}
     url_timestamps = {}
     url_users = {}
     domain_links = {}
@@ -44,7 +43,6 @@ def test_process_link_excludes_porn():
         domain_links=domain_links,
     )
 
-    assert url_scores == {}
     assert url_timestamps == {}
     assert url_users == {}
     assert domain_links == {}

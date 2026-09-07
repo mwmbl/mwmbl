@@ -829,3 +829,49 @@ def test_blacklisted_links_are_not_crawled(client, api_key, monkeypatch):
 
     assert "https://badsite.test/x" not in crawled
     assert "https://other.test/y" in crawled
+
+
+def test_run_pipeline_attributes_results_to_their_source(monkeypatch):
+    """The offline eval callers pass a SelectionContext and read back which source
+    produced each URL. Nothing in the streaming endpoint exercises that path, so the
+    attribution is only covered here."""
+    import mwmbl.tinysearchengine.super_search as ss
+    from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext
+
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="From HN", url="https://hn.example/a", extract="x")],
+            "github": [Document(title="From GH", url="https://gh.example/b", extract="x")],
+        },
+    )
+    _stub_scoring(monkeypatch, [0.0] * 20)
+
+    async def _noop_emit(event_type, data):
+        return None
+
+    ctx = SelectionContext()
+    all_docs: list[Document] = []
+    async_to_sync(ss._run_pipeline)("q", _noop_emit, all_docs, [None], asyncio.Lock(), ctx)
+
+    assert ctx.source_by_url == {
+        "https://hn.example/a": "hn",
+        "https://gh.example/b": "github",
+    }
+    assert sorted(ctx.selected) == ["github", "hn"]
+    assert ctx.per_source_limit > 0
+
+
+def test_run_pipeline_works_without_a_selection_context(monkeypatch):
+    """The streaming endpoint passes no context; the pipeline must not require one."""
+    import mwmbl.tinysearchengine.super_search as ss
+
+    _stub_sources(monkeypatch, {"hn": [Document(title="From HN", url="https://hn.example/a", extract="x")]})
+    _stub_scoring(monkeypatch, [0.0] * 20)
+
+    async def _noop_emit(event_type, data):
+        return None
+
+    all_docs: list[Document] = []
+    async_to_sync(ss._run_pipeline)("q", _noop_emit, all_docs, [None], asyncio.Lock())
+    assert [d.url for d in all_docs] == ["https://hn.example/a"]

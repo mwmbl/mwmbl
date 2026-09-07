@@ -169,11 +169,10 @@ no-matching-overload = "warn"
 invalid-return-type = "warn"
 # 2.
 invalid-type-form = "warn"
-# 2 - both real: eval callers pass a 6th `ctx` argument to `_run_pipeline`, which takes 5.
-too-many-positional-arguments = "warn"
-# 1 - real: mwmbl/indexer/update_urls.py calls get_domain_max_urls() without
-# `curated_domains`, so add_hn_links() raises TypeError.
-missing-argument = "warn"
+# 0 - clean, and kept blocking. Calling something with the wrong number of arguments is
+# always a bug, and ty catches it across modules where a test never would.
+too-many-positional-arguments = "error"
+missing-argument = "error"
 # 1.
 empty-body = "warn"
 # 1.
