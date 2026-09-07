@@ -151,6 +151,26 @@ Development
 
 For trying out the service locally see the section in the Mwmbl [book](https://book.mwmbl.org/page/developers/).
 
+### Code style and checks
+
+Python code is formatted and linted with [ruff](https://docs.astral.sh/ruff/) and type checked
+with [ty](https://github.com/astral-sh/ty). Both are configured in `pyproject.toml` and pinned in
+the `dev` dependency group, so everyone runs the same versions.
+
+Install the git hooks once, after `uv sync`:
+
+    make install-hooks
+
+From then on every commit is formatted and checked. To run the same checks by hand:
+
+    make check     # format check + lint + type check, exactly what CI runs
+    make fix       # reformat and apply the safe lint fixes
+
+ty is gated on error-level diagnostics only. There is a large warning backlog - Django's
+`Model.objects` is invisible to ty, which has no django-stubs plugin support - so the rules with
+pre-existing violations are downgraded to warnings in `[tool.ty.rules]`. Run `make typecheck-all`
+to see the whole backlog, and promote a rule back to `error` once its count reaches zero.
+
 ### Using Dokku
 
 Note: this method is not recommended as it is more involved, and your index will not include any data unless you 

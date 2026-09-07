@@ -1,0 +1,41 @@
+# Install with: make install-hooks
+#
+# Keep the hooks here in sync with the check targets in the Makefile and the lint job
+# in .github/workflows/ci.yml - all three must run the same thing.
+
+# Nothing here should touch the front end, generated data, or the Rust build outputs.
+exclude: ^(devdata/|front-end/|test_env/|mwmbl_rank/target/)
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep this pinned to the same ruff version as the dev dependency group in
+    # pyproject.toml, so the hook and `make check` cannot disagree.
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # ty is run from the project's own environment rather than a pre-commit-managed one:
+  # it needs the installed third-party packages to resolve imports, and pinning it here
+  # would mean pinning the version in two places.
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: make typecheck
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # Deliberately no end-of-file-fixer or trailing-whitespace here: ruff already handles
+  # both for Python, and repo-wide they rewrite generated artifacts (the bundled XGBoost
+  # model, the maturin-packaged domains JSON) and the contents of string literals.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]

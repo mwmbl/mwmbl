@@ -81,6 +81,9 @@ dev = [
     "fakeredis>=2.30.1",
     "maturin>=1.5,<2.0",
     "patchelf>=0.17.2.4",
+    "ruff>=0.16.6",
+    "ty>=0.0.78",
+    "pre-commit>=4.6.2",
 ]
 
 [tool.maturin]
@@ -102,3 +105,76 @@ markers = [
     "live: hits real external endpoints; excluded from the default run. Run with -m live (used by the weekly Super Search smoke workflow).",
     "slow: heavy CPU (e.g. XGBoost feature selection); excluded from the default run. Run with -m slow.",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["devdata", "front-end", "test_env"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+# The formatter owns line length. E501 only ever fires on things it cannot split -
+# long string literals, URLs and markdown tables in API docs - where wrapping hurts.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Django settings modules build their config with star imports from a base module.
+"mwmbl/settings*.py" = ["F403", "F405"]
+# These modules must call django.setup() (or pytest.importorskip) before the imports
+# that reach Django models or the Rust extension, so those imports cannot be at the top.
+"analyse/analyse_crawled_links.py" = ["E402"]
+"mwmbl/crawl.py" = ["E402"]
+"mwmbl/rankeval/evaluation/compare_ltr_models.py" = ["E402"]
+"test/test_rust_features.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mwmbl", "mwmbl_rank"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+exclude = ["devdata", "front-end", "test_env", "scripts/train", "**/migrations"]
+
+# ty is gated on CI and on commit, so every rule that has pre-existing violations is
+# downgraded to "warn" here: the baseline is green and a NEW category of error fails the
+# build. `make typecheck-warnings` lists everything still outstanding.
+#
+# Tighten these back to "error" one rule at a time as the counts come down. The counts
+# below are the baseline at the time ty was introduced (2026-09-07).
+[tool.ty.rules]
+# 415, of which ~279 are Django's `Model.objects` - ty has no django-stubs plugin support,
+# so the default manager is invisible to it. Not fixable in this repo today.
+unresolved-attribute = "warn"
+# 138. Mostly Django/numpy/pandas dynamism plus genuinely loose annotations.
+invalid-argument-type = "warn"
+# 37.
+invalid-assignment = "warn"
+# 31. Optional ML extras (torch, transformers, sentence-transformers), the pybloomfilter
+# native module, and scripts that import their siblings by bare module name.
+unresolved-import = "warn"
+# 19.
+not-iterable = "warn"
+# 12.
+not-subscriptable = "warn"
+# 10.
+unsupported-operator = "warn"
+# 9.
+invalid-parameter-default = "warn"
+# 8.
+invalid-method-override = "warn"
+# 6.
+no-matching-overload = "warn"
+# 4.
+invalid-return-type = "warn"
+# 2.
+invalid-type-form = "warn"
+# 2 - both real: eval callers pass a 6th `ctx` argument to `_run_pipeline`, which takes 5.
+too-many-positional-arguments = "warn"
+# 1 - real: mwmbl/indexer/update_urls.py calls get_domain_max_urls() without
+# `curated_domains`, so add_hn_links() raises TypeError.
+missing-argument = "warn"
+# 1.
+empty-body = "warn"
+# 1.
+call-non-callable = "warn"

@@ -1,0 +1,9 @@
+# Revisions to skip when running `git blame`.
+#
+# Enable locally with:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub and GitLab both honour this file automatically.
+
+# Format the codebase with ruff and fix what the linter found
+6cd5fb4d516f287cfeac03b93db6f29a2e350b20
