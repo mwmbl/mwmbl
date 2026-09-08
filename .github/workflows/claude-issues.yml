@@ -171,14 +171,20 @@ jobs:
           - 5432:5432
 
     env:
-      # Outside the checkout, both of these. The review and finalise steps run git with an
-      # unrestricted Bash tool and are asked to commit; a file sitting untracked in the
-      # working tree is one `git add -A` away from being part of the pull request.
-      CLAUDE_RUN_LOG: ${{ runner.temp }}/claude-runs.jsonl
-      CLAUDE_SUMMARY_DIR: ${{ runner.temp }}/claude-summaries
       ISSUE_NUMBER: ${{ matrix.item.issue }}
 
     steps:
+      # Both of these live outside the checkout. The review and finalise steps run git with
+      # an unrestricted Bash tool and are asked to commit; a file sitting untracked in the
+      # working tree is one `git add -A` away from being part of the pull request.
+      #
+      # They are set here rather than in the job's `env` above because the `runner` context
+      # does not exist at job level: a `${{ runner.temp }}` there is not an empty string but
+      # a workflow that fails to validate, which is what broke every run from 2f0de72 on.
+      - name: Point the run log outside the checkout
+        run: |
+          echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl" >>"$GITHUB_ENV"
+          echo "CLAUDE_SUMMARY_DIR=$RUNNER_TEMP/claude-summaries" >>"$GITHUB_ENV"
       # Full history: every step diffs the branch against main, and the step below
       # compares HEAD against the branch's own remote tip.
       #
