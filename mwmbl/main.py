@@ -44,11 +44,12 @@ def run():
     django.setup()
 
     from django.conf import settings
+
     from mwmbl import background
-    from mwmbl.redis_url_queue import RedisURLQueue
     from mwmbl.count_urls import count_urls_continuously
-    from mwmbl.indexer.update_urls import update_urls_continuously
     from mwmbl.curated_domains import get_curated_domains
+    from mwmbl.indexer.update_urls import update_urls_continuously
+    from mwmbl.redis_url_queue import RedisURLQueue
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")
@@ -87,7 +88,8 @@ def run():
             # *scheduled*: apps.ready() writes a Task row and nothing executes it. Every
             # periodic task in production had been pending, unattempted, for months.
             process = multiprocessing.get_context("spawn").Process(
-                target=run_background_tasks, name="background-tasks", daemon=True)
+                target=run_background_tasks, name="background-tasks", daemon=True
+            )
             process.start()
             logger.info("Started the background task queue (pid %d)", process.pid)
 
@@ -103,6 +105,7 @@ def run():
 
             def load(self):
                 from mwmbl.asgi import application
+
                 return application
 
         GunicornApp().run()

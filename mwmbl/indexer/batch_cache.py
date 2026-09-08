@@ -3,6 +3,7 @@ Store for local batches.
 
 We store them in a directory on the local machine.
 """
+
 import gzip
 import json
 import os
@@ -15,9 +16,8 @@ from pydantic import ValidationError
 
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.database import Database
-from mwmbl.indexer.indexdb import IndexDatabase, BatchStatus
+from mwmbl.indexer.indexdb import BatchStatus, IndexDatabase
 from mwmbl.retry import retry_requests
-
 
 logger = getLogger(__name__)
 
@@ -81,10 +81,10 @@ class BatchCache:
         path = self.get_path_from_url(url)
         logger.debug(f"Storing local batch at {path}")
         os.makedirs(path.parent, exist_ok=True)
-        with open(path, 'wb') as output_file:
-            data = gzip.compress(batch.json().encode('utf8'))
+        with open(path, "wb") as output_file:
+            data = gzip.compress(batch.json().encode("utf8"))
             output_file.write(data)
 
     def get_path_from_url(self, url) -> Path:
         url_path = urlparse(url).path
-        return Path(self.path) / url_path.lstrip('/')
+        return Path(self.path) / url_path.lstrip("/")

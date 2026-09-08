@@ -1,14 +1,14 @@
 """
 Perform an evaluation using NDCG against a gold standard set of results.
 """
-from abc import ABC, abstractmethod
+
 import time
+from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
 from scipy.stats import sem
 from sklearn.metrics import ndcg_score
-
 
 # Sourced from https://www.searchenginejournal.com/google-first-page-clicks/374516/
 from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RANKINGS_DATASET_TRAIN_PATH
@@ -51,7 +51,7 @@ def gold_scores_for(rankings) -> dict[str, float]:
     """
     ranking = latest_ranking(rankings).drop_duplicates(subset="url", keep="first")
     top_ranked = ranking[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
-    top_ranked["score"] = CLICK_PROPORTIONS[:len(top_ranked)]
+    top_ranked["score"] = CLICK_PROPORTIONS[: len(top_ranked)]
     return top_ranked.set_index("url")["score"].to_dict()
 
 
@@ -69,7 +69,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     ndcg_scores = []
     proportions = []
 
-    queries = dataset['query'].unique()
+    queries = dataset["query"].unique()
     if fraction < 1.0:
         num_queries = int(fraction * len(queries))
         print("Num queries", num_queries)
@@ -79,7 +79,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
 
     wiki_counts = []
     durations = []
-    for query, rankings in dataset.groupby('query'):
+    for query, rankings in dataset.groupby("query"):
         if query not in random_queries:
             continue
 
@@ -121,6 +121,8 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     print("predict_time_sem:", sem(durations))
 
     print("Dataset\tFraction\tNDCG\tSEM\tProportion\tSEM\tWiki Count\tSEM\tPredict time\tSEM")
-    print(f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
-          f"{np.mean(proportions)}\t{sem(proportions)}\t{np.mean(wiki_counts)}\t{sem(wiki_counts)}"
-          f"\t{np.mean(durations)}\t{sem(durations)}")
+    print(
+        f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
+        f"{np.mean(proportions)}\t{sem(proportions)}\t{np.mean(wiki_counts)}\t{sem(wiki_counts)}"
+        f"\t{np.mean(durations)}\t{sem(durations)}"
+    )

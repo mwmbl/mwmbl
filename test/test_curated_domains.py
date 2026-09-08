@@ -1,4 +1,5 @@
 """Tests for the approved-domain lookup that overrides the blacklists."""
+
 from unittest.mock import patch
 
 import pytest

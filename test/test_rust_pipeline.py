@@ -7,6 +7,7 @@ These tests require the mwmbl_rank Rust extension to be built:
 Run with:
     pytest test/test_rust_pipeline.py -v
 """
+
 import os
 import tempfile
 
@@ -19,10 +20,10 @@ pytest.importorskip("mwmbl_rank", reason="mwmbl_rank Rust extension not built")
 
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def make_dataframe(n: int = 30, seed: int = 42) -> pd.DataFrame:
     """Create a synthetic DataFrame with the columns expected by RustXGBPipeline."""
@@ -53,13 +54,15 @@ def make_dataframe(n: int = 30, seed: int = 42) -> pd.DataFrame:
     rows = []
     for i in range(n):
         idx = i % len(queries)
-        rows.append({
-            "query": queries[idx],
-            "url": urls[idx],
-            "title": titles[idx],
-            "extract": extracts[idx],
-            "score": float(rng.uniform(0, 2)),
-        })
+        rows.append(
+            {
+                "query": queries[idx],
+                "url": urls[idx],
+                "title": titles[idx],
+                "extract": extracts[idx],
+                "score": float(rng.uniform(0, 2)),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -71,6 +74,7 @@ def make_labels(n: int = 30, seed: int = 42) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestRustXGBPipelineBasic:
     def test_instantiation(self):
@@ -152,14 +156,14 @@ class TestRustXGBPipelineFitPredict:
     def test_predict_with_null_title(self, trained_pipeline):
         pipeline, X, _ = trained_pipeline
         X_null = X.copy()
-        X_null.loc[0, 'title'] = None
+        X_null.loc[0, "title"] = None
         preds = pipeline.predict(X_null)
         assert not np.any(np.isnan(preds))
 
     def test_predict_with_null_extract(self, trained_pipeline):
         pipeline, X, _ = trained_pipeline
         X_null = X.copy()
-        X_null.loc[0, 'extract'] = None
+        X_null.loc[0, "extract"] = None
         preds = pipeline.predict(X_null)
         assert not np.any(np.isnan(preds))
 
@@ -186,8 +190,7 @@ class TestRustXGBPipelinePersistence:
             loaded_preds = loaded.predict(X)
 
             np.testing.assert_allclose(
-                original_preds, loaded_preds, atol=1e-5,
-                err_msg="Predictions differ after save/load"
+                original_preds, loaded_preds, atol=1e-5, err_msg="Predictions differ after save/load"
             )
         finally:
             os.unlink(model_path)
@@ -246,15 +249,15 @@ class TestRustXGBPipelineNDCG:
         # Use the devdata CSV if available, otherwise use synthetic data
         devdata_path = "devdata/rankeval/learning-to-rank.csv"
         if os.path.exists(devdata_path):
-            dataset = pd.read_csv(devdata_path, lineterminator='\n')
-            dataset['title'] = dataset['title'].fillna('')
-            dataset['extract'] = dataset['extract'].fillna('')
-            X = dataset[['query', 'url', 'title', 'extract', 'score']]
-            y = dataset['gold_standard_rank'].fillna(0).astype(float)
+            dataset = pd.read_csv(devdata_path, lineterminator="\n")
+            dataset["title"] = dataset["title"].fillna("")
+            dataset["extract"] = dataset["extract"].fillna("")
+            X = dataset[["query", "url", "title", "extract", "score"]]
+            y = dataset["gold_standard_rank"].fillna(0).astype(float)
         else:
             # Synthetic: create data where higher score → higher relevance
             X = make_dataframe(50)
-            y = X['score'].values.astype(np.float32)
+            y = X["score"].values.astype(np.float32)
 
         pipeline = RustXGBPipeline(num_rounds=50)
         pipeline.fit(X, y)

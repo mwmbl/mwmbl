@@ -9,6 +9,7 @@ Recipe sources carry ``domain``/``field`` directly (parsed by ``recipe.py``);
 the handful of hand-written Python adapters have static metadata here. The
 shortlist supplies popularity / page-count priors by domain.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,12 +32,12 @@ _DEFAULT_SCORE = 0.6
 
 @dataclass(frozen=True)
 class SiteMeta:
-    name: str                      # source key in SOURCES
+    name: str  # source key in SOURCES
     domain: str
     field: str = "other"
     popularity: float = _DEFAULT_SCORE
     estimated_pages: float = _DEFAULT_SCORE
-    always_on: bool = False         # global sources always included in selection
+    always_on: bool = False  # global sources always included in selection
 
 
 # Hand-written adapters: not in the shortlist (or special/global), so metadata is static.

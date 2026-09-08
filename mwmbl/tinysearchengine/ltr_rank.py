@@ -4,9 +4,8 @@ LTR (Learning-to-Rank) ranker that uses the Rust XGBoost pipeline for scoring.
 LTRRanker accepts any model with a sklearn-compatible predict(DataFrame) interface,
 including both the Python sklearn pipeline and the Rust RustXGBPipeline.
 """
+
 import numpy as np
-from pandas import DataFrame
-from sklearn.base import BaseEstimator
 
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -59,15 +58,18 @@ class LTRRanker(Ranker):
         if len(results) == 0:
             return []
 
-        query = ' '.join(terms)
+        query = " ".join(terms)
 
-        data = [{
-            'query': query,
-            'url': page.url,
-            'title': page.title if page.title is not None else "",
-            'extract': page.extract if page.extract is not None else "",
-            'score': page.score if page.score is not None else 0.0,
-        }  for page in results]
+        data = [
+            {
+                "query": query,
+                "url": page.url,
+                "title": page.title if page.title is not None else "",
+                "extract": page.extract if page.extract is not None else "",
+                "score": page.score if page.score is not None else 0.0,
+            }
+            for page in results
+        ]
 
         predictions = self.model.predict(data)
         mask = predictions > 0.0
@@ -93,12 +95,15 @@ def score_documents(model, query: str, documents: list[Document]) -> list[float]
     """
     if not documents:
         return []
-    data = [{
-        'query': query,
-        'url': page.url,
-        'title': page.title if page.title is not None else "",
-        'extract': page.extract if page.extract is not None else "",
-        'score': page.score if page.score is not None else 0.0,
-    } for page in documents]
+    data = [
+        {
+            "query": query,
+            "url": page.url,
+            "title": page.title if page.title is not None else "",
+            "extract": page.extract if page.extract is not None else "",
+            "score": page.score if page.score is not None else 0.0,
+        }
+        for page in documents
+    ]
     predictions = model.predict(data)
     return [float(p) for p in predictions]

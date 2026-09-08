@@ -6,10 +6,10 @@ These tests:
 - Verify quota, auth, event ordering, and forbidden-symbol presence in
   the orchestrator (architecture guard).
 """
+
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
@@ -30,6 +30,7 @@ User = get_user_model()
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def user(db):
@@ -66,9 +67,9 @@ def _parse_sse(body: bytes) -> list[tuple[str, dict]]:
         data = None
         for line in chunk.split(b"\n"):
             if line.startswith(b"event: "):
-                event_type = line[len(b"event: "):].decode()
+                event_type = line[len(b"event: ") :].decode()
             elif line.startswith(b"data: "):
-                data = json.loads(line[len(b"data: "):].decode())
+                data = json.loads(line[len(b"data: ") :].decode())
         if event_type is not None:
             events.append((event_type, data))
     return events
@@ -77,8 +78,10 @@ def _parse_sse(body: bytes) -> list[tuple[str, dict]]:
 def _read_stream(response) -> bytes:
     content = response.streaming_content
     if hasattr(content, "__aiter__"):
+
         async def _collect():
             return b"".join([chunk async for chunk in content])
+
         return async_to_sync(_collect)()
     return b"".join(content)
 
@@ -89,8 +92,10 @@ def _stub_sources(monkeypatch, by_source: dict[str, list[Document]]):
 
     new_sources = {}
     for name, docs in by_source.items():
+
         async def fake_search(client, query, limit, _docs=docs):
             return _docs
+
         new_sources[name] = fake_search
     monkeypatch.setattr(ss, "SOURCES", new_sources)
 
@@ -116,6 +121,7 @@ def _stub_scoring(monkeypatch, scores: list[float]):
 # ---------------------------------------------------------------------------
 # Auth & quota
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_super_search_requires_auth(client):
@@ -165,18 +171,22 @@ def test_super_search_quota_enforced(client, api_key, monkeypatch):
 # Event-stream behaviour
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 @override_settings(SUPER_SEARCH_TOP_K=2)
 def test_promoted_results_use_top_k(client, api_key, monkeypatch):
     """Exactly top-K docs are promoted for crawling; surplus docs are excluded."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Best",   url="https://best.example/",   extract="x"),
-            Document(title="Second", url="https://second.example/", extract="x"),
-            Document(title="Third",  url="https://third.example/",  extract="x"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Best", url="https://best.example/", extract="x"),
+                Document(title="Second", url="https://second.example/", extract="x"),
+                Document(title="Third", url="https://third.example/", extract="x"),
+            ],
+        },
+    )
     # Scores in descending order — only the top-2 should be promoted.
     _stub_scoring(monkeypatch, [0.9, 0.5, 0.1] + [0.0] * 20)
 
@@ -210,14 +220,17 @@ def test_heap_replacement_promotes_better_late_doc(client, api_key, monkeypatch)
     """When the heap is full, a later doc with a higher score replaces the minimum and
     is still promoted — the heap min-replacement path must work."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Low A",  url="https://low-a.example/",  extract="x"),
-            Document(title="Low B",  url="https://low-b.example/",  extract="x"),
-            Document(title="Low C",  url="https://low-c.example/",  extract="x"),
-            Document(title="Best",   url="https://best.example/",   extract="x"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Low A", url="https://low-a.example/", extract="x"),
+                Document(title="Low B", url="https://low-b.example/", extract="x"),
+                Document(title="Low C", url="https://low-c.example/", extract="x"),
+                Document(title="Best", url="https://best.example/", extract="x"),
+            ],
+        },
+    )
     # First two fill the heap at 0.1; Low C can't enter (0.1 > 0.1 is False);
     # Best (0.9) beats the minimum and must be promoted.
     _stub_scoring(monkeypatch, [0.1, 0.1, 0.1, 0.9] + [0.0] * 20)
@@ -245,13 +258,16 @@ def test_heap_equal_score_does_not_enter_full_heap(client, api_key, monkeypatch)
     """A doc whose score equals the heap minimum must NOT be promoted — the check is
     strictly greater-than, so ties don't displace existing entries."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="First",  url="https://first.example/",  extract="x"),
-            Document(title="Second", url="https://second.example/", extract="x"),
-            Document(title="Third",  url="https://third.example/",  extract="x"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="First", url="https://first.example/", extract="x"),
+                Document(title="Second", url="https://second.example/", extract="x"),
+                Document(title="Third", url="https://third.example/", extract="x"),
+            ],
+        },
+    )
     _stub_scoring(monkeypatch, [0.5, 0.5, 0.5] + [0.0] * 20)
 
     def fake_crawl(url, redis):
@@ -275,9 +291,12 @@ def test_heap_equal_score_does_not_enter_full_heap(client, api_key, monkeypatch)
 def test_final_results_event_emitted(client, api_key, monkeypatch):
     """A 'results' event with the full ranked list is emitted before 'done'."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.5] + [0.0] * 20)
 
     def fake_crawl(url, redis):
@@ -312,16 +331,16 @@ def test_final_results_are_mmr_diversified(client, api_key, monkeypatch):
     cache.delete(_super_search_monthly_key(api_key.user.id))
     # Relevance order a > b > c. a and b share a domain (and text); c is a fresh
     # domain. MMR should lift c above the second same-domain result b.
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Python alpha repo", url="https://github.com/x/alpha",
-                     extract="python alpha project"),
-            Document(title="Python beta repo", url="https://github.com/x/beta",
-                     extract="python beta project"),
-            Document(title="Python gamma site", url="https://example.org/gamma",
-                     extract="python gamma guide"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Python alpha repo", url="https://github.com/x/alpha", extract="python alpha project"),
+                Document(title="Python beta repo", url="https://github.com/x/beta", extract="python beta project"),
+                Document(title="Python gamma site", url="https://example.org/gamma", extract="python gamma guide"),
+            ],
+        },
+    )
     # Promotion scores, then descending final-ranking scores (consumed once per
     # _emit_final_results call) all in the same a > b > c order.
     _stub_scoring(monkeypatch, [0.9, 0.8, 0.7] * 4 + [0.0] * 30)
@@ -354,9 +373,12 @@ def test_done_reports_pages_indexed(client, api_key, monkeypatch):
     import mwmbl.tinysearchengine.super_search as ss
 
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Python intro", url="https://py.example/", extract="A guide")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.5] + [0.0] * 20)
     monkeypatch.setattr(
         "mwmbl.tinysearchengine.super_search.crawl_url",
@@ -453,21 +475,36 @@ def test_link_following_adds_followed_docs(client, api_key, monkeypatch):
     """A promoted page is crawled, its outbound links followed, and the followed
     docs appear in the final ranking — exercises page_fetched / link_followed."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Python parent", url="https://parent.example/",
-                        extract="python parent text")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Python parent", url="https://parent.example/", extract="python parent text")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
 
     def fake_crawl(url, redis):
         if url == "https://parent.example/":
-            return {"url": url, "status": 200, "content": {
-                "title": "Python parent", "extract": "python parent text",
-                "links": ["https://child.example/python-guide"], "extra_links": [],
-            }}
-        return {"url": url, "status": 200, "content": {
-            "title": "Python child", "extract": "about python", "links": [], "extra_links": [],
-        }}
+            return {
+                "url": url,
+                "status": 200,
+                "content": {
+                    "title": "Python parent",
+                    "extract": "python parent text",
+                    "links": ["https://child.example/python-guide"],
+                    "extra_links": [],
+                },
+            }
+        return {
+            "url": url,
+            "status": 200,
+            "content": {
+                "title": "Python child",
+                "extract": "about python",
+                "links": [],
+                "extra_links": [],
+            },
+        }
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
 
@@ -481,8 +518,9 @@ def test_link_following_adds_followed_docs(client, api_key, monkeypatch):
 
     assert "page_fetched" in types
     followed = [d for t, d in events if t == "link_followed"]
-    assert any(d["url"] == "https://child.example/python-guide" and d["from"] == "https://parent.example/"
-               for d in followed)
+    assert any(
+        d["url"] == "https://child.example/python-guide" and d["from"] == "https://parent.example/" for d in followed
+    )
 
     final = [d for t, d in events if t == "results"][-1]["results"]
     final_urls = {r["url"] for r in final}
@@ -494,12 +532,15 @@ def test_link_following_adds_followed_docs(client, api_key, monkeypatch):
 def test_no_duplicate_consecutive_results_frames(client, api_key, monkeypatch):
     """The dedup guard must never emit two consecutive identical `results` frames."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Python one", url="https://one.example/", extract="python one"),
-            Document(title="Python two", url="https://two.example/", extract="python two"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Python one", url="https://one.example/", extract="python one"),
+                Document(title="Python two", url="https://two.example/", extract="python two"),
+            ],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 40)
 
     def fake_crawl(url, redis):
@@ -526,12 +567,15 @@ def test_title_only_source_result_retained(client, api_key, monkeypatch):
     (e.g. "olearia macrodonta", where two relevant pages have empty extracts).
     """
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "mwmbl": [
-            Document(title="Python guide", url="https://py.example/", extract="A guide"),
-            Document(title="Python reference", url="https://noextract.example/", extract=""),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "mwmbl": [
+                Document(title="Python guide", url="https://py.example/", extract="A guide"),
+                Document(title="Python reference", url="https://noextract.example/", extract=""),
+            ],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9, 0.8] + [0.0] * 40)
 
     def fake_crawl(url, redis):
@@ -554,21 +598,36 @@ def test_followed_link_without_title_excluded(client, api_key, monkeypatch):
     (its only title would be URL-derived) and must not enter the final ranking,
     even though its extract matches the query."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Python parent", url="https://parent.example/",
-                        extract="python parent text")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Python parent", url="https://parent.example/", extract="python parent text")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
 
     def fake_crawl(url, redis):
         if url == "https://parent.example/":
-            return {"url": url, "status": 200, "content": {
-                "title": "Python parent", "extract": "python parent text",
-                "links": ["https://child.example/python-guide"], "extra_links": [],
-            }}
-        return {"url": url, "status": 200, "content": {
-            "title": "", "extract": "python child text", "links": [], "extra_links": [],
-        }}
+            return {
+                "url": url,
+                "status": 200,
+                "content": {
+                    "title": "Python parent",
+                    "extract": "python parent text",
+                    "links": ["https://child.example/python-guide"],
+                    "extra_links": [],
+                },
+            }
+        return {
+            "url": url,
+            "status": 200,
+            "content": {
+                "title": "",
+                "extract": "python child text",
+                "links": [],
+                "extra_links": [],
+            },
+        }
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
 
@@ -585,21 +644,36 @@ def test_followed_link_without_title_excluded(client, api_key, monkeypatch):
 def test_followed_link_with_title_and_no_extract_kept(client, api_key, monkeypatch):
     """A followed link with a genuine crawled title but an empty extract is kept."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Python parent", url="https://parent.example/",
-                        extract="python parent text")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Python parent", url="https://parent.example/", extract="python parent text")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
 
     def fake_crawl(url, redis):
         if url == "https://parent.example/":
-            return {"url": url, "status": 200, "content": {
-                "title": "Python parent", "extract": "python parent text",
-                "links": ["https://child.example/python-guide"], "extra_links": [],
-            }}
-        return {"url": url, "status": 200, "content": {
-            "title": "Python child", "extract": "", "links": [], "extra_links": [],
-        }}
+            return {
+                "url": url,
+                "status": 200,
+                "content": {
+                    "title": "Python parent",
+                    "extract": "python parent text",
+                    "links": ["https://child.example/python-guide"],
+                    "extra_links": [],
+                },
+            }
+        return {
+            "url": url,
+            "status": 200,
+            "content": {
+                "title": "Python child",
+                "extract": "",
+                "links": [],
+                "extra_links": [],
+            },
+        }
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
 
@@ -614,6 +688,7 @@ def test_followed_link_with_title_and_no_extract_kept(client, api_key, monkeypat
 # ---------------------------------------------------------------------------
 # Architecture guard: no forbidden sync symbols in the orchestrator
 # ---------------------------------------------------------------------------
+
 
 def test_super_search_module_has_no_blocking_imports():
     """A failsafe against accidentally importing the sync `requests` lib
@@ -633,6 +708,7 @@ def test_super_search_module_has_no_blocking_imports():
 # index_results_against_query rather than index_documents, and it emits its own result
 # frames rather than going through Ranker.get_results.
 
+
 def _stub_blacklist(monkeypatch, domains: set[str]):
     import mwmbl.tinysearchengine.super_search as ss
 
@@ -645,17 +721,21 @@ def _stub_blacklist(monkeypatch, domains: set[str]):
 @pytest.mark.django_db
 def test_blacklisted_source_results_are_not_shown(client, api_key, monkeypatch):
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Bad", url="https://badsite.test/x", extract="bad"),
-            Document(title="Good", url="https://good.test/x", extract="good"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Bad", url="https://badsite.test/x", extract="bad"),
+                Document(title="Good", url="https://good.test/x", extract="good"),
+            ],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9, 0.5] + [0.0] * 20)
     _stub_blacklist(monkeypatch, {"badsite.test"})
     monkeypatch.setattr(
         "mwmbl.tinysearchengine.super_search.crawl_url",
-        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None})
+        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None},
+    )
 
     response = client.get("/api/v2/super-search/?q=python", HTTP_X_API_KEY=api_key.raw_key)
     events = _parse_sse(_read_stream(response))
@@ -674,17 +754,21 @@ def test_blacklisted_results_are_not_indexed(client, api_key, monkeypatch):
     """_index_results calls index_results_against_query directly, so the index-time
     filter in index_documents never sees these documents."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [
-            Document(title="Bad", url="https://badsite.test/x", extract="bad"),
-            Document(title="Good", url="https://good.test/x", extract="good"),
-        ],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [
+                Document(title="Bad", url="https://badsite.test/x", extract="bad"),
+                Document(title="Good", url="https://good.test/x", extract="good"),
+            ],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9, 0.5] + [0.0] * 20)
     _stub_blacklist(monkeypatch, {"badsite.test"})
     monkeypatch.setattr(
         "mwmbl.tinysearchengine.super_search.crawl_url",
-        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None})
+        lambda url, redis: {"url": url, "status": 200, "timestamp": 0, "content": None, "error": None},
+    )
 
     indexed = []
 
@@ -704,9 +788,12 @@ def test_blacklisted_results_are_not_indexed(client, api_key, monkeypatch):
 def test_blacklisted_links_are_not_crawled(client, api_key, monkeypatch):
     """Links are filtered before the crawl, so a blacklisted page is never fetched."""
     cache.delete(_super_search_monthly_key(api_key.user.id))
-    _stub_sources(monkeypatch, {
-        "hn": [Document(title="Parent", url="https://good.test/", extract="parent")],
-    })
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="Parent", url="https://good.test/", extract="parent")],
+        },
+    )
     _stub_scoring(monkeypatch, [0.9] + [0.0] * 20)
     _stub_blacklist(monkeypatch, {"badsite.test"})
 
@@ -715,12 +802,25 @@ def test_blacklisted_links_are_not_crawled(client, api_key, monkeypatch):
     def fake_crawl(url, redis):
         crawled.append(url)
         if url == "https://good.test/":
-            return {"url": url, "status": 200, "timestamp": 0, "error": None,
-                    "content": {"title": "Parent", "extract": "parent",
-                                "links": ["https://badsite.test/x", "https://other.test/y"],
-                                "extra_links": []}}
-        return {"url": url, "status": 200, "timestamp": 0, "error": None,
-                "content": {"title": "Child", "extract": "child", "links": [], "extra_links": []}}
+            return {
+                "url": url,
+                "status": 200,
+                "timestamp": 0,
+                "error": None,
+                "content": {
+                    "title": "Parent",
+                    "extract": "parent",
+                    "links": ["https://badsite.test/x", "https://other.test/y"],
+                    "extra_links": [],
+                },
+            }
+        return {
+            "url": url,
+            "status": 200,
+            "timestamp": 0,
+            "error": None,
+            "content": {"title": "Child", "extract": "child", "links": [], "extra_links": []},
+        }
 
     monkeypatch.setattr("mwmbl.tinysearchengine.super_search.crawl_url", fake_crawl)
 
@@ -729,3 +829,49 @@ def test_blacklisted_links_are_not_crawled(client, api_key, monkeypatch):
 
     assert "https://badsite.test/x" not in crawled
     assert "https://other.test/y" in crawled
+
+
+def test_run_pipeline_attributes_results_to_their_source(monkeypatch):
+    """The offline eval callers pass a SelectionContext and read back which source
+    produced each URL. Nothing in the streaming endpoint exercises that path, so the
+    attribution is only covered here."""
+    import mwmbl.tinysearchengine.super_search as ss
+    from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext
+
+    _stub_sources(
+        monkeypatch,
+        {
+            "hn": [Document(title="From HN", url="https://hn.example/a", extract="x")],
+            "github": [Document(title="From GH", url="https://gh.example/b", extract="x")],
+        },
+    )
+    _stub_scoring(monkeypatch, [0.0] * 20)
+
+    async def _noop_emit(event_type, data):
+        return None
+
+    ctx = SelectionContext()
+    all_docs: list[Document] = []
+    async_to_sync(ss._run_pipeline)("q", _noop_emit, all_docs, [None], asyncio.Lock(), ctx)
+
+    assert ctx.source_by_url == {
+        "https://hn.example/a": "hn",
+        "https://gh.example/b": "github",
+    }
+    assert sorted(ctx.selected) == ["github", "hn"]
+    assert ctx.per_source_limit > 0
+
+
+def test_run_pipeline_works_without_a_selection_context(monkeypatch):
+    """The streaming endpoint passes no context; the pipeline must not require one."""
+    import mwmbl.tinysearchengine.super_search as ss
+
+    _stub_sources(monkeypatch, {"hn": [Document(title="From HN", url="https://hn.example/a", extract="x")]})
+    _stub_scoring(monkeypatch, [0.0] * 20)
+
+    async def _noop_emit(event_type, data):
+        return None
+
+    all_docs: list[Document] = []
+    async_to_sync(ss._run_pipeline)("q", _noop_emit, all_docs, [None], asyncio.Lock())
+    assert [d.url for d in all_docs] == ["https://hn.example/a"]

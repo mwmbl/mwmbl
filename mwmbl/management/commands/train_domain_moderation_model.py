@@ -16,6 +16,7 @@ Publishing writes a ModerationModelArtifact row rather than a file: the incumben
 reads and the model the workers serve are then the same object, and neither is lost to a
 deploy. See mwmbl.moderation.model.
 """
+
 import json
 from datetime import date
 
@@ -45,29 +46,45 @@ class Command(BaseCommand):
     help = "Train the domain moderation approve/reject suggester"
 
     def add_arguments(self, parser):
-        parser.add_argument("--dry-run", action="store_true",
-                            help="Train and report metrics without writing the artifact")
-        parser.add_argument("--force", action="store_true",
-                            help="Publish even if the gate fails")
         parser.add_argument(
-            "--no-text", action="store_true", dest="no_text",
-            help="Fit on the domain name alone, ignoring the crawled page text vocabulary")
+            "--dry-run", action="store_true", help="Train and report metrics without writing the artifact"
+        )
+        parser.add_argument("--force", action="store_true", help="Publish even if the gate fails")
         parser.add_argument(
-            "--has-text", action="store_true", dest="has_text",
-            help=("Add the was-it-crawled indicator, which is off by default because it "
-                  "measured worse on every metric: evidence is crawled newest-first, so it "
-                  "doubles as a proxy for recency. Worth re-measuring with --ablate once "
-                  "backfill_domain_evidence has evened out the coverage"))
+            "--no-text",
+            action="store_true",
+            dest="no_text",
+            help="Fit on the domain name alone, ignoring the crawled page text vocabulary",
+        )
         parser.add_argument(
-            "--ablate", action="store_true",
-            help=("Also train with the has_text indicator and without the page-text "
-                  "vocabulary, and report all three on the same split, so each feature is "
-                  "measured rather than guessed"))
+            "--has-text",
+            action="store_true",
+            dest="has_text",
+            help=(
+                "Add the was-it-crawled indicator, which is off by default because it "
+                "measured worse on every metric: evidence is crawled newest-first, so it "
+                "doubles as a proxy for recency. Worth re-measuring with --ablate once "
+                "backfill_domain_evidence has evened out the coverage"
+            ),
+        )
         parser.add_argument(
-            "--derived", action="store_true",
-            help=("Add blocklist-derived rows for reason classes short of real data. Off by "
-                  "default: measured at 100 rows this drops real SPAM F1 from 0.839 to 0.688, "
-                  "and OFFENSIVE is already covered exactly by the blocklist check."))
+            "--ablate",
+            action="store_true",
+            help=(
+                "Also train with the has_text indicator and without the page-text "
+                "vocabulary, and report all three on the same split, so each feature is "
+                "measured rather than guessed"
+            ),
+        )
+        parser.add_argument(
+            "--derived",
+            action="store_true",
+            help=(
+                "Add blocklist-derived rows for reason classes short of real data. Off by "
+                "default: measured at 100 rows this drops real SPAM F1 from 0.839 to 0.688, "
+                "and OFFENSIVE is already covered exactly by the blocklist check."
+            ),
+        )
 
     def handle(self, *args, **options):
         rows = training_data.real_rows()
@@ -83,16 +100,17 @@ class Command(BaseCommand):
             if needed:
                 self.stdout.write(f"Reason classes with too little real data: {sorted(needed)}")
                 rows += training_data.derived_rows(
-                    needed, DERIVED_ROWS_PER_REASON,
-                    exclude={row.domain for row in rows})
+                    needed, DERIVED_ROWS_PER_REASON, exclude={row.domain for row in rows}
+                )
 
         version = f"domain-mod-{date.today():%Y-%m-%d}"
         # The model the workers are serving right now, so the gate can score it on the same
         # held-out rows as the candidate. None on a first run, and on an artifact this code can
         # no longer featurise - the gate falls back to the stored metrics and says so.
         incumbent = load_published_model()
-        model, metrics = train(rows, version, use_text=not options["no_text"],
-                               use_has_text=options["has_text"], incumbent=incumbent)
+        model, metrics = train(
+            rows, version, use_text=not options["no_text"], use_has_text=options["has_text"], incumbent=incumbent
+        )
         self.stdout.write(json.dumps(metrics, indent=2))
 
         if options["ablate"]:
@@ -109,8 +127,7 @@ class Command(BaseCommand):
             return
 
         publish(model, metrics)
-        self.stdout.write(self.style.SUCCESS(
-            f"Published {model.version}; every worker picks it up within a minute."))
+        self.stdout.write(self.style.SUCCESS(f"Published {model.version}; every worker picks it up within a minute."))
         rescore_pending_submissions(schedule=0)
         self.stdout.write("Scheduled a rescore of the pending queue with the new model.")
 
@@ -130,11 +147,12 @@ class Command(BaseCommand):
         _, with_has_text = train(rows, f"{version}-has-text", use_has_text=True)
 
         self.stdout.write("\nAblation - are the page-text features earning their place?")
-        self.stdout.write(f"  {'':>22}  {'norm AP':>17}  {'reject P':>16}  "
-                          f"{'reject R':>16}  {'unsure':>7}")
-        for name, metrics in (("text (shipped)", full),
-                              ("text + has_text", with_has_text),
-                              ("domain name only", no_text)):
+        self.stdout.write(f"  {'':>22}  {'norm AP':>17}  {'reject P':>16}  {'reject R':>16}  {'unsure':>7}")
+        for name, metrics in (
+            ("text (shipped)", full),
+            ("text + has_text", with_has_text),
+            ("domain name only", no_text),
+        ):
             cold = metrics.get("cold_start")
             if cold is None:
                 self.stdout.write(f"  {name:>22}: no cold-start slice")
@@ -144,7 +162,8 @@ class Command(BaseCommand):
                 f"  {name:>22}  {self._with_interval(cold['normalised_ap'], cold['normalised_ap_ci'])}  "
                 f"{self._with_interval(at['reject_precision'], at['reject_precision_ci'])}  "
                 f"{self._with_interval(at['reject_recall'], at['reject_recall_ci'])}  "
-                f"{at['unsure_share']:>7.3f}")
+                f"{at['unsure_share']:>7.3f}"
+            )
 
         self.stdout.write("\n  " + self._coverage_note(full) + "\n")
 
@@ -163,14 +182,18 @@ class Command(BaseCommand):
         train_share = metrics.get("train_rows_with_text", 0) / train_rows if train_rows else 0
         test_share = (cold.get("rows_with_text", 0) / cold["rows"]) if cold.get("rows") else 0
 
-        coverage = (f"{metrics.get('train_rows_with_text', 0)} of {train_rows} training rows "
-                    f"({train_share:.0%}) and {cold.get('rows_with_text', 0)} of "
-                    f"{cold.get('rows', 0)} cold-start test rows ({test_share:.0%}) have text.")
+        coverage = (
+            f"{metrics.get('train_rows_with_text', 0)} of {train_rows} training rows "
+            f"({train_share:.0%}) and {cold.get('rows_with_text', 0)} of "
+            f"{cold.get('rows', 0)} cold-start test rows ({test_share:.0%}) have text."
+        )
         if abs(train_share - test_share) > COVERAGE_GAP_TOLERANCE:
-            return (coverage + "\n  That gap makes has_text a proxy for recency rather than "
-                    "for evidence, and skews the text block's\n  vocabulary towards the test "
-                    "period. Run backfill_domain_evidence over the older submissions\n  and "
-                    "re-read this table before drawing conclusions from it.")
+            return (
+                coverage + "\n  That gap makes has_text a proxy for recency rather than "
+                "for evidence, and skews the text block's\n  vocabulary towards the test "
+                "period. Run backfill_domain_evidence over the older submissions\n  and "
+                "re-read this table before drawing conclusions from it."
+            )
         return coverage + " Coverage is even, so these rows compare like for like."
 
     @staticmethod
@@ -188,5 +211,8 @@ class Command(BaseCommand):
         for row in rows:
             if row.source == training_data.REAL and row.rejected and row.reason:
                 counts[row.reason] = counts.get(row.reason, 0) + 1
-        return {reason for reason in DomainSubmission.DOMAIN_REJECTION_REASON
-                if counts.get(reason, 0) < MIN_REAL_ROWS_PER_REASON}
+        return {
+            reason
+            for reason in DomainSubmission.DOMAIN_REJECTION_REASON
+            if counts.get(reason, 0) < MIN_REAL_ROWS_PER_REASON
+        }

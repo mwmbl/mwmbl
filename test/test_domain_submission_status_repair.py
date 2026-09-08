@@ -7,6 +7,7 @@ to every query that looks for a decided submission - the queue, the history, the
 domains, the training data. These cover both halves of the fix: the rows are repaired, and
 the column now refuses the bad value at the database, whatever writes it.
 """
+
 import importlib
 
 import pytest
@@ -18,8 +19,7 @@ from django.test import override_settings
 from mwmbl.curated_domains import CURATED_DOMAINS_CACHE_KEY, get_curated_domains
 from mwmbl.models import DomainSubmission, MwmblUser
 
-migration_module = importlib.import_module(
-    "mwmbl.migrations.0037_repair_domain_submission_statuses")
+migration_module = importlib.import_module("mwmbl.migrations.0037_repair_domain_submission_statuses")
 repair_statuses = migration_module.repair_statuses
 
 STATUS_CONSTRAINT = "domain_submission_status_valid"
@@ -39,8 +39,7 @@ def broken_column(db):
     in a transaction, so the constraint comes back on rollback.
     """
     with connection.cursor() as cursor:
-        cursor.execute(
-            f"ALTER TABLE {DomainSubmission._meta.db_table} DROP CONSTRAINT {STATUS_CONSTRAINT}")
+        cursor.execute(f"ALTER TABLE {DomainSubmission._meta.db_table} DROP CONSTRAINT {STATUS_CONSTRAINT}")
     yield
 
 
@@ -52,8 +51,7 @@ def clear_curated_cache():
 
 
 def make_submission(user, name, status, **kwargs):
-    return DomainSubmission.objects.create(
-        name=name, submitted_by=user, status=status, **kwargs)
+    return DomainSubmission.objects.create(name=name, submitted_by=user, status=status, **kwargs)
 
 
 @pytest.mark.django_db

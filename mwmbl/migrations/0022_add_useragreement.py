@@ -6,33 +6,48 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0021_hash_api_keys'),
+        ("mwmbl", "0021_hash_api_keys"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='UserAgreement',
+            name="UserAgreement",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('agreement_type', models.CharField(choices=[('TERMS_OF_SERVICE_GUI', 'Terms of Service (GUI)'), ('TERMS_OF_SERVICE_API', 'Terms of Service (API)')], max_length=50)),
-                ('version_id', models.CharField(max_length=100)),
-                ('accepted_at', models.DateTimeField(auto_now_add=True)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "agreement_type",
+                    models.CharField(
+                        choices=[
+                            ("TERMS_OF_SERVICE_GUI", "Terms of Service (GUI)"),
+                            ("TERMS_OF_SERVICE_API", "Terms of Service (API)"),
+                        ],
+                        max_length=50,
+                    ),
+                ),
+                ("version_id", models.CharField(max_length=100)),
+                ("accepted_at", models.DateTimeField(auto_now_add=True)),
             ],
         ),
         migrations.RenameIndex(
-            model_name='usagebucket',
-            new_name='mwmbl_usage_year_584313_idx',
-            old_name='mwmbl_usage_year_mo_idx',
+            model_name="usagebucket",
+            new_name="mwmbl_usage_year_584313_idx",
+            old_name="mwmbl_usage_year_mo_idx",
         ),
         migrations.AddField(
-            model_name='useragreement',
-            name='user',
-            field=models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='agreements', to=settings.AUTH_USER_MODEL),
+            model_name="useragreement",
+            name="user",
+            field=models.ForeignKey(
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="agreements",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
         migrations.AddIndex(
-            model_name='useragreement',
-            index=models.Index(fields=['user', 'agreement_type', '-accepted_at'], name='mwmbl_usera_user_id_e959ac_idx'),
+            model_name="useragreement",
+            index=models.Index(
+                fields=["user", "agreement_type", "-accepted_at"], name="mwmbl_usera_user_id_e959ac_idx"
+            ),
         ),
     ]

@@ -20,6 +20,7 @@ Two-phase helper for the Super Search v2 candidate analysis:
 
 Run from the repo root (the directory containing curated-domains.json).
 """
+
 import argparse
 import json
 import sys
@@ -46,28 +47,68 @@ RECIPE_BATCH_SIZE = 5
 # Domains already served by a hand-written adapter (recipe domains are detected
 # from the YAML files). The Stack Exchange adapter covers the whole SE network.
 ADAPTER_DOMAINS = {
-    "mwmbl.org", "news.ycombinator.com", "github.com", "pypi.org",
-    "arxiv.org", "info.arxiv.org",
-    "stackoverflow.com", "stackexchange.com", "superuser.com",
-    "mathoverflow.net", "serverfault.com", "askubuntu.com",
+    "mwmbl.org",
+    "news.ycombinator.com",
+    "github.com",
+    "pypi.org",
+    "arxiv.org",
+    "info.arxiv.org",
+    "stackoverflow.com",
+    "stackexchange.com",
+    "superuser.com",
+    "mathoverflow.net",
+    "serverfault.com",
+    "askubuntu.com",
 }
 
 # Fixed taxonomy / enums (keep in sync with the subagent prompt).
 FIELDS = {
-    "programming", "tech", "science", "academia", "books-literature",
-    "recipes-food", "history", "art-design", "gaming", "music", "film-tv",
-    "business-finance", "health-medicine", "news-politics", "law-government",
-    "education", "philosophy", "nature-environment", "sports", "lifestyle",
+    "programming",
+    "tech",
+    "science",
+    "academia",
+    "books-literature",
+    "recipes-food",
+    "history",
+    "art-design",
+    "gaming",
+    "music",
+    "film-tv",
+    "business-finance",
+    "health-medicine",
+    "news-politics",
+    "law-government",
+    "education",
+    "philosophy",
+    "nature-environment",
+    "sports",
+    "lifestyle",
     "other",
 }
 LEVELS = {"low", "medium", "high"}
 SITE_TYPES = {
-    "blog", "docs", "wiki", "forum", "journal", "news", "store",
-    "personal", "reference", "tool", "org",
+    "blog",
+    "docs",
+    "wiki",
+    "forum",
+    "journal",
+    "news",
+    "store",
+    "personal",
+    "reference",
+    "tool",
+    "org",
 }
 REQUIRED_KEYS = {
-    "name", "field", "popularity", "estimated_pages", "site_type",
-    "language", "has_search", "recommended", "reason",
+    "name",
+    "field",
+    "popularity",
+    "estimated_pages",
+    "site_type",
+    "language",
+    "has_search",
+    "recommended",
+    "reason",
 }
 
 # Map classifier synonyms onto the fixed taxonomy (keeps the output reproducible
@@ -106,6 +147,7 @@ def root_domain(d):
 def hn_prior_map(names):
     """Map domain -> 'high' | 'medium' hint from HN top-domain scores, else absent."""
     from mwmbl.hn_top_domains_filtered import DOMAINS
+
     hn = {k.lower(): v for k, v in DOMAINS.items()}
     prior = {}
     for name in names:
@@ -127,16 +169,12 @@ def cmd_prepare():
 
     n_chunks = 0
     for i in range(0, len(names), CHUNK_SIZE):
-        chunk = names[i:i + CHUNK_SIZE]
+        chunk = names[i : i + CHUNK_SIZE]
         idx = i // CHUNK_SIZE
-        payload = [
-            {"name": name, "hn_popularity_hint": prior.get(name)}
-            for name in chunk
-        ]
+        payload = [{"name": name, "hn_popularity_hint": prior.get(name)} for name in chunk]
         (CHUNK_DIR / f"input_{idx:03d}.json").write_text(json.dumps(payload, indent=2))
         n_chunks += 1
-    print(f"Prepared {len(names)} domains into {n_chunks} input chunks "
-          f"(size {CHUNK_SIZE}) in {CHUNK_DIR}")
+    print(f"Prepared {len(names)} domains into {n_chunks} input chunks (size {CHUNK_SIZE}) in {CHUNK_DIR}")
     print(f"HN popularity prior available for {len(prior)} domains.")
 
 
@@ -183,9 +221,11 @@ def cmd_merge():
     missing_names = [n for n in names if n not in by_name]
     extra_names = [n for n in by_name if n not in curated_set]
 
-    print(f"Classified {len(by_name)} / {len(names)} domains, "
-          f"{len(missing_names)} missing, {len(errors)} invalid, "
-          f"{len(extra_names)} unexpected.")
+    print(
+        f"Classified {len(by_name)} / {len(names)} domains, "
+        f"{len(missing_names)} missing, {len(errors)} invalid, "
+        f"{len(extra_names)} unexpected."
+    )
 
     if missing_names:
         print("  Missing (first 20):", missing_names[:20])
@@ -229,15 +269,9 @@ def cmd_shortlist():
         return 1
     domains = json.loads(OUTPUT.read_text())["domains"]
     pop_rank = {"high": 0, "medium": 1, "low": 2}
-    shortlist = [
-        e for e in domains
-        if e["recommended"] and e["has_search"]
-        and e["popularity"] in ("medium", "high")
-    ]
+    shortlist = [e for e in domains if e["recommended"] and e["has_search"] and e["popularity"] in ("medium", "high")]
     shortlist.sort(key=lambda e: (pop_rank[e["popularity"]], e["field"], e["name"]))
-    SHORTLIST.write_text(
-        json.dumps({"domains": shortlist}, indent=2, ensure_ascii=False) + "\n"
-    )
+    SHORTLIST.write_text(json.dumps({"domains": shortlist}, indent=2, ensure_ascii=False) + "\n")
     print(f"Wrote {SHORTLIST} with {len(shortlist)} / {len(domains)} domains.")
     print("Filter: recommended AND has_search AND popularity in {medium, high}")
     print("\n-- field --")
@@ -255,6 +289,7 @@ def cmd_shortlist():
 def _covered_domains():
     """Domains already served: hand-written adapters + existing recipe YAML files."""
     import yaml
+
     covered = set(ADAPTER_DOMAINS)
     for path in RECIPES_DIR.glob("*.yaml"):
         try:
@@ -304,8 +339,7 @@ def cmd_select_remaining():
     attempted = {e["name"] for e in _select_diverse(orig_uncovered, TARGET_COUNT)}
 
     covered_now = _covered_domains()
-    remaining = [e for e in entries
-                 if e["name"] not in covered_now and e["name"] not in attempted]
+    remaining = [e for e in entries if e["name"] not in covered_now and e["name"] not in attempted]
     remaining = _select_diverse(remaining, len(remaining))  # field-interleaved order
 
     TARGETS.write_text(json.dumps({"domains": remaining}, indent=2, ensure_ascii=False) + "\n")
@@ -314,13 +348,15 @@ def cmd_select_remaining():
         old.unlink()
     n_batches = 0
     for i in range(0, len(remaining), REMAINING_BATCH_SIZE):
-        batch = remaining[i:i + REMAINING_BATCH_SIZE]
+        batch = remaining[i : i + REMAINING_BATCH_SIZE]
         (RECIPE_CHUNK_DIR / f"input_{i // REMAINING_BATCH_SIZE:03d}.json").write_text(
             json.dumps(batch, indent=2, ensure_ascii=False)
         )
         n_batches += 1
-    print(f"Remaining uncovered, not-yet-attempted: {len(remaining)} sites "
-          f"({len(covered_now)} covered, {len(attempted)} already attempted).")
+    print(
+        f"Remaining uncovered, not-yet-attempted: {len(remaining)} sites "
+        f"({len(covered_now)} covered, {len(attempted)} already attempted)."
+    )
     print(f"Wrote {n_batches} batches (size {REMAINING_BATCH_SIZE}) in {RECIPE_CHUNK_DIR}.")
     return 0
 
@@ -343,16 +379,20 @@ def cmd_select_targets():
         old.unlink()
     n_batches = 0
     for i in range(0, len(targets), RECIPE_BATCH_SIZE):
-        batch = targets[i:i + RECIPE_BATCH_SIZE]
+        batch = targets[i : i + RECIPE_BATCH_SIZE]
         (RECIPE_CHUNK_DIR / f"input_{i // RECIPE_BATCH_SIZE:03d}.json").write_text(
             json.dumps(batch, indent=2, ensure_ascii=False)
         )
         n_batches += 1
 
-    print(f"Selected {len(targets)} targets from {len(candidates)} uncovered "
-          f"shortlist sites ({len(covered)} already covered).")
-    print(f"Wrote {TARGETS} and {n_batches} batches (size {RECIPE_BATCH_SIZE}) "
-          f"in {RECIPE_CHUNK_DIR} for the recipe sub-agent fan-out.")
+    print(
+        f"Selected {len(targets)} targets from {len(candidates)} uncovered "
+        f"shortlist sites ({len(covered)} already covered)."
+    )
+    print(
+        f"Wrote {TARGETS} and {n_batches} batches (size {RECIPE_BATCH_SIZE}) "
+        f"in {RECIPE_CHUNK_DIR} for the recipe sub-agent fan-out."
+    )
     print("\n-- field --")
     for k, v in Counter(e["field"] for e in targets).most_common():
         print(f"  {k:20} {v}")

@@ -4,19 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0004_curation_original_index_results'),
+        ("mwmbl", "0004_curation_original_index_results"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='OldIndex',
+            name="OldIndex",
             fields=[
-                ('index_path', models.CharField(max_length=300, primary_key=True, serialize=False)),
-                ('index_total_pages', models.IntegerField()),
-                ('last_copied_time', models.DateTimeField()),
-                ('last_page_copied', models.IntegerField()),
+                ("index_path", models.CharField(max_length=300, primary_key=True, serialize=False)),
+                ("index_total_pages", models.IntegerField()),
+                ("last_copied_time", models.DateTimeField()),
+                ("last_page_copied", models.IntegerField()),
             ],
         ),
     ]

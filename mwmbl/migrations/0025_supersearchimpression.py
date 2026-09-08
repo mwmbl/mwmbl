@@ -4,25 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0024_marketingconsent'),
+        ("mwmbl", "0024_marketingconsent"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='SuperSearchImpression',
+            name="SuperSearchImpression",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('query', models.CharField(max_length=512)),
-                ('candidates', models.JSONField(default=list)),
-                ('selected', models.JSONField(default=list)),
-                ('features', models.JSONField(default=dict)),
-                ('rewards', models.JSONField(default=dict)),
-                ('timestamp', models.DateTimeField(auto_now_add=True)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("query", models.CharField(max_length=512)),
+                ("candidates", models.JSONField(default=list)),
+                ("selected", models.JSONField(default=list)),
+                ("features", models.JSONField(default=dict)),
+                ("rewards", models.JSONField(default=dict)),
+                ("timestamp", models.DateTimeField(auto_now_add=True)),
             ],
             options={
-                'indexes': [models.Index(fields=['timestamp'], name='mwmbl_super_timesta_bbb2f8_idx')],
+                "indexes": [models.Index(fields=["timestamp"], name="mwmbl_super_timesta_bbb2f8_idx")],
             },
         ),
     ]

@@ -40,6 +40,7 @@ Usage:
   uv run python scripts/super_search_eval.py select   --matrix eval_matrix
   uv run python scripts/super_search_eval.py simulate --matrix eval_matrix
 """
+
 import argparse
 import asyncio
 import json
@@ -59,7 +60,8 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 # host_of/registrable are pure stdlib helpers (no Django) — safe to import at module
 # load, before django.setup(); the registry-backed source_domain_map is loaded lazily.
 from mwmbl.tinysearchengine.super_search_select.domains import (  # noqa: E402
-    host_of, registrable,
+    host_of,
+    registrable,
 )
 
 
@@ -71,20 +73,25 @@ def _bootstrap_django():
 # build-matrix (network + Django)
 # ---------------------------------------------------------------------------
 
+
 async def _query_all_sources(query: str, limit: int):
     import httpx
     from django.conf import settings
+
     from mwmbl.tinysearchengine.super_search_sources import SOURCES
 
     timeout = settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
-                                 headers={"User-Agent": "mwmbl-super-search-eval/0.1"}) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, headers={"User-Agent": "mwmbl-super-search-eval/0.1"}
+    ) as client:
+
         async def one(name, fn):
             try:
                 docs = await asyncio.wait_for(fn(client, query, limit), timeout=timeout)
                 return name, docs
             except Exception:
                 return name, []
+
         results = await asyncio.gather(*[one(n, f) for n, f in SOURCES.items()])
     return dict(results)
 
@@ -96,7 +103,6 @@ def _fetch_all_queries(queries: list[str], checkpoint: Path, limit: int) -> dict
     in the checkpoint are not re-fetched, so a multi-hour network run can be
     interrupted and resumed.
     """
-    from mwmbl.tinysearchengine.super_search_sources import SOURCES
 
     fetched: dict[str, dict] = {}
     if checkpoint.exists():
@@ -108,18 +114,15 @@ def _fetch_all_queries(queries: list[str], checkpoint: Path, limit: int) -> dict
     with checkpoint.open("a") as fh:
         for qi, query in enumerate(todo):
             docs_by_source = asyncio.run(_query_all_sources(query, limit))
-            docs = {name: [[d.url, d.title, d.extract] for d in ds]
-                    for name, ds in docs_by_source.items() if ds}
+            docs = {name: [[d.url, d.title, d.extract] for d in ds] for name, ds in docs_by_source.items() if ds}
             fetched[query] = docs
             fh.write(json.dumps({"query": query, "docs": docs}) + "\n")
             fh.flush()
-            print(f"  [{qi + 1}/{len(todo)}] {query!r}: "
-                  f"{sum(len(d) for d in docs.values())} docs")
+            print(f"  [{qi + 1}/{len(todo)}] {query!r}: {sum(len(d) for d in docs.values())} docs")
     return fetched
 
 
-def _survival_rewards(query: str, docs_by_source: dict, s_index: dict, R, qi: int,
-                      limit: int, top_k: int) -> None:
+def _survival_rewards(query: str, docs_by_source: dict, s_index: dict, R, qi: int, limit: int, top_k: int) -> None:
     """Reward = fraction of a source's results surviving the LTR model's top-K."""
     from mwmbl.search_setup import ltr_model
     from mwmbl.tinysearchengine.indexer import Document
@@ -152,24 +155,26 @@ def _judge_rewards(query: str, docs_by_source: dict, s_index: dict, R, qi: int) 
     judge = get_judge()
     if judge is None:
         raise RuntimeError(
-            "--reward judge requires the relevance judge artifact "
-            "(settings.SUPER_SEARCH_JUDGE_MODEL_DIR)")
+            "--reward judge requires the relevance judge artifact (settings.SUPER_SEARCH_JUDGE_MODEL_DIR)"
+        )
     for name, docs in docs_by_source.items():
         texts = [doc_text(title, extract) for _, title, extract in docs]
         if texts:
             R[qi, s_index[name]] = float(np.mean(judge.score(query, texts)))
 
 
-def build_matrix(queries: list[str], out: str, reward: str = "survival",
-                 checkpoint: str | None = None):
+def build_matrix(queries: list[str], out: str, reward: str = "survival", checkpoint: str | None = None):
     from django.conf import settings
-    from mwmbl.tinysearchengine.super_search_sources import SOURCES
+
     from mwmbl.tinysearchengine.super_search_select import vectors
+    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
     from mwmbl.tinysearchengine.super_search_select.features import (
-        FEATURE_NAMES, QueryContext, feature_vector,
+        FEATURE_NAMES,
+        QueryContext,
+        feature_vector,
     )
     from mwmbl.tinysearchengine.super_search_select.registry import get_meta
-    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
+    from mwmbl.tinysearchengine.super_search_sources import SOURCES
 
     sources = list(SOURCES.keys())
     s_index = {name: i for i, name in enumerate(sources)}
@@ -189,8 +194,7 @@ def build_matrix(queries: list[str], out: str, reward: str = "survival",
             text = " ".join(f"{title or ''} {extract or ''}" for _, title, extract in docs)
             prof_bow[name] += vectors.project_bow(text, dim)
             prof_cng[name] += vectors.project_char_ngrams(text, dim)
-    profile = {n: (vectors._l2_normalise(prof_bow[n]), vectors._l2_normalise(prof_cng[n]))
-               for n in sources}
+    profile = {n: (vectors._l2_normalise(prof_bow[n]), vectors._l2_normalise(prof_cng[n])) for n in sources}
 
     # Pass 2: features + rewards.
     Q, S = len(queries), len(sources)
@@ -213,16 +217,17 @@ def build_matrix(queries: list[str], out: str, reward: str = "survival",
         if (qi + 1) % 50 == 0:
             print(f"  scored [{qi + 1}/{Q}]")
 
-    matrix = RewardMatrix(queries=queries, sources=sources,
-                          feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask)
+    matrix = RewardMatrix(queries=queries, sources=sources, feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask)
     matrix.save(out)
-    print(f"Wrote matrix {out}.npz/.json ({reward} rewards): {Q} queries x {S} sources, "
-          f"{int(mask.sum())} filled cells.")
+    print(
+        f"Wrote matrix {out}.npz/.json ({reward} rewards): {Q} queries x {S} sources, {int(mask.sum())} filled cells."
+    )
 
 
 # ---------------------------------------------------------------------------
 # build-gold-matrix (offline: LTR dataset gold labels, no network)
 # ---------------------------------------------------------------------------
+
 
 def _is_gold(rank) -> bool:
     """True if ``rank`` is a real gold rank (not pandas NaN / None / blank)."""
@@ -244,7 +249,7 @@ def attribute_rows(rows, reg_map):
     source has a gold-relevant row for the query (else False = available-but-not-gold),
     and ``prof_text[source]`` accumulates that source's title/extract text.
     """
-    per_query: dict[str, dict[str, bool]] = {}   # query -> {source -> has_gold}
+    per_query: dict[str, dict[str, bool]] = {}  # query -> {source -> has_gold}
     prof_text: dict[str, list[str]] = defaultdict(list)
     for query, url, title, extract, gold in rows:
         names = reg_map.get(registrable(host_of(str(url))))
@@ -276,14 +281,17 @@ def build_gold_matrix(out: str):
     """
     import pandas as pd
     from django.conf import settings
+
     from mwmbl.rankeval.paths import LEARNING_TO_RANK_DATASET_PATH
     from mwmbl.tinysearchengine.super_search_select import vectors
     from mwmbl.tinysearchengine.super_search_select.domains import source_domain_map
+    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
     from mwmbl.tinysearchengine.super_search_select.features import (
-        FEATURE_NAMES, QueryContext, feature_vector,
+        FEATURE_NAMES,
+        QueryContext,
+        feature_vector,
     )
     from mwmbl.tinysearchengine.super_search_select.registry import get_meta, get_registry
-    from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix
 
     dim = settings.SUPER_SEARCH_PROJECTION_DIM
     F = len(FEATURE_NAMES)
@@ -328,8 +336,9 @@ def build_gold_matrix(out: str):
             if has_gold:
                 R[qi, si] = 1.0
 
-    matrix = RewardMatrix(queries=in_cov_queries, sources=sources,
-                          feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask)
+    matrix = RewardMatrix(
+        queries=in_cov_queries, sources=sources, feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask
+    )
     matrix.save(out)
 
     # Diagnostics: does selection even have room to matter? If most queries have
@@ -337,23 +346,28 @@ def build_gold_matrix(out: str):
     avail_per_q = mask.sum(axis=1)
     gold_per_q = (R > 0).sum(axis=1)
     n_gold_q = int((gold_per_q > 0).sum())
-    print(f"\nWrote matrix {out}.npz/.json: {Q} in-coverage queries x {S} sources, "
-          f"{int(mask.sum())} filled cells.")
-    print(f"  queries with >=1 gold source:   {n_gold_q} ({100*n_gold_q/max(Q,1):.1f}%)")
-    print(f"  mean available sources / query: {avail_per_q.mean():.2f} "
-          f"(median {int(np.median(avail_per_q))}, max {int(avail_per_q.max())})")
+    print(f"\nWrote matrix {out}.npz/.json: {Q} in-coverage queries x {S} sources, {int(mask.sum())} filled cells.")
+    print(f"  queries with >=1 gold source:   {n_gold_q} ({100 * n_gold_q / max(Q, 1):.1f}%)")
+    print(
+        f"  mean available sources / query: {avail_per_q.mean():.2f} "
+        f"(median {int(np.median(avail_per_q))}, max {int(avail_per_q.max())})"
+    )
     for k in (1, 2, 3, 5, 10):
         n = int((avail_per_q > k).sum())
-        print(f"  queries with > {k:>2} available sources: {n:>4} "
-              f"({100*n/max(Q,1):.1f}%)  <- room for top-{k} selection to matter")
+        print(
+            f"  queries with > {k:>2} available sources: {n:>4} "
+            f"({100 * n / max(Q, 1):.1f}%)  <- room for top-{k} selection to matter"
+        )
 
 
 # ---------------------------------------------------------------------------
 # select / simulate (pure, no network)
 # ---------------------------------------------------------------------------
 
+
 def cmd_select(matrix_path: str, k: int):
     from mwmbl.tinysearchengine.super_search_select.evaluation import RewardMatrix, select_features
+
     m = RewardMatrix.load(matrix_path)
     result = select_features(m, k=k)
     print(f"baseline coverage@{k}: {result['baseline_coverage']:.4f}\n")
@@ -364,8 +378,11 @@ def cmd_select(matrix_path: str, k: int):
 
 def cmd_simulate(matrix_path: str, k: int):
     from mwmbl.tinysearchengine.super_search_select.evaluation import (
-        RewardMatrix, simulate_baselines, sweep_explore_scale,
+        RewardMatrix,
+        simulate_baselines,
+        sweep_explore_scale,
     )
+
     m = RewardMatrix.load(matrix_path)
     base = simulate_baselines(m, k=k)
     print("baselines (mean captured reward per query):")
@@ -379,11 +396,14 @@ def cmd_simulate(matrix_path: str, k: int):
         print(f"  nu={nu:<4} {val:.4f}{marker}")
 
 
-def cmd_simulate_xgb(matrix_path: str, k: int, epsilons: list[float],
-                     refit_every: int, min_rows: int):
+def cmd_simulate_xgb(matrix_path: str, k: int, epsilons: list[float], refit_every: int, min_rows: int):
     from mwmbl.tinysearchengine.super_search_select.evaluation import (
-        RewardMatrix, simulate_baselines, sweep_epsilon, sweep_explore_scale,
+        RewardMatrix,
+        simulate_baselines,
+        sweep_epsilon,
+        sweep_explore_scale,
     )
+
     m = RewardMatrix.load(matrix_path)
     base = simulate_baselines(m, k=k)
     print("baselines (mean captured reward per query):")
@@ -393,28 +413,26 @@ def cmd_simulate_xgb(matrix_path: str, k: int, epsilons: list[float],
     best_nu = max(ts, key=ts.get)
     print(f"\nbest LinTS: nu={best_nu} {ts[best_nu]:.4f}")
     print("\nXGB contextual bandit by epsilon:")
-    sweep = sweep_epsilon(m, k=k, epsilons=epsilons,
-                          refit_every=refit_every, min_rows=min_rows)
+    sweep = sweep_epsilon(m, k=k, epsilons=epsilons, refit_every=refit_every, min_rows=min_rows)
     best = max(sweep, key=sweep.get)
     for eps, val in sweep.items():
         marker = "  <- best" if eps == best else ""
         print(f"  eps={eps:<5} {val:.4f}{marker}")
 
 
-def cmd_holdout(matrix_path: str, k: int, test_frac: float,
-                queries_by_source: str | None, seed: int):
+def cmd_holdout(matrix_path: str, k: int, test_frac: float, queries_by_source: str | None, seed: int):
     from mwmbl.tinysearchengine.super_search_select.evaluation import (
-        RewardMatrix, evaluate_holdout,
+        RewardMatrix,
+        evaluate_holdout,
     )
+
     m = RewardMatrix.load(matrix_path)
     home_by_query = None
     if queries_by_source:
         by_source = json.loads(Path(queries_by_source).read_text())
         home_by_query = {q: source for source, qs in by_source.items() for q in qs}
-    result = evaluate_holdout(m, k=k, test_frac=test_frac, seed=seed,
-                              home_by_query=home_by_query)
-    print(f"train queries: {result['n_train_queries']}, "
-          f"test queries: {result['n_test_queries']}")
+    result = evaluate_holdout(m, k=k, test_frac=test_frac, seed=seed, home_by_query=home_by_query)
+    print(f"train queries: {result['n_train_queries']}, test queries: {result['n_test_queries']}")
     print(f"xgb test RMSE: {result['rmse']:.4f}\n")
     for metric in ("coverage_at_k", "home_recall_at_k"):
         print(f"{metric} (k={k}):")
@@ -424,16 +442,14 @@ def cmd_holdout(matrix_path: str, k: int, test_frac: float,
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_build = sub.add_parser("build-matrix")
     p_build.add_argument("--queries", required=True, help="file with one query per line")
     p_build.add_argument("--out", default="eval_matrix")
     p_build.add_argument("--reward", choices=["survival", "judge"], default="survival")
-    p_build.add_argument("--checkpoint", default=None,
-                         help="fetch checkpoint JSONL (default: <out>.fetch.jsonl)")
+    p_build.add_argument("--checkpoint", default=None, help="fetch checkpoint JSONL (default: <out>.fetch.jsonl)")
 
     p_gold = sub.add_parser("build-gold-matrix")
     p_gold.add_argument("--out", default="devdata/ss_gold_matrix")
@@ -449,8 +465,7 @@ def main():
     p_sxgb = sub.add_parser("simulate-xgb")
     p_sxgb.add_argument("--matrix", default="eval_matrix")
     p_sxgb.add_argument("--k", type=int, default=10)
-    p_sxgb.add_argument("--epsilons", type=float, nargs="+",
-                        default=[0.0, 0.05, 0.1, 0.2])
+    p_sxgb.add_argument("--epsilons", type=float, nargs="+", default=[0.0, 0.05, 0.1, 0.2])
     p_sxgb.add_argument("--refit-every", type=int, default=200)
     p_sxgb.add_argument("--min-rows", type=int, default=300)
 
@@ -458,8 +473,9 @@ def main():
     p_hold.add_argument("--matrix", default="eval_matrix")
     p_hold.add_argument("--k", type=int, default=10)
     p_hold.add_argument("--test-frac", type=float, default=0.2)
-    p_hold.add_argument("--queries-by-source", default=None,
-                        help="JSON {source: [queries]} home map (ss_source_queries.json)")
+    p_hold.add_argument(
+        "--queries-by-source", default=None, help="JSON {source: [queries]} home map (ss_source_queries.json)"
+    )
     p_hold.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
@@ -475,11 +491,9 @@ def main():
     elif args.command == "simulate":
         cmd_simulate(args.matrix, args.k)
     elif args.command == "simulate-xgb":
-        cmd_simulate_xgb(args.matrix, args.k, args.epsilons,
-                         args.refit_every, args.min_rows)
+        cmd_simulate_xgb(args.matrix, args.k, args.epsilons, args.refit_every, args.min_rows)
     elif args.command == "holdout":
-        cmd_holdout(args.matrix, args.k, args.test_frac,
-                    args.queries_by_source, args.seed)
+        cmd_holdout(args.matrix, args.k, args.test_frac, args.queries_by_source, args.seed)
 
 
 if __name__ == "__main__":

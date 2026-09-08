@@ -9,11 +9,10 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 from mwmbl.tinysearchengine.mmr_rank import MMRRanker
-from mwmbl.tinysearchengine.rank import HeuristicAndWikiRanker
 
 redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
 

@@ -23,6 +23,7 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev uv run python \
         scripts/super_search_queryset.py --dump-batch 30
 """
+
 import argparse
 import asyncio
 import json
@@ -45,8 +46,8 @@ CHECKPOINT = REPO_ROOT / "devdata" / "ss_source_queries.json"
 CATALOG = REPO_ROOT / "devdata" / "llm_relabel" / "source_catalog.json"
 
 MIN_QUERIES, MAX_QUERIES = 5, 10
-PROBE_SEEDS = 3          # description-derived probe queries per source
-PROBE_LIMIT = 5          # results per probe
+PROBE_SEEDS = 3  # description-derived probe queries per source
+PROBE_LIMIT = 5  # results per probe
 GROUNDING_TERMS = 15
 
 _WORD_RE = re.compile(r"[a-z][a-z0-9'-]{3,}")
@@ -56,7 +57,8 @@ _STOPWORDS = frozenset(
     "more most some such only very also than then there here each every and "
     "the for are was were has had can could should would may might must not "
     "its his her our you all any but out off own same too who whom does did "
-    "site sites page pages website websites online free best".split())
+    "site sites page pages website websites online free best".split()
+)
 
 GENERATION_BRIEF = """\
 For each source below, write {min_q}-{max_q} realistic user search queries that this
@@ -88,14 +90,17 @@ def save_checkpoint(data: dict[str, list[str]]) -> None:
 
 def all_sources() -> list[str]:
     from mwmbl.tinysearchengine.super_search_sources import SOURCES
+
     return list(SOURCES.keys())
 
 
 def source_info(name: str) -> tuple[str, str, str]:
     """(domain, field, description) from the registry + LLM source catalog + shortlist."""
     from mwmbl.tinysearchengine.super_search_select.registry import (
-        _load_shortlist, get_meta,
+        _load_shortlist,
+        get_meta,
     )
+
     meta = get_meta(name)
     catalog = json.loads(CATALOG.read_text()) if CATALOG.exists() else {}
     desc = catalog.get(name, {}).get("description", "")
@@ -112,13 +117,15 @@ def _content_words(text: str) -> list[str]:
 async def _probe_source(name: str, seeds: list[str]) -> list[str]:
     """Query the source with description-derived seeds; return its top result terms."""
     import httpx
+
     from mwmbl.tinysearchengine.super_search_sources import SOURCES
 
     fn = SOURCES[name]
     timeout = settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT
     counts: Counter = Counter()
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
-                                 headers={"User-Agent": "mwmbl-super-search-eval/0.1"}) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, headers={"User-Agent": "mwmbl-super-search-eval/0.1"}
+    ) as client:
         for seed in seeds:
             try:
                 docs = await asyncio.wait_for(fn(client, seed, PROBE_LIMIT), timeout=timeout)
@@ -144,11 +151,12 @@ def dump_batch(n: int, probe: bool) -> None:
         if probe:
             seeds = list(dict.fromkeys(_content_words(desc)))[:PROBE_SEEDS] or [field]
             terms = asyncio.run(_probe_source(name, seeds))
-            print(f"grounding (live results for seeds {seeds}): "
-                  f"{', '.join(terms) if terms else '(no results)'}")
+            print(f"grounding (live results for seeds {seeds}): {', '.join(terms) if terms else '(no results)'}")
         print()
-    print(f"[{len(todo)} sources dumped; {len(done)} done, "
-          f"{len(all_sources()) - len(done) - len(todo)} remaining after these]")
+    print(
+        f"[{len(todo)} sources dumped; {len(done)} done, "
+        f"{len(all_sources()) - len(done) - len(todo)} remaining after these]"
+    )
 
 
 _URLISH_RE = re.compile(r"https?://|www\.", re.I)
@@ -167,15 +175,13 @@ def merge(path: str) -> None:
             raise ValueError(f"source {name!r} already has queries; refusing to overwrite")
         deduped = list(dict.fromkeys(q.strip() for q in queries if q and q.strip()))
         if not MIN_QUERIES <= len(deduped) <= MAX_QUERIES:
-            raise ValueError(f"{name!r}: {len(deduped)} queries after dedup, "
-                             f"need {MIN_QUERIES}-{MAX_QUERIES}")
+            raise ValueError(f"{name!r}: {len(deduped)} queries after dedup, need {MIN_QUERIES}-{MAX_QUERIES}")
         for q in deduped:
             if _URLISH_RE.search(q) or len(q) > 80:
                 raise ValueError(f"{name!r}: bad query {q!r}")
         done[name] = deduped
     save_checkpoint(done)
-    print(f"merged {len(generated)} sources; checkpoint now covers "
-          f"{len(done)}/{len(known)} sources.")
+    print(f"merged {len(generated)} sources; checkpoint now covers {len(done)}/{len(known)} sources.")
 
 
 def status() -> None:
@@ -194,8 +200,7 @@ def main():
     group.add_argument("--status", action="store_true")
     group.add_argument("--dump-batch", type=int, metavar="N")
     group.add_argument("--merge", metavar="FILE")
-    parser.add_argument("--no-probe", action="store_true",
-                        help="skip the live grounding probe when dumping")
+    parser.add_argument("--no-probe", action="store_true", help="skip the live grounding probe when dumping")
     args = parser.parse_args()
     if args.status:
         status()

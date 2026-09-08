@@ -1,6 +1,7 @@
 """
 Add domains to the queue to be retrieved
 """
+
 import csv
 import gzip
 
@@ -11,7 +12,7 @@ BATCH_SIZE = 250
 
 
 def get_domains():
-    reader = csv.reader(gzip.open(DOMAINS_PATH, 'rt'))
+    reader = csv.reader(gzip.open(DOMAINS_PATH, "rt"))
     next(reader)
     for rank, domain, _ in reader:
         yield rank, domain
@@ -30,5 +31,5 @@ def queue_domains():
             print("Queued:", queued)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     queue_domains()

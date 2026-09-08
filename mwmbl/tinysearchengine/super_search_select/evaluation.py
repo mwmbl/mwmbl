@@ -26,6 +26,7 @@ randomized pairs.
 This module is pure (numpy/sklearn/xgboost only); building the matrix from live
 sources lives in ``scripts/super_search_eval.py``.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,26 +35,28 @@ from pathlib import Path
 
 import numpy as np
 
-from mwmbl.tinysearchengine.super_search_select.features import FEATURE_NAMES
-
 
 @dataclass
 class RewardMatrix:
     queries: list[str]
     sources: list[str]
     feature_names: list[str]
-    X: np.ndarray      # (Q, S, F) features
-    R: np.ndarray      # (Q, S) reward in [0, 1]
-    mask: np.ndarray   # (Q, S) bool: source returned results for the query
+    X: np.ndarray  # (Q, S, F) features
+    R: np.ndarray  # (Q, S) reward in [0, 1]
+    mask: np.ndarray  # (Q, S) bool: source returned results for the query
 
     def save(self, path: str | Path) -> None:
         path = Path(path)
         np.savez_compressed(path.with_suffix(".npz"), X=self.X, R=self.R, mask=self.mask)
-        path.with_suffix(".json").write_text(json.dumps({
-            "queries": self.queries,
-            "sources": self.sources,
-            "feature_names": self.feature_names,
-        }))
+        path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "queries": self.queries,
+                    "sources": self.sources,
+                    "feature_names": self.feature_names,
+                }
+            )
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> "RewardMatrix":
@@ -61,15 +64,19 @@ class RewardMatrix:
         arrs = np.load(path.with_suffix(".npz"))
         meta = json.loads(path.with_suffix(".json").read_text())
         return cls(
-            queries=meta["queries"], sources=meta["sources"],
+            queries=meta["queries"],
+            sources=meta["sources"],
             feature_names=meta["feature_names"],
-            X=arrs["X"], R=arrs["R"], mask=arrs["mask"],
+            X=arrs["X"],
+            R=arrs["R"],
+            mask=arrs["mask"],
         )
 
 
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+
 
 def coverage_at_k(scores: np.ndarray, R: np.ndarray, mask: np.ndarray, k: int) -> float:
     """Mean (over queries) reward captured by the top-k scored sources, relative
@@ -94,6 +101,7 @@ def coverage_at_k(scores: np.ndarray, R: np.ndarray, mask: np.ndarray, k: int) -
 # Feature selection (XGBoost, grouped CV by query)
 # ---------------------------------------------------------------------------
 
+
 def _flatten(matrix: RewardMatrix, feature_idx: list[int]):
     """Flatten masked (query, source) cells into (X, y, groups) for sklearn."""
     Q, S, _ = matrix.X.shape
@@ -109,14 +117,12 @@ def _flatten(matrix: RewardMatrix, feature_idx: list[int]):
 
 def _cell_index(matrix: RewardMatrix) -> list[tuple[int, int]]:
     """The (query, source) cell behind each flattened masked row, in order."""
-    return [(q, s)
-            for q in range(matrix.X.shape[0])
-            for s in range(matrix.X.shape[1])
-            if matrix.mask[q, s]]
+    return [(q, s) for q in range(matrix.X.shape[0]) for s in range(matrix.X.shape[1]) if matrix.mask[q, s]]
 
 
-def evaluate_feature_set(matrix: RewardMatrix, feature_idx: list[int], k: int = 10,
-                         n_splits: int = 5, seed: int = 0) -> dict:
+def evaluate_feature_set(
+    matrix: RewardMatrix, feature_idx: list[int], k: int = 10, n_splits: int = 5, seed: int = 0
+) -> dict:
     """Grouped CV (by query): train XGBoost on the chosen features, scatter the
     out-of-fold predictions to the (query, source) grid, and report held-out
     coverage@k and RMSE."""
@@ -129,8 +135,7 @@ def evaluate_feature_set(matrix: RewardMatrix, feature_idx: list[int], k: int = 
     rmses = []
     gkf = GroupKFold(n_splits=min(n_splits, len(set(groups))))
     for train, test in gkf.split(X, y, groups):
-        model = XGBRegressor(n_estimators=200, max_depth=4, learning_rate=0.1,
-                             subsample=0.8, random_state=seed)
+        model = XGBRegressor(n_estimators=200, max_depth=4, learning_rate=0.1, subsample=0.8, random_state=seed)
         model.fit(X[train], y[train])
         p = model.predict(X[test])
         rmses.append(float(np.sqrt(np.mean((p - y[test]) ** 2))))
@@ -162,8 +167,10 @@ def select_features(matrix: RewardMatrix, k: int = 10, seed: int = 0) -> dict:
 # Policy simulation
 # ---------------------------------------------------------------------------
 
-def simulate_ts(matrix: RewardMatrix, k: int, nu: float, sigma2: float = 0.25,
-                lam: float = 1.0, seed: int = 0) -> float:
+
+def simulate_ts(
+    matrix: RewardMatrix, k: int, nu: float, sigma2: float = 0.25, lam: float = 1.0, seed: int = 0
+) -> float:
     """Replay linear-Gaussian Thompson sampling; return mean per-query captured reward."""
     rng = np.random.default_rng(seed)
     Q, S, F = matrix.X.shape
@@ -219,15 +226,22 @@ def simulate_baselines(matrix: RewardMatrix, k: int, seed: int = 0) -> dict:
     return out
 
 
-def sweep_explore_scale(matrix: RewardMatrix, k: int, nus: list[float],
-                        sigma2: float = 0.25, lam: float = 1.0, seed: int = 0) -> dict[float, float]:
+def sweep_explore_scale(
+    matrix: RewardMatrix, k: int, nus: list[float], sigma2: float = 0.25, lam: float = 1.0, seed: int = 0
+) -> dict[float, float]:
     """Mean captured reward for each candidate exploration scale ``nu``."""
     return {nu: simulate_ts(matrix, k, nu, sigma2, lam, seed) for nu in nus}
 
 
-def simulate_xgb(matrix: RewardMatrix, k: int, epsilon: float,
-                 refit_every: int = 200, min_rows: int = 300, seed: int = 0,
-                 params: dict | None = None) -> float:
+def simulate_xgb(
+    matrix: RewardMatrix,
+    k: int,
+    epsilon: float,
+    refit_every: int = 200,
+    min_rows: int = 300,
+    seed: int = 0,
+    params: dict | None = None,
+) -> float:
     """Replay the epsilon-greedy XGBoost contextual bandit over the matrix.
 
     Mirrors ``simulate_ts``'s contract (mean per-query captured reward).
@@ -274,8 +288,8 @@ def simulate_xgb(matrix: RewardMatrix, k: int, epsilon: float,
             enc = np.stack([encode(q, s) for s in avail])
             ranked = avail[np.argsort(model.predict(enc))[::-1]]
             n_explore = int(rng.binomial(k_q, epsilon))
-            chosen = list(ranked[:k_q - n_explore])
-            rest = ranked[k_q - n_explore:]
+            chosen = list(ranked[: k_q - n_explore])
+            rest = ranked[k_q - n_explore :]
             if n_explore and rest.size:
                 chosen += list(rng.choice(rest, size=min(n_explore, rest.size), replace=False))
             chosen = np.asarray(chosen)
@@ -294,20 +308,21 @@ def simulate_xgb(matrix: RewardMatrix, k: int, epsilon: float,
     return captured / Q
 
 
-def sweep_epsilon(matrix: RewardMatrix, k: int, epsilons: list[float],
-                  refit_every: int = 200, min_rows: int = 300,
-                  seed: int = 0) -> dict[float, float]:
+def sweep_epsilon(
+    matrix: RewardMatrix, k: int, epsilons: list[float], refit_every: int = 200, min_rows: int = 300, seed: int = 0
+) -> dict[float, float]:
     """Mean captured reward for each candidate exploration rate ``epsilon``."""
-    return {eps: simulate_xgb(matrix, k, eps, refit_every, min_rows, seed)
-            for eps in epsilons}
+    return {eps: simulate_xgb(matrix, k, eps, refit_every, min_rows, seed) for eps in epsilons}
 
 
 # ---------------------------------------------------------------------------
 # Holdout evaluation of the xgb source model
 # ---------------------------------------------------------------------------
 
-def _holdout_split(matrix: RewardMatrix, home: list[str | None], test_frac: float,
-                   seed: int) -> tuple[np.ndarray, np.ndarray]:
+
+def _holdout_split(
+    matrix: RewardMatrix, home: list[str | None], test_frac: float, seed: int
+) -> tuple[np.ndarray, np.ndarray]:
     """Split query indices into (train, test), stratified by home source so
     every source's home queries appear in both splits where possible."""
     rng = np.random.default_rng(seed)
@@ -326,8 +341,9 @@ def _holdout_split(matrix: RewardMatrix, home: list[str | None], test_frac: floa
     return train_idx, test_idx
 
 
-def _home_recall_at_k(scores: np.ndarray, matrix: RewardMatrix,
-                      home: list[str | None], rows: np.ndarray, k: int) -> float:
+def _home_recall_at_k(
+    scores: np.ndarray, matrix: RewardMatrix, home: list[str | None], rows: np.ndarray, k: int
+) -> float:
     """Fraction of queries whose home source lands in the top-k scored sources."""
     s_index = {name: i for i, name in enumerate(matrix.sources)}
     hits, n = 0, 0
@@ -344,9 +360,15 @@ def _home_recall_at_k(scores: np.ndarray, matrix: RewardMatrix,
     return hits / n if n else 0.0
 
 
-def _lints_posterior_means(matrix: RewardMatrix, train_idx: np.ndarray, k: int,
-                           nu: float = 0.05, sigma2: float = 0.25,
-                           lam: float = 1.0, seed: int = 0) -> np.ndarray:
+def _lints_posterior_means(
+    matrix: RewardMatrix,
+    train_idx: np.ndarray,
+    k: int,
+    nu: float = 0.05,
+    sigma2: float = 0.25,
+    lam: float = 1.0,
+    seed: int = 0,
+) -> np.ndarray:
     """Replay LinTS over the train queries; return per-arm posterior means for
     greedy scoring of held-out queries."""
     rng = np.random.default_rng(seed)
@@ -371,9 +393,14 @@ def _lints_posterior_means(matrix: RewardMatrix, train_idx: np.ndarray, k: int,
     return np.stack([np.linalg.inv(A[s]) @ b[s] for s in range(S)])
 
 
-def evaluate_holdout(matrix: RewardMatrix, k: int = 10, test_frac: float = 0.2,
-                     seed: int = 0, home_by_query: dict[str, str] | None = None,
-                     params: dict | None = None) -> dict:
+def evaluate_holdout(
+    matrix: RewardMatrix,
+    k: int = 10,
+    test_frac: float = 0.2,
+    seed: int = 0,
+    home_by_query: dict[str, str] | None = None,
+    params: dict | None = None,
+) -> dict:
     """Train the xgb source model on a query split, evaluate on the rest.
 
     ``home_by_query`` maps a query to the source it was written for (the
@@ -387,9 +414,12 @@ def evaluate_holdout(matrix: RewardMatrix, k: int = 10, test_frac: float = 0.2,
     if home_by_query is not None:
         home = [home_by_query.get(q) for q in matrix.queries]
     else:
-        home = [matrix.sources[int(np.argmax(np.where(matrix.mask[q], matrix.R[q], -np.inf)))]
-                if matrix.mask[q].any() else None
-                for q in range(len(matrix.queries))]
+        home = [
+            matrix.sources[int(np.argmax(np.where(matrix.mask[q], matrix.R[q], -np.inf)))]
+            if matrix.mask[q].any()
+            else None
+            for q in range(len(matrix.queries))
+        ]
     train_idx, test_idx = _holdout_split(matrix, home, test_frac, seed)
 
     vocab = xgb_model.build_vocab(matrix.sources)
@@ -403,9 +433,9 @@ def evaluate_holdout(matrix: RewardMatrix, k: int = 10, test_frac: float = 0.2,
     train_mask[train_idx] = True
     seen = matrix.mask & train_mask[:, None]
     with np.errstate(invalid="ignore"):
-        source_mean = np.where(seen.sum(axis=0) > 0,
-                               (matrix.R * seen).sum(axis=0) / np.maximum(seen.sum(axis=0), 1),
-                               0.0)
+        source_mean = np.where(
+            seen.sum(axis=0) > 0, (matrix.R * seen).sum(axis=0) / np.maximum(seen.sum(axis=0), 1), 0.0
+        )
 
     def rows_for(idx: np.ndarray):
         xs, ys, cells = [], [], []

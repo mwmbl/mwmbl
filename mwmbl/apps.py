@@ -1,4 +1,3 @@
-from multiprocessing import Process, Queue
 from pathlib import Path
 
 from django.apps import AppConfig
@@ -19,7 +18,8 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     re-fetching.
     """
     # Imports here to avoid AppRegistryNotReady exception
-    from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
+    from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
+
     index_path = Path(settings.DATA_PATH) / index_name
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
@@ -47,8 +47,10 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     if existing_index.page_size == PAGE_SIZE and existing_index.num_pages == num_pages:
         return
 
-    message = (f"Existing index page sizes ({existing_index.page_size}) or number of pages "
-               f"({existing_index.num_pages}) do not match")
+    message = (
+        f"Existing index page sizes ({existing_index.page_size}) or number of pages "
+        f"({existing_index.num_pages}) do not match"
+    )
     if not rebuild_on_mismatch:
         raise ValueError(message)
     print(f"{message} - rebuilding {index_path}")
@@ -56,9 +58,9 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
 
 
 def _create_index_file(index_path, num_pages):
-    from mwmbl.tinysearchengine.indexer import TinyIndex, Document, PAGE_SIZE
-    TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages,
-                     page_size=PAGE_SIZE)
+    from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
+
+    TinyIndex.create(item_factory=Document, index_path=index_path, num_pages=num_pages, page_size=PAGE_SIZE)
 
 
 def _replace_index_file(index_path, num_pages):
@@ -93,11 +95,11 @@ class MwmblConfig(AppConfig):
         # boot after a size change pays for the whole file up front - ~17s for the 15 GB
         # production cache at the ~0.9 GB/s measured locally, which is what the healthcheck
         # grace in app.json has to cover.
-        create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES,
-                     rebuild_on_mismatch=True)
+        create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES, rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
             create_index_db()
             import mwmbl.signals  # noqa: F401 - connects the post_save receivers
+
             self._schedule_background_tasks()
 
     # Cache key guarding the scheduling critical section below. Held just long
@@ -113,6 +115,7 @@ class MwmblConfig(AppConfig):
         """
         import asyncio
         import logging
+
         log = logging.getLogger(__name__)
 
         # Under bare `uvicorn` (as opposed to gunicorn+uvicorn-workers), apps.ready()
@@ -137,15 +140,20 @@ class MwmblConfig(AppConfig):
         # the rest skip immediately, and the lock's TTL simply bounds how long
         # a crashed winner blocks a retry by a later-starting worker.
         from django.core.cache import cache
+
         if not cache.add(MwmblConfig._SCHEDULE_LOCK_KEY, "1", timeout=MwmblConfig._SCHEDULE_LOCK_TIMEOUT):
             log.info("Skipping background task scheduling: another worker is already handling it.")
             return
 
         try:
             from background_task.models import Task
+
             from mwmbl.background import (
-                purge_blacklisted_from_queue, refresh_blacklist_snapshot, report_usage_to_polar,
-                retrain_domain_moderation_model, sync_search_counts,
+                purge_blacklisted_from_queue,
+                refresh_blacklist_snapshot,
+                report_usage_to_polar,
+                retrain_domain_moderation_model,
+                sync_search_counts,
             )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
@@ -171,13 +179,11 @@ class MwmblConfig(AppConfig):
             # a one-off rebuild under the same task name (mwmbl.signals), and one of those
             # sitting in the queue at deploy time must not suppress the periodic task.
             if not Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK, repeat__gt=0).exists():
-                refresh_blacklist_snapshot(
-                    repeat=settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS, repeat_until=None)
+                refresh_blacklist_snapshot(repeat=settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS, repeat_until=None)
 
             # Drain the queue of blacklisted documents that retrieval has filtered out
             if not Task.objects.filter(task_name=BLACKLIST_PURGE_TASK).exists():
-                purge_blacklisted_from_queue(
-                    repeat=settings.BLACKLIST_PURGE_INTERVAL_SECONDS, repeat_until=None)
+                purge_blacklisted_from_queue(repeat=settings.BLACKLIST_PURGE_INTERVAL_SECONDS, repeat_until=None)
 
             # Retrain the moderation suggester monthly. Scheduled a month out rather than
             # schedule=0: unlike the blacklist snapshot there is nothing useful about
@@ -185,7 +191,9 @@ class MwmblConfig(AppConfig):
             if not Task.objects.filter(task_name=MODERATION_RETRAIN_TASK).exists():
                 retrain_domain_moderation_model(
                     schedule=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
-                    repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS, repeat_until=None)
+                    repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
+                    repeat_until=None,
+                )
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

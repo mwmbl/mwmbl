@@ -26,6 +26,7 @@ Usage:
       recipe_chunks/input_000.json recipe_chunks/input_001.json ...
   DATABASE_URL="postgres://daoud@" uv run python scripts/auto_recipe.py --all
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,13 +40,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 
-import django  # noqa: E402
 import logging  # noqa: E402
+
+import django  # noqa: E402
 
 django.setup()
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("mwmbl.tinysearchengine.super_search_sources.recipe").setLevel(
-    logging.ERROR)
+logging.getLogger("mwmbl.tinysearchengine.super_search_sources.recipe").setLevel(logging.ERROR)
 
 import httpx  # noqa: E402
 import yaml  # noqa: E402
@@ -107,46 +108,65 @@ def _templates(domain: str) -> list[tuple[str, dict, dict]]:
     return [
         (
             "wp-search",
-            {"url": f"{base}/wp-json/wp/v2/search",
-             "params": {"search": "{query}", "per_page": "{limit}"}},
-            {"format": "json", "results": "",
-             "fields": {"title": "title", "url": "url"}},
+            {"url": f"{base}/wp-json/wp/v2/search", "params": {"search": "{query}", "per_page": "{limit}"}},
+            {"format": "json", "results": "", "fields": {"title": "title", "url": "url"}},
         ),
         (
             "wp-posts",
-            {"url": f"{base}/wp-json/wp/v2/posts",
-             "params": {"search": "{query}", "per_page": "{limit}"}},
-            {"format": "json", "results": "",
-             "fields": {"title": "title.rendered", "extract": "excerpt.rendered",
-                        "url": "link"},
-             "strip_html": ["title", "extract"]},
+            {"url": f"{base}/wp-json/wp/v2/posts", "params": {"search": "{query}", "per_page": "{limit}"}},
+            {
+                "format": "json",
+                "results": "",
+                "fields": {"title": "title.rendered", "extract": "excerpt.rendered", "url": "link"},
+                "strip_html": ["title", "extract"],
+            },
         ),
         (
             "mediawiki",
-            {"url": f"{base}/w/api.php",
-             "params": {"action": "query", "list": "search", "format": "json",
-                        "srsearch": "{query}", "srlimit": "{limit}"}},
-            {"format": "json", "results": "query.search",
-             "fields": {"title": "title", "extract": "snippet",
-                        "url": {"template": f"{base}/wiki/{{title}}"}},
-             "strip_html": ["extract"]},
+            {
+                "url": f"{base}/w/api.php",
+                "params": {
+                    "action": "query",
+                    "list": "search",
+                    "format": "json",
+                    "srsearch": "{query}",
+                    "srlimit": "{limit}",
+                },
+            },
+            {
+                "format": "json",
+                "results": "query.search",
+                "fields": {"title": "title", "extract": "snippet", "url": {"template": f"{base}/wiki/{{title}}"}},
+                "strip_html": ["extract"],
+            },
         ),
         (
             "mediawiki-root",
-            {"url": f"{base}/api.php",
-             "params": {"action": "query", "list": "search", "format": "json",
-                        "srsearch": "{query}", "srlimit": "{limit}"}},
-            {"format": "json", "results": "query.search",
-             "fields": {"title": "title", "extract": "snippet",
-                        "url": {"template": f"{base}/wiki/{{title}}"}},
-             "strip_html": ["extract"]},
+            {
+                "url": f"{base}/api.php",
+                "params": {
+                    "action": "query",
+                    "list": "search",
+                    "format": "json",
+                    "srsearch": "{query}",
+                    "srlimit": "{limit}",
+                },
+            },
+            {
+                "format": "json",
+                "results": "query.search",
+                "fields": {"title": "title", "extract": "snippet", "url": {"template": f"{base}/wiki/{{title}}"}},
+                "strip_html": ["extract"],
+            },
         ),
         (
             "discourse",
             {"url": f"{base}/search.json", "params": {"q": "{query}"}},
-            {"format": "json", "results": "topics",
-             "fields": {"title": "title",
-                        "url": {"template": f"{base}/t/{{slug}}/{{id}}"}}},
+            {
+                "format": "json",
+                "results": "topics",
+                "fields": {"title": "title", "url": {"template": f"{base}/t/{{slug}}/{{id}}"}},
+            },
         ),
     ]
 
@@ -160,8 +180,7 @@ async def _probe_domain(client: httpx.AsyncClient, entry: dict) -> dict:
 
     words = _probe_words(field)
     for label, request, response in _templates(domain):
-        recipe = Recipe(name=name, request=request, response=response,
-                        domain=domain, field=field)
+        recipe = Recipe(name=name, request=request, response=response, domain=domain, field=field)
         for word in words:
             try:
                 docs = await search_with_recipe(client, recipe, word, 10)
@@ -181,22 +200,23 @@ async def _probe_domain(client: httpx.AsyncClient, entry: dict) -> dict:
                     "response": response,
                     "smoke": {"query": word, "expect_title_contains": word},
                 }
-                (RECIPES_DIR / f"{name}.yaml").write_text(
-                    yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
-                return {"domain": domain, "status": "pass",
-                        "label": label, "word": word, "n": len(docs)}
+                (RECIPES_DIR / f"{name}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+                return {"domain": domain, "status": "pass", "label": label, "word": word, "n": len(docs)}
     return {"domain": domain, "status": "fail"}
 
 
 async def _run(entries: list[dict]) -> list[dict]:
     sem = asyncio.Semaphore(CONCURRENCY)
     async with httpx.AsyncClient(
-        follow_redirects=True, timeout=TIMEOUT,
+        follow_redirects=True,
+        timeout=TIMEOUT,
         headers={"User-Agent": "mwmbl-super-search-smoke/0.1 (+https://mwmbl.org)"},
     ) as client:
+
         async def guarded(entry):
             async with sem:
                 return await _probe_domain(client, entry)
+
         return await asyncio.gather(*[guarded(e) for e in entries])
 
 
@@ -213,12 +233,10 @@ def _load_entries(paths: list[str]) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("batches", nargs="*", help="batch JSON files")
-    ap.add_argument("--all", action="store_true",
-                    help="process every recipe_chunks/input_*.json")
+    ap.add_argument("--all", action="store_true", help="process every recipe_chunks/input_*.json")
     args = ap.parse_args()
 
-    paths = sorted(str(p) for p in CHUNKS_DIR.glob("input_*.json")) if args.all \
-        else args.batches
+    paths = sorted(str(p) for p in CHUNKS_DIR.glob("input_*.json")) if args.all else args.batches
     if not paths:
         print("no batch files given (use --all or list files)", file=sys.stderr)
         return 2
@@ -231,9 +249,11 @@ def main() -> int:
     exists = [r for r in results if r["status"] == "exists"]
     for r in passes:
         print(f"PASS {r['domain']}  ({r['label']}, q={r['word']!r}, {r['n']} results)")
-    print(f"\n{len(passes)} passed, {len(exists)} already existed, "
-          f"{len(results) - len(passes) - len(exists)} failed "
-          f"(of {len(results)} domains).")
+    print(
+        f"\n{len(passes)} passed, {len(exists)} already existed, "
+        f"{len(results) - len(passes) - len(exists)} failed "
+        f"(of {len(results)} domains)."
+    )
     return 0
 
 

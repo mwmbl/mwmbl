@@ -20,10 +20,10 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
         uv run python -m mwmbl.rankeval.evaluation.evaluate_super_search --fraction 0.02
 """
+
 import asyncio
 import os
 from argparse import ArgumentParser
-from pathlib import Path
 
 import django
 
@@ -40,7 +40,6 @@ from mwmbl.tinysearchengine.indexer import Document  # noqa: E402
 from mwmbl.tinysearchengine.super_search import _emit_final_results, _run_pipeline  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext  # noqa: E402
 
-
 memory = Memory(location=str(DATA_DIR / "super-search-eval-cache"), verbose=0)
 
 
@@ -49,13 +48,20 @@ async def _noop_emit(event_type, data):
 
 
 def _doc_to_dict(doc: Document) -> dict:
-    return {"title": doc.title, "url": doc.url, "extract": doc.extract,
-            "score": doc.score, "term": doc.term, "state": doc.state}
+    return {
+        "title": doc.title,
+        "url": doc.url,
+        "extract": doc.extract,
+        "score": doc.score,
+        "term": doc.term,
+        "state": doc.state,
+    }
 
 
 def _dict_to_doc(d: dict) -> Document:
-    return Document(title=d["title"], url=d["url"], extract=d["extract"],
-                    score=d["score"], term=d["term"], state=d["state"])
+    return Document(
+        title=d["title"], url=d["url"], extract=d["extract"], score=d["score"], term=d["term"], state=d["state"]
+    )
 
 
 async def _collect(query: str) -> list[Document]:
@@ -113,12 +119,11 @@ class SuperSearchRankingModel(RankingModel):
 
 def run():
     parser = ArgumentParser()
-    parser.add_argument("--fraction", type=float, default=0.02,
-                        help="Fraction of gold queries to sample (collection is slow).")
-    parser.add_argument("--train", action="store_true",
-                        help="Evaluate on the train split instead of test.")
-    parser.add_argument("--clear-cache", action="store_true",
-                        help="Clear the cached document pools before evaluating.")
+    parser.add_argument(
+        "--fraction", type=float, default=0.02, help="Fraction of gold queries to sample (collection is slow)."
+    )
+    parser.add_argument("--train", action="store_true", help="Evaluate on the train split instead of test.")
+    parser.add_argument("--clear-cache", action="store_true", help="Clear the cached document pools before evaluating.")
     args = parser.parse_args()
 
     if args.clear_cache:

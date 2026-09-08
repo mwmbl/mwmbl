@@ -1,4 +1,5 @@
 """Mwmbl index + Wikipedia via the standard search ranker."""
+
 import asyncio
 import logging
 

@@ -9,8 +9,14 @@ from mwmbl.indexer.indexdb import BatchStatus, IndexDatabase
 logger = getLogger(__name__)
 
 
-def run(batch_cache: BatchCache, start_status: BatchStatus, end_status: BatchStatus,
-        process: Callable[[Collection[HashedBatch], ...], None], num_batches, *args):
+def run(
+    batch_cache: BatchCache,
+    start_status: BatchStatus,
+    end_status: BatchStatus,
+    process: Callable[[Collection[HashedBatch], ...], None],
+    num_batches,
+    *args,
+):
 
     with Database() as db:
         index_db = IndexDatabase(db.connection)

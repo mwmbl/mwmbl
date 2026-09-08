@@ -4,18 +4,17 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0027_sourceprovenance'),
+        ("mwmbl", "0027_sourceprovenance"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='sourceprovenance',
-            name='query',
+            model_name="sourceprovenance",
+            name="query",
         ),
         migrations.RemoveField(
-            model_name='supersearchimpression',
-            name='query',
+            model_name="supersearchimpression",
+            name="query",
         ),
     ]

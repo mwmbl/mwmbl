@@ -9,6 +9,7 @@ Vectors are stored as raw float32 bytes, so this module uses its own
 binary-safe Redis connection (the shared client in ``search_setup`` /
 ``super_search`` uses ``decode_responses=True``, which would corrupt bytes).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -65,10 +66,7 @@ def get_profiles(sites: list[str]) -> dict[str, tuple[np.ndarray | None, np.ndar
     keys = [_PROFILE_BOW.format(site=s) for s in sites] + [_PROFILE_CNG.format(site=s) for s in sites]
     raw = r.mget(keys)
     n = len(sites)
-    return {
-        site: (vectors.from_bytes(raw[i]), vectors.from_bytes(raw[n + i]))
-        for i, site in enumerate(sites)
-    }
+    return {site: (vectors.from_bytes(raw[i]), vectors.from_bytes(raw[n + i])) for i, site in enumerate(sites)}
 
 
 def update_profile(site: str, docs: list[Document]) -> None:

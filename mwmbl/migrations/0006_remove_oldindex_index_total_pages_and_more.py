@@ -4,24 +4,23 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0005_oldindex'),
+        ("mwmbl", "0005_oldindex"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='oldindex',
-            name='index_total_pages',
+            model_name="oldindex",
+            name="index_total_pages",
         ),
         migrations.AlterField(
-            model_name='oldindex',
-            name='last_copied_time',
+            model_name="oldindex",
+            name="last_copied_time",
             field=models.DateTimeField(null=True),
         ),
         migrations.AlterField(
-            model_name='oldindex',
-            name='last_page_copied',
+            model_name="oldindex",
+            name="last_page_copied",
             field=models.IntegerField(null=True),
         ),
     ]

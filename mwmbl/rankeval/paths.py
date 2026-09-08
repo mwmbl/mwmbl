@@ -2,17 +2,17 @@ import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent.parent
-DATA_DIR = ROOT_DIR / 'devdata' / 'rankeval-2026-04'
+DATA_DIR = ROOT_DIR / "devdata" / "rankeval-2026-04"
 
-REMOTE_DATA_DIR = DATA_DIR / 'remote-datasets'
-RANKINGS_DATASET_TRAIN_PATH = REMOTE_DATA_DIR / 'rankings-train.csv'
-RANKINGS_DATASET_TEST_PATH = REMOTE_DATA_DIR / 'rankings-test.csv'
+REMOTE_DATA_DIR = DATA_DIR / "remote-datasets"
+RANKINGS_DATASET_TRAIN_PATH = REMOTE_DATA_DIR / "rankings-train.csv"
+RANKINGS_DATASET_TEST_PATH = REMOTE_DATA_DIR / "rankings-test.csv"
 
-LEARNING_TO_RANK_DATASET_PATH = DATA_DIR / 'learning-to-rank.csv.gz'
-LEARNING_TO_RANK_LLM_DATASET_PATH = DATA_DIR / 'learning-to-rank-llm.csv.gz'
+LEARNING_TO_RANK_DATASET_PATH = DATA_DIR / "learning-to-rank.csv.gz"
+LEARNING_TO_RANK_LLM_DATASET_PATH = DATA_DIR / "learning-to-rank-llm.csv.gz"
 # MODEL_PATH = ROOT_DIR / "mwmbl" / "resources" / 'model.pickle'
-MODEL_PATH = DATA_DIR / 'model.pickle'
+MODEL_PATH = DATA_DIR / "model.pickle"
 RUST_MODEL_PATH = DATA_DIR / "model.xgb"
 CURRENT_MODEL_PATH = DATA_DIR / "model-current.xgb"
 
-URLS_PATH = Path(os.environ['HOME']) / 'data' / 'tinysearch' / 'urls.sqlite3'
+URLS_PATH = Path(os.environ["HOME"]) / "data" / "tinysearch" / "urls.sqlite3"

@@ -5,6 +5,7 @@ entity's official website (property ``P856``). This is the structured, Big-Tech-
 independent way to answer navigational/brand queries ("virgin media" ->
 https://www.virginmedia.com/) without a per-brand source.
 """
+
 import logging
 
 import httpx
@@ -22,10 +23,17 @@ _HEADERS = {"User-Agent": "mwmbl-supersearch/1.0 (https://mwmbl.org; hello@mwmbl
 async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Document]:
     n = max(1, min(limit, 5))
     try:
-        r = await client.get(API, headers=_HEADERS, params={
-            "action": "wbsearchentities", "search": query,
-            "language": "en", "format": "json", "limit": n,
-        })
+        r = await client.get(
+            API,
+            headers=_HEADERS,
+            params={
+                "action": "wbsearchentities",
+                "search": query,
+                "language": "en",
+                "format": "json",
+                "limit": n,
+            },
+        )
         r.raise_for_status()
         hits = r.json().get("search", [])
     except (httpx.HTTPError, ValueError) as e:
@@ -37,10 +45,17 @@ async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Docu
         return []
 
     try:
-        r2 = await client.get(API, headers=_HEADERS, params={
-            "action": "wbgetentities", "ids": "|".join(ids),
-            "props": "claims|labels|descriptions", "languages": "en", "format": "json",
-        })
+        r2 = await client.get(
+            API,
+            headers=_HEADERS,
+            params={
+                "action": "wbgetentities",
+                "ids": "|".join(ids),
+                "props": "claims|labels|descriptions",
+                "languages": "en",
+                "format": "json",
+            },
+        )
         r2.raise_for_status()
         entities = r2.json().get("entities", {})
     except (httpx.HTTPError, ValueError) as e:

@@ -5,8 +5,8 @@ billing endpoints, and the background usage-reporting job without risk of
 import cycles.
 """
 
-FREE_KEYED_MONTHLY_LIMIT = 2_000       # free requests/month once an API key is presented
-PRICE_PER_1000_QUERIES_CENTS = 500     # $5.00 per 1,000 queries
+FREE_KEYED_MONTHLY_LIMIT = 2_000  # free requests/month once an API key is presented
+PRICE_PER_1000_QUERIES_CENTS = 500  # $5.00 per 1,000 queries
 
 # Preset spend-limit options surfaced in the UI (mirrors Brave's Free/$10/$25/$100 presets).
 SPEND_LIMIT_PRESETS_CENTS = [0, 1_000, 2_500, 10_000]

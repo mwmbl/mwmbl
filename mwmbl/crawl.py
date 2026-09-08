@@ -29,13 +29,13 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 django.setup()
 
 from mwmbl.crawler.batch import HashedBatch, Result, Results
-from mwmbl.crawler.env_vars import CRAWLER_WORKERS, CRAWL_DELAY_SECONDS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
-from mwmbl.crawler.retrieve import crawl_batch, crawl_url, CRAWLER_VERSION, USER_AGENT
+from mwmbl.crawler.env_vars import CRAWL_DELAY_SECONDS, CRAWLER_WORKERS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
+from mwmbl.crawler.retrieve import CRAWLER_VERSION, USER_AGENT, crawl_url
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.tokenizer import tokenize
 
@@ -73,7 +73,7 @@ def validate_environment():
     """Validate required environment variables for crawler operation."""
     if not MWMBL_API_KEY.strip():
         raise ValueError("An environment variable MWMBL_API_KEY must be set to run the crawler")
-    
+
     if MWMBL_CONTACT_INFO == "CHANGE_ME@example.com":
         raise ValueError(
             "MWMBL_CONTACT_INFO must be set to your email or website URL. "
@@ -85,25 +85,25 @@ def validate_environment():
 class Crawler:
     """
     Main crawler class that manages Redis connections, URL queues, and crawling operations.
-    
+
     This class encapsulates all the crawler functionality including:
     - Redis connection management
     - URL queue operations
     - Batch processing
     - Indexing operations
     """
-    
+
     def __init__(self, redis_url=None):
         """
         Initialize the crawler with Redis connection.
-        
+
         Args:
             redis_url: Optional Redis URL. If not provided, uses settings.REDIS_URL
         """
         self.redis_url = redis_url or settings.REDIS_URL
         self._redis = None
         self._url_queue = None
-    
+
     @property
     def redis(self):
         """Lazy initialization of Redis connection."""
@@ -114,22 +114,22 @@ class Crawler:
                 health_check_interval=30,
             )
         return self._redis
-    
+
     @property
     def url_queue(self):
         """Lazy initialization of URL queue."""
         if self._url_queue is None:
             self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains)
         return self._url_queue
-    
+
     def check_redis(self):
         """Check Redis connection health."""
         try:
             self.redis.ping()
             logger.debug("Redis ping successful")
-        except ConnectionError as e:
+        except ConnectionError:
             raise SystemExit(f"Cannot reach Redis at {self.redis_url}. Make sure your Redis server is running.")
-    
+
     def process_batch(self):
         """
         Process a single batch of URLs by crawling them sequentially with rate limiting.
@@ -158,19 +158,21 @@ class Crawler:
             result = crawl_url(url, self.redis)
             results.append(result)
             logger.debug("Result", result)
-        
+
         js_timestamp = int(time.time() * 1000)
-        batch = HashedBatch.parse_obj({
-            "user_id_hash": user_id, 
-            "timestamp": js_timestamp, 
-            "items": results,
-        })
+        batch = HashedBatch.parse_obj(
+            {
+                "user_id_hash": user_id,
+                "timestamp": js_timestamp,
+                "items": results,
+            }
+        )
         record_urls_in_database([batch], self.url_queue)
 
         # Push the batch into the Redis queue
         batch_json = batch.json()
         self.redis.rpush(BATCH_QUEUE_KEY, batch_json)
-    
+
     def run_indexing(self):
         """
         Process completed crawl batches and integrate results into the search index.
@@ -194,14 +196,14 @@ class Crawler:
             logger.info("No more batches to index. Sleeping for 10 seconds.")
             time.sleep(10)
             return
-        
+
         logger.info(f"Got {len(batch_jsons)} batches to index")
         batches = [HashedBatch.parse_raw(b) for b in batch_jsons]
         term_new_doc_count = index_batches(batches, index_path)
         logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
         remote_index = RemoteIndex()
-        with TinyIndex(Document, index_path, 'w') as local_index:
+        with TinyIndex(Document, index_path, "w") as local_index:
             for term, count in term_new_doc_count.most_common(100):
                 logger.info(f"Syncing term {term} with {count} new local items")
                 remote_items = remote_index.retrieve(term)
@@ -220,14 +222,21 @@ class Crawler:
                 new_high_score = max_local_score < min_remote_score
 
                 if new_high_score:
-                    result_items = [Result(url=doc.url, title=doc.title, extract=doc.extract,
-                                           score=doc.score, term=doc.term, state=doc.state,
-                                           last_crawled=doc.last_crawled) for doc in new_items]
+                    result_items = [
+                        Result(
+                            url=doc.url,
+                            title=doc.title,
+                            extract=doc.extract,
+                            score=doc.score,
+                            term=doc.term,
+                            state=doc.state,
+                            last_crawled=doc.last_crawled,
+                        )
+                        for doc in new_items
+                    ]
                     results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
                     logger.info(f"Posting {len(result_items)} results")
-                    response = requests.post(
-                        "https://api.mwmbl.org/api/v1/crawler/results", json=results.dict()
-                    )
+                    response = requests.post("https://api.mwmbl.org/api/v1/crawler/results", json=results.dict())
                     logger.info(f"Response: {response.text}")
                     response.raise_for_status()
 
@@ -243,7 +252,7 @@ class Crawler:
 
                 new_page_content = local_index.get_page(page_index)
                 logger.info(f"Page content: {new_page_content}")
-    
+
     def process_batch_continuously(self):
         """Continuously process batches with error handling."""
         while True:
@@ -253,7 +262,7 @@ class Crawler:
             except Exception as err:
                 logger.exception(f"Error processing batch: '{err}'")
                 time.sleep(10)
-    
+
     def run_indexing_continuously(self):
         """Continuously run indexing with error handling."""
         while True:
@@ -263,11 +272,11 @@ class Crawler:
             except Exception as err:
                 logger.exception(f"Error running indexing: '{err}'")
                 time.sleep(10)
-    
+
     def run(self):
         """
         Main entry point for the crawler.
-        
+
         Starts multiple worker processes for batch processing and one indexing process.
         Monitors processes and restarts them if they crash.
         """
@@ -308,13 +317,17 @@ class Crawler:
                     for crash_time, exit_code, pid in index_crash_history:
                         crash_details.append(f"  - {crash_time.isoformat()}: pid={pid}, exit_code={exit_code}")
 
-                    error_msg = (f"Index process crashed {len(index_crash_history)} times in the last hour "
-                               f"(threshold: 5). Recent crashes:\n" + "\n".join(crash_details))
+                    error_msg = (
+                        f"Index process crashed {len(index_crash_history)} times in the last hour "
+                        f"(threshold: 5). Recent crashes:\n" + "\n".join(crash_details)
+                    )
                     logger.error(error_msg)
                     raise RuntimeError(error_msg)
 
-                logger.warning(f"Indexing process [pid={pid}] died with exit code {exit_code}, respawning. "
-                             f"Crash count in last hour: {len(index_crash_history)}")
+                logger.warning(
+                    f"Indexing process [pid={pid}] died with exit code {exit_code}, respawning. "
+                    f"Crash count in last hour: {len(index_crash_history)}"
+                )
                 index_process = Process(target=self.run_indexing_continuously)
                 index_process.start()
 
@@ -331,6 +344,7 @@ class Crawler:
 # Global instance for backward compatibility
 _default_crawler = None
 
+
 def get_default_crawler():
     """Get the default crawler instance."""
     global _default_crawler
@@ -338,18 +352,22 @@ def get_default_crawler():
         _default_crawler = Crawler()
     return _default_crawler
 
+
 # Backward compatibility functions
 def check_redis():
     """Check Redis connection health (backward compatibility)."""
     return get_default_crawler().check_redis()
 
+
 def process_batch():
     """Process a single batch (backward compatibility)."""
     return get_default_crawler().process_batch()
 
+
 def run_indexing():
     """Run indexing (backward compatibility)."""
     return get_default_crawler().run_indexing()
+
 
 def run():
     """Main entry point (backward compatibility)."""

@@ -1,6 +1,3 @@
-
-
-
 from mwmbl.format import format_result
 from mwmbl.tinysearchengine.indexer import Document
 

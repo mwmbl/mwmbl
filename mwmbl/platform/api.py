@@ -2,7 +2,7 @@ import logging
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
-from allauth.account.utils import setup_user_email, send_email_confirmation
+from allauth.account.utils import send_email_confirmation, setup_user_email
 from django.conf import settings
 from django.core import signing
 from django.core.exceptions import ValidationError
@@ -15,30 +15,70 @@ from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
 from polar_sdk.models import SubscriptionCancel
-from polar_sdk.webhooks import validate_event, WebhookVerificationError
+from polar_sdk.webhooks import WebhookVerificationError, validate_event
 
-from mwmbl.exceptions import InvalidRequest
-from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
-from mwmbl.utils import normalize_domain, validate_domain
 from mwmbl import pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
-from mwmbl.models import AgreementType, MwmblUser, DomainEvidence, DomainSubmission, SearchResultVote, ApiKey, UsageBucket, UserBilling, UserAgreement, MarketingConsent, MarketingSource, generate_username
+from mwmbl.exceptions import InvalidRequest
+from mwmbl.models import (
+    AgreementType,
+    ApiKey,
+    DomainEvidence,
+    DomainSubmission,
+    MarketingConsent,
+    MarketingSource,
+    MwmblUser,
+    SearchResultVote,
+    UserAgreement,
+    UserBilling,
+)
 from mwmbl.moderation.suggest import (
-    annotate_queue, annotate_votes, one_row_per_domain, prior_decision_counts, prior_decisions,
-    submitter_record, submitter_records, suggestion_for,
+    annotate_queue,
+    annotate_votes,
+    one_row_per_domain,
+    prior_decision_counts,
+    prior_decisions,
+    submitter_record,
+    submitter_records,
+    suggestion_for,
 )
-from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.platform.schemas import (
-    Registration, ConfirmEmail, DomainSubmissionSchema, UpdateDomainSubmission,
-    VoteRequest, VoteRemoveRequest, VoteStatsRequest, VoteResponse, VoteStats, UserVoteHistory,
-    CreateApiKeyRequest, ApiKeyCreatedResponse, ApiKeyListItem,
-    UserProfileResponse, SubscriptionResponse, CheckoutRequest, CheckoutResponse, UpdateSpendLimitRequest,
-    ForgotPasswordRequest, ResetPasswordRequest,
-    AgreementAcceptRequest, AgreementResponse,
-    MarketingConsentRequest, MarketingConsentResponse, MarketingConsentListResponse,
-    BulkDecisionRequest, ModeratedDomainSchema, ModerationHistory, ModerationQueue,
-    QueueItemSchema, SubmissionDetailSchema,
+    AgreementAcceptRequest,
+    AgreementResponse,
+    ApiKeyCreatedResponse,
+    ApiKeyListItem,
+    BulkDecisionRequest,
+    CheckoutRequest,
+    CheckoutResponse,
+    ConfirmEmail,
+    CreateApiKeyRequest,
+    DomainSubmissionSchema,
+    ForgotPasswordRequest,
+    MarketingConsentListResponse,
+    MarketingConsentRequest,
+    MarketingConsentResponse,
+    ModeratedDomainSchema,
+    ModerationHistory,
+    ModerationQueue,
+    QueueItemSchema,
+    Registration,
+    ResetPasswordRequest,
+    SubmissionDetailSchema,
+    SubscriptionResponse,
+    UpdateDomainSubmission,
+    UpdateSpendLimitRequest,
+    UserProfileResponse,
+    UserVoteHistory,
+    VoteRemoveRequest,
+    VoteRequest,
+    VoteResponse,
+    VoteStats,
+    VoteStatsRequest,
 )
+from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
+from mwmbl.signals import schedule_blacklist_rebuild
+from mwmbl.usernames import generate_username
+from mwmbl.utils import normalize_domain, validate_domain
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +92,7 @@ def check_email_verified(request):
 
 
 @router.post(
-    '/register',
+    "/register",
     summary="Register a new user",
     description=(
         "Create a new Mwmbl user account. Only `email` and `password` are required. "
@@ -87,7 +127,7 @@ def register(request, registration: Registration):
     return {
         "status": "ok",
         "username": username,
-        "message": "User registered successfully. Check your email for confirmation."
+        "message": "User registered successfully. Check your email for confirmation.",
     }
 
 
@@ -115,7 +155,7 @@ def confirm_email(request, confirm: ConfirmEmail):
     return {
         "status": "ok",
         "username": confirmation.email_address.user.username,
-        "message": "Email confirmed successfully."
+        "message": "Email confirmed successfully.",
     }
 
 
@@ -277,8 +317,7 @@ def apply_decision(submission: DomainSubmission, decision, user) -> None:
 
 def check_moderator(request):
     if not request.user.has_perm("mwmbl.change_domain_submission_status"):
-        raise InvalidRequest("You do not have permission to moderate domain submissions.",
-                             status=403)
+        raise InvalidRequest("You do not have permission to moderate domain submissions.", status=403)
 
 
 @router.get(
@@ -303,14 +342,14 @@ def check_moderator(request):
     ),
 )
 def get_moderation_queue(
-        request,
-        limit: int = 50,
-        offset: int = 0,
-        order_by: str = "submissions",
-        suggested_action: str = None,
-        suggested_reason: str = None,
-        submitted_by: int = None,
-        min_confidence: float = None,
+    request,
+    limit: int = 50,
+    offset: int = 0,
+    order_by: str = "submissions",
+    suggested_action: str = None,
+    suggested_reason: str = None,
+    submitted_by: int = None,
+    min_confidence: float = None,
 ) -> dict:
     check_moderator(request)
 
@@ -320,9 +359,9 @@ def get_moderation_queue(
     # list in Python would mean materialising every pending submission (there are ~4,000) on
     # every request, which is the whole reason suggestions are precomputed. one_row_per_domain
     # and annotate_votes are in SQL for the same reason: the ordering sorts on both.
-    submissions = annotate_votes(one_row_per_domain(
-        annotate_queue(DomainSubmission.objects.filter(status="PENDING"))
-    )).select_related("submitted_by")
+    submissions = annotate_votes(
+        one_row_per_domain(annotate_queue(DomainSubmission.objects.filter(status="PENDING")))
+    ).select_related("submitted_by")
 
     if submitted_by is not None:
         submissions = submissions.filter(submitted_by_id=submitted_by)
@@ -336,7 +375,7 @@ def get_moderation_queue(
     submissions = submissions.order_by(*_queue_ordering(order_by))
 
     count = submissions.count()
-    page = list(submissions[offset:offset + limit])
+    page = list(submissions[offset : offset + limit])
     return {"items": _queue_items(page), "count": count}
 
 
@@ -365,8 +404,10 @@ def _queue_items(submissions: list[DomainSubmission]) -> list[QueueItemSchema]:
     padlock come off the DomainEvidence rows already fetched here for the suggestion, so
     showing them costs nothing.
     """
-    evidence_by_domain = {row.domain: row for row in DomainEvidence.objects.filter(
-        domain__in=[submission.name for submission in submissions])}
+    evidence_by_domain = {
+        row.domain: row
+        for row in DomainEvidence.objects.filter(domain__in=[submission.name for submission in submissions])
+    }
     submitters = submitter_records({submission.submitted_by_id for submission in submissions})
     priors = prior_decision_counts({submission.name for submission in submissions})
 
@@ -375,23 +416,27 @@ def _queue_items(submissions: list[DomainSubmission]) -> list[QueueItemSchema]:
     for submission in submissions:
         evidence = evidence_by_domain.get(submission.name)
         suggestion = suggestion_for(
-            submission, evidence,
+            submission,
+            evidence,
             submitter=submitters.get(submission.submitted_by_id, empty),
-            prior=priors.get(submission.name, empty))
+            prior=priors.get(submission.name, empty),
+        )
         signals = evidence.signals if evidence else {}
-        items.append(QueueItemSchema(
-            name=submission.name,
-            submission_count=submission.submission_count,
-            first_submitted_on=submission.submitted_on,
-            first_submitted_by=submission.submitted_by_id,
-            first_submitted_by_username=submission.submitted_by.username,
-            upvotes=submission.upvotes,
-            downvotes=submission.downvotes,
-            https=signals.get("https"),
-            evidence_state=evidence.state if evidence else "PENDING",
-            pages=evidence.pages if evidence else [],
-            suggestion=suggestion.__dict__ if suggestion else None,
-        ))
+        items.append(
+            QueueItemSchema(
+                name=submission.name,
+                submission_count=submission.submission_count,
+                first_submitted_on=submission.submitted_on,
+                first_submitted_by=submission.submitted_by_id,
+                first_submitted_by_username=submission.submitted_by.username,
+                upvotes=submission.upvotes,
+                downvotes=submission.downvotes,
+                https=signals.get("https"),
+                evidence_state=evidence.state if evidence else "PENDING",
+                pages=evidence.pages if evidence else [],
+                suggestion=suggestion.__dict__ if suggestion else None,
+            )
+        )
     return items
 
 
@@ -409,8 +454,7 @@ def _queue_items(submissions: list[DomainSubmission]) -> list[QueueItemSchema]:
 def get_submission_detail(request, submission_id: int) -> SubmissionDetailSchema:
     check_moderator(request)
 
-    submission = (DomainSubmission.objects.filter(id=submission_id)
-                  .select_related("submitted_by").first())
+    submission = DomainSubmission.objects.filter(id=submission_id).select_related("submitted_by").first()
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 
@@ -499,8 +543,12 @@ def undo_decision(request, domain: str):
     # suggestion - and re-posting a PENDING status through apply_decision, the nearest thing
     # to an undo before this endpoint, overwrote them from the request.
     undone = submissions.update(
-        status="PENDING", rejection_reason="", rejection_detail="",
-        status_changed_by=request.user, status_changed_on=timezone.now())
+        status="PENDING",
+        rejection_reason="",
+        rejection_detail="",
+        status_changed_by=request.user,
+        status_changed_on=timezone.now(),
+    )
     if not undone:
         raise InvalidRequest(f"No submissions found for {name}.", status=404)
 
@@ -537,13 +585,13 @@ HISTORY_ORDERINGS = {
     ),
 )
 def get_moderation_history(
-        request,
-        limit: int = 50,
-        offset: int = 0,
-        status: str = None,
-        moderator: int = None,
-        name: str = None,
-        order_by: str = "recent",
+    request,
+    limit: int = 50,
+    offset: int = 0,
+    status: str = None,
+    moderator: int = None,
+    name: str = None,
+    order_by: str = "recent",
 ) -> dict:
     check_moderator(request)
 
@@ -558,43 +606,49 @@ def get_moderation_history(
     # "last" rather than "first": a history row shows the decision that currently stands, so
     # the domain is represented by its most recently touched submission, not its oldest.
     submissions = one_row_per_domain(submissions, status=status, pick="last")
-    submissions = (submissions.select_related("submitted_by", "status_changed_by")
-                   .order_by(*HISTORY_ORDERINGS.get(order_by, HISTORY_ORDERINGS["recent"])))
+    submissions = submissions.select_related("submitted_by", "status_changed_by").order_by(
+        *HISTORY_ORDERINGS.get(order_by, HISTORY_ORDERINGS["recent"])
+    )
 
     count = submissions.count()
-    return {"items": _moderated_items(list(submissions[offset:offset + limit])), "count": count}
+    return {"items": _moderated_items(list(submissions[offset : offset + limit])), "count": count}
 
 
 def _moderated_items(submissions: list[DomainSubmission]) -> list[ModeratedDomainSchema]:
     """Build the page's rows. The representative row here is the last-touched submission, so
     "who first asked for this domain" needs one more lookup - once for the page, not per row."""
     first_by_name = {}
-    for submission in (DomainSubmission.objects
-                       .filter(name__in=[row.name for row in submissions])
-                       .select_related("submitted_by").order_by("submitted_on", "pk")):
+    for submission in (
+        DomainSubmission.objects.filter(name__in=[row.name for row in submissions])
+        .select_related("submitted_by")
+        .order_by("submitted_on", "pk")
+    ):
         first_by_name.setdefault(submission.name, submission)
 
     items = []
     for submission in submissions:
         first = first_by_name[submission.name]
-        items.append(ModeratedDomainSchema(
-            name=submission.name,
-            submission_count=submission.submission_count,
-            status=submission.status,
-            rejection_reason=submission.rejection_reason,
-            rejection_detail=submission.rejection_detail,
-            first_submitted_on=first.submitted_on,
-            first_submitted_by=first.submitted_by_id,
-            first_submitted_by_username=first.submitted_by.username,
-            status_changed_on=submission.status_changed_on,
-            status_changed_by=submission.status_changed_by_id,
-            status_changed_by_username=(submission.status_changed_by.username
-                                        if submission.status_changed_by else ""),
-            suggested_status=submission.suggested_status,
-            suggested_reason=submission.suggested_reason,
-            suggestion_confidence=submission.suggestion_confidence,
-            suggestion_model_version=submission.suggestion_model_version,
-        ))
+        items.append(
+            ModeratedDomainSchema(
+                name=submission.name,
+                submission_count=submission.submission_count,
+                status=submission.status,
+                rejection_reason=submission.rejection_reason,
+                rejection_detail=submission.rejection_detail,
+                first_submitted_on=first.submitted_on,
+                first_submitted_by=first.submitted_by_id,
+                first_submitted_by_username=first.submitted_by.username,
+                status_changed_on=submission.status_changed_on,
+                status_changed_by=submission.status_changed_by_id,
+                status_changed_by_username=(
+                    submission.status_changed_by.username if submission.status_changed_by else ""
+                ),
+                suggested_status=submission.suggested_status,
+                suggested_reason=submission.suggested_reason,
+                suggestion_confidence=submission.suggestion_confidence,
+                suggestion_model_version=submission.suggestion_model_version,
+            )
+        )
     return items
 
 
@@ -653,7 +707,7 @@ def vote_on_search_result(request, vote_request: VoteRequest):
         user=request.user,
         url=vote_request.url,
         query=vote_request.query,
-        defaults={'vote_type': vote_request.vote_type}
+        defaults={"vote_type": vote_request.vote_type},
     )
 
     action = "created" if created else "updated"
@@ -682,8 +736,8 @@ def get_vote_counts(request, vote_stats_request: VoteStatsRequest):
     vote_data = {}
     for url in vote_stats_request.urls:
         votes = SearchResultVote.objects.filter(url=url, query=vote_stats_request.query)
-        upvotes = votes.filter(vote_type='upvote').count()
-        downvotes = votes.filter(vote_type='downvote').count()
+        upvotes = votes.filter(vote_type="upvote").count()
+        downvotes = votes.filter(vote_type="downvote").count()
 
         user_vote = None
         try:
@@ -692,11 +746,7 @@ def get_vote_counts(request, vote_stats_request: VoteStatsRequest):
         except SearchResultVote.DoesNotExist:
             pass
 
-        vote_data[url] = VoteStats(
-            upvotes=upvotes,
-            downvotes=downvotes,
-            user_vote=user_vote
-        )
+        vote_data[url] = VoteStats(upvotes=upvotes, downvotes=downvotes, user_vote=user_vote)
 
     return VoteResponse(votes=vote_data)
 
@@ -716,11 +766,7 @@ def remove_vote(request, vote_request: VoteRemoveRequest):
     check_email_verified(request)
 
     try:
-        vote = SearchResultVote.objects.get(
-            user=request.user,
-            url=vote_request.url,
-            query=vote_request.query
-        )
+        vote = SearchResultVote.objects.get(user=request.user, url=vote_request.url, query=vote_request.query)
         vote.delete()
         return {"status": "ok", "message": "Vote removed successfully."}
     except SearchResultVote.DoesNotExist:
@@ -742,12 +788,13 @@ def remove_vote(request, vote_request: VoteRemoveRequest):
 @paginate
 def get_user_vote_history(request) -> list[SearchResultVote]:
     check_email_verified(request)
-    return SearchResultVote.objects.filter(user=request.user).order_by('-timestamp')
+    return SearchResultVote.objects.filter(user=request.user).order_by("-timestamp")
 
 
 # ---------------------------------------------------------------------------
 # Agreements helpers
 # ---------------------------------------------------------------------------
+
 
 def _record_agreements(user: MwmblUser, agreement_types: list) -> None:
     for agreement_type in agreement_types:
@@ -768,11 +815,7 @@ def _record_marketing_consent(user: MwmblUser, source: MarketingSource, opted_in
     the existing row instead of growing the audit trail. Returns the row representing
     the current state.
     """
-    latest = (
-        MarketingConsent.objects.filter(user=user, source=source)
-        .order_by("-timestamp", "-id")
-        .first()
-    )
+    latest = MarketingConsent.objects.filter(user=user, source=source).order_by("-timestamp", "-id").first()
     if latest is not None and latest.opted_in == opted_in:
         return latest
     return MarketingConsent.objects.create(user=user, source=source, opted_in=opted_in)
@@ -806,6 +849,7 @@ def _require_current_agreement(user: MwmblUser, agreement_type: AgreementType) -
 # ---------------------------------------------------------------------------
 # Agreement endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/agreements/",
@@ -859,11 +903,13 @@ def get_agreements(request) -> list[AgreementResponse]:
             .first()
         )
         if latest:
-            result.append(AgreementResponse(
-                agreement_type=latest.agreement_type,
-                version_id=latest.version_id,
-                accepted_at=latest.accepted_at,
-            ))
+            result.append(
+                AgreementResponse(
+                    agreement_type=latest.agreement_type,
+                    version_id=latest.version_id,
+                    accepted_at=latest.accepted_at,
+                )
+            )
     return result
 
 
@@ -889,6 +935,7 @@ def get_agreement_history(request) -> list[AgreementResponse]:
 # Marketing consent
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/marketing-consent",
     auth=JWTAuth(),
@@ -906,17 +953,15 @@ def get_marketing_consent(request) -> MarketingConsentListResponse:
     check_email_verified(request)
     consent = []
     for source in MarketingSource:
-        latest = (
-            MarketingConsent.objects.filter(user=request.user, source=source)
-            .order_by("-timestamp", "-id")
-            .first()
-        )
+        latest = MarketingConsent.objects.filter(user=request.user, source=source).order_by("-timestamp", "-id").first()
         if latest:
-            consent.append(MarketingConsentResponse(
-                source=latest.source,
-                opted_in=latest.opted_in,
-                timestamp=latest.timestamp,
-            ))
+            consent.append(
+                MarketingConsentResponse(
+                    source=latest.source,
+                    opted_in=latest.opted_in,
+                    timestamp=latest.timestamp,
+                )
+            )
     return MarketingConsentListResponse(consent=consent)
 
 
@@ -974,6 +1019,7 @@ def unsubscribe_marketing(request, token: str):
 # API key management
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/api-keys/",
     auth=JWTAuth(),
@@ -994,6 +1040,7 @@ def create_api_key(request, body: CreateApiKeyRequest):
     else:
         _require_current_agreement(request.user, AgreementType.TERMS_OF_SERVICE_API)
     from mwmbl.models import generate_api_key
+
     raw_key, key_hash = generate_api_key()
     api_key = ApiKey.objects.create(
         user=request.user,
@@ -1062,6 +1109,7 @@ def delete_api_key(request, key_id: int):
 # User profile
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/user",
     auth=JWTAuth(),
@@ -1088,8 +1136,10 @@ def get_current_user(request):
 # Billing
 # ---------------------------------------------------------------------------
 
+
 def _subscription_response(user, billing, status: str) -> SubscriptionResponse:
     from mwmbl.quota import get_monthly_count
+
     spend_cents = billing.max_monthly_spend_cents if billing else 0
     usage = get_monthly_count(user.id)
     return SubscriptionResponse(
@@ -1184,7 +1234,7 @@ def uncancel_subscription(request):
     response=SubscriptionResponse,
     summary="Cancel subscription at period end",
     description="Schedules the subscription to cancel at the end of the current billing period. "
-                "The spend limit remains active until then.",
+    "The spend limit remains active until then.",
     tags=["Billing"],
 )
 def cancel_subscription(request):
@@ -1271,7 +1321,13 @@ def polar_webhook(request):
             logger.warning("Polar webhook: no user found for user_id=%s", user_id)
         else:
             billing, created = UserBilling.objects.get_or_create(user=user)
-            logger.info("Polar webhook: UserBilling %s for user %s customer_id=%s subscription_id=%s", "created" if created else "updated", user.email, event.data.customer_id, event.data.id)
+            logger.info(
+                "Polar webhook: UserBilling %s for user %s customer_id=%s subscription_id=%s",
+                "created" if created else "updated",
+                user.email,
+                event.data.customer_id,
+                event.data.id,
+            )
             billing.polar_customer_id = event.data.customer_id or billing.polar_customer_id
             billing.polar_subscription_id = event.data.id or billing.polar_subscription_id
             billing.current_period_end = event.data.current_period_end or billing.current_period_end
@@ -1279,7 +1335,11 @@ def polar_webhook(request):
             billing.save()
     elif event_type == "subscription.canceled":
         user_id = event.data.metadata.get("user_id")
-        logger.info("Polar webhook: subscription.canceled user_id=%s cancel_at_period_end=%s", user_id, getattr(event.data, "cancel_at_period_end", None))
+        logger.info(
+            "Polar webhook: subscription.canceled user_id=%s cancel_at_period_end=%s",
+            user_id,
+            getattr(event.data, "cancel_at_period_end", None),
+        )
         user = MwmblUser.objects.filter(id=user_id).first()
         if user is None:
             logger.warning("Polar webhook: no user found for user_id=%s", user_id)
@@ -1289,9 +1349,15 @@ def polar_webhook(request):
             if billing:
                 billing.cancel_at_period_end = True
                 billing.save()
-            logger.info("Polar webhook: user %s (id=%s) subscription scheduled to cancel at period end", user.email, user_id)
+            logger.info(
+                "Polar webhook: user %s (id=%s) subscription scheduled to cancel at period end", user.email, user_id
+            )
         else:
-            logger.info("Polar webhook: immediate cancellation for user %s (id=%s), resetting spend limit to $0", user.email, user_id)
+            logger.info(
+                "Polar webhook: immediate cancellation for user %s (id=%s), resetting spend limit to $0",
+                user.email,
+                user_id,
+            )
             billing = getattr(user, "billing", None)
             if billing:
                 billing.cancel_at_period_end = False
@@ -1320,6 +1386,7 @@ def polar_webhook(request):
 # Password reset
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/forgot-password",
     summary="Request password reset",
@@ -1328,6 +1395,7 @@ def polar_webhook(request):
 )
 def forgot_password(request, body: ForgotPasswordRequest):
     from django.contrib.auth.forms import PasswordResetForm
+
     form = PasswordResetForm({"email": body.email})
     if form.is_valid():
         form.save(request=request, use_https=request.is_secure())
@@ -1342,6 +1410,7 @@ def forgot_password(request, body: ForgotPasswordRequest):
 )
 def reset_password(request, body: ResetPasswordRequest):
     from django.contrib.auth.tokens import default_token_generator
+
     try:
         user = MwmblUser.objects.get(email=body.email)
     except MwmblUser.DoesNotExist:

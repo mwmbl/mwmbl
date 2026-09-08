@@ -5,34 +5,42 @@ from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
 from typing import List, Optional
-from urllib.parse import urlparse, urlunsplit, urljoin
+from urllib.parse import urljoin, urlparse, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
-from mwmbl.justext import core, utils
 from redis import Redis
 from requests import ReadTimeout
-from urllib3.exceptions import NewConnectionError, MaxRetryError
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
 from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
+from mwmbl.justext import core, utils
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
 
-
 # UnsafeURLError subclasses ValueError, so it is already covered here, but list
 # it explicitly for clarity: an SSRF-blocked URL is skipped like any other bad URL.
-ALLOWED_EXCEPTIONS = (ValueError, UnsafeURLError, ConnectionError, ReadTimeout, TimeoutError,
-                      OSError, NewConnectionError, MaxRetryError, SSLCertVerificationError)
+ALLOWED_EXCEPTIONS = (
+    ValueError,
+    UnsafeURLError,
+    ConnectionError,
+    ReadTimeout,
+    TimeoutError,
+    OSError,
+    NewConnectionError,
+    MaxRetryError,
+    SSLCertVerificationError,
+)
 
-POST_BATCH_URL = '/api/v1/crawler/batches/'
-POST_NEW_BATCH_URL = '/api/v1/crawler/batches/new'
+POST_BATCH_URL = "/api/v1/crawler/batches/"
+POST_NEW_BATCH_URL = "/api/v1/crawler/batches/new"
 
 TIMEOUT_SECONDS = 3
 MAX_REDIRECTS = 5
-MAX_FETCH_SIZE = 1024*1024
+MAX_FETCH_SIZE = 1024 * 1024
 MAX_URL_LENGTH = 150
-BAD_URL_REGEX = re.compile(r'\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$')
+BAD_URL_REGEX = re.compile(r"\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$")
 MAX_NEW_LINKS = 50
 MAX_EXTRA_LINKS = 50
 NUM_TITLE_CHARS = 65
@@ -41,8 +49,8 @@ NUM_EXTRACT_CHARS = 155
 # or whose text is mostly link anchors (nav/breadcrumbs rather than prose).
 MIN_FALLBACK_PARAGRAPH_CHARS = 20
 MAX_FALLBACK_PARAGRAPH_LINK_DENSITY = 0.5
-DEFAULT_ENCODING = 'utf8'
-DEFAULT_ENC_ERRORS = 'replace'
+DEFAULT_ENCODING = "utf8"
+DEFAULT_ENC_ERRORS = "replace"
 MAX_SITE_URLS = 100
 CRAWLER_VERSION: str = "0.2.0"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
@@ -70,8 +78,7 @@ def fetch(url):
     headers = {"User-Agent": USER_AGENT}
     for _ in range(MAX_REDIRECTS + 1):
         validate_url(url)
-        r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS,
-                         headers=headers, allow_redirects=False)
+        r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers=headers, allow_redirects=False)
 
         if r.is_redirect and r.next is not None:
             r.close()
@@ -84,7 +91,7 @@ def fetch(url):
         content = b""
         for chunk in r.iter_content(1024):
             if time.time() - start > TIMEOUT_SECONDS:
-                raise ValueError('Timeout reached')
+                raise ValueError("Timeout reached")
 
             content += chunk
 
@@ -106,7 +113,7 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         return False
 
     domain = parsed_url.netloc
-    robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, 'robots.txt', '', ''))
+    robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "robots.txt", "", ""))
 
     cached_content = _get_robots_from_cache(redis, domain)
     if cached_content is not None:
@@ -130,7 +137,7 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         return True
 
     decoded = None
-    for encoding in ['utf-8', 'iso-8859-1']:
+    for encoding in ["utf-8", "iso-8859-1"]:
         try:
             decoded = content.decode(encoding).splitlines()
             break
@@ -141,13 +148,13 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         logger.info(f"Unable to decode robots file {robots_url}")
         _cache_robots_content(redis, domain, [], error=True)
         return True
-    
+
     parse_robots = RobotFileParser()
     parse_robots.parse(decoded)
     allowed = parse_robots.can_fetch(USER_AGENT, url)
-    
+
     _cache_robots_content(redis, domain, decoded, error=False)
-    
+
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
@@ -157,13 +164,13 @@ def _get_robots_from_cache(redis: Redis, domain: str) -> Optional[List[str]]:
     cached = redis.get(cache_key)
     if cached is None:
         return None
-    
+
     try:
         data = json.loads(cached)
-        if time.time() > data['expires_at']:
+        if time.time() > data["expires_at"]:
             redis.delete(cache_key)
             return None
-        return data['content']
+        return data["content"]
     except (json.JSONDecodeError, KeyError) as e:
         logger.warning(f"Invalid cache entry for {cache_key}: {e}, removing")
         redis.delete(cache_key)
@@ -174,13 +181,9 @@ def _cache_robots_content(redis: Redis, domain: str, content: List[str], error: 
     cache_key = f"robots:{domain}"
     now = time.time()
     ttl = ROBOTS_CACHE_ERROR_TTL_SECONDS if error else ROBOTS_CACHE_TTL_SECONDS
-    
-    cache_data = {
-        'content': content,
-        'cached_at': int(now),
-        'expires_at': int(now + ttl)
-    }
-    
+
+    cache_data = {"content": content, "cached_at": int(now), "expires_at": int(now + ttl)}
+
     redis.setex(cache_key, ttl, json.dumps(cache_data))
     logger.debug(f"Cached robots.txt for {domain}, expires in {ttl}s")
 
@@ -228,7 +231,7 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
                 if resolved is None:
                     logger.debug(f"Bad URL: {link}")
                     continue
-                if paragraph.class_type == 'good':
+                if paragraph.class_type == "good":
                     if len(new_links) < MAX_NEW_LINKS:
                         new_links.add(resolved)
                 else:
@@ -253,7 +256,7 @@ def extract_from_html_text(html_text: str) -> str:
             continue
         extract += " " + paragraph.text.strip()
         if len(extract) > NUM_EXTRACT_CHARS:
-            extract = extract[:NUM_EXTRACT_CHARS - 1] + "…"
+            extract = extract[: NUM_EXTRACT_CHARS - 1] + "…"
             break
     return extract.strip()
 
@@ -304,7 +307,7 @@ def get_first_paragraph(dom) -> str:
 
 
 def _truncate(text: str, limit: int) -> str:
-    return text[:limit - 1] + '…' if len(text) > limit else text
+    return text[: limit - 1] + "…" if len(text) > limit else text
 
 
 def crawl_url(url, redis: Redis):
@@ -313,14 +316,14 @@ def crawl_url(url, redis: Redis):
     allowed = robots_allowed(url, redis)
     if not allowed:
         return {
-            'url': url,
-            'status': None,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'RobotsDenied',
-                'message': 'Robots do not allow this URL',
-            }
+            "url": url,
+            "status": None,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "RobotsDenied",
+                "message": "Robots do not allow this URL",
+            },
         }
 
     try:
@@ -328,47 +331,47 @@ def crawl_url(url, redis: Redis):
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Exception crawling URl {url}: {e}")
         return {
-            'url': url,
-            'status': None,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'AbortError',
-                'message': str(e),
-            }
+            "url": url,
+            "status": None,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "AbortError",
+                "message": str(e),
+            },
         }
 
     if len(content) == 0:
         return {
-            'url': url,
-            'resolved_url': resolved_url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': 'NoResponseText',
-                'message': 'No response found',
-            }
+            "url": url,
+            "resolved_url": resolved_url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "NoResponseText",
+                "message": "No response found",
+            },
         }
 
-    content = re.sub(rb'[\x00-\x08\x0b\x0c\x0e-\x1f]', b'', content)
+    content = re.sub(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]", b"", content)
 
     try:
         dom = html_to_dom(content, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
     except Exception as e:
         logger.exception(f"Error parsing dom: {url}")
         return {
-            'url': url,
-            'resolved_url': resolved_url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': e.__class__.__name__,
-                'message': str(e),
-            }
+            "url": url,
+            "resolved_url": resolved_url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": e.__class__.__name__,
+                "message": str(e),
+            },
         }
-        
+
     title_element = dom.xpath("//title")
     title = ""
     if len(title_element) > 0:
@@ -377,7 +380,7 @@ def crawl_url(url, redis: Redis):
             title = title_text.strip()
 
     if len(title) > NUM_TITLE_CHARS:
-        title = title[:NUM_TITLE_CHARS - 1] + '…'
+        title = title[: NUM_TITLE_CHARS - 1] + "…"
 
     try:
         paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
@@ -385,15 +388,15 @@ def crawl_url(url, redis: Redis):
         bad_bytes = sorted({b for b in content if b < 0x20 and b not in (0x09, 0x0A, 0x0D)})
         logger.exception("Error parsing paragraphs - offending control bytes: %s", bad_bytes)
         return {
-            'url': url,
-            'resolved_url': resolved_url,
-            'status': status_code,
-            'timestamp': js_timestamp,
-            'content': None,
-            'error': {
-                'name': e.__class__.__name__,
-                'message': str(e),
-            }
+            "url": url,
+            "resolved_url": resolved_url,
+            "status": status_code,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": e.__class__.__name__,
+                "message": str(e),
+            },
         }
 
     new_links, extra_links = get_new_links(paragraphs, url)
@@ -407,13 +410,13 @@ def crawl_url(url, redis: Redis):
     logger.debug(f"Got new links {new_links}")
     logger.debug(f"Got extra links {extra_links}")
 
-    extract = ''
+    extract = ""
     for paragraph in paragraphs:
-        if paragraph.class_type != 'good':
+        if paragraph.class_type != "good":
             continue
-        extract += ' ' + paragraph.text.strip()
+        extract += " " + paragraph.text.strip()
         if len(extract) > NUM_EXTRACT_CHARS:
-            extract = extract[:NUM_EXTRACT_CHARS - 1] + '…'
+            extract = extract[: NUM_EXTRACT_CHARS - 1] + "…"
             break
 
     # justext finds no body content for JS-first pages (e.g. Discord, SPAs) and
@@ -430,17 +433,17 @@ def crawl_url(url, redis: Redis):
                 extract = _truncate(fallback, NUM_EXTRACT_CHARS)
 
     return {
-      'url': url,
-      'resolved_url': resolved_url,
-      'status': status_code,
-      'timestamp': js_timestamp,
-      'content': {
-        'title': title,
-        'extract': extract,
-        'links': sorted(new_links),
-        'extra_links': sorted(extra_links),
-      },
-      'error': None
+        "url": url,
+        "resolved_url": resolved_url,
+        "status": status_code,
+        "timestamp": js_timestamp,
+        "content": {
+            "title": title,
+            "extract": extract,
+            "links": sorted(new_links),
+            "extra_links": sorted(extra_links),
+        },
+        "error": None,
     }
 
 
@@ -448,6 +451,3 @@ def crawl_batch(batch, num_threads, redis: Redis):
     with ThreadPool(num_threads) as pool:
         result = pool.map(lambda url: crawl_url(url, redis), batch)
     return result
-
-
-

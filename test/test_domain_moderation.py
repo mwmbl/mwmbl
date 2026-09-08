@@ -5,6 +5,7 @@ the training gate - but that a moderator is never shown something misleading: a 
 either backed by evidence or absent, a deterministic check always beats a probability, and the
 queue never runs a model on the request path.
 """
+
 import io
 import json
 import sys
@@ -21,14 +22,12 @@ from django.contrib.auth.models import Permission
 from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.models import (
-    DomainEvidence, DomainSubmission, ModerationModelArtifact, MwmblUser, SearchResultVote)
+from mwmbl.models import DomainEvidence, DomainSubmission, ModerationModelArtifact, MwmblUser, SearchResultVote
 from mwmbl.moderation import model as model_module
 from mwmbl.moderation import rules
 from mwmbl.moderation.evidence import crawl_domain
 from mwmbl.moderation.features import Featuriser, ModerationExample
-from mwmbl.moderation.model import (
-    Suggestion, get_model, load_metrics, publish, reset_model_cache, suggest)
+from mwmbl.moderation.model import Suggestion, get_model, load_metrics, publish, reset_model_cache, suggest
 from mwmbl.moderation.suggest import annotate_queue, refresh_suggestion, suggestion_for
 from mwmbl.moderation.train import _suggestion_influence, operating_point, passes_gate
 from mwmbl.moderation.training_data import TrainingRow, is_trainable_domain
@@ -38,8 +37,7 @@ QUEUE_URL = "/api/v1/platform/domain-submissions/queue"
 
 @pytest.fixture
 def submitter(db):
-    return MwmblUser.objects.create_user(
-        username="submitter", email="submitter@example.com", password="password")
+    return MwmblUser.objects.create_user(username="submitter", email="submitter@example.com", password="password")
 
 
 @pytest.fixture(autouse=True)
@@ -53,21 +51,17 @@ def clear_the_model_cache():
 @pytest.fixture
 def established(db):
     """A submitter with a track record, whose approvals are not withheld."""
-    user = MwmblUser.objects.create_user(
-        username="established", email="established@example.com", password="password")
+    user = MwmblUser.objects.create_user(username="established", email="established@example.com", password="password")
     for index in range(3):
-        DomainSubmission.objects.create(name=f"past{index}.example", submitted_by=user,
-                                        status="APPROVED")
+        DomainSubmission.objects.create(name=f"past{index}.example", submitted_by=user, status="APPROVED")
     return user
 
 
 @pytest.fixture
 def moderator(db):
-    user = MwmblUser.objects.create_user(
-        username="moderator", email="moderator@example.com", password="password")
+    user = MwmblUser.objects.create_user(username="moderator", email="moderator@example.com", password="password")
     EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
-    user.user_permissions.add(
-        Permission.objects.get(codename="change_domain_submission_status"))
+    user.user_permissions.add(Permission.objects.get(codename="change_domain_submission_status"))
     return user
 
 
@@ -80,8 +74,16 @@ def ready_evidence(domain, **overrides):
         "state": DomainEvidence.State.READY,
         "fetched_at": timezone.now(),
         "http_status": 200,
-        "pages": [{"url": f"https://{domain}/", "status": 200, "title": "A title",
-                   "extract": "Some body text", "num_links": 12, "error": ""}],
+        "pages": [
+            {
+                "url": f"https://{domain}/",
+                "status": 200,
+                "title": "A title",
+                "extract": "Some body text",
+                "num_links": 12,
+                "error": "",
+            }
+        ],
         "signals": {"has_links": True, "num_pages_fetched": 1, "blacklisted": False},
         "suggested_action": "APPROVE",
         "confidence": 0.8,
@@ -100,16 +102,24 @@ def ready_evidence(domain, **overrides):
 
 # --------------------------------------------------------------------- rules
 
-@pytest.mark.parametrize("crawl,expected_kind", [
-    ({"http_status": 404, "pages": [{"title": "", "extract": "", "num_links": 0}],
-      "signals": {}}, "http_status"),
-    ({"http_status": None, "error": "RobotsDenied", "pages": [], "signals": {}}, "robots"),
-    ({"http_status": None, "error": "AbortError", "pages": [], "signals": {}}, "unreachable"),
-    ({"http_status": 200, "final_domain": "somewhere-else.com", "pages": [],
-      "signals": {}}, "redirect"),
-    ({"http_status": 200, "pages": [{"title": "t", "extract": "e", "num_links": 1}],
-      "signals": {"has_links": True, "blacklisted": True}}, "blocklist"),
-])
+
+@pytest.mark.parametrize(
+    "crawl,expected_kind",
+    [
+        ({"http_status": 404, "pages": [{"title": "", "extract": "", "num_links": 0}], "signals": {}}, "http_status"),
+        ({"http_status": None, "error": "RobotsDenied", "pages": [], "signals": {}}, "robots"),
+        ({"http_status": None, "error": "AbortError", "pages": [], "signals": {}}, "unreachable"),
+        ({"http_status": 200, "final_domain": "somewhere-else.com", "pages": [], "signals": {}}, "redirect"),
+        (
+            {
+                "http_status": 200,
+                "pages": [{"title": "t", "extract": "e", "num_links": 1}],
+                "signals": {"has_links": True, "blacklisted": True},
+            },
+            "blocklist",
+        ),
+    ],
+)
 def test_each_deterministic_check_fires(crawl, expected_kind):
     kinds = {item.kind for item in rules.crawl_evidence("example.com", crawl)}
     assert expected_kind in kinds
@@ -124,8 +134,8 @@ def test_do_not_crawl_list_is_decisive():
 
 def test_subdomain_redirect_is_not_treated_as_off_domain():
     items = rules.crawl_evidence(
-        "example.com",
-        {"http_status": 200, "final_domain": "www.example.com", "pages": [], "signals": {}})
+        "example.com", {"http_status": 200, "final_domain": "www.example.com", "pages": [], "signals": {}}
+    )
     assert "redirect" not in {item.kind for item in items}
 
 
@@ -141,14 +151,14 @@ def test_previous_approval_of_the_same_domain_is_decisive():
 
 # --------------------------------------------------------------------- suggestions
 
+
 def test_a_deterministic_check_beats_the_model():
     """A 404 is not a matter of opinion, so no probability may override it."""
     model = mock.Mock()
     model.version = "test"
-    model.predict.return_value = [(0.01, "SPAM", 0.9)]   # the model says "approve"
+    model.predict.return_value = [(0.01, "SPAM", 0.9)]  # the model says "approve"
 
-    items = rules.crawl_evidence(
-        "example.com", {"http_status": 404, "pages": [], "signals": {}})
+    items = rules.crawl_evidence("example.com", {"http_status": 404, "pages": [], "signals": {}})
     suggestion = suggest("example.com", [], items, model=model)
 
     assert suggestion.action == "REJECT"
@@ -159,8 +169,7 @@ def test_a_deterministic_check_beats_the_model():
 def test_a_check_that_implies_other_carries_the_detail_the_submitter_is_shown():
     """OTHER is the one reason that explains nothing on its own, so a suggestion carrying it
     has to carry the sentence too - the API refuses a decision that does not."""
-    items = rules.crawl_evidence(
-        "example.com", {"http_status": 404, "pages": [], "signals": {}})
+    items = rules.crawl_evidence("example.com", {"http_status": 404, "pages": [], "signals": {}})
     suggestion = suggest("example.com", [], items, model=mock.Mock(version="test"))
 
     assert (suggestion.action, suggestion.reason) == ("REJECT", "OTHER")
@@ -170,22 +179,19 @@ def test_a_check_that_implies_other_carries_the_detail_the_submitter_is_shown():
 def test_a_check_written_for_the_moderator_tells_the_submitter_something_readable():
     """A label is read by whoever is deciding the case and a detail by the person whose site
     was rejected, so a label naming the exception we caught is not the sentence to send."""
-    items = rules.crawl_evidence(
-        "example.com", {"error": "AbortError", "pages": [], "signals": {}})
+    items = rules.crawl_evidence("example.com", {"error": "AbortError", "pages": [], "signals": {}})
     suggestion = suggest("example.com", [], items, model=mock.Mock(version="test"))
 
     assert (suggestion.action, suggestion.reason) == ("REJECT", "OTHER")
     assert suggestion.reason_detail == "We could not fetch this site when we tried to crawl it."
     # The moderator still gets the exception, in the evidence list where it belongs.
-    assert "Could not be fetched (AbortError)" in [
-        item["label"] for item in suggestion.evidence]
+    assert "Could not be fetched (AbortError)" in [item["label"] for item in suggestion.evidence]
 
 
 def test_the_do_not_crawl_list_explains_itself_from_the_submitters_side():
     """Its label is written from ours - "we don't crawl ourselves" - and is about our policy
     rather than about the site the submitter sent."""
-    items = rules.crawl_evidence(
-        "google.com", {"http_status": 200, "pages": [], "signals": {}})
+    items = rules.crawl_evidence("google.com", {"http_status": 200, "pages": [], "signals": {}})
     suggestion = suggest("google.com", [], items, model=mock.Mock(version="test"))
 
     assert (suggestion.action, suggestion.reason) == ("REJECT", "OTHER")
@@ -224,6 +230,7 @@ def test_missing_model_degrades_to_unsure_not_to_a_default():
 
 def test_offensive_confidence_is_capped_because_it_has_no_real_labels():
     from mwmbl.moderation.model import REASON_CONFIDENCE_CAP
+
     assert REASON_CONFIDENCE_CAP["OFFENSIVE"] < 1.0
 
 
@@ -236,13 +243,16 @@ def test_review_priority_puts_confident_rejects_first_and_approvals_last():
 
 # --------------------------------------------------------------------- features
 
+
 def test_featuriser_produces_the_same_width_for_unseen_input():
     featuriser = Featuriser()
-    fitted = featuriser.fit_transform([
-        ModerationExample("aianimegenerator.cloud", ["free ai anime generator"]),
-        ModerationExample("docs.python.org", ["python language reference"]),
-        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
-    ])
+    fitted = featuriser.fit_transform(
+        [
+            ModerationExample("aianimegenerator.cloud", ["free ai anime generator"]),
+            ModerationExample("docs.python.org", ["python language reference"]),
+            ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+        ]
+    )
     transformed = featuriser.transform([ModerationExample("unseen.example", ["nothing alike"])])
     assert transformed.shape[1] == fitted.shape[1]
     assert len(featuriser.feature_names()) == fitted.shape[1]
@@ -254,11 +264,13 @@ def test_has_text_separates_an_uncrawled_domain_from_one_whose_words_are_unknown
     rows do; without this indicator the model cannot tell the two cases apart and the
     difference is absorbed into an intercept fitted on the training mix."""
     featuriser = Featuriser(use_has_text=True)
-    featuriser.fit_transform([
-        ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
-        ModerationExample("docs.python.org", ["python language reference tool"]),
-        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
-    ])
+    featuriser.fit_transform(
+        [
+            ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+            ModerationExample("docs.python.org", ["python language reference tool"]),
+            ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+        ]
+    )
     assert featuriser.text is not None
     column = list(featuriser.feature_names()).index("has_text")
 
@@ -271,9 +283,11 @@ def test_has_text_separates_an_uncrawled_domain_from_one_whose_words_are_unknown
 def test_the_ablation_fits_the_same_features_minus_the_text_block():
     """--no-text has to run through the real featuriser, not a copy of it, or the ablation
     measures the copy."""
-    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
-                ModerationExample("docs.python.org", ["python language reference tool"]),
-                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+    examples = [
+        ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+        ModerationExample("docs.python.org", ["python language reference tool"]),
+        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+    ]
     with_text = Featuriser().fit_transform(examples).shape[1]
     without = Featuriser(use_text=False)
     assert without.fit_transform(examples).shape[1] < with_text
@@ -291,7 +305,8 @@ def test_a_judges_most_confident_approval_is_not_read_as_a_certain_rejection(tmp
     path = tmp_path / "judge.judgements.jsonl"
     path.write_text(
         '{"domain": "obviously-fine.org", "reject_probability": 1, "reason": ""}\n'
-        '{"domain": "aislopgenerator.xyz", "reject_probability": 95, "reason": "SPAM"}\n')
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 95, "reason": "SPAM"}\n'
+    )
 
     judgements = read_judgements(path)
     assert judgements["obviously-fine.org"] == 0.01
@@ -305,7 +320,8 @@ def test_judgements_already_on_a_zero_to_one_scale_are_left_alone(tmp_path):
     path = tmp_path / "judge.judgements.jsonl"
     path.write_text(
         '{"domain": "obviously-fine.org", "reject_probability": 0.01, "reason": ""}\n'
-        '{"domain": "aislopgenerator.xyz", "reject_probability": 0.95, "reason": "SPAM"}\n')
+        '{"domain": "aislopgenerator.xyz", "reject_probability": 0.95, "reason": "SPAM"}\n'
+    )
 
     assert read_judgements(path) == {"obviously-fine.org": 0.01, "aislopgenerator.xyz": 0.95}
 
@@ -345,9 +361,11 @@ def test_has_text_can_be_held_out_independently_of_the_text_block():
     """The two halves of the page-text features can fail independently - the vocabulary can
     earn its place while the indicator is a proxy for recency - so the ablation holds out each
     on its own rather than both together."""
-    examples = [ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
-                ModerationExample("docs.python.org", ["python language reference tool"]),
-                ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"])]
+    examples = [
+        ModerationExample("aianimegenerator.cloud", ["free ai anime generator tool"]),
+        ModerationExample("docs.python.org", ["python language reference tool"]),
+        ModerationExample("seobacklinkhub.org", ["best seo backlinks tool"]),
+    ]
 
     both = Featuriser(use_has_text=True)
     shipped = Featuriser()
@@ -357,7 +375,7 @@ def test_has_text_can_be_held_out_independently_of_the_text_block():
     assert "has_text" in list(both.feature_names())
     # Off by default: measured against production data it made every metric worse.
     assert "has_text" not in list(shipped.feature_names())
-    assert shipped.text is not None                 # the vocabulary block is still there
+    assert shipped.text is not None  # the vocabulary block is still there
     assert shipped.transform(examples).shape[1] == both.transform(examples).shape[1] - 1
 
 
@@ -373,10 +391,11 @@ def test_malformed_historic_names_are_excluded_from_training():
 def test_derived_rows_never_reach_the_test_split():
     from mwmbl.moderation.train import split_by_time
 
-    real = [TrainingRow(f"real{index}.com", index % 2 == 0, "", "real", [], f"2025-01-{index:02d}")
-            for index in range(1, 21)]
-    derived = [TrainingRow(f"derived{index}.com", True, "OFFENSIVE", "derived", [])
-               for index in range(5)]
+    real = [
+        TrainingRow(f"real{index}.com", index % 2 == 0, "", "real", [], f"2025-01-{index:02d}")
+        for index in range(1, 21)
+    ]
+    derived = [TrainingRow(f"derived{index}.com", True, "OFFENSIVE", "derived", []) for index in range(5)]
     seed = [TrainingRow("seed.com", True, "OTHER", "seed", [])]
 
     train_rows, test_rows = split_by_time(real + derived + seed)
@@ -388,22 +407,25 @@ def test_agreement_is_measured_against_the_action_that_was_shown():
     """suggested_status records what the tool displayed - APPROVE, REJECT or UNSURE - so
     comparing it against a submission status ("REJECTED") matched nothing and inverted the
     count: every rejection the moderator agreed with was scored as a disagreement."""
+
     def decided(rejected, shown):
         return TrainingRow("example.com", rejected, "", "real", [], suggested_status=shown)
 
-    influence = _suggestion_influence([
-        decided(rejected=True, shown="REJECT"),      # agreed
-        decided(rejected=False, shown="REJECT"),     # disagreed
-        decided(rejected=False, shown="APPROVE"),    # agreed
-        decided(rejected=True, shown="UNSURE"),      # shown, but took no side
-        decided(rejected=True, shown=""),            # nothing was shown
-    ])
+    influence = _suggestion_influence(
+        [
+            decided(rejected=True, shown="REJECT"),  # agreed
+            decided(rejected=False, shown="REJECT"),  # disagreed
+            decided(rejected=False, shown="APPROVE"),  # agreed
+            decided(rejected=True, shown="UNSURE"),  # shown, but took no side
+            decided(rejected=True, shown=""),  # nothing was shown
+        ]
+    )
 
-    assert influence == {"real_rows": 5, "shown_a_suggestion": 4,
-                         "suggested_a_side": 3, "agreed_with_it": 2}
+    assert influence == {"real_rows": 5, "shown_a_suggestion": 4, "suggested_a_side": 3, "agreed_with_it": 2}
 
 
 # --------------------------------------------------------------------- API
+
 
 @pytest.mark.django_db
 def test_queue_requires_the_moderator_permission(client, submitter):
@@ -437,16 +459,12 @@ def test_uncrawled_submission_reports_that_rather_than_guessing(client, moderato
 
 @pytest.mark.django_db
 def test_queue_orders_rows_that_need_a_human_first(client, moderator, established):
-    for name, action in [("approve-me.com", "APPROVE"),
-                         ("reject-me.com", "REJECT"),
-                         ("unsure.com", "UNSURE")]:
+    for name, action in [("approve-me.com", "APPROVE"), ("reject-me.com", "REJECT"), ("unsure.com", "UNSURE")]:
         DomainSubmission.objects.create(name=name, submitted_by=established)
         ready_evidence(name, suggested_action=action, confidence=0.8)
 
-    response = client.get(f"{QUEUE_URL}?order_by=needs_review",
-                          headers={"Authorization": token(moderator)})
-    assert [item["name"] for item in response.json()["items"]] == [
-        "reject-me.com", "unsure.com", "approve-me.com"]
+    response = client.get(f"{QUEUE_URL}?order_by=needs_review", headers={"Authorization": token(moderator)})
+    assert [item["name"] for item in response.json()["items"]] == ["reject-me.com", "unsure.com", "approve-me.com"]
 
 
 @pytest.mark.django_db
@@ -455,8 +473,7 @@ def test_queue_filters_on_the_suggestion(client, moderator, submitter):
         DomainSubmission.objects.create(name=name, submitted_by=submitter)
         ready_evidence(name, suggested_action=action)
 
-    response = client.get(f"{QUEUE_URL}?suggested_action=REJECT",
-                          headers={"Authorization": token(moderator)})
+    response = client.get(f"{QUEUE_URL}?suggested_action=REJECT", headers={"Authorization": token(moderator)})
     assert [item["name"] for item in response.json()["items"]] == ["b.com"]
 
 
@@ -466,10 +483,18 @@ def test_decision_records_the_suggestion_that_was_shown(client, moderator, submi
 
     response = client.post(
         f"/api/v1/platform/domain-submissions/ids/{submission.id}",
-        data={"status": "REJECTED", "rejection_reason": "SPAM", "rejection_detail": "",
-              "suggested_status": "APPROVE", "suggested_reason": "",
-              "suggestion_confidence": 0.62, "suggestion_model_version": "test-model"},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={
+            "status": "REJECTED",
+            "rejection_reason": "SPAM",
+            "rejection_detail": "",
+            "suggested_status": "APPROVE",
+            "suggested_reason": "",
+            "suggestion_confidence": 0.62,
+            "suggestion_model_version": "test-model",
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
     assert response.status_code == 200
 
     submission.refresh_from_db()
@@ -488,11 +513,15 @@ def test_bulk_decisions_apply_each_choice_separately(client, moderator, submitte
 
     response = client.post(
         "/api/v1/platform/domain-submissions/decisions",
-        data={"decisions": [
-            {"domain": "a.com", "status": "APPROVED"},
-            {"domain": "b.com", "status": "REJECTED", "rejection_reason": "SPAM"},
-        ]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={
+            "decisions": [
+                {"domain": "a.com", "status": "APPROVED"},
+                {"domain": "b.com", "status": "REJECTED", "rejection_reason": "SPAM"},
+            ]
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.json()["updated"] == 2
     first.refresh_from_db()
@@ -508,7 +537,8 @@ def test_refetch_clears_the_evidence_so_the_crawl_actually_reruns(client, modera
     with mock.patch("mwmbl.platform.api.enrich_domain_submission") as enrich:
         response = client.post(
             f"/api/v1/platform/domain-submissions/ids/{submission.id}/refetch",
-            headers={"Authorization": token(moderator)})
+            headers={"Authorization": token(moderator)},
+        )
 
     assert response.status_code == 200
     assert not DomainEvidence.objects.filter(domain="was-down.com").exists()
@@ -523,14 +553,14 @@ HISTORY_URL = "/api/v1/platform/domain-submissions/moderated"
 
 def upvote(url, username):
     SearchResultVote.objects.create(
-        user=MwmblUser.objects.create_user(username=username), url=url, query="q",
-        vote_type="upvote")
+        user=MwmblUser.objects.create_user(username=username), url=url, query="q", vote_type="upvote"
+    )
 
 
 def downvote(url, username):
     SearchResultVote.objects.create(
-        user=MwmblUser.objects.create_user(username=username), url=url, query="q",
-        vote_type="downvote")
+        user=MwmblUser.objects.create_user(username=username), url=url, query="q", vote_type="downvote"
+    )
 
 
 @pytest.mark.django_db
@@ -556,10 +586,8 @@ def test_the_row_is_the_first_submission_of_the_domain(client, moderator):
     has to be the row those two fields come from."""
     first = MwmblUser.objects.create_user(username="anon_4417")
     later = MwmblUser.objects.create_user(username="someone_else")
-    DomainSubmission.objects.create(name="a.com", submitted_by=first,
-                                    submitted_on=timezone.now() - timedelta(days=6))
-    DomainSubmission.objects.create(name="a.com", submitted_by=later,
-                                    submitted_on=timezone.now() - timedelta(days=1))
+    DomainSubmission.objects.create(name="a.com", submitted_by=first, submitted_on=timezone.now() - timedelta(days=6))
+    DomainSubmission.objects.create(name="a.com", submitted_by=later, submitted_on=timezone.now() - timedelta(days=1))
     ready_evidence("a.com")
 
     item = client.get(QUEUE_URL, headers={"Authorization": token(moderator)}).json()["items"][0]
@@ -582,9 +610,10 @@ def test_votes_are_rolled_up_to_the_domain(client, moderator, established):
     DomainSubmission.objects.create(name="silent.example", submitted_by=established)
     ready_evidence("silent.example")
 
-    items = {item["name"]: item
-             for item in client.get(QUEUE_URL,
-                                    headers={"Authorization": token(moderator)}).json()["items"]}
+    items = {
+        item["name"]: item
+        for item in client.get(QUEUE_URL, headers={"Authorization": token(moderator)}).json()["items"]
+    }
 
     assert (items["solarpunk.zone"]["upvotes"], items["solarpunk.zone"]["downvotes"]) == (2, 1)
     # Zero, not null: a domain nobody has voted on has to sort with the rest.
@@ -603,8 +632,12 @@ def test_a_www_submission_still_finds_its_votes(client, moderator, established):
 
 @pytest.mark.django_db
 def test_the_default_order_is_most_submitted_then_most_upvoted(client, moderator, established):
-    for name, submissions, upvotes in [("popular.com", 3, 1), ("tied-low.com", 2, 1),
-                                       ("tied-high.com", 2, 40), ("lonely.com", 1, 99)]:
+    for name, submissions, upvotes in [
+        ("popular.com", 3, 1),
+        ("tied-low.com", 2, 1),
+        ("tied-high.com", 2, 40),
+        ("lonely.com", 1, 99),
+    ]:
         for _ in range(submissions):
             DomainSubmission.objects.create(name=name, submitted_by=established)
         for index in range(upvotes):
@@ -612,8 +645,7 @@ def test_the_default_order_is_most_submitted_then_most_upvoted(client, moderator
         ready_evidence(name)
 
     body = client.get(QUEUE_URL, headers={"Authorization": token(moderator)}).json()
-    assert [item["name"] for item in body["items"]] == [
-        "popular.com", "tied-high.com", "tied-low.com", "lonely.com"]
+    assert [item["name"] for item in body["items"]] == ["popular.com", "tied-high.com", "tied-low.com", "lonely.com"]
 
 
 @pytest.mark.django_db
@@ -624,12 +656,12 @@ def test_the_card_carries_its_sample_pages_and_padlock(client, moderator, establ
     ready_evidence("crawled.com", signals={"has_links": True, "https": False})
     DomainSubmission.objects.create(name="uncrawled.com", submitted_by=established)
     DomainSubmission.objects.create(name="unreachable.com", submitted_by=established)
-    ready_evidence("unreachable.com", signals={"has_links": False, "https": None},
-                   error="AbortError", http_status=None)
+    ready_evidence("unreachable.com", signals={"has_links": False, "https": None}, error="AbortError", http_status=None)
 
-    items = {item["name"]: item
-             for item in client.get(QUEUE_URL,
-                                    headers={"Authorization": token(moderator)}).json()["items"]}
+    items = {
+        item["name"]: item
+        for item in client.get(QUEUE_URL, headers={"Authorization": token(moderator)}).json()["items"]
+    }
 
     assert items["crawled.com"]["pages"][0]["title"] == "A title"
     assert items["crawled.com"]["https"] is False
@@ -647,30 +679,30 @@ def test_one_decision_settles_every_submission_of_the_domain(client, moderator, 
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "cheap-rolex.biz", "status": "REJECTED",
-                             "rejection_reason": "SPAM"}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={"decisions": [{"domain": "cheap-rolex.biz", "status": "REJECTED", "rejection_reason": "SPAM"}]},
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.json() == {"status": "ok", "domains": 1, "updated": 9, "not_found": []}
-    assert not DomainSubmission.objects.filter(name="cheap-rolex.biz",
-                                               status="PENDING").exists()
+    assert not DomainSubmission.objects.filter(name="cheap-rolex.biz", status="PENDING").exists()
 
 
 @pytest.mark.django_db
 def test_a_decision_can_be_changed_after_the_fact(client, moderator, submitter):
     """Re-deciding is the same request as deciding: a domain already rejected can be approved
     without a second endpoint, and does not end up half one and half the other."""
-    DomainSubmission.objects.create(name="a.com", submitted_by=submitter, status="REJECTED",
-                                    rejection_reason="SPAM")
+    DomainSubmission.objects.create(name="a.com", submitted_by=submitter, status="REJECTED", rejection_reason="SPAM")
     DomainSubmission.objects.create(name="a.com", submitted_by=submitter)
 
-    client.post(DECISIONS_URL,
-                data={"decisions": [{"domain": "a.com", "status": "APPROVED"}]},
-                content_type="application/json",
-                headers={"Authorization": token(moderator)})
+    client.post(
+        DECISIONS_URL,
+        data={"decisions": [{"domain": "a.com", "status": "APPROVED"}]},
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
-    statuses = set(DomainSubmission.objects.filter(name="a.com")
-                   .values_list("status", "rejection_reason"))
+    statuses = set(DomainSubmission.objects.filter(name="a.com").values_list("status", "rejection_reason"))
     assert statuses == {("APPROVED", "")}
 
 
@@ -679,7 +711,9 @@ def test_a_decision_on_an_unknown_domain_is_reported_not_invented(client, modera
     response = client.post(
         DECISIONS_URL,
         data={"decisions": [{"domain": "never-submitted.com", "status": "APPROVED"}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.json()["not_found"] == ["never-submitted.com"]
 
@@ -690,24 +724,32 @@ UNDO_URL = "/api/v1/platform/domain-submissions/domains/{}/undo"
 
 
 @pytest.mark.django_db
-def test_undo_returns_a_domain_to_the_queue_without_rewriting_the_audit(client, moderator,
-                                                                       submitter):
+def test_undo_returns_a_domain_to_the_queue_without_rewriting_the_audit(client, moderator, submitter):
     """The suggested_* columns record what was on screen when the decision was made. Posting
     a PENDING status back through the decision endpoint - the nearest thing to an undo before
     this - overwrote them from the request, destroying the one thing they exist for."""
     submission = DomainSubmission.objects.create(name="a.com", submitted_by=submitter)
     ready_evidence("a.com")
-    client.post(DECISIONS_URL,
-                data={"decisions": [{"domain": "a.com", "status": "REJECTED",
-                                     "rejection_reason": "SPAM",
-                                     "suggested_status": "REJECT",
-                                     "suggested_reason": "SPAM",
-                                     "suggestion_confidence": 0.91,
-                                     "suggestion_model_version": "2026-08-01"}]},
-                content_type="application/json", headers={"Authorization": token(moderator)})
+    client.post(
+        DECISIONS_URL,
+        data={
+            "decisions": [
+                {
+                    "domain": "a.com",
+                    "status": "REJECTED",
+                    "rejection_reason": "SPAM",
+                    "suggested_status": "REJECT",
+                    "suggested_reason": "SPAM",
+                    "suggestion_confidence": 0.91,
+                    "suggestion_model_version": "2026-08-01",
+                }
+            ]
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
-    response = client.post(UNDO_URL.format("a.com"),
-                           headers={"Authorization": token(moderator)})
+    response = client.post(UNDO_URL.format("a.com"), headers={"Authorization": token(moderator)})
 
     assert response.status_code == 200
     submission.refresh_from_db()
@@ -740,8 +782,7 @@ def test_undoing_an_approval_rebuilds_the_blacklist_snapshot(client, moderator, 
 def test_undoing_a_rejection_does_not_rebuild_the_snapshot(client, moderator, submitter):
     """Only an approval ever changed the snapshot, so only undoing one has to change it back -
     a rebuild downloads and parses tens of megabytes."""
-    DomainSubmission.objects.create(name="a.com", submitted_by=submitter, status="REJECTED",
-                                    rejection_reason="SPAM")
+    DomainSubmission.objects.create(name="a.com", submitted_by=submitter, status="REJECTED", rejection_reason="SPAM")
     Task.objects.all().delete()
 
     with mock.patch("mwmbl.background.refresh_blacklist_snapshot") as refresh:
@@ -752,22 +793,26 @@ def test_undoing_a_rejection_does_not_rebuild_the_snapshot(client, moderator, su
 
 @pytest.mark.django_db
 def test_undoing_a_domain_nobody_submitted_is_a_404(client, moderator):
-    response = client.post(UNDO_URL.format("never-submitted.com"),
-                           headers={"Authorization": token(moderator)})
+    response = client.post(UNDO_URL.format("never-submitted.com"), headers={"Authorization": token(moderator)})
     assert response.status_code == 404
 
 
 @pytest.mark.django_db
 def test_history_lists_past_decisions_by_status_newest_first(client, moderator, submitter):
-    for name, status, when in [("old-reject.com", "REJECTED", 5),
-                               ("new-reject.com", "REJECTED", 1),
-                               ("approved.com", "APPROVED", 2)]:
+    for name, status, when in [
+        ("old-reject.com", "REJECTED", 5),
+        ("new-reject.com", "REJECTED", 1),
+        ("approved.com", "APPROVED", 2),
+    ]:
         DomainSubmission.objects.create(
-            name=name, submitted_by=submitter, status=status,
-            status_changed_by=moderator, status_changed_on=timezone.now() - timedelta(days=when))
+            name=name,
+            submitted_by=submitter,
+            status=status,
+            status_changed_by=moderator,
+            status_changed_on=timezone.now() - timedelta(days=when),
+        )
 
-    body = client.get(f"{HISTORY_URL}?status=REJECTED",
-                      headers={"Authorization": token(moderator)}).json()
+    body = client.get(f"{HISTORY_URL}?status=REJECTED", headers={"Authorization": token(moderator)}).json()
 
     assert [item["name"] for item in body["items"]] == ["new-reject.com", "old-reject.com"]
     assert body["count"] == 2
@@ -778,9 +823,13 @@ def test_history_lists_past_decisions_by_status_newest_first(client, moderator, 
 def test_history_shows_one_row_per_domain(client, moderator, submitter):
     for index in range(4):
         DomainSubmission.objects.create(
-            name="a.com", submitted_by=submitter, status="REJECTED", rejection_reason="SPAM",
+            name="a.com",
+            submitted_by=submitter,
+            status="REJECTED",
+            rejection_reason="SPAM",
             status_changed_by=moderator,
-            status_changed_on=timezone.now() - timedelta(days=index))
+            status_changed_on=timezone.now() - timedelta(days=index),
+        )
 
     body = client.get(HISTORY_URL, headers={"Authorization": token(moderator)}).json()
 
@@ -791,13 +840,19 @@ def test_history_shows_one_row_per_domain(client, moderator, submitter):
 @pytest.mark.django_db
 def test_history_carries_what_the_moderator_was_shown(client, moderator, submitter):
     DomainSubmission.objects.create(
-        name="a.com", submitted_by=submitter, status="REJECTED", rejection_reason="SPAM",
-        status_changed_by=moderator, status_changed_on=timezone.now(),
-        suggested_status="REJECT", suggested_reason="SPAM", suggestion_confidence=0.77,
-        suggestion_model_version="2026-07-01")
+        name="a.com",
+        submitted_by=submitter,
+        status="REJECTED",
+        rejection_reason="SPAM",
+        status_changed_by=moderator,
+        status_changed_on=timezone.now(),
+        suggested_status="REJECT",
+        suggested_reason="SPAM",
+        suggestion_confidence=0.77,
+        suggestion_model_version="2026-07-01",
+    )
 
-    item = client.get(HISTORY_URL,
-                      headers={"Authorization": token(moderator)}).json()["items"][0]
+    item = client.get(HISTORY_URL, headers={"Authorization": token(moderator)}).json()["items"][0]
 
     assert item["suggested_status"] == "REJECT"
     assert item["suggestion_confidence"] == 0.77
@@ -812,14 +867,19 @@ def test_history_requires_the_moderator_permission(client, submitter):
 
 # --------------------------------------------------------------------- rescoring
 
+
 @pytest.mark.django_db
 def test_rescore_updates_pending_rows_only(submitter):
     from mwmbl.background import rescore_pending_submissions
 
     DomainSubmission.objects.create(name="pending.com", submitted_by=submitter, status="PENDING")
     decided = DomainSubmission.objects.create(
-        name="decided.com", submitted_by=submitter, status="APPROVED",
-        suggested_status="REJECT", suggestion_confidence=0.9)
+        name="decided.com",
+        submitted_by=submitter,
+        status="APPROVED",
+        suggested_status="REJECT",
+        suggestion_confidence=0.9,
+    )
     ready_evidence("pending.com", model_version="old")
     ready_evidence("decided.com", model_version="old")
 
@@ -849,15 +909,13 @@ def test_enrichment_recrawls_stale_evidence(submitter):
 
     ready_evidence("stale.com", fetched_at=timezone.now() - timedelta(days=365))
     with mock.patch("mwmbl.background.crawl_domain") as crawl:
-        crawl.return_value = {"http_status": 200, "final_domain": "", "error": "",
-                              "pages": [], "signals": {}}
+        crawl.return_value = {"http_status": 200, "final_domain": "", "error": "", "pages": [], "signals": {}}
         enrich_domain_submission.now("stale.com")
     crawl.assert_called_once()
 
 
 @pytest.mark.django_db
-def test_queue_cost_does_not_grow_with_the_backlog(client, moderator, established,
-                                                   django_assert_max_num_queries):
+def test_queue_cost_does_not_grow_with_the_backlog(client, moderator, established, django_assert_max_num_queries):
     """Ordering, filtering and slicing must happen in SQL.
 
     The backlog is ~4,000 pending submissions. An implementation that builds the list in
@@ -874,13 +932,15 @@ def test_queue_cost_does_not_grow_with_the_backlog(client, moderator, establishe
         for voter in range(index % 4):
             SearchResultVote.objects.create(
                 user=MwmblUser.objects.create_user(username=f"voter{index}-{voter}"),
-                url=f"https://{name}/page{voter}", query="q", vote_type="upvote")
+                url=f"https://{name}/page{voter}",
+                query="q",
+                vote_type="upvote",
+            )
         ready_evidence(name, suggested_action="REJECT", confidence=index / 30)
 
     # Auth, permissions, count, page, evidence, submitter counts, prior-decision counts.
     with django_assert_max_num_queries(12):
-        response = client.get(f"{QUEUE_URL}?limit=5&order_by=needs_review",
-                              headers={"Authorization": token(moderator)})
+        response = client.get(f"{QUEUE_URL}?limit=5&order_by=needs_review", headers={"Authorization": token(moderator)})
 
     body = response.json()
     # Distinct pending domains, not the 90 pending submissions behind them.
@@ -900,12 +960,12 @@ def test_queue_paginates_over_the_whole_ordering(client, moderator, established)
         ready_evidence(name, suggested_action="REJECT", confidence=index / 10)
 
     def page(offset):
-        response = client.get(f"{QUEUE_URL}?limit=4&offset={offset}&order_by=needs_review",
-                              headers={"Authorization": token(moderator)})
+        response = client.get(
+            f"{QUEUE_URL}?limit=4&offset={offset}&order_by=needs_review", headers={"Authorization": token(moderator)}
+        )
         return [item["name"] for item in response.json()["items"]]
 
-    assert page(0) + page(4) + page(8) == [f"site{index}.example"
-                                           for index in range(9, -1, -1)]
+    assert page(0) + page(4) + page(8) == [f"site{index}.example" for index in range(9, -1, -1)]
 
 
 def test_robots_denied_is_evidence_not_a_verdict():
@@ -913,8 +973,8 @@ def test_robots_denied_is_evidence_not_a_verdict():
     distinct rejection details mentions robots.txt. Suggesting a confident rejection here
     would be confidently wrong on a domain moderators actually wanted."""
     items = rules.crawl_evidence(
-        "lobste.rs", {"http_status": None, "error": "RobotsDenied", "pages": [{}],
-                      "signals": {}})
+        "lobste.rs", {"http_status": None, "error": "RobotsDenied", "pages": [{}], "signals": {}}
+    )
     robots = next(item for item in items if item.kind == "robots")
     assert robots.implies_action is None
     assert rules.decisive(items) is None
@@ -926,8 +986,12 @@ def test_blocklist_membership_is_evidence_not_a_verdict():
     must not argue against the mechanism it serves."""
     items = rules.crawl_evidence(
         "pudding.cool",
-        {"http_status": 200, "pages": [{"title": "t", "extract": "e", "num_links": 4}],
-         "signals": {"has_links": True, "blacklisted": True}})
+        {
+            "http_status": 200,
+            "pages": [{"title": "t", "extract": "e", "num_links": 4}],
+            "signals": {"has_links": True, "blacklisted": True},
+        },
+    )
     blocklist = next(item for item in items if item.kind == "blocklist")
     assert blocklist.direction == rules.REJECT
     assert blocklist.implies_action is None
@@ -936,9 +1000,13 @@ def test_blocklist_membership_is_evidence_not_a_verdict():
 def test_a_failed_fetch_reports_one_problem_not_four():
     items = rules.crawl_evidence(
         "gone.example",
-        {"http_status": None, "error": "AbortError", "pages": [{"title": "", "extract": "",
-                                                                "num_links": 0}],
-         "signals": {}})
+        {
+            "http_status": None,
+            "error": "AbortError",
+            "pages": [{"title": "", "extract": "", "num_links": 0}],
+            "signals": {},
+        },
+    )
     kinds = {item.kind for item in items}
     assert kinds == {"unreachable"}
 
@@ -946,7 +1014,7 @@ def test_a_failed_fetch_reports_one_problem_not_four():
 def test_an_approval_is_not_labelled_with_the_reason_heads_argmax():
     model = mock.Mock()
     model.version = "test"
-    model.predict.return_value = [(0.02, "OFFENSIVE", 0.5)]   # clearly an approval
+    model.predict.return_value = [(0.02, "OFFENSIVE", 0.5)]  # clearly an approval
 
     suggestion = suggest("example.com", ["wholesome text"], [], model=model)
 
@@ -963,12 +1031,13 @@ def test_redirect_check_errs_towards_reporting_nothing():
     assert rules.registrable("example.co.uk") == rules.registrable("somewhere-else.co.uk")
 
     items = rules.crawl_evidence(
-        "example.com",
-        {"http_status": 200, "final_domain": "elsewhere.net", "pages": [], "signals": {}})
+        "example.com", {"http_status": 200, "final_domain": "elsewhere.net", "pages": [], "signals": {}}
+    )
     assert rules.decisive(items).kind == "redirect"
 
 
 # --------------------------------------------------------------------- retrain gate
+
 
 def metrics(pr_auc, low, high, rows=150, positives=81):
     """Cold-start metrics in the shape a stored artifact carries.
@@ -976,16 +1045,21 @@ def metrics(pr_auc, low, high, rows=150, positives=81):
     rows and positives are what make the PR-AUC readable: the gate corrects for prevalence, so
     a slice cannot be described by its score alone.
     """
-    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high],
-                           "rows": rows, "positives": positives}}
+    return {"cold_start": {"pr_auc": pr_auc, "pr_auc_ci": [low, high], "rows": rows, "positives": positives}}
 
 
 def paired(difference, low, high, contamination_known=True):
-    return {"cold_start": metrics(0.7, 0.6, 0.8)["cold_start"],
-            "versus_incumbent": {
-                "incumbent_version": "domain-mod-2026-08-01", "rows": 150,
-                "contamination_known": contamination_known, "difference": difference,
-                "difference_ci": [low, high], "candidate_wins_fraction": 0.5}}
+    return {
+        "cold_start": metrics(0.7, 0.6, 0.8)["cold_start"],
+        "versus_incumbent": {
+            "incumbent_version": "domain-mod-2026-08-01",
+            "rows": 150,
+            "contamination_known": contamination_known,
+            "difference": difference,
+            "difference_ci": [low, high],
+            "candidate_wins_fraction": 0.5,
+        },
+    }
 
 
 def test_gate_publishes_when_there_is_no_incumbent():
@@ -994,8 +1068,7 @@ def test_gate_publishes_when_there_is_no_incumbent():
 
 
 def test_gate_blocks_a_model_below_the_incumbents_lower_bound():
-    allowed, explanation = passes_gate(metrics(0.60, 0.51, 0.69),
-                                       metrics(0.78, 0.69, 0.86))
+    allowed, explanation = passes_gate(metrics(0.60, 0.51, 0.69), metrics(0.78, 0.69, 0.86))
     assert not allowed
     assert "unpaired" in explanation
 
@@ -1018,7 +1091,8 @@ def test_gate_is_not_fooled_by_a_change_in_prevalence():
     ships."""
     allowed, explanation = passes_gate(
         metrics(0.6716, 0.5927, 0.7472, rows=635, positives=189),
-        metrics(0.7788, 0.6885, 0.8588, rows=150, positives=81))
+        metrics(0.7788, 0.6885, 0.8588, rows=150, positives=81),
+    )
     assert allowed, explanation
 
 
@@ -1026,8 +1100,7 @@ def test_the_paired_comparison_is_preferred_to_the_stored_metrics():
     """Two numbers from two different test sets can only be compared weakly. When the incumbent
     could be loaded and scored on the same rows, that is the answer - even when the stored
     metrics, describing a different population, would have said otherwise."""
-    allowed, explanation = passes_gate(paired(0.02, -0.03, 0.07),
-                                       metrics(0.95, 0.93, 0.97))
+    allowed, explanation = passes_gate(paired(0.02, -0.03, 0.07), metrics(0.95, 0.93, 0.97))
     assert allowed
     assert "paired against domain-mod-2026-08-01" in explanation
 
@@ -1049,8 +1122,7 @@ def test_an_incumbent_with_no_training_record_is_flagged_not_trusted_silently():
     """Artifacts pickled before train_domains was recorded may be scored on rows they were
     fitted on, which flatters them. The candidate still has to clear the bar - the point is
     that the explanation says the bar was tilted."""
-    allowed, explanation = passes_gate(paired(0.01, -0.02, 0.05, contamination_known=False),
-                                       metrics(0.5, 0.4, 0.6))
+    allowed, explanation = passes_gate(paired(0.01, -0.02, 0.05, contamination_known=False), metrics(0.5, 0.4, 0.6))
     assert allowed
     assert "no record of its training domains" in explanation
 
@@ -1063,6 +1135,7 @@ def test_gate_refuses_when_there_is_no_cold_start_slice():
 
 
 # --------------------------------------------------------------------- prior shift
+
 
 @pytest.mark.django_db
 def test_no_confident_approval_for_a_submitter_with_no_track_record(submitter):
@@ -1080,8 +1153,7 @@ def test_no_confident_approval_for_a_submitter_with_no_track_record(submitter):
 @pytest.mark.django_db
 def test_approval_stands_for_a_submitter_with_a_record(submitter):
     for index in range(3):
-        DomainSubmission.objects.create(name=f"past{index}.example", submitted_by=submitter,
-                                        status="APPROVED")
+        DomainSubmission.objects.create(name=f"past{index}.example", submitted_by=submitter, status="APPROVED")
     submission = DomainSubmission.objects.create(name="known.example", submitted_by=submitter)
     evidence = ready_evidence("known.example", suggested_action="APPROVE", confidence=0.9)
 
@@ -1095,8 +1167,7 @@ def test_approval_stands_for_a_submitter_with_a_record(submitter):
 def test_rejections_are_not_withheld_from_first_time_submitters(submitter):
     """Rejection precision is 0.88 on exactly this slice, so only the approve side is held."""
     submission = DomainSubmission.objects.create(name="spammy.example", submitted_by=submitter)
-    evidence = ready_evidence("spammy.example", suggested_action="REJECT",
-                              suggested_reason="SPAM", confidence=0.9)
+    evidence = ready_evidence("spammy.example", suggested_action="REJECT", suggested_reason="SPAM", confidence=0.9)
 
     suggestion = suggestion_for(submission, evidence)
 
@@ -1105,6 +1176,7 @@ def test_rejections_are_not_withheld_from_first_time_submitters(submitter):
 
 
 # --------------------------------------------------------------------- crawl evidence
+
 
 class _FakeResponse:
     """Enough of a requests Response for retrieve.fetch."""
@@ -1123,9 +1195,11 @@ class _FakeResponse:
         pass
 
 
-A_PAGE = (b"<html><head><title>Buy this domain</title></head><body>"
-          b"<p>This premium domain name is for sale. Make an offer today and we will be in "
-          b"touch with you shortly to complete the transfer.</p></body></html>")
+A_PAGE = (
+    b"<html><head><title>Buy this domain</title></head><body>"
+    b"<p>This premium domain name is for sale. Make an offer today and we will be in "
+    b"touch with you shortly to complete the transfer.</p></body></html>"
+)
 
 
 def crawl_with(responses: dict, domain: str) -> dict:
@@ -1134,6 +1208,7 @@ def crawl_with(responses: dict, domain: str) -> dict:
     Driven from requests.get rather than by stubbing crawl_url, because everything this
     covers lives in the plumbing between the fetch and the evidence.
     """
+
     def get(url, **kwargs):
         response = responses[url]
         if isinstance(response, Exception):
@@ -1141,11 +1216,12 @@ def crawl_with(responses: dict, domain: str) -> dict:
         return response
 
     blacklist = mock.Mock(is_domain_blacklisted=mock.Mock(return_value=False))
-    with mock.patch("mwmbl.crawler.retrieve.requests.get", get), \
-            mock.patch("mwmbl.crawler.retrieve.validate_url"), \
-            mock.patch("mwmbl.crawler.retrieve.robots_allowed", return_value=True), \
-            mock.patch("mwmbl.moderation.evidence.get_snapshot_blacklist",
-                       return_value=blacklist):
+    with (
+        mock.patch("mwmbl.crawler.retrieve.requests.get", get),
+        mock.patch("mwmbl.crawler.retrieve.validate_url"),
+        mock.patch("mwmbl.crawler.retrieve.robots_allowed", return_value=True),
+        mock.patch("mwmbl.moderation.evidence.get_snapshot_blacklist", return_value=blacklist),
+    ):
         return crawl_domain(domain, redis=None)
 
 
@@ -1154,11 +1230,13 @@ def test_a_domain_that_redirects_elsewhere_is_reported_as_a_redirect():
     domains, and "redirects to somewhere else" is the fetch that proves it. The check is only
     as good as the URL the crawler reports: reporting the requested one compares the domain
     against itself and the rule can never fire."""
-    crawl = crawl_with({
-        "https://squatted.example/": _FakeResponse(
-            301, headers={"Location": "https://parked.test/lander"}),
-        "https://parked.test/lander": _FakeResponse(200, body=A_PAGE),
-    }, "squatted.example")
+    crawl = crawl_with(
+        {
+            "https://squatted.example/": _FakeResponse(301, headers={"Location": "https://parked.test/lander"}),
+            "https://parked.test/lander": _FakeResponse(200, body=A_PAGE),
+        },
+        "squatted.example",
+    )
 
     assert crawl["final_domain"] == "parked.test"
     decisive = rules.decisive(rules.crawl_evidence("squatted.example", crawl))
@@ -1169,8 +1247,7 @@ def test_a_domain_that_redirects_elsewhere_is_reported_as_a_redirect():
 def test_a_domain_that_serves_its_own_pages_reports_no_redirect():
     """The other direction, because the check is decisive: a site that answers for itself must
     never be rejected for redirecting to itself."""
-    crawl = crawl_with(
-        {"https://honest.example/": _FakeResponse(200, body=A_PAGE)}, "honest.example")
+    crawl = crawl_with({"https://honest.example/": _FakeResponse(200, body=A_PAGE)}, "honest.example")
 
     assert crawl["final_domain"] == ""
     kinds = {item.kind for item in rules.crawl_evidence("honest.example", crawl)}
@@ -1181,10 +1258,13 @@ def test_a_site_without_a_certificate_is_a_site_not_a_dead_domain():
     """Only https used to be tried, so "no TLS" and "not there" were the same result - and
     that result is a decisive REJECT for being unreachable. A site served over plain http is
     a site; whether it has a certificate is a line for the moderator, not a verdict."""
-    crawl = crawl_with({
-        "https://no-cert.example/": ConnectionError("certificate verify failed"),
-        "http://no-cert.example/": _FakeResponse(200, body=A_PAGE),
-    }, "no-cert.example")
+    crawl = crawl_with(
+        {
+            "https://no-cert.example/": ConnectionError("certificate verify failed"),
+            "http://no-cert.example/": _FakeResponse(200, body=A_PAGE),
+        },
+        "no-cert.example",
+    )
 
     assert crawl["signals"]["https"] is False
     assert crawl["error"] == ""
@@ -1196,10 +1276,13 @@ def test_a_site_without_a_certificate_is_a_site_not_a_dead_domain():
 def test_a_domain_that_is_simply_down_is_still_reported_as_unreachable():
     """The other direction: falling back to http must not turn a dead domain into a live one,
     and must not label it "no TLS" - the https attempt is the one that describes production."""
-    crawl = crawl_with({
-        "https://gone.example/": ConnectionError("no route to host"),
-        "http://gone.example/": ConnectionError("no route to host"),
-    }, "gone.example")
+    crawl = crawl_with(
+        {
+            "https://gone.example/": ConnectionError("no route to host"),
+            "http://gone.example/": ConnectionError("no route to host"),
+        },
+        "gone.example",
+    )
 
     # Unknown, not absent: the rules layer already gates "no TLS" behind having reached the
     # site, but the queue card reads this signal straight out of the row, and False there
@@ -1212,15 +1295,14 @@ def test_a_domain_that_is_simply_down_is_still_reported_as_unreachable():
 
 
 def test_a_normal_https_site_is_not_asked_for_over_http():
-    crawl = crawl_with(
-        {"https://secure.example/": _FakeResponse(200, body=A_PAGE)}, "secure.example")
+    crawl = crawl_with({"https://secure.example/": _FakeResponse(200, body=A_PAGE)}, "secure.example")
 
     assert crawl["signals"]["https"] is True
-    assert "no_tls" not in {item.kind
-                            for item in rules.crawl_evidence("secure.example", crawl)}
+    assert "no_tls" not in {item.kind for item in rules.crawl_evidence("secure.example", crawl)}
 
 
 # --------------------------------------------------------------------- enrichment
+
 
 @pytest.mark.django_db
 def test_enrichment_never_commits_a_scored_row_without_the_score():
@@ -1230,9 +1312,10 @@ def test_enrichment_never_commits_a_scored_row_without_the_score():
     from mwmbl.background import enrich_domain_submission
 
     crawl = {"http_status": 200, "final_domain": "", "error": "", "pages": [], "signals": {}}
-    with mock.patch("mwmbl.background.crawl_domain", return_value=crawl), \
-            mock.patch("mwmbl.background.refresh_suggestion",
-                       side_effect=RuntimeError("scoring blew up")):
+    with (
+        mock.patch("mwmbl.background.crawl_domain", return_value=crawl),
+        mock.patch("mwmbl.background.refresh_suggestion", side_effect=RuntimeError("scoring blew up")),
+    ):
         with pytest.raises(RuntimeError):
             enrich_domain_submission.now("half-written.example")
 
@@ -1246,8 +1329,7 @@ def test_a_failed_recrawl_does_not_leave_the_old_crawl_on_screen():
     from mwmbl.background import enrich_domain_submission
 
     ready_evidence("gone.example", fetched_at=timezone.now() - timedelta(days=365))
-    with mock.patch("mwmbl.background.crawl_domain",
-                    side_effect=ConnectionError("no route to host")):
+    with mock.patch("mwmbl.background.crawl_domain", side_effect=ConnectionError("no route to host")):
         enrich_domain_submission.now("gone.example")
 
     evidence = DomainEvidence.objects.get(domain="gone.example")
@@ -1284,9 +1366,9 @@ def test_a_stored_unexplainable_rejection_is_not_shown_as_a_suggestion(submitter
     """Rows scored before the model stopped proposing a bare OTHER are still in the table, and
     a moderator pressing the button on one gets a 422 rather than a decision."""
     submission = DomainSubmission.objects.create(name="stale.example", submitted_by=submitter)
-    evidence = ready_evidence("stale.example", suggested_action="REJECT",
-                              suggested_reason="OTHER", confidence=0.93,
-                              reason_source="model")
+    evidence = ready_evidence(
+        "stale.example", suggested_action="REJECT", suggested_reason="OTHER", confidence=0.93, reason_source="model"
+    )
 
     suggestion = suggestion_for(submission, evidence)
 
@@ -1296,12 +1378,22 @@ def test_a_stored_unexplainable_rejection_is_not_shown_as_a_suggestion(submitter
 @pytest.mark.django_db
 def test_a_rule_scored_rejection_keeps_its_reason_and_carries_the_detail(submitter):
     a_404 = rules.EvidenceItem(
-        "http_status", rules.REJECT, "Homepage returns HTTP 404", implies_action="REJECT",
-        implies_reason="OTHER", implies_confidence=0.9).to_dict()
+        "http_status",
+        rules.REJECT,
+        "Homepage returns HTTP 404",
+        implies_action="REJECT",
+        implies_reason="OTHER",
+        implies_confidence=0.9,
+    ).to_dict()
     submission = DomainSubmission.objects.create(name="dead.example", submitted_by=submitter)
-    evidence = ready_evidence("dead.example", suggested_action="REJECT",
-                              suggested_reason="OTHER", confidence=0.9,
-                              reason_source="rule", evidence=[a_404])
+    evidence = ready_evidence(
+        "dead.example",
+        suggested_action="REJECT",
+        suggested_reason="OTHER",
+        confidence=0.9,
+        reason_source="rule",
+        evidence=[a_404],
+    )
 
     suggestion = suggestion_for(submission, evidence)
 
@@ -1312,8 +1404,7 @@ def test_a_rule_scored_rejection_keeps_its_reason_and_carries_the_detail(submitt
 @pytest.mark.django_db
 def test_a_previous_rejection_of_the_same_domain_says_so_as_the_detail(submitter, established):
     """The prior-decision check implies OTHER too, and its label is the sentence."""
-    DomainSubmission.objects.create(name="again.example", submitted_by=established,
-                                    status="REJECTED")
+    DomainSubmission.objects.create(name="again.example", submitted_by=established, status="REJECTED")
     submission = DomainSubmission.objects.create(name="again.example", submitted_by=submitter)
     evidence = ready_evidence("again.example")
 
@@ -1330,12 +1421,16 @@ def test_a_rule_scored_other_with_no_check_left_behind_it_is_not_suggested(submi
     stored rows claiming "rule" with nothing left to explain them, and a rejection whose
     detail cannot be written is one the API would refuse. So it goes back as UNSURE, and the
     detail is read off the evidence rather than assumed from the column."""
-    demoted = rules.EvidenceItem(
-        "http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()
+    demoted = rules.EvidenceItem("http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()
     submission = DomainSubmission.objects.create(name="stale.example", submitted_by=submitter)
-    evidence = ready_evidence("stale.example", suggested_action="REJECT",
-                              suggested_reason="OTHER", confidence=0.9,
-                              reason_source="rule", evidence=[demoted])
+    evidence = ready_evidence(
+        "stale.example",
+        suggested_action="REJECT",
+        suggested_reason="OTHER",
+        confidence=0.9,
+        reason_source="rule",
+        evidence=[demoted],
+    )
 
     suggestion = suggestion_for(submission, evidence)
 
@@ -1344,46 +1439,66 @@ def test_a_rule_scored_other_with_no_check_left_behind_it_is_not_suggested(submi
 
 # --------------------------------------------------------------------- queue parity
 
+
 @pytest.mark.django_db
 def test_queue_display_matches_suggestion_for(submitter, established):
     """The queue filters and orders in SQL; the rows are rendered by suggestion_for. Where the
     two disagree, a filter hides rows that are on screen and the ordering sorts on a number
     nobody is shown - so every branch of the adjustment is checked against the other."""
-    DomainSubmission.objects.create(name="approved-before.example",
-                                    submitted_by=established, status="APPROVED")
-    DomainSubmission.objects.create(name="rejected-before.example",
-                                    submitted_by=established, status="REJECTED")
-    DomainSubmission.objects.create(name="dead-and-approved-before.example",
-                                    submitted_by=established, status="APPROVED")
+    DomainSubmission.objects.create(name="approved-before.example", submitted_by=established, status="APPROVED")
+    DomainSubmission.objects.create(name="rejected-before.example", submitted_by=established, status="REJECTED")
+    DomainSubmission.objects.create(
+        name="dead-and-approved-before.example", submitted_by=established, status="APPROVED"
+    )
 
     a_404 = rules.EvidenceItem(
-        "http_status", rules.REJECT, "Homepage returns HTTP 404", implies_action="REJECT",
-        implies_reason="OTHER", implies_confidence=0.9).to_dict()
+        "http_status",
+        rules.REJECT,
+        "Homepage returns HTTP 404",
+        implies_action="REJECT",
+        implies_reason="OTHER",
+        implies_confidence=0.9,
+    ).to_dict()
 
     cases = [
         # (domain, submitter, evidence overrides) - one per branch of the adjustment.
         ("first-timer-approve.example", submitter, {}),
         ("known-approve.example", established, {}),
-        ("reject.example", submitter, {"suggested_action": "REJECT",
-                                       "suggested_reason": "SPAM", "confidence": 0.91}),
+        ("reject.example", submitter, {"suggested_action": "REJECT", "suggested_reason": "SPAM", "confidence": 0.91}),
         ("unsure.example", submitter, {"suggested_action": "UNSURE", "confidence": 0.1}),
         # A reason the model cannot explain, so not shown as a suggestion at all.
-        ("unexplained.example", submitter, {"suggested_action": "REJECT",
-                                            "suggested_reason": "OTHER", "confidence": 0.93}),
+        (
+            "unexplained.example",
+            submitter,
+            {"suggested_action": "REJECT", "suggested_reason": "OTHER", "confidence": 0.93},
+        ),
         # The same, from the other side: a row that says a check decided the reason, with
         # nothing implying OTHER left in its evidence to write the detail from.
-        ("stale-rule.example", submitter,
-         {"suggested_action": "REJECT", "suggested_reason": "OTHER", "confidence": 0.93,
-          "reason_source": "rule",
-          "evidence": [rules.EvidenceItem(
-              "http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()]}),
-        ("approved-before.example", submitter, {"suggested_action": "REJECT",
-                                                "suggested_reason": "SPAM"}),
+        (
+            "stale-rule.example",
+            submitter,
+            {
+                "suggested_action": "REJECT",
+                "suggested_reason": "OTHER",
+                "confidence": 0.93,
+                "reason_source": "rule",
+                "evidence": [rules.EvidenceItem("http_status", rules.REJECT, "Homepage returns HTTP 404").to_dict()],
+            },
+        ),
+        ("approved-before.example", submitter, {"suggested_action": "REJECT", "suggested_reason": "SPAM"}),
         ("rejected-before.example", submitter, {}),
         # A check that already decided it, at least as strongly as the prior decision does.
-        ("dead-and-approved-before.example", submitter,
-         {"suggested_action": "REJECT", "suggested_reason": "OTHER", "confidence": 0.9,
-          "reason_source": "rule", "evidence": [a_404]}),
+        (
+            "dead-and-approved-before.example",
+            submitter,
+            {
+                "suggested_action": "REJECT",
+                "suggested_reason": "OTHER",
+                "confidence": 0.9,
+                "reason_source": "rule",
+                "evidence": [a_404],
+            },
+        ),
         ("still-crawling.example", submitter, None),
     ]
     for domain, user, overrides in cases:
@@ -1415,8 +1530,7 @@ def test_queue_filters_find_a_withheld_approval_where_it_is_shown(client, modera
     DomainSubmission.objects.create(name="withheld.example", submitted_by=submitter)
     ready_evidence("withheld.example", suggested_action="APPROVE", confidence=0.9)
 
-    response = client.get(f"{QUEUE_URL}?suggested_action=UNSURE",
-                          headers={"Authorization": token(moderator)})
+    response = client.get(f"{QUEUE_URL}?suggested_action=UNSURE", headers={"Authorization": token(moderator)})
     items = response.json()["items"]
 
     assert [item["name"] for item in items] == ["withheld.example"]
@@ -1424,8 +1538,7 @@ def test_queue_filters_find_a_withheld_approval_where_it_is_shown(client, modera
 
 
 @pytest.mark.django_db
-def test_a_withheld_approval_outranks_a_confident_one(client, moderator, submitter,
-                                                      established):
+def test_a_withheld_approval_outranks_a_confident_one(client, moderator, submitter, established):
     """It is the 44%-wrong slice: it needs a human more than an approval we trust does."""
     DomainSubmission.objects.create(name="withheld.example", submitted_by=submitter)
     ready_evidence("withheld.example", suggested_action="APPROVE", confidence=0.95)
@@ -1433,11 +1546,11 @@ def test_a_withheld_approval_outranks_a_confident_one(client, moderator, submitt
     ready_evidence("trusted.example", suggested_action="APPROVE", confidence=0.95)
 
     response = client.get(QUEUE_URL, headers={"Authorization": token(moderator)})
-    assert [item["name"] for item in response.json()["items"]] == [
-        "withheld.example", "trusted.example"]
+    assert [item["name"] for item in response.json()["items"]] == ["withheld.example", "trusted.example"]
 
 
 # --------------------------------------------------------------------- the artifact
+
 
 class _StubModel:
     """A stand-in for ModerationModel. joblib only needs it to pickle and carry a version."""
@@ -1452,6 +1565,7 @@ class _StubModel:
 
 class _StaleFeatureSetModel:
     """An artifact whose pickled featuriser no longer matches the code that loaded it."""
+
     version = "stale"
 
     def predict(self, examples):
@@ -1470,7 +1584,7 @@ def test_a_published_model_outlives_the_process_that_trained_it():
     worker replica kept its own copy."""
     publish(_StubModel("domain-mod-2026-09-01"), {"cold_start": {"pr_auc": 0.81}})
 
-    reset_model_cache()      # a different worker, loading for the first time
+    reset_model_cache()  # a different worker, loading for the first time
     assert get_model().version == "domain-mod-2026-09-01"
     assert load_metrics()["cold_start"]["pr_auc"] == 0.81
 
@@ -1483,8 +1597,8 @@ def test_a_worker_picks_up_a_retrain_it_did_not_run(monkeypatch):
 
     monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
     ModerationModelArtifact.objects.create(
-        version="domain-mod-2026-10-01", metrics={},
-        model=artifact_bytes(_StubModel("domain-mod-2026-10-01")))
+        version="domain-mod-2026-10-01", metrics={}, model=artifact_bytes(_StubModel("domain-mod-2026-10-01"))
+    )
 
     assert get_model().version == "domain-mod-2026-10-01"
 
@@ -1527,8 +1641,7 @@ def test_an_unloadable_artifact_falls_back_rather_than_failing(tmp_path, setting
     not go down with it."""
     joblib.dump(_StubModel("bundled"), tmp_path / "model.joblib")
     settings.DOMAIN_MODERATION_MODEL_DIR = str(tmp_path)
-    ModerationModelArtifact.objects.create(
-        version="corrupt", model=b"not a pickle", metrics={})
+    ModerationModelArtifact.objects.create(version="corrupt", model=b"not a pickle", metrics={})
 
     assert get_model().version == "bundled"
 
@@ -1569,9 +1682,16 @@ def test_a_model_newer_than_the_code_degrades_instead_of_ending_the_run(tmp_path
 def test_a_decisive_check_still_wins_over_a_model_that_cannot_score():
     """The deterministic checks do not need the model, so an unscorable one must not downgrade
     a decisive answer to UNSURE."""
-    items = [rules.EvidenceItem(kind="http_error", direction="REJECT",
-                                label="Homepage returns 404", implies_action="REJECT",
-                                implies_reason="OTHER", implies_confidence=0.95)]
+    items = [
+        rules.EvidenceItem(
+            kind="http_error",
+            direction="REJECT",
+            label="Homepage returns 404",
+            implies_action="REJECT",
+            implies_reason="OTHER",
+            implies_confidence=0.95,
+        )
+    ]
 
     suggestion = suggest("a.com", [], items, model=_StaleFeatureSetModel())
 
@@ -1590,8 +1710,8 @@ def test_a_sibling_deployments_artifact_does_not_evict_a_working_model(monkeypat
 
     monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
     ModerationModelArtifact.objects.create(
-        version="from-the-other-app", metrics={},
-        model=artifact_bytes(_StaleFeatureSetModel()))
+        version="from-the-other-app", metrics={}, model=artifact_bytes(_StaleFeatureSetModel())
+    )
 
     assert get_model().version == "domain-mod-2026-09-01"
 
@@ -1605,13 +1725,12 @@ def test_an_unusable_artifact_is_not_unpickled_on_every_refresh(monkeypatch):
 
     monkeypatch.setattr(model_module, "MODEL_REFRESH_SECONDS", 0)
     ModerationModelArtifact.objects.create(
-        version="from-the-other-app", metrics={},
-        model=artifact_bytes(_StaleFeatureSetModel()))
+        version="from-the-other-app", metrics={}, model=artifact_bytes(_StaleFeatureSetModel())
+    )
 
     loads = []
     original = model_module._load
-    monkeypatch.setattr(model_module, "_load",
-                        lambda version: loads.append(version) or original(version))
+    monkeypatch.setattr(model_module, "_load", lambda version: loads.append(version) or original(version))
 
     for _ in range(3):
         assert get_model().version == "domain-mod-2026-09-01"
@@ -1620,18 +1739,24 @@ def test_an_unusable_artifact_is_not_unpickled_on_every_refresh(monkeypatch):
 
 # --------------------------------------------------------------------- request validation
 
+
 @pytest.mark.django_db
-def test_an_over_long_audit_field_is_a_validation_error_not_a_database_one(
-        client, moderator, submitter):
+def test_an_over_long_audit_field_is_a_validation_error_not_a_database_one(client, moderator, submitter):
     """Django does not enforce max_length on save(), so without the schema constraint this is
     a Postgres DataError and a 500 rather than a 400 naming the field."""
     submission = DomainSubmission.objects.create(name="example.com", submitted_by=submitter)
 
     response = client.post(
         f"/api/v1/platform/domain-submissions/ids/{submission.id}",
-        data={"status": "APPROVED", "rejection_reason": "", "rejection_detail": "",
-              "suggestion_model_version": "v" * 100},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={
+            "status": "APPROVED",
+            "rejection_reason": "",
+            "rejection_detail": "",
+            "suggestion_model_version": "v" * 100,
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 422
     submission.refresh_from_db()
@@ -1646,9 +1771,14 @@ def test_other_without_a_detail_is_refused(client, moderator, submitter):
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "example.com", "status": "REJECTED",
-                             "rejection_reason": "OTHER", "rejection_detail": "  "}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={
+            "decisions": [
+                {"domain": "example.com", "status": "REJECTED", "rejection_reason": "OTHER", "rejection_detail": "  "}
+            ]
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 422
     assert DomainSubmission.objects.get(name="example.com").status == "PENDING"
@@ -1662,26 +1792,27 @@ def test_a_rejection_reason_outside_the_four_choices_is_refused(client, moderato
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "example.com", "status": "REJECTED",
-                             "rejection_reason": "BECAUSE"}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={"decisions": [{"domain": "example.com", "status": "REJECTED", "rejection_reason": "BECAUSE"}]},
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 422
 
 
 @pytest.mark.django_db
-def test_a_decision_carrying_the_suggestion_action_as_its_status_is_refused(
-        client, moderator, submitter):
-    """"APPROVE" is what the tool suggests; "APPROVED" is what a submission becomes. Django
+def test_a_decision_carrying_the_suggestion_action_as_its_status_is_refused(client, moderator, submitter):
+    """ "APPROVE" is what the tool suggests; "APPROVED" is what a submission becomes. Django
     does not check choices on save(), so the near-miss used to be written to every submission
     of the domain, which then matched neither the pending queue nor the approved set."""
     DomainSubmission.objects.create(name="example.com", submitted_by=submitter)
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "example.com", "status": "APPROVE",
-                             "suggested_status": "APPROVE"}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={"decisions": [{"domain": "example.com", "status": "APPROVE", "suggested_status": "APPROVE"}]},
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 422
     assert DomainSubmission.objects.get(name="example.com").status == "PENDING"
@@ -1693,9 +1824,10 @@ def test_an_approval_cannot_carry_a_rejection_reason(client, moderator, submitte
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "example.com", "status": "APPROVED",
-                             "rejection_reason": "SPAM"}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={"decisions": [{"domain": "example.com", "status": "APPROVED", "rejection_reason": "SPAM"}]},
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 422
 
@@ -1706,10 +1838,19 @@ def test_other_with_a_detail_is_accepted(client, moderator, submitter):
 
     response = client.post(
         DECISIONS_URL,
-        data={"decisions": [{"domain": "example.com", "status": "REJECTED",
-                             "rejection_reason": "OTHER",
-                             "rejection_detail": "Mirrors content we already index."}]},
-        content_type="application/json", headers={"Authorization": token(moderator)})
+        data={
+            "decisions": [
+                {
+                    "domain": "example.com",
+                    "status": "REJECTED",
+                    "rejection_reason": "OTHER",
+                    "rejection_detail": "Mirrors content we already index.",
+                }
+            ]
+        },
+        content_type="application/json",
+        headers={"Authorization": token(moderator)},
+    )
 
     assert response.status_code == 200
     assert DomainSubmission.objects.get(name="example.com").status == "REJECTED"

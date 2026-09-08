@@ -1,7 +1,6 @@
 from numpy.random import RandomState
 from sklearn.base import BaseEstimator
 
-
 random = RandomState(1)
 
 

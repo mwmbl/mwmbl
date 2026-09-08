@@ -1,4 +1,5 @@
 """Tests for the XGBoost contextual-bandit source model and the xgb policy."""
+
 import json
 
 import fakeredis
@@ -55,6 +56,7 @@ def _trained_model(tmp_path, sources=("github", "recipes"), reward_kind="test"):
 # Encoding / training data
 # ---------------------------------------------------------------------------
 
+
 def test_encode_shape_and_identity_block():
     vocab_index = {"a": 0, "b": 1}
     x = xgb_model.encode(_shared(), "b", vocab_index)
@@ -95,23 +97,29 @@ def test_build_training_data_from_matrix():
     R = np.array([[1.0, 0.0], [0.5, 0.2], [0.0, 0.9]])
     mask = np.ones((Q, S), dtype=bool)
     mask[2, 0] = False
-    matrix = RewardMatrix(queries=["q1", "q2", "q3"], sources=["b", "a"],
-                          feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask)
+    matrix = RewardMatrix(
+        queries=["q1", "q2", "q3"], sources=["b", "a"], feature_names=list(FEATURE_NAMES), X=X, R=R, mask=mask
+    )
     Xf, y, vocab, means = xgb_model.build_training_data_from_matrix(matrix)
     assert vocab == ["a", "b"]
     assert Xf.shape == (5, NUM_FEATURES + 2)
     assert set(y.tolist()) == {1.0, 0.0, 0.5, 0.2, 0.9}
     # Per-source mean reward over masked cells, injected into the ema slot.
-    assert means["b"] == pytest.approx(0.75)          # (1.0 + 0.5) / 2
+    assert means["b"] == pytest.approx(0.75)  # (1.0 + 0.5) / 2
     assert means["a"] == pytest.approx((0.0 + 0.2 + 0.9) / 3)
     ema_i = FEATURE_NAMES.index("contribution_ema")
     assert set(np.round(Xf[:, ema_i], 6)) == {0.75, round((0.0 + 0.2 + 0.9) / 3, 6)}
 
 
 def test_matrix_with_mismatched_features_raises():
-    matrix = RewardMatrix(queries=["q"], sources=["a"], feature_names=["bias"],
-                          X=np.zeros((1, 1, 1)), R=np.zeros((1, 1)),
-                          mask=np.ones((1, 1), dtype=bool))
+    matrix = RewardMatrix(
+        queries=["q"],
+        sources=["a"],
+        feature_names=["bias"],
+        X=np.zeros((1, 1, 1)),
+        R=np.zeros((1, 1)),
+        mask=np.ones((1, 1), dtype=bool),
+    )
     with pytest.raises(ValueError, match="feature names"):
         xgb_model.build_training_data_from_matrix(matrix)
 
@@ -119,6 +127,7 @@ def test_matrix_with_mismatched_features_raises():
 # ---------------------------------------------------------------------------
 # Model learns identity x context interactions
 # ---------------------------------------------------------------------------
+
 
 def test_model_learns_intent_source_interaction(tmp_path):
     _trained_model(tmp_path)
@@ -132,6 +141,7 @@ def test_model_learns_intent_source_interaction(tmp_path):
 # ---------------------------------------------------------------------------
 # Artifact save / load / get_model
 # ---------------------------------------------------------------------------
+
 
 def test_artifact_roundtrip_meta(tmp_path):
     vocab = _trained_model(tmp_path, reward_kind="judge")
@@ -179,15 +189,13 @@ def test_get_model_falls_back_to_bundle_when_runtime_empty(tmp_path, monkeypatch
     bundle = tmp_path / "bundle"
     _trained_model(bundle, sources=("bundled_source",))
     monkeypatch.setattr(xgb_model, "BUNDLED_DIR", bundle)
-    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR",
-                        str(tmp_path / "empty_runtime"))
+    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR", str(tmp_path / "empty_runtime"))
     assert xgb_model.get_model().vocab == ["bundled_source"]
 
 
 def test_get_model_no_artifact_anywhere_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(xgb_model, "BUNDLED_DIR", tmp_path / "no_bundle")
-    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR",
-                        str(tmp_path / "no_runtime"))
+    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR", str(tmp_path / "no_runtime"))
     with pytest.raises(FileNotFoundError):
         xgb_model.get_model()
 
@@ -204,6 +212,7 @@ def test_get_model_hot_reloads_after_retrain(tmp_path, monkeypatch):
     # ensure the mtime moves even on coarse-grained filesystems
     stat = meta_path.stat()
     import os
+
     os.utime(meta_path, (stat.st_atime, stat.st_mtime + 1))
     assert xgb_model.get_model().vocab == ["arxiv", "github", "recipes"]
 
@@ -211,6 +220,7 @@ def test_get_model_hot_reloads_after_retrain(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # xgb policy
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def xgb_policy_env(tmp_path, monkeypatch):
@@ -236,8 +246,7 @@ def test_policy_xgb_selects_and_records_features(xgb_policy_env, monkeypatch):
 
 def test_policy_xgb_greedy_is_deterministic(xgb_policy_env, monkeypatch):
     monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_EPSILON", 0.0)
-    runs = {tuple(policy.select_sources("some query", xgb_policy_env, k=6))
-            for _ in range(5)}
+    runs = {tuple(policy.select_sources("some query", xgb_policy_env, k=6)) for _ in range(5)}
     assert len(runs) == 1
 
 
@@ -257,8 +266,7 @@ def test_policy_xgb_missing_artifact_raises(monkeypatch, tmp_path):
     r = fakeredis.FakeRedis()
     monkeypatch.setattr(profiles, "_redis", r)
     monkeypatch.setattr(rstats, "_redis", r)
-    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR",
-                        str(tmp_path / "empty"))
+    monkeypatch.setattr("django.conf.settings.SUPER_SEARCH_XGB_MODEL_DIR", str(tmp_path / "empty"))
     monkeypatch.setattr(xgb_model, "BUNDLED_DIR", tmp_path / "no_bundle")
     names = ["mwmbl", "hn"] + [f"site{i}" for i in range(20)]
     with pytest.raises(FileNotFoundError):
@@ -268,6 +276,7 @@ def test_policy_xgb_missing_artifact_raises(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Online per-source reward EMA (rstats -> contribution_ema feature)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def fake_rstats_redis(monkeypatch):
@@ -306,11 +315,10 @@ def test_seed_profiles_never_clobbers_live_values(fake_rstats_redis, monkeypatch
     live_before, _ = profiles.get_profile("live")
 
     seed_vec = np.ones(64, dtype=np.float32) / 8.0
-    seeded = profiles.seed_profiles({"live": (seed_vec, seed_vec),
-                                     "cold": (seed_vec, seed_vec)})
+    seeded = profiles.seed_profiles({"live": (seed_vec, seed_vec), "cold": (seed_vec, seed_vec)})
     assert seeded == 1
     live_after, _ = profiles.get_profile("live")
-    assert np.allclose(live_after, live_before)          # untouched
+    assert np.allclose(live_after, live_before)  # untouched
     cold_bow, cold_cng = profiles.get_profile("cold")
     assert np.allclose(cold_bow, seed_vec) and np.allclose(cold_cng, seed_vec)
 
@@ -321,6 +329,7 @@ def test_seed_online_state_from_bundled_artifact(fake_rstats_redis, tmp_path, mo
     _trained_model(tmp_path)  # writes model.json + meta.json (no reward means)
     # add reward means + profiles to the artifact
     import json as _json
+
     meta_path = tmp_path / xgb_model.META_FILE
     meta = _json.loads(meta_path.read_text())
     meta["source_reward_means"] = {"github": 0.6, "recipes": 0.3}
@@ -359,6 +368,7 @@ def test_rstats_feeds_selection_features(fake_rstats_redis, monkeypatch):
 # Online retrain from the impression log
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_retrain_from_impressions_writes_artifact(tmp_path, monkeypatch):
     from mwmbl.models import SuperSearchImpression
@@ -366,15 +376,17 @@ def test_retrain_from_impressions_writes_artifact(tmp_path, monkeypatch):
     monkeypatch.setattr(xgb_model, "XGB_PARAMS", FAST_PARAMS)
     for features, rewards in _interaction_rows(30):
         SuperSearchImpression.objects.create(
-            candidates=list(features), selected=list(features),
-            features={k: list(v) for k, v in features.items()}, rewards=rewards)
+            candidates=list(features),
+            selected=list(features),
+            features={k: list(v) for k, v in features.items()},
+            rewards=rewards,
+        )
     # A pre-intent row with a short (10-dim) vector must zero-pad, not break.
     SuperSearchImpression.objects.create(
-        candidates=["old"], selected=["old"],
-        features={"old": [1.0] * 10}, rewards={"old": 0.5})
+        candidates=["old"], selected=["old"], features={"old": [1.0] * 10}, rewards={"old": 0.5}
+    )
 
-    metrics = xgb_model.train_and_save_from_impressions(
-        window_days=7, min_rows=10, out_dir=tmp_path)
+    metrics = xgb_model.train_and_save_from_impressions(window_days=7, min_rows=10, out_dir=tmp_path)
     assert metrics is not None and "train_rmse" in metrics
     loaded = xgb_model.load_artifact(tmp_path)
     assert {"github", "recipes", "old"} <= set(loaded.vocab)
@@ -387,16 +399,16 @@ def test_retrain_skips_below_min_rows(tmp_path):
     from mwmbl.models import SuperSearchImpression
 
     SuperSearchImpression.objects.create(
-        candidates=["a"], selected=["a"],
-        features={"a": [0.0] * NUM_FEATURES}, rewards={"a": 1.0})
-    assert xgb_model.train_and_save_from_impressions(
-        window_days=7, min_rows=100, out_dir=tmp_path) is None
+        candidates=["a"], selected=["a"], features={"a": [0.0] * NUM_FEATURES}, rewards={"a": 1.0}
+    )
+    assert xgb_model.train_and_save_from_impressions(window_days=7, min_rows=100, out_dir=tmp_path) is None
     assert not (tmp_path / xgb_model.META_FILE).exists()
 
 
 # ---------------------------------------------------------------------------
 # Privacy tripwire: nothing vector-valued may enter the persisted features
 # ---------------------------------------------------------------------------
+
 
 def test_persisted_features_are_scalar_and_reconstruction_safe():
     """Impressions persist the feature vector per source; every entry must be a
@@ -406,7 +418,8 @@ def test_persisted_features_are_scalar_and_reconstruction_safe():
     import re
 
     from mwmbl.tinysearchengine.super_search_select.features import (
-        QueryContext, feature_vector,
+        QueryContext,
+        feature_vector,
     )
     from mwmbl.tinysearchengine.super_search_select.registry import get_meta
 

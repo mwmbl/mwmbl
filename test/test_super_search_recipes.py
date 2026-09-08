@@ -5,6 +5,7 @@ url/title/extract coercion (templated URLs, relative-href resolution, HTML
 stripping) and that an HTTP error returns [] rather than propagating. We also
 verify the shipped recipe files load and register into SOURCES.
 """
+
 import re
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def _recipe(name: str) -> Recipe:
 # Recipe loading / registration
 # ---------------------------------------------------------------------------
 
+
 def test_shipped_recipes_load():
     assert {"wiktionary", "archive_org", "gutenberg"} <= set(RECIPES)
     assert _recipe("gutenberg").response_format == "html"
@@ -57,6 +59,7 @@ def test_shipped_recipes_load():
 
 def test_recipes_registered_in_sources():
     from mwmbl.tinysearchengine.super_search_sources import SOURCES
+
     assert "wiktionary" in SOURCES and "gutenberg" in SOURCES
 
 
@@ -80,13 +83,17 @@ def test_recipe_has_smoke_block(recipe):
 # JSON: Wiktionary (MediaWiki) — templated URL + HTML-stripped snippet
 # ---------------------------------------------------------------------------
 
+
 async def test_wiktionary_templates_url_and_strips_html(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://en\.wiktionary\.org/w/api\.php.*"),
-        json={"query": {"search": [
-            {"title": "serendipity",
-             "snippet": 'fortunate <span class="searchmatch">serendipity</span>'},
-        ]}},
+        json={
+            "query": {
+                "search": [
+                    {"title": "serendipity", "snippet": 'fortunate <span class="searchmatch">serendipity</span>'},
+                ]
+            }
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_with_recipe(client, _recipe("wiktionary"), "serendipity", 5)
@@ -110,13 +117,18 @@ async def test_wiktionary_quotes_titles_with_spaces(httpx_mock):
 # JSON: archive.org — nested results path + templated URL from identifier
 # ---------------------------------------------------------------------------
 
+
 async def test_archive_org_nested_results_and_template(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://archive\.org/advancedsearch\.php.*"),
-        json={"response": {"docs": [
-            {"identifier": "apollo11", "title": "Apollo 11", "description": "Moon landing"},
-            {"title": "no id"},  # no identifier -> no URL -> skipped
-        ]}},
+        json={
+            "response": {
+                "docs": [
+                    {"identifier": "apollo11", "title": "Apollo 11", "description": "Moon landing"},
+                    {"title": "no id"},  # no identifier -> no URL -> skipped
+                ]
+            }
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_with_recipe(client, _recipe("archive_org"), "apollo 11", 5)
@@ -129,10 +141,16 @@ async def test_json_base_url_joins_relative_path(httpx_mock):
     """A JSON API returning a site-relative url (e.g. gov.uk's "/contact-hmrc") is
     joined onto base_url to the canonical absolute URL, without %-quoting slashes."""
     recipe = Recipe(
-        name="govuk", domain="www.gov.uk", field="law-government",
+        name="govuk",
+        domain="www.gov.uk",
+        field="law-government",
         request={"url": "https://www.gov.uk/api/search.json", "params": {"q": "{query}"}},
-        response={"format": "json", "base_url": "https://www.gov.uk", "results": "results",
-                  "fields": {"title": "title", "url": "link"}},
+        response={
+            "format": "json",
+            "base_url": "https://www.gov.uk",
+            "results": "results",
+            "fields": {"title": "title", "url": "link"},
+        },
         smoke={"query": "vat", "expect_title_contains": "VAT"},
     )
     httpx_mock.add_response(
@@ -213,6 +231,7 @@ async def test_xml_attributes_and_template(httpx_mock):
 # Robustness: errors swallowed
 # ---------------------------------------------------------------------------
 
+
 async def test_http_error_returns_empty(httpx_mock):
     httpx_mock.add_response(status_code=500)
     async with httpx.AsyncClient() as client:
@@ -227,6 +246,7 @@ def test_recipes_dir_exists():
 # ---------------------------------------------------------------------------
 # v2 engine enhancements: headers, POST json body, XML namespaces, list index
 # ---------------------------------------------------------------------------
+
 
 async def test_request_headers_sent(httpx_mock):
     recipe = Recipe(
@@ -265,6 +285,7 @@ async def test_post_json_body_with_substitution(httpx_mock):
     request = httpx_mock.get_requests()[0]
     assert request.method == "POST"
     import json as _json
+
     body = _json.loads(request.content)
     assert body == {"query": "neutrino", "size": "7"}
     assert docs[0].url == "https://example.com/1"
@@ -274,8 +295,7 @@ async def test_json_list_index_path(httpx_mock):
     recipe = Recipe(
         name="listidx",
         request={"url": "https://example.com/api", "params": {"q": "{query}"}},
-        response={"format": "json", "results": "data.0.items",
-                  "fields": {"title": "name", "url": "link"}},
+        response={"format": "json", "results": "data.0.items", "fields": {"title": "name", "url": "link"}},
     )
     httpx_mock.add_response(
         url=re.compile(r"https://example\.com/.*"),

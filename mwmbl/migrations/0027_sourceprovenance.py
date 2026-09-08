@@ -4,25 +4,27 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0026_supersearchbanditstate'),
+        ("mwmbl", "0026_supersearchbanditstate"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='SourceProvenance',
+            name="SourceProvenance",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('url', models.URLField(max_length=500, unique=True)),
-                ('source', models.CharField(max_length=128)),
-                ('query', models.CharField(blank=True, max_length=512, null=True)),
-                ('parent_url', models.URLField(blank=True, max_length=500, null=True)),
-                ('depth', models.IntegerField(default=0)),
-                ('timestamp', models.DateTimeField(auto_now_add=True)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("url", models.URLField(max_length=500, unique=True)),
+                ("source", models.CharField(max_length=128)),
+                ("query", models.CharField(blank=True, max_length=512, null=True)),
+                ("parent_url", models.URLField(blank=True, max_length=500, null=True)),
+                ("depth", models.IntegerField(default=0)),
+                ("timestamp", models.DateTimeField(auto_now_add=True)),
             ],
             options={
-                'indexes': [models.Index(fields=['source'], name='mwmbl_sourc_source_e12d82_idx'), models.Index(fields=['timestamp'], name='mwmbl_sourc_timesta_bb15f3_idx')],
+                "indexes": [
+                    models.Index(fields=["source"], name="mwmbl_sourc_source_e12d82_idx"),
+                    models.Index(fields=["timestamp"], name="mwmbl_sourc_timesta_bb15f3_idx"),
+                ],
             },
         ),
     ]

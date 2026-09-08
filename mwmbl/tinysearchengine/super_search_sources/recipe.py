@@ -14,6 +14,7 @@ orchestrator.
 See ``recipes/*.yaml`` for examples covering JSON APIs (Wiktionary,
 archive.org) and HTML scraping (Project Gutenberg).
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,6 +40,7 @@ RECIPES_DIR = Path(__file__).parent / "recipes"
 @dataclass
 class Recipe:
     """A parsed search recipe. ``request`` and ``response`` are the raw YAML maps."""
+
     name: str
     request: dict
     response: dict
@@ -88,23 +90,21 @@ def load_recipes(directory: Path | str = RECIPES_DIR) -> dict[str, Recipe]:
 
 def make_recipe_source(recipe: Recipe) -> Callable[..., Coroutine[Any, Any, list[Document]]]:
     """Wrap a recipe as a ``search(client, query, limit)`` adapter for ``SOURCES``."""
+
     async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Document]:
         return await search_with_recipe(client, recipe, query, limit)
+
     return search
 
 
-async def search_with_recipe(
-    client: httpx.AsyncClient, recipe: Recipe, query: str, limit: int
-) -> list[Document]:
+async def search_with_recipe(client: httpx.AsyncClient, recipe: Recipe, query: str, limit: int) -> list[Document]:
     req = recipe.request
     method = req.get("method", "GET").upper()
     params = _build_params(req.get("params"), query, limit)
     headers = _substitute(req.get("headers"), query, limit) if req.get("headers") else None
     json_body = _substitute(req.get("json"), query, limit) if req.get("json") is not None else None
     try:
-        response = await client.request(
-            method, req["url"], params=params, headers=headers, json=json_body
-        )
+        response = await client.request(method, req["url"], params=params, headers=headers, json=json_body)
         response.raise_for_status()
         fmt = recipe.response_format
         if fmt == "json":
@@ -124,6 +124,7 @@ async def search_with_recipe(
 # Request building
 # ---------------------------------------------------------------------------
 
+
 def _substitute(value, query: str, limit: int):
     if isinstance(value, str):
         return value.format(query=query, limit=limit)
@@ -141,6 +142,7 @@ def _build_params(params: dict | None, query: str, limit: int) -> dict:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _coerce_str(value, strip_html: bool = False) -> str:
     if value is None:
@@ -169,6 +171,7 @@ def _make_doc(values: dict, url: str) -> Document | None:
 # ---------------------------------------------------------------------------
 # JSON
 # ---------------------------------------------------------------------------
+
 
 def _walk(data, path: str):
     """Walk a dotted path through nested dicts/lists; None if absent.
@@ -231,6 +234,7 @@ def _resolve_url_json(url_spec, item: dict, values: dict, base_url: str = "") ->
 # HTML
 # ---------------------------------------------------------------------------
 
+
 def _parse_html(html_text: str, spec: dict) -> list[Document]:
     soup = BeautifulSoup(html_text, "html.parser")
     fields = spec["fields"]
@@ -239,9 +243,7 @@ def _parse_html(html_text: str, spec: dict) -> list[Document]:
     docs: list[Document] = []
     for el in soup.select(spec["results"]):
         values = {
-            name: _select_html(el, field_spec, name in strip)
-            for name, field_spec in fields.items()
-            if name != "url"
+            name: _select_html(el, field_spec, name in strip) for name, field_spec in fields.items() if name != "url"
         }
         doc = _make_doc(values, _resolve_url_html(fields.get("url"), el, base_url))
         if doc is not None:
@@ -276,6 +278,7 @@ def _resolve_url_html(url_spec, el, base_url: str) -> str:
 # ---------------------------------------------------------------------------
 # XML
 # ---------------------------------------------------------------------------
+
 
 def _parse_xml(xml_text: str, spec: dict) -> list[Document]:
     root = fromstring(xml_text)

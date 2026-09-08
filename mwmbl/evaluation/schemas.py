@@ -1,6 +1,7 @@
-from ninja import Schema, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from ninja import Field, Schema
 
 
 class WasmSubmissionResponse(Schema):
@@ -28,9 +29,7 @@ class EvaluationJobResponse(Schema):
         example=42,
     )
     status: str = Field(
-        description=(
-            "Current status of the job. One of: `VALIDATED`, `RUNNING`, `COMPLETED`, `FAILED`."
-        ),
+        description=("Current status of the job. One of: `VALIDATED`, `RUNNING`, `COMPLETED`, `FAILED`."),
         example="COMPLETED",
     )
     created_at: datetime = Field(
@@ -65,9 +64,7 @@ class EvaluationResultsResponse(Schema):
         example=42,
     )
     status: str = Field(
-        description=(
-            "Current status of the job. One of: `VALIDATED`, `RUNNING`, `COMPLETED`, `FAILED`."
-        ),
+        description=("Current status of the job. One of: `VALIDATED`, `RUNNING`, `COMPLETED`, `FAILED`."),
         example="COMPLETED",
     )
     results: Optional[dict] = Field(

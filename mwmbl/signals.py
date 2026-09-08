@@ -11,6 +11,7 @@ Both of them are about a domain submission reaching work that happens elsewhere:
   queue the domain has already been fetched and scored. Doing that work on their request
   instead would put three page fetches in front of every row.
 """
+
 from datetime import timedelta
 from logging import getLogger
 

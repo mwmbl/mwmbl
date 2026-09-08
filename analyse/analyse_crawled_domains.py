@@ -1,14 +1,15 @@
 """
 See how many unique URLs and root domains we have crawled.
 """
+
 import glob
 import gzip
 import json
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from urllib.parse import urlparse
 
 from mwmbl.crawler import HashedBatch
-from mwmbl.indexer import CRAWL_GLOB, MWMBL_DATA_DIR
+from mwmbl.indexer import CRAWL_GLOB
 
 
 def get_urls():
@@ -29,8 +30,8 @@ def analyse_urls(urls):
         url_set[url].append(user)
 
         parsed_url = urlparse(url)
-        path = parsed_url.path.strip('/')
-        if path == '':
+        path = parsed_url.path.strip("/")
+        if path == "":
             domains.add(parsed_url.netloc)
 
     count = sum(len(x) for x in url_set.values())
@@ -52,6 +53,5 @@ def run():
     analyse_urls(urls)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
-

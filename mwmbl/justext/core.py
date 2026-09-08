@@ -6,19 +6,17 @@ Copyright (c) 2011 Jan Pomikalek
 This software is licensed as described in the file LICENSE.rst.
 """
 
-from __future__ import absolute_import
-from __future__ import division, print_function, unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import re
 from contextlib import contextmanager
+from functools import lru_cache
+from xml.sax.handler import ContentHandler
 
 import lxml.html
 import lxml.sax
-
-from functools import lru_cache
-
 from lxml.html.clean import Cleaner
-from xml.sax.handler import ContentHandler
+
 from .paragraph import Paragraph
 from .utils import is_blank
 
@@ -33,16 +31,46 @@ NO_HEADINGS_DEFAULT = False
 # Short and near-good headings within MAX_HEADING_DISTANCE characters before
 # a good paragraph are classified as good unless --no-headings is specified.
 MAX_HEADING_DISTANCE_DEFAULT = 200
-PARAGRAPH_TAGS = frozenset({
-    'body', 'blockquote', 'caption', 'center', 'col', 'colgroup', 'dd',
-    'div', 'dl', 'dt', 'fieldset', 'form', 'legend', 'optgroup', 'option',
-    'p', 'pre', 'table', 'td', 'textarea', 'tfoot', 'th', 'thead', 'tr',
-    'ul', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-})
-DEFAULT_ENCODING = 'utf8'
-DEFAULT_ENC_ERRORS = 'replace'
-CHARSET_META_TAG_PATTERN = re.compile(br"""<meta[^>]+charset=["']?([^'"/>\s]+)""", re.IGNORECASE)
-GOOD_OR_BAD = {'good', 'bad'}
+PARAGRAPH_TAGS = frozenset(
+    {
+        "body",
+        "blockquote",
+        "caption",
+        "center",
+        "col",
+        "colgroup",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "form",
+        "legend",
+        "optgroup",
+        "option",
+        "p",
+        "pre",
+        "table",
+        "td",
+        "textarea",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+        "li",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+    }
+)
+DEFAULT_ENCODING = "utf8"
+DEFAULT_ENC_ERRORS = "replace"
+CHARSET_META_TAG_PATTERN = re.compile(rb"""<meta[^>]+charset=["']?([^'"/>\s]+)""", re.IGNORECASE)
+GOOD_OR_BAD = {"good", "bad"}
 
 
 @contextmanager
@@ -51,6 +79,7 @@ def ignored(*exceptions):
         yield
     except tuple(exceptions):
         pass
+
 
 class JustextError(Exception):
     "Base class for jusText exceptions."
@@ -177,11 +206,11 @@ class ParagraphMaker(ContentHandler):
         else:
             self.br = bool(name == "br")
             if self.br:
-                self.paragraph.append_text(' ')
-            elif name == 'a':
+                self.paragraph.append_text(" ")
+            elif name == "a":
                 self.link = True
                 try:
-                    self.paragraph.links.add(attrs.getValueByQName('href').strip())
+                    self.paragraph.links.add(attrs.getValueByQName("href").strip())
                 except KeyError:
                     pass
             self.paragraph.tags_count += 1
@@ -192,7 +221,7 @@ class ParagraphMaker(ContentHandler):
 
         if name in PARAGRAPH_TAGS:
             self._start_new_pragraph()
-        if name == 'a':
+        if name == "a":
             self.link = False
 
     def endDocument(self):
@@ -250,10 +279,16 @@ def define_stoplist(stoplist):
     return stoplist
 
 
-def classify_paragraphs(paragraphs, stoplist, length_low=LENGTH_LOW_DEFAULT,
-        length_high=LENGTH_HIGH_DEFAULT, stopwords_low=STOPWORDS_LOW_DEFAULT,
-        stopwords_high=STOPWORDS_HIGH_DEFAULT, max_link_density=MAX_LINK_DENSITY_DEFAULT,
-        no_headings=NO_HEADINGS_DEFAULT):
+def classify_paragraphs(
+    paragraphs,
+    stoplist,
+    length_low=LENGTH_LOW_DEFAULT,
+    length_high=LENGTH_HIGH_DEFAULT,
+    stopwords_low=STOPWORDS_LOW_DEFAULT,
+    stopwords_high=STOPWORDS_HIGH_DEFAULT,
+    max_link_density=MAX_LINK_DENSITY_DEFAULT,
+    no_headings=NO_HEADINGS_DEFAULT,
+):
     "Context-free paragraph classification."
 
     stoplist = define_stoplist(stoplist)
@@ -264,25 +299,25 @@ def classify_paragraphs(paragraphs, stoplist, length_low=LENGTH_LOW_DEFAULT,
         paragraph.heading = bool(not no_headings and paragraph.is_heading)
 
         if link_density > max_link_density:
-            paragraph.cf_class = 'bad'
-        elif ('\xa9' in paragraph.text) or ('&copy' in paragraph.text):
-            paragraph.cf_class = 'bad'
-        elif 'select' in paragraph.dom_path:
-            paragraph.cf_class = 'bad'
+            paragraph.cf_class = "bad"
+        elif ("\xa9" in paragraph.text) or ("&copy" in paragraph.text):
+            paragraph.cf_class = "bad"
+        elif "select" in paragraph.dom_path:
+            paragraph.cf_class = "bad"
         elif length < length_low:
             if paragraph.chars_count_in_links > 0:
-                paragraph.cf_class = 'bad'
+                paragraph.cf_class = "bad"
             else:
-                paragraph.cf_class = 'short'
+                paragraph.cf_class = "short"
         elif stopword_density >= stopwords_high:
             if length > length_high:
-                paragraph.cf_class = 'good'
+                paragraph.cf_class = "good"
             else:
-                paragraph.cf_class = 'neargood'
+                paragraph.cf_class = "neargood"
         elif stopword_density >= stopwords_low:
-            paragraph.cf_class = 'neargood'
+            paragraph.cf_class = "neargood"
         else:
-            paragraph.cf_class = 'bad'
+            paragraph.cf_class = "bad"
 
 
 def _get_neighbour(i, paragraphs, ignore_neargood, inc, boundary):
@@ -291,9 +326,9 @@ def _get_neighbour(i, paragraphs, ignore_neargood, inc, boundary):
         c = paragraphs[i].class_type
         if c in GOOD_OR_BAD:
             return c
-        if c == 'neargood' and not ignore_neargood:
+        if c == "neargood" and not ignore_neargood:
             return c
-    return 'bad'
+    return "bad"
 
 
 def get_prev_neighbour(i, paragraphs, ignore_neargood):
@@ -324,13 +359,13 @@ def revise_paragraph_classification(paragraphs, max_heading_distance=MAX_HEADING
     for i, paragraph in enumerate(paragraphs):
         # copy classes
         paragraph.class_type = paragraph.cf_class
-        if not (paragraph.heading and paragraph.class_type == 'short'):
+        if not (paragraph.heading and paragraph.class_type == "short"):
             continue
         j = i + 1
         distance = 0
         while j < len(paragraphs) and distance <= max_heading_distance:
-            if paragraphs[j].class_type == 'good':
-                paragraph.class_type = 'neargood'
+            if paragraphs[j].class_type == "good":
+                paragraph.class_type = "neargood"
                 break
             distance += len(paragraphs[j].text)
             j += 1
@@ -338,54 +373,62 @@ def revise_paragraph_classification(paragraphs, max_heading_distance=MAX_HEADING
     # classify short
     new_classes = {}
     for i, paragraph in enumerate(paragraphs):
-        if paragraph.class_type != 'short':
+        if paragraph.class_type != "short":
             continue
         prev_neighbour = get_prev_neighbour(i, paragraphs, ignore_neargood=True)
         next_neighbour = get_next_neighbour(i, paragraphs, ignore_neargood=True)
-        if prev_neighbour == 'good' and next_neighbour == 'good':
-            new_classes[i] = 'good'
-        elif prev_neighbour == 'bad' and next_neighbour == 'bad':
-            new_classes[i] = 'bad'
+        if prev_neighbour == "good" and next_neighbour == "good":
+            new_classes[i] = "good"
+        elif prev_neighbour == "bad" and next_neighbour == "bad":
+            new_classes[i] = "bad"
         # it must be set(['good', 'bad'])
-        elif (prev_neighbour == 'bad' and get_prev_neighbour(i, paragraphs, ignore_neargood=False) == 'neargood') or \
-             (next_neighbour == 'bad' and get_next_neighbour(i, paragraphs, ignore_neargood=False) == 'neargood'):
-            new_classes[i] = 'good'
+        elif (prev_neighbour == "bad" and get_prev_neighbour(i, paragraphs, ignore_neargood=False) == "neargood") or (
+            next_neighbour == "bad" and get_next_neighbour(i, paragraphs, ignore_neargood=False) == "neargood"
+        ):
+            new_classes[i] = "good"
         else:
-            new_classes[i] = 'bad'
+            new_classes[i] = "bad"
 
     for i, c in new_classes.items():
         paragraphs[i].class_type = c
 
     # revise neargood
     for i, paragraph in enumerate(paragraphs):
-        if paragraph.class_type != 'neargood':
+        if paragraph.class_type != "neargood":
             continue
         prev_neighbour = get_prev_neighbour(i, paragraphs, ignore_neargood=True)
         next_neighbour = get_next_neighbour(i, paragraphs, ignore_neargood=True)
-        if (prev_neighbour, next_neighbour) == ('bad', 'bad'):
-            paragraph.class_type = 'bad'
+        if (prev_neighbour, next_neighbour) == ("bad", "bad"):
+            paragraph.class_type = "bad"
         else:
-            paragraph.class_type = 'good'
+            paragraph.class_type = "good"
 
     # more good headings
     for i, paragraph in enumerate(paragraphs):
-        if not (paragraph.heading and paragraph.class_type == 'bad' and paragraph.cf_class != 'bad'):
+        if not (paragraph.heading and paragraph.class_type == "bad" and paragraph.cf_class != "bad"):
             continue
         j = i + 1
         distance = 0
         while j < len(paragraphs) and distance <= max_heading_distance:
-            if paragraphs[j].class_type == 'good':
-                paragraph.class_type = 'good'
+            if paragraphs[j].class_type == "good":
+                paragraph.class_type = "good"
                 break
             distance += len(paragraphs[j].text)
             j += 1
 
 
-def justext_from_dom(dom, stoplist, length_low=LENGTH_LOW_DEFAULT,
-                     length_high=LENGTH_HIGH_DEFAULT, stopwords_low=STOPWORDS_LOW_DEFAULT,
-                     stopwords_high=STOPWORDS_HIGH_DEFAULT, max_link_density=MAX_LINK_DENSITY_DEFAULT,
-                     max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT, no_headings=NO_HEADINGS_DEFAULT,
-                     preprocessor=preprocessor):
+def justext_from_dom(
+    dom,
+    stoplist,
+    length_low=LENGTH_LOW_DEFAULT,
+    length_high=LENGTH_HIGH_DEFAULT,
+    stopwords_low=STOPWORDS_LOW_DEFAULT,
+    stopwords_high=STOPWORDS_HIGH_DEFAULT,
+    max_link_density=MAX_LINK_DENSITY_DEFAULT,
+    max_heading_distance=MAX_HEADING_DISTANCE_DEFAULT,
+    no_headings=NO_HEADINGS_DEFAULT,
+    preprocessor=preprocessor,
+):
     """
     Converts an HTML page into a list of classified paragraphs. Each paragraph
     is represented as instance of class ˙˙justext.paragraph.Paragraph˙˙.
@@ -394,8 +437,9 @@ def justext_from_dom(dom, stoplist, length_low=LENGTH_LOW_DEFAULT,
 
     paragraphs = ParagraphMaker.make_paragraphs(dom_preprocessed)
 
-    classify_paragraphs(paragraphs, stoplist, length_low, length_high,
-        stopwords_low, stopwords_high, max_link_density, no_headings)
+    classify_paragraphs(
+        paragraphs, stoplist, length_low, length_high, stopwords_low, stopwords_high, max_link_density, no_headings
+    )
     revise_paragraph_classification(paragraphs, max_heading_distance)
 
     return paragraphs

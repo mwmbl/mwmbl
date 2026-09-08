@@ -1,45 +1,121 @@
 import re
 
 from mwmbl.tinysearchengine.indexer import DocumentState
-from mwmbl.tokenizer import tokenize, clean_unicode
-
+from mwmbl.tokenizer import clean_unicode, tokenize
 
 DOCUMENT_SOURCES = {
-    DocumentState.FROM_GOOGLE: 'google',
-    DocumentState.FROM_USER: 'user',
-    DocumentState.FROM_WIKI: 'wikipedia',
-    DocumentState.ORGANIC_APPROVED: 'mwmbl',
-    DocumentState.FROM_GOOGLE_APPROVED: 'google',
-    DocumentState.FROM_USER_APPROVED: 'user',
-    DocumentState.FROM_WIKI_APPROVED: 'wikipedia',
+    DocumentState.FROM_GOOGLE: "google",
+    DocumentState.FROM_USER: "user",
+    DocumentState.FROM_WIKI: "wikipedia",
+    DocumentState.ORGANIC_APPROVED: "mwmbl",
+    DocumentState.FROM_GOOGLE_APPROVED: "google",
+    DocumentState.FROM_USER_APPROVED: "user",
+    DocumentState.FROM_WIKI_APPROVED: "wikipedia",
 }
 
 
 HIGHLIGHT_STOPWORDS = {
     # Articles & Determiners
-    "a", "an", "the", "this", "that", "these", "those", "each", "every", "some", "any",
+    "a",
+    "an",
+    "the",
+    "this",
+    "that",
+    "these",
+    "those",
+    "each",
+    "every",
+    "some",
+    "any",
     # Prepositions
-    "to", "in", "on", "at", "by", "for", "with", "about", "against", "between",
-    "into", "through", "during", "before", "after", "above", "below", "from",
-    "up", "down", "of", "off", "over", "under",
+    "to",
+    "in",
+    "on",
+    "at",
+    "by",
+    "for",
+    "with",
+    "about",
+    "against",
+    "between",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "from",
+    "up",
+    "down",
+    "of",
+    "off",
+    "over",
+    "under",
     # Conjunctions
-    "and", "but", "or", "nor", "for", "yet", "so", "although", "because", "since", "unless",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "for",
+    "yet",
+    "so",
+    "although",
+    "because",
+    "since",
+    "unless",
     # Common Verbs & Pronouns
-    "is", "am", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-    "do", "does", "did", "i", "me", "my", "you", "your", "he", "him", "his",
-    "she", "her", "it", "its", "we", "us", "our", "they", "them", "their",
+    "is",
+    "am",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "i",
+    "me",
+    "my",
+    "you",
+    "your",
+    "he",
+    "him",
+    "his",
+    "she",
+    "her",
+    "it",
+    "its",
+    "we",
+    "us",
+    "our",
+    "they",
+    "them",
+    "their",
     # Interrogatives (usually noise in technical queries)
-    "how", "what", "which", "who", "whom", "where", "when", "why"
+    "how",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "where",
+    "when",
+    "why",
 }
 
 
 def get_document_source(state: DocumentState):
-    return DOCUMENT_SOURCES.get(state, 'mwmbl')
+    return DOCUMENT_SOURCES.get(state, "mwmbl")
 
 
 def format_result_with_pattern(pattern, result):
     formatted_result = {}
-    for content_type, content_raw in [('title', result.title), ('extract', result.extract)]:
+    for content_type, content_raw in [("title", result.title), ("extract", result.extract)]:
         content = clean_unicode(content_raw) if content_raw else ""
         matches = re.finditer(pattern, content, re.IGNORECASE)
         all_spans = [0] + sum((list(m.span()) for m in matches), []) + [len(content)]
@@ -49,24 +125,25 @@ def format_result_with_pattern(pattern, result):
             start = all_spans[i]
             end = all_spans[i + 1]
             if end - start > 0:
-                content_result.append({'value': content[start:end], 'is_bold': is_bold})
+                content_result.append({"value": content[start:end], "is_bold": is_bold})
         formatted_result[content_type] = content_result
-    formatted_result['url'] = result.url
-    formatted_result['source'] = get_document_source(result.state)
+    formatted_result["url"] = result.url
+    formatted_result["source"] = get_document_source(result.state)
     return formatted_result
 
 
 def get_query_regex(terms, is_complete: bool, use_word_boundaries: bool):
     if not terms:
-        return ''
+        return ""
 
-    word_sep = r'\b' if use_word_boundaries else ''
+    word_sep = r"\b" if use_word_boundaries else ""
     if is_complete:
-        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms]
+        term_patterns = [rf"{word_sep}{re.escape(term)}{word_sep}" for term in terms]
     else:
-        term_patterns = [rf'{word_sep}{re.escape(term)}{word_sep}' for term in terms[:-1]] + [
-            rf'{word_sep}{re.escape(terms[-1])}']
-    pattern = '|'.join(term_patterns)
+        term_patterns = [rf"{word_sep}{re.escape(term)}{word_sep}" for term in terms[:-1]] + [
+            rf"{word_sep}{re.escape(terms[-1])}"
+        ]
+    pattern = "|".join(term_patterns)
     return pattern
 
 
@@ -82,16 +159,16 @@ def _extract_highlights(segments: list[dict]) -> list[str]:
     phrases = []
     current: list[str] = []
     for seg in segments:
-        if seg['is_bold']:
-            current.append(seg['value'])
-        elif current and not seg['value'].strip():
-            current.append(seg['value'])
+        if seg["is_bold"]:
+            current.append(seg["value"])
+        elif current and not seg["value"].strip():
+            current.append(seg["value"])
         else:
             if current:
-                phrases.append(''.join(current).strip())
+                phrases.append("".join(current).strip())
                 current = []
     if current:
-        phrases.append(''.join(current).strip())
+        phrases.append("".join(current).strip())
 
     unique = set(phrases)
     return sorted(unique, key=len, reverse=True)
@@ -102,14 +179,14 @@ def format_result_v2(result, position: int, query: str) -> dict:
     filtered_tokens = [t for t in tokens if t not in HIGHLIGHT_STOPWORDS]
     pattern = get_query_regex(filtered_tokens, True, True)
     v1 = format_result_with_pattern(pattern, result)
-    title = ''.join(seg['value'] for seg in v1['title'])
-    content = ''.join(seg['value'] for seg in v1['extract'])
+    title = "".join(seg["value"] for seg in v1["title"])
+    content = "".join(seg["value"] for seg in v1["extract"])
     return {
-        'url': result.url,
-        'title': title,
-        'title_highlights': _extract_highlights(v1['title']),
-        'content': content,
-        'content_highlights': _extract_highlights(v1['extract']),
-        'engine': get_document_source(result.state),
-        'score': 1.0 / position,
+        "url": result.url,
+        "title": title,
+        "title_highlights": _extract_highlights(v1["title"]),
+        "content": content,
+        "content_highlights": _extract_highlights(v1["extract"]),
+        "engine": get_document_source(result.state),
+        "score": 1.0 / position,
     }

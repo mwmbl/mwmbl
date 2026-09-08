@@ -15,6 +15,7 @@ caching, SSRF validation, a 3 second timeout, a 1 MB cap and justext extraction 
 Graph fallbacks. Super Search already calls it from inside the server process, so nothing
 here is a new capability - it is the existing crawler pointed at one domain.
 """
+
 from __future__ import annotations
 
 import time
@@ -33,16 +34,27 @@ from mwmbl.moderation import rules
 logger = getLogger(__name__)
 
 # Paths that tell you nothing about whether a site is worth crawling.
-BORING_PATH_WORDS = ("privacy", "terms", "cookie", "legal", "login", "signin", "sign-in",
-                     "register", "cart", "checkout", "contact", "rss", "feed")
+BORING_PATH_WORDS = (
+    "privacy",
+    "terms",
+    "cookie",
+    "legal",
+    "login",
+    "signin",
+    "sign-in",
+    "register",
+    "cart",
+    "checkout",
+    "contact",
+    "rss",
+    "feed",
+)
 
 # Markers counted as signals for the moderator. Not model features - they are far too crude
 # for that - but "we found 4 ad-network scripts" is a useful line in an evidence list, and
 # moderators do reject for "obtrusive ads" and "paywall".
-AD_MARKERS = ("googlesyndication", "doubleclick", "adsbygoogle", "adnxs", "taboola",
-              "outbrain", "criteo", "media.net")
-PAYWALL_MARKERS = ("paywall", "subscribe to continue", "subscribers only",
-                   "create a free account to")
+AD_MARKERS = ("googlesyndication", "doubleclick", "adsbygoogle", "adnxs", "taboola", "outbrain", "criteo", "media.net")
+PAYWALL_MARKERS = ("paywall", "subscribe to continue", "subscribers only", "create a free account to")
 
 
 def crawl_domain(domain: str, redis, max_pages: int = None) -> dict:
@@ -132,7 +144,7 @@ def store_failure(domain: str, error: str) -> DomainEvidence:
         domain=domain,
         defaults={
             "state": DomainEvidence.State.FAILED,
-            "fetched_at": timezone.now(),      # when we last tried, not when we last succeeded
+            "fetched_at": timezone.now(),  # when we last tried, not when we last succeeded
             "error": error,
             "http_status": None,
             "final_domain": "",
@@ -223,5 +235,4 @@ def page_texts(evidence: DomainEvidence | None) -> list[str]:
     """The text the model reads, in the same shape training built it from."""
     if evidence is None:
         return []
-    return [f"{page.get('title', '')} {page.get('extract', '')}".strip()
-            for page in (evidence.pages or [])]
+    return [f"{page.get('title', '')} {page.get('extract', '')}".strip() for page in (evidence.pages or [])]

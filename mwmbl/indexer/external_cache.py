@@ -29,6 +29,7 @@ not the fact that somebody searched in that area, since an entry still holds the
 that came back.
 That is strictly less than the disk cache gave away.
 """
+
 import hashlib
 import hmac
 import time
@@ -132,8 +133,7 @@ def external_cache_term(query: str) -> str:
     in settings_prod.
     """
     normalised = " ".join(query.split()).casefold()
-    digest = hmac.new(settings.SECRET_KEY.encode("utf8"),
-                      normalised.encode("utf8", errors="ignore"), hashlib.sha256)
+    digest = hmac.new(settings.SECRET_KEY.encode("utf8"), normalised.encode("utf8", errors="ignore"), hashlib.sha256)
     return digest.hexdigest()[:16]
 
 
@@ -144,13 +144,17 @@ def is_fresh(document: Document, now: int) -> bool:
     providers, so it cannot recover the source from the term - document.source is the only
     thing that identifies them, and it is where a per-source TTL would key off.
     """
-    ttl = (settings.EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS if document.url == EXTERNAL_CACHE_EMPTY_URL
-           else settings.EXTERNAL_CACHE_TTL_SECONDS)
+    ttl = (
+        settings.EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS
+        if document.url == EXTERNAL_CACHE_EMPTY_URL
+        else settings.EXTERNAL_CACHE_TTL_SECONDS
+    )
     return document.last_crawled is not None and now - document.last_crawled < ttl
 
 
-def get_cached_external_results(source: DocumentSource, query: str,
-                                now: Optional[int] = None) -> Optional[list[Document]]:
+def get_cached_external_results(
+    source: DocumentSource, query: str, now: Optional[int] = None
+) -> Optional[list[Document]]:
     """A query's cached results from one provider.
 
     None means we have nothing for this (source, query) and should ask the provider. A list
@@ -177,8 +181,11 @@ def get_cached_external_results(source: DocumentSource, query: str,
     # hashes to it, and it also lets through documents with no term at all. The term narrows
     # that to this query - across all providers, since the term does not name one - and the
     # source picks out the provider being asked about.
-    entries = [document for document in stored
-               if document.term == term and document.source == source and is_fresh(document, now)]
+    entries = [
+        document
+        for document in stored
+        if document.term == term and document.source == source and is_fresh(document, now)
+    ]
     if not entries:
         return None
 
@@ -190,13 +197,24 @@ def get_cached_external_results(source: DocumentSource, query: str,
     # is not a score: turning one into the other needs the caller's scale, which the cache
     # does not know and must not guess. Callers score by position - get_wiki_results does.
     ranked = sorted(entries, key=lambda document: document.score or 0.0)
-    return [Document(title=document.title, url=document.url, extract=document.extract,
-                     score=None, term=query, state=document.state, source=document.source)
-            for document in ranked if document.url != EXTERNAL_CACHE_EMPTY_URL]
+    return [
+        Document(
+            title=document.title,
+            url=document.url,
+            extract=document.extract,
+            score=None,
+            term=query,
+            state=document.state,
+            source=document.source,
+        )
+        for document in ranked
+        if document.url != EXTERNAL_CACHE_EMPTY_URL
+    ]
 
 
-def store_external_results(source: DocumentSource, query: str, documents: list[Document],
-                           now: Optional[int] = None) -> None:
+def store_external_results(
+    source: DocumentSource, query: str, documents: list[Document], now: Optional[int] = None
+) -> None:
     """Store one provider's results for a query, replacing any existing entry for it.
 
     Never raises. A cache write that fails costs a re-fetch later; it must not cost a
@@ -210,7 +228,7 @@ def store_external_results(source: DocumentSource, query: str, documents: list[D
     entries = _entries_to_store(source, term, documents, now)
 
     try:
-        with TinyIndex(item_factory=Document, index_path=external_cache_path(), mode='w') as index:
+        with TinyIndex(item_factory=Document, index_path=external_cache_path(), mode="w") as index:
             page_index = index.get_key_page_index(term)
             with index.page(page_index) as page:
                 # Newest first. store() drops the tail that does not fit, so ordering by
@@ -225,21 +243,26 @@ def store_external_results(source: DocumentSource, query: str, documents: list[D
                 # provider's results would silently drop every other provider's results for
                 # the same query.
                 kept = sorted(
-                    (document for document in page.documents
-                     if not (document.term == term and document.source == source)
-                     and is_fresh(document, now)),
-                    key=lambda document: -(document.last_crawled or 0))
+                    (
+                        document
+                        for document in page.documents
+                        if not (document.term == term and document.source == source) and is_fresh(document, now)
+                    ),
+                    key=lambda document: -(document.last_crawled or 0),
+                )
                 stored = page.store(entries + kept)
                 if stored < len(entries):
                     logger.warning(
                         "External cache page %d held only %d of %d entries for one query",
-                        page_index, stored, len(entries))
+                        page_index,
+                        stored,
+                        len(entries),
+                    )
     except Exception:
         logger.exception("Could not store %s results in the external cache index", source.name)
 
 
-def _entries_to_store(source: DocumentSource, term: str, documents: list[Document],
-                      now: int) -> list[Document]:
+def _entries_to_store(source: DocumentSource, term: str, documents: list[Document], now: int) -> list[Document]:
     """The documents to write for this query, or the empty-result sentinel if there are none.
 
     Every entry carries its source, the sentinel included - an entry has to say which
@@ -257,10 +280,28 @@ def _entries_to_store(source: DocumentSource, term: str, documents: list[Documen
     """
     usable = [document for document in documents if document.url and document.title]
     if not usable:
-        return [Document(title="", url=EXTERNAL_CACHE_EMPTY_URL, extract="", score=0.0, term=term,
-                         last_crawled=now, source=source)]
+        return [
+            Document(
+                title="",
+                url=EXTERNAL_CACHE_EMPTY_URL,
+                extract="",
+                score=0.0,
+                term=term,
+                last_crawled=now,
+                source=source,
+            )
+        ]
 
-    return [Document(title=document.title, url=document.url, extract=document.extract,
-                     score=float(rank), term=term, state=document.state, last_crawled=now,
-                     source=source)
-            for rank, document in enumerate(usable)]
+    return [
+        Document(
+            title=document.title,
+            url=document.url,
+            extract=document.extract,
+            score=float(rank),
+            term=term,
+            state=document.state,
+            last_crawled=now,
+            source=source,
+        )
+        for rank, document in enumerate(usable)
+    ]

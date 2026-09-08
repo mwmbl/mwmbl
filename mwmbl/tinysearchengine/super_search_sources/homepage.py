@@ -7,6 +7,7 @@ title actually contains a query term — a cheap relevance guard against random
 domain squatters. It complements (does not replace) the general index: it just
 surfaces an official homepage candidate the crawl may not have indexed yet.
 """
+
 import logging
 import re
 
@@ -34,8 +35,7 @@ async def search(client: httpx.AsyncClient, query: str, limit: int) -> list[Docu
             break
         candidate = f"https://{slug}{tld}/"
         try:
-            r = await client.get(candidate, follow_redirects=True,
-                                  headers={"User-Agent": _UA})
+            r = await client.get(candidate, follow_redirects=True, headers={"User-Agent": _UA})
         except httpx.HTTPError:
             continue
         if r.status_code != 200 or "text/html" not in r.headers.get("content-type", ""):

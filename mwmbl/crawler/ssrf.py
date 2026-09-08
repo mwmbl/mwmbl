@@ -12,6 +12,7 @@ transport adapters and is left as a future hardening step. Callers that follow
 HTTP redirects must re-validate each hop, since a public URL can 3xx to an
 internal one.
 """
+
 import ipaddress
 import socket
 from urllib.parse import urlparse
@@ -29,12 +30,7 @@ def _ip_is_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
     return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
     )
 
 

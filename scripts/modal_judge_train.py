@@ -23,6 +23,7 @@ One-time auth:  uv run --with modal modal token new
 Run:  uv run --with modal modal run scripts/modal_judge_train.py \
           --base minilm --tasks both --run-name minilm-both-v1
 """
+
 import io
 import json
 import subprocess
@@ -42,10 +43,10 @@ app = modal.App("judge-train")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("torch", "sentence-transformers>=4.1", "transformers",
-                 "accelerate", "datasets", "optimum[onnxruntime]>=1.24")
-    .add_local_dir("devdata/judge_train", "/repo/devdata/judge_train",
-                   ignore=["models/**"])
+    .pip_install(
+        "torch", "sentence-transformers>=4.1", "transformers", "accelerate", "datasets", "optimum[onnxruntime]>=1.24"
+    )
+    .add_local_dir("devdata/judge_train", "/repo/devdata/judge_train", ignore=["models/**"])
     .add_local_file(LLM_DATASET, f"/repo/{LLM_DATASET}")
     .add_local_file("scripts/judge_bakeoff.py", "/repo/scripts/judge_bakeoff.py")
 )
@@ -55,13 +56,23 @@ volume = modal.Volume.from_name("judge-train", create_if_missing=True)
 
 def load_jsonl_gz(path):
     import gzip
+
     with gzip.open(path, "rt") as f:
         return [json.loads(line) for line in f]
 
 
 @app.function(image=image, gpu="T4", timeout=3600, volumes={"/ckpt": volume})
-def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
-          batch_size: int, eval_steps: int, seed: int, git_sha: str) -> bytes:
+def train(
+    base: str,
+    tasks: str,
+    run_name: str,
+    epochs: float,
+    lr: float,
+    batch_size: int,
+    eval_steps: int,
+    seed: int,
+    git_sha: str,
+) -> bytes:
     import os
     import sys
     import time
@@ -69,10 +80,8 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
     import numpy as np
     import torch
     from datasets import Dataset
-    from sentence_transformers.cross_encoder import (
-        CrossEncoder, CrossEncoderTrainer, CrossEncoderTrainingArguments)
-    from sentence_transformers.cross_encoder.losses import (
-        BinaryCrossEntropyLoss, RankNetLoss)
+    from sentence_transformers.cross_encoder import CrossEncoder, CrossEncoderTrainer, CrossEncoderTrainingArguments
+    from sentence_transformers.cross_encoder.losses import BinaryCrossEntropyLoss, RankNetLoss
     from sentence_transformers.evaluation import SentenceEvaluator
     from sentence_transformers.training_args import MultiDatasetBatchSamplers
     from transformers import set_seed
@@ -97,13 +106,13 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
     model.max_length = MAX_LENGTH
     if tasks in ("both", "pointwise"):
         train_datasets["pointwise"] = Dataset.from_list(
-            [{"query": r["query"], "doc": r["doc_text"], "label": float(r["label"])}
-             for r in pointwise_train])
+            [{"query": r["query"], "doc": r["doc_text"], "label": float(r["label"])} for r in pointwise_train]
+        )
         train_losses["pointwise"] = BinaryCrossEntropyLoss(model)
     if tasks in ("both", "pairs"):
         train_datasets["pairs"] = Dataset.from_list(
-            [{"query": r["query"], "docs": [r["pos"], r["neg"]],
-              "labels": [1.0, 0.0]} for r in pairs_train])
+            [{"query": r["query"], "docs": [r["pos"], r["neg"]], "labels": [1.0, 0.0]} for r in pairs_train]
+        )
         train_losses["pairs"] = RankNetLoss(model)
 
     class JudgeEvaluator(SentenceEvaluator):
@@ -112,18 +121,15 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
         def __init__(self):
             super().__init__()
             self.primary_metric = "pairs_accuracy"
-            self.pair_inputs = [(p["query"], p["pos"]) for p in pairs_val] + \
-                               [(p["query"], p["neg"]) for p in pairs_val]
+            self.pair_inputs = [(p["query"], p["pos"]) for p in pairs_val] + [(p["query"], p["neg"]) for p in pairs_val]
             self.point_inputs = [(r["query"], r["doc_text"]) for r in pointwise_val]
             self.point_labels = np.array([r["label"] for r in pointwise_val])
 
         def __call__(self, model, output_path=None, epoch=-1, steps=-1):
-            scores = model.predict(self.pair_inputs, batch_size=256,
-                                   show_progress_bar=False)
+            scores = model.predict(self.pair_inputs, batch_size=256, show_progress_bar=False)
             half = len(pairs_val)
             accuracy = float(np.mean(scores[:half] > scores[half:]))
-            point = model.predict(self.point_inputs, batch_size=256,
-                                  show_progress_bar=False)
+            point = model.predict(self.point_inputs, batch_size=256, show_progress_bar=False)
             rho = judge_bakeoff.spearman(point, self.point_labels)
             metrics = {"pairs_accuracy": accuracy, "pointwise_spearman": rho}
             print(f"eval @ step {steps}: {metrics}", flush=True)
@@ -153,9 +159,9 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
         multi_dataset_batch_sampler=MultiDatasetBatchSamplers.PROPORTIONAL,
         report_to="none",
     )
-    trainer = CrossEncoderTrainer(model=model, args=args,
-                                  train_dataset=train_datasets,
-                                  loss=train_losses, evaluator=evaluator)
+    trainer = CrossEncoderTrainer(
+        model=model, args=args, train_dataset=train_datasets, loss=train_losses, evaluator=evaluator
+    )
     trainer.train()
     final = evaluator(model, steps=-1)
 
@@ -166,56 +172,58 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
     artifact_dir = Path(f"/tmp/artifact/{run_name}")
     artifact_dir.mkdir(parents=True)
     rows = judge_bakeoff.load_dataset()
-    llm_scores = model.predict([(r["query"], r["doc_text"]) for r in rows],
-                               batch_size=256, show_progress_bar=False)
+    llm_scores = model.predict([(r["query"], r["doc_text"]) for r in rows], batch_size=256, show_progress_bar=False)
     np.save(artifact_dir / "llm_scores.npy", np.asarray(llm_scores, dtype=np.float64))
-    pos = model.predict([(p["query"], p["pos"]) for p in pairs_eval],
-                        batch_size=256, show_progress_bar=False)
-    neg = model.predict([(p["query"], p["neg"]) for p in pairs_eval],
-                        batch_size=256, show_progress_bar=False)
+    pos = model.predict([(p["query"], p["pos"]) for p in pairs_eval], batch_size=256, show_progress_bar=False)
+    neg = model.predict([(p["query"], p["neg"]) for p in pairs_eval], batch_size=256, show_progress_bar=False)
     np.savez(artifact_dir / "pairs_eval_scores.npz", pos=pos, neg=neg)
 
     parity_indexes = np.random.default_rng(0).choice(len(rows), 512, replace=False)
-    parity = [{"query": rows[i]["query"], "doc_text": rows[i]["doc_text"],
-               "torch_score": float(llm_scores[i])} for i in parity_indexes]
+    parity = [
+        {"query": rows[i]["query"], "doc_text": rows[i]["doc_text"], "torch_score": float(llm_scores[i])}
+        for i in parity_indexes
+    ]
     (artifact_dir / "parity_sample.json").write_text(json.dumps(parity))
 
     # --- ONNX export: fp32 (O2-optimized) + dynamic int8 ----------------------
     onnx_error = None
     try:
-        from optimum.onnxruntime import (ORTModelForSequenceClassification,
-                                         ORTOptimizer, ORTQuantizer)
-        from optimum.onnxruntime.configuration import (AutoQuantizationConfig,
-                                                       OptimizationConfig)
+        from optimum.onnxruntime import ORTModelForSequenceClassification, ORTOptimizer, ORTQuantizer
+        from optimum.onnxruntime.configuration import AutoQuantizationConfig, OptimizationConfig
 
         onnx_dir = artifact_dir / "onnx"
-        ort_model = ORTModelForSequenceClassification.from_pretrained(
-            final_dir, export=True)
+        ort_model = ORTModelForSequenceClassification.from_pretrained(final_dir, export=True)
         ort_model.save_pretrained(onnx_dir)  # raw model.onnx
         # quantize from the raw export — the O2-optimized fused graph breaks
         # onnx shape inference inside the quantizer
         quantizer = ORTQuantizer.from_pretrained(onnx_dir, file_name="model.onnx")
-        quantizer.quantize(save_dir=onnx_dir,
-                           quantization_config=AutoQuantizationConfig.avx2(
-                               is_static=False, per_channel=False))
+        quantizer.quantize(
+            save_dir=onnx_dir, quantization_config=AutoQuantizationConfig.avx2(is_static=False, per_channel=False)
+        )
         (onnx_dir / "model_quantized.onnx").rename(onnx_dir / "model.int8.onnx")
         optimizer = ORTOptimizer.from_pretrained(ort_model)
-        optimizer.optimize(save_dir=onnx_dir, optimization_config=OptimizationConfig(
-            optimization_level=2))
+        optimizer.optimize(save_dir=onnx_dir, optimization_config=OptimizationConfig(optimization_level=2))
         (onnx_dir / "model_optimized.onnx").rename(onnx_dir / "model.onnx")
         model.tokenizer.save_pretrained(str(onnx_dir))
     except Exception as exc:  # jina custom code may not export; keep torch arm
         onnx_error = f"{type(exc).__name__}: {exc}"
-        print(f"ONNX export FAILED (torch scores still usable): {onnx_error}",
-              flush=True)
+        print(f"ONNX export FAILED (torch scores still usable): {onnx_error}", flush=True)
 
     meta = {
-        "run_name": run_name, "base": base, "tasks": tasks,
-        "epochs": epochs, "lr": lr, "batch_size": batch_size,
-        "eval_steps": eval_steps, "seed": seed, "max_length": MAX_LENGTH,
-        "git_sha": git_sha, "train_pairs": len(pairs_train),
+        "run_name": run_name,
+        "base": base,
+        "tasks": tasks,
+        "epochs": epochs,
+        "lr": lr,
+        "batch_size": batch_size,
+        "eval_steps": eval_steps,
+        "seed": seed,
+        "max_length": MAX_LENGTH,
+        "git_sha": git_sha,
+        "train_pairs": len(pairs_train),
         "train_pointwise": len(pointwise_train),
-        "zero_shot_val": baseline, "final_val": final,
+        "zero_shot_val": baseline,
+        "final_val": final,
         "best_checkpoint": trainer.state.best_model_checkpoint,
         "best_metric": trainer.state.best_metric,
         "onnx_error": onnx_error,
@@ -233,17 +241,22 @@ def train(base: str, tasks: str, run_name: str, epochs: float, lr: float,
 
 
 @app.local_entrypoint()
-def main(base: str = "minilm", tasks: str = "both", run_name: str = None,
-         epochs: float = 2.0, lr: float = 2e-5, batch_size: int = 64,
-         eval_steps: int = 200, seed: int = 42):
+def main(
+    base: str = "minilm",
+    tasks: str = "both",
+    run_name: str = None,
+    epochs: float = 2.0,
+    lr: float = 2e-5,
+    batch_size: int = 64,
+    eval_steps: int = 200,
+    seed: int = 42,
+):
     assert base in BASES, f"--base must be one of {sorted(BASES)}"
     assert tasks in ("both", "pairs", "pointwise")
     run_name = run_name or f"{base}-{tasks}-v1"
-    git_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True).stdout.strip()
+    git_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
 
-    artifact = train.remote(BASES[base], tasks, run_name, epochs, lr,
-                            batch_size, eval_steps, seed, git_sha)
+    artifact = train.remote(BASES[base], tasks, run_name, epochs, lr, batch_size, eval_steps, seed, git_sha)
 
     out_dir = Path("devdata/judge_train/models") / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

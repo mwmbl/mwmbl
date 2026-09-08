@@ -39,11 +39,10 @@ def fix_names(apps, schema_editor):
 
     DomainSubmission.objects.bulk_update(submissions_to_update, ["name"], batch_size=BATCH_SIZE)
     for start in range(0, len(ids_to_delete), BATCH_SIZE):
-        DomainSubmission.objects.filter(id__in=ids_to_delete[start:start + BATCH_SIZE]).delete()
+        DomainSubmission.objects.filter(id__in=ids_to_delete[start : start + BATCH_SIZE]).delete()
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("mwmbl", "0032_normalize_domain_submission_names"),
     ]

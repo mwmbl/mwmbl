@@ -22,5 +22,5 @@ def run_update_urls_on_fixed_batches():
     print("Total time:", total_time)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_update_urls_on_fixed_batches()

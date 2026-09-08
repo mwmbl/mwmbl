@@ -38,7 +38,6 @@ from dotenv import load_dotenv
 from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RANKINGS_DATASET_TRAIN_PATH
 from mwmbl.settings import BUCKET_NAME, ENDPOINT_URL, VERSION
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOWNLOADS_DIR = REPO_ROOT / "scripts" / "downloads"
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -85,8 +84,10 @@ def download_datasets(workers: int = 16):
         keys += [obj.key for obj in bucket.objects.filter(Prefix=f"{date_prefix}dataset/")]
 
     missing = [k for k in keys if not (DOWNLOADS_DIR / k).exists()]
-    print(f"{len(keys)} dataset files on Backblaze, {len(keys) - len(missing)} already "
-          f"present locally; downloading {len(missing)}...")
+    print(
+        f"{len(keys)} dataset files on Backblaze, {len(keys) - len(missing)} already "
+        f"present locally; downloading {len(missing)}..."
+    )
 
     def _fetch(key: str):
         dest = DOWNLOADS_DIR / key
@@ -101,8 +102,7 @@ def download_datasets(workers: int = 16):
             if i % 500 == 0:
                 print(f"Downloaded {i}/{len(missing)} new files...")
 
-    print(f"Download complete: {downloaded} new files, "
-          f"{len(keys) - len(missing)} already present.")
+    print(f"Download complete: {downloaded} new files, {len(keys) - len(missing)} already present.")
 
 
 def create_dataset() -> pd.DataFrame:
@@ -118,13 +118,15 @@ def create_dataset() -> pd.DataFrame:
         for item in data.get("searchResults", []):
             query = item["query"]
             for i, row in enumerate(item["results"]):
-                dataset.append({
-                    "query": query,
-                    "url": row["url"],
-                    "snippet": row["extract"],
-                    "rank": i + 1,
-                    "date_retrieved": date_str,
-                })
+                dataset.append(
+                    {
+                        "query": query,
+                        "url": row["url"],
+                        "snippet": row["extract"],
+                        "rank": i + 1,
+                        "date_retrieved": date_str,
+                    }
+                )
 
     return pd.DataFrame(dataset)
 
@@ -141,20 +143,22 @@ def save_dataset(dataset: pd.DataFrame):
     train_set = dataset[dataset["query"].isin(train_queries)]
     test_set = dataset[~dataset["query"].isin(train_queries)]
 
-    print(f"Saving dataset with {len(train_set)} train rows "
-          f"and {len(test_set)} test rows to {RANKINGS_DATASET_TRAIN_PATH.parent}")
+    print(
+        f"Saving dataset with {len(train_set)} train rows "
+        f"and {len(test_set)} test rows to {RANKINGS_DATASET_TRAIN_PATH.parent}"
+    )
 
     train_set.to_csv(RANKINGS_DATASET_TRAIN_PATH)
     test_set.to_csv(RANKINGS_DATASET_TEST_PATH)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--no-download", action="store_true",
-        help="Skip the Backblaze download and rebuild the CSVs from "
-             "files already in scripts/downloads/.")
+        "--no-download",
+        action="store_true",
+        help="Skip the Backblaze download and rebuild the CSVs from files already in scripts/downloads/.",
+    )
     args = parser.parse_args()
 
     if not args.no_download:

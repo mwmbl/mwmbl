@@ -9,22 +9,21 @@ Covers:
 - flush_search_counts background task
 """
 
-from datetime import datetime, timezone as stdlib_timezone
+from datetime import datetime
+from datetime import timezone as stdlib_timezone
 from unittest.mock import patch
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client
-from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
-
-from django.conf import settings
 
 from mwmbl import pricing
 from mwmbl.background import sync_search_counts
-from mwmbl.models import ApiKey, AgreementType, MwmblUser, UsageBucket, UserAgreement, UserBilling, generate_api_key
+from mwmbl.models import AgreementType, ApiKey, UsageBucket, UserAgreement, UserBilling, generate_api_key
 from mwmbl.quota import RATE_LIMIT, _monthly_key, check_rate_limit, get_monthly_count, increment_monthly
 
 User = get_user_model()
@@ -33,6 +32,7 @@ User = get_user_model()
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def verified_user(db):
@@ -130,6 +130,7 @@ def api_key_header(key):
 # Helper: get the unified API client
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def api_client():
     """Return a Django test client pointed at the v1 API."""
@@ -139,6 +140,7 @@ def api_client():
 # ---------------------------------------------------------------------------
 # API key management — POST /api/v1/platform/api-keys/
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_create_api_key(api_client, access_token):
@@ -209,14 +211,10 @@ def test_create_crawl_api_key(api_client, access_token):
 @pytest.mark.django_db
 def test_create_crawl_api_key_without_gui_tos_returns_403(api_client, db):
     """A user who has only accepted the API TOS cannot create a crawl key."""
-    user = User.objects.create_user(
-        username="apionly", email="apionly@example.com", password="testpass123"
-    )
+    user = User.objects.create_user(username="apionly", email="apionly@example.com", password="testpass123")
     EmailAddress.objects.create(user=user, email="apionly@example.com", verified=True, primary=True)
     version_id = settings.CURRENT_AGREEMENT_VERSIONS.get(AgreementType.TERMS_OF_SERVICE_API)
-    UserAgreement.objects.create(
-        user=user, agreement_type=AgreementType.TERMS_OF_SERVICE_API, version_id=version_id
-    )
+    UserAgreement.objects.create(user=user, agreement_type=AgreementType.TERMS_OF_SERVICE_API, version_id=version_id)
     token = str(RefreshToken.for_user(user).access_token)
     response = api_client.post(
         "/api/v1/platform/api-keys/",
@@ -230,6 +228,7 @@ def test_create_crawl_api_key_without_gui_tos_returns_403(api_client, db):
 # ---------------------------------------------------------------------------
 # API key management — GET /api/v1/platform/api-keys/
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_list_api_keys_hides_raw_key(api_client, access_token, search_api_key):
@@ -269,6 +268,7 @@ def test_list_api_keys_unauthenticated(api_client):
 # ---------------------------------------------------------------------------
 # API key management — DELETE /api/v1/platform/api-keys/{id}
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_delete_api_key(api_client, access_token, search_api_key):
@@ -315,6 +315,7 @@ def test_delete_crawl_api_key(api_client, access_token, crawl_api_key):
 # Search endpoint — authentication
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_search_missing_key_returns_results_with_null_usage(api_client):
     """Unauthenticated requests are allowed; usage fields are null."""
@@ -345,11 +346,14 @@ def test_search_crawl_scoped_key_rejected(api_client, crawl_api_key):
 # Search endpoint — successful request with usage metadata
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_search_with_valid_key(api_client, search_api_key):
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=0), \
-         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=1):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=0),
+        patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=1),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
@@ -360,10 +364,12 @@ def test_search_with_valid_key(api_client, search_api_key):
 @pytest.mark.django_db
 def test_search_response_includes_usage_fields(api_client, search_api_key):
     """When quota helpers are mocked, the response includes monthly_usage and monthly_limit."""
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=5), \
-         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=6), \
-         patch("mwmbl.tinysearchengine.rank.HeuristicRanker.search", return_value=[]):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=5),
+        patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=6),
+        patch("mwmbl.tinysearchengine.rank.HeuristicRanker.search", return_value=[]),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
@@ -379,6 +385,7 @@ def test_search_response_includes_usage_fields(api_client, search_api_key):
 # Search endpoint — quota enforcement
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_search_rate_limit_exceeded(api_client, search_api_key):
     with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=False):
@@ -393,8 +400,10 @@ def test_search_rate_limit_exceeded(api_client, search_api_key):
 @pytest.mark.django_db
 def test_search_monthly_quota_exceeded(api_client, search_api_key):
     limit = pricing.FREE_KEYED_MONTHLY_LIMIT
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=limit),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
@@ -408,9 +417,11 @@ def test_search_monthly_quota_exceeded(api_client, search_api_key):
 @pytest.mark.django_db
 def test_search_keyed_default_zero_spend_cap_is_free_allowance(api_client, search_api_key):
     """A fresh account with no UserBilling row defaults to the free-only cap."""
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT - 1), \
-         patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT - 1),
+        patch("mwmbl.tinysearchengine.search.increment_monthly", return_value=pricing.FREE_KEYED_MONTHLY_LIMIT),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
@@ -426,16 +437,20 @@ def test_search_keyed_with_spend_limit_raises_cap(api_client, search_api_key, ve
     cap = pricing.effective_monthly_request_cap(1_000)
     assert cap == pricing.FREE_KEYED_MONTHLY_LIMIT + 2_000
 
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap - 1):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap - 1),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
         )
     assert response.status_code == 200
 
-    with patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True), \
-         patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap):
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=cap),
+    ):
         response = api_client.get(
             "/api/v2/search/?q=python",
             **api_key_header(search_api_key.raw_key),
@@ -446,6 +461,7 @@ def test_search_keyed_with_spend_limit_raises_cap(api_client, search_api_key, ve
 # ---------------------------------------------------------------------------
 # Crawler /results — header vs body key and scope enforcement
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_post_results_no_key_returns_401(api_client):
@@ -459,9 +475,11 @@ def test_post_results_no_key_returns_401(api_client):
 
 @pytest.mark.django_db
 def test_post_results_header_key_accepted(api_client, crawl_api_key):
-    with patch("mwmbl.crawler.app.index_documents"), \
-         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
-         patch("mwmbl.crawler.app.stats_manager"):
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
@@ -474,9 +492,11 @@ def test_post_results_header_key_accepted(api_client, crawl_api_key):
 @pytest.mark.django_db
 def test_post_results_body_key_deprecated_still_works(api_client, crawl_api_key):
     """Body api_key field is deprecated but must still work for backward compatibility."""
-    with patch("mwmbl.crawler.app.index_documents"), \
-         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
-         patch("mwmbl.crawler.app.stats_manager"):
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
@@ -500,9 +520,11 @@ def test_post_results_search_scoped_key_rejected(api_client, search_api_key):
 @pytest.mark.django_db
 def test_post_results_header_takes_precedence_over_body(api_client, crawl_api_key, search_api_key):
     """When both header and body key are present, the header key is used."""
-    with patch("mwmbl.crawler.app.index_documents"), \
-         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
-         patch("mwmbl.crawler.app.stats_manager"):
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
@@ -530,9 +552,11 @@ def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
     past_ts = int(datetime.now(stdlib_timezone.utc).timestamp()) - 60
     captured = []
 
-    with patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)), \
-         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
-         patch("mwmbl.crawler.app.stats_manager"):
+    with (
+        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
@@ -547,9 +571,11 @@ def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
 def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
     captured = []
 
-    with patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)), \
-         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"), \
-         patch("mwmbl.crawler.app.stats_manager"):
+    with (
+        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
         response = api_client.post(
             "/api/v1/crawler/results",
             content_type="application/json",
@@ -563,6 +589,7 @@ def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
 # ---------------------------------------------------------------------------
 # Background tasks
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_sync_search_counts_redis_to_postgres(verified_user):
@@ -642,6 +669,7 @@ def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
 # ---------------------------------------------------------------------------
 # Subscription endpoint — GET /api/v1/platform/billing/subscription
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.django_db
 def test_subscription_unauthenticated(api_client):
@@ -728,6 +756,7 @@ def test_subscription_reflects_spend_limit(api_client, access_token, verified_us
 # ---------------------------------------------------------------------------
 # Quota helper unit tests
 # ---------------------------------------------------------------------------
+
 
 def test_rate_limit_allows_up_to_limit():
 

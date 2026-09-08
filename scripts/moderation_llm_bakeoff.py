@@ -20,8 +20,8 @@ Three steps, because the middle one runs outside this process:
 The export deliberately carries no labels and no submitter, so the file handed to a judge -
 which may be a third party - cannot leak the answer or say who submitted what.
 """
+
 import argparse
-import gzip
 import json
 import os
 import sys
@@ -33,15 +33,19 @@ import django
 
 django.setup()
 
-import numpy as np                                                # noqa: E402
-from sklearn.metrics import average_precision_score               # noqa: E402
+import numpy as np  # noqa: E402
+from sklearn.metrics import average_precision_score  # noqa: E402
 
-from mwmbl.moderation.train import (                              # noqa: E402
-    BOOTSTRAP_SAMPLES, normalise, split_by_time, train)
-from mwmbl.moderation.training_data import seed_rows              # noqa: E402
+from mwmbl.moderation.train import (  # noqa: E402
+    BOOTSTRAP_SAMPLES,
+    normalise,
+    split_by_time,
+    train,
+)
+from mwmbl.moderation.training_data import seed_rows  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from moderation_eval import DEFAULT_EXPORT, rows_from_export      # noqa: E402
+from moderation_eval import DEFAULT_EXPORT, rows_from_export  # noqa: E402
 
 DOMAINS_FILE = "domains.txt"
 TRUTH_FILE = "truth.jsonl"
@@ -73,14 +77,13 @@ def few_shot_examples(train_rows, wanted: int) -> list:
     # Round-robin across reasons so a rare class - OFFENSIVE has one real example in the whole
     # dataset - is not crowded out by SPAM, which has hundreds.
     rejections, index = [], 0
-    while len(rejections) < wanted // 2 and any(
-            len(rows) > index for rows in by_reason.values()):
+    while len(rejections) < wanted // 2 and any(len(rows) > index for rows in by_reason.values()):
         for reason in sorted(by_reason):
             if len(by_reason[reason]) > index and len(rejections) < wanted // 2:
                 rejections.append(by_reason[reason][index])
         index += 1
 
-    chosen = approvals[:wanted - len(rejections)] + rejections
+    chosen = approvals[: wanted - len(rejections)] + rejections
     return sorted(chosen, key=lambda row: row.domain)
 
 
@@ -96,8 +99,7 @@ def cold_start_test_rows(export: Path):
 
     known = {row.submitter for row in train_rows if row.submitter}
     cold = [row for row in test_rows if row.submitter not in known]
-    scores = [prediction[0] for prediction in
-              model.predict([row.to_example() for row in cold])]
+    scores = [prediction[0] for prediction in model.predict([row.to_example() for row in cold])]
     return cold, np.array(scores)
 
 
@@ -109,29 +111,38 @@ def export(options) -> int:
     train_rows, _ = split_by_time(all_rows)
     examples = few_shot_examples(train_rows, options.examples)
     held_out = {row.domain for row in rows}
-    assert not {row.domain for row in examples} & held_out, (
-        "a few-shot example leaked in from the held-out rows")
+    assert not {row.domain for row in examples} & held_out, "a few-shot example leaked in from the held-out rows"
 
     (options.out / EXAMPLES_FILE).write_text(
-        "\n".join(f"- `{row.domain}` -> "
-                  + (f"REJECT ({row.reason or 'OTHER'})" if row.rejected else "APPROVE")
-                  for row in examples) + "\n")
+        "\n".join(
+            f"- `{row.domain}` -> " + (f"REJECT ({row.reason or 'OTHER'})" if row.rejected else "APPROVE")
+            for row in examples
+        )
+        + "\n"
+    )
 
-    (options.out / DOMAINS_FILE).write_text(
-        "".join(f"{row.domain}\n" for row in rows))
+    (options.out / DOMAINS_FILE).write_text("".join(f"{row.domain}\n" for row in rows))
     # The labels and the model's own scores stay on this side, keyed by domain, so scoring can
     # join them back without the judge ever having seen them.
     with (options.out / TRUTH_FILE).open("w") as truth:
         for row, score in zip(rows, scores):
-            truth.write(json.dumps({"domain": row.domain, "rejected": row.rejected,
-                                    "reason": row.reason, "model_score": float(score)}) + "\n")
+            truth.write(
+                json.dumps(
+                    {"domain": row.domain, "rejected": row.rejected, "reason": row.reason, "model_score": float(score)}
+                )
+                + "\n"
+            )
 
-    print(f"{len(examples)} training-split examples "
-          f"({sum(row.rejected for row in examples)} rejections) -> "
-          f"{options.out / EXAMPLES_FILE}")
+    print(
+        f"{len(examples)} training-split examples "
+        f"({sum(row.rejected for row in examples)} rejections) -> "
+        f"{options.out / EXAMPLES_FILE}"
+    )
     print(f"{len(rows)} cold-start held-out domains -> {options.out / DOMAINS_FILE}")
-    print(f"{sum(row.rejected for row in rows)} of them were rejected "
-          f"(base rate {sum(row.rejected for row in rows) / len(rows):.3f})")
+    print(
+        f"{sum(row.rejected for row in rows)} of them were rejected "
+        f"(base rate {sum(row.rejected for row in rows) / len(rows):.3f})"
+    )
     return 0
 
 
@@ -173,8 +184,10 @@ def paired_bootstrap(truth: np.ndarray, left: np.ndarray, right: np.ndarray) -> 
         if sample.sum() < 5 or (1 - sample).sum() < 5:
             continue
         base = sample.mean()
-        differences.append(normalise(average_precision_score(sample, left[indices]), base)
-                           - normalise(average_precision_score(sample, right[indices]), base))
+        differences.append(
+            normalise(average_precision_score(sample, left[indices]), base)
+            - normalise(average_precision_score(sample, right[indices]), base)
+        )
 
     base_rate = float(truth.mean())
     return {
@@ -182,16 +195,19 @@ def paired_bootstrap(truth: np.ndarray, left: np.ndarray, right: np.ndarray) -> 
         "right": round(normalise(average_precision_score(truth, right), base_rate), 4),
         "difference": round(
             normalise(average_precision_score(truth, left), base_rate)
-            - normalise(average_precision_score(truth, right), base_rate), 4),
-        "difference_ci": [round(float(np.percentile(differences, 2.5)), 4),
-                          round(float(np.percentile(differences, 97.5)), 4)],
+            - normalise(average_precision_score(truth, right), base_rate),
+            4,
+        ),
+        "difference_ci": [
+            round(float(np.percentile(differences, 2.5)), 4),
+            round(float(np.percentile(differences, 97.5)), 4),
+        ],
         "left_wins_fraction": round(float(np.mean(np.array(differences) > 0)), 4),
     }
 
 
 def score(options) -> int:
-    truth_rows = [json.loads(line) for line in
-                  (options.dir / TRUTH_FILE).read_text().splitlines() if line.strip()]
+    truth_rows = [json.loads(line) for line in (options.dir / TRUTH_FILE).read_text().splitlines() if line.strip()]
     # One entry per distinct domain, not per submission. A domain submitted nine times is one
     # thing a moderator decides, and counting it nine times would weight the score by how
     # popular a submission was rather than by how hard it was to judge. Both rankers are
@@ -215,28 +231,34 @@ def score(options) -> int:
 
         result = paired_bootstrap(truth, llm, model)
         print(f"\n{path.name}")
-        print(f"  answered {len(answered)}/{len(by_domain)} domains, "
-              f"{int(truth.sum())} rejected (base rate {truth.mean():.3f})")
-        print(f"  normalised AP: LLM {result['left']:.4f}  model {result['right']:.4f}  "
-              f"difference {result['difference']:+.4f} "
-              f"[{result['difference_ci'][0]:+.4f}, {result['difference_ci'][1]:+.4f}]")
+        print(
+            f"  answered {len(answered)}/{len(by_domain)} domains, "
+            f"{int(truth.sum())} rejected (base rate {truth.mean():.3f})"
+        )
+        print(
+            f"  normalised AP: LLM {result['left']:.4f}  model {result['right']:.4f}  "
+            f"difference {result['difference']:+.4f} "
+            f"[{result['difference_ci'][0]:+.4f}, {result['difference_ci'][1]:+.4f}]"
+        )
         print(f"  the LLM ranks better in {result['left_wins_fraction']:.0%} of resamples")
-        print(f"  raw PR-AUC: LLM "
-              f"{average_precision_score(truth, llm):.4f}  model "
-              f"{average_precision_score(truth, model):.4f}")
+        print(
+            f"  raw PR-AUC: LLM "
+            f"{average_precision_score(truth, llm):.4f}  model "
+            f"{average_precision_score(truth, model):.4f}"
+        )
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     exporter = subparsers.add_parser("export")
     exporter.add_argument("--export", type=Path, default=DEFAULT_EXPORT)
     exporter.add_argument("--out", type=Path, default=Path("devdata/moderation_bakeoff"))
-    exporter.add_argument("--examples", type=int, default=60,
-                          help="Labelled training-split decisions to write for few-shot prompts")
+    exporter.add_argument(
+        "--examples", type=int, default=60, help="Labelled training-split decisions to write for few-shot prompts"
+    )
     exporter.set_defaults(function=export)
 
     scorer = subparsers.add_parser("score")

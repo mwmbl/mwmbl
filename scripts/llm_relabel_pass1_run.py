@@ -21,6 +21,7 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev DATABASE_URL="postgres://daoud@" \
         uv run python scripts/llm_relabel_pass1_run.py --dump-batch 200
 """
+
 import json
 import os
 from argparse import ArgumentParser
@@ -34,12 +35,11 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 django.setup()
 
 from mwmbl.rankeval.paths import RANKINGS_DATASET_TRAIN_PATH  # noqa: E402
-from scripts.llm_relabel_pass1 import INTENT_SOURCES, augment_sources  # noqa: E402
+from scripts.llm_relabel_pass1 import augment_sources  # noqa: E402
 
 CHECKPOINT = "devdata/llm_relabel/pass1_intents.jsonl"
 SEED = 42
-INTENTS = {"navigational", "entity", "informational", "transactional",
-           "local", "news", "tool", "ambiguous"}
+INTENTS = {"navigational", "entity", "informational", "transactional", "local", "news", "tool", "ambiguous"}
 
 # Curated catalog the judge chooses from (matches the validated Pass-1 prompt).
 CATALOG_BLOCK = """\
@@ -171,9 +171,7 @@ def cmd_merge(path: str):
                 skipped += 1
                 continue
             picks = [] if src.lower() == "none" else [s.strip() for s in src.split(",") if s.strip()]
-            rec = {"query": query, "intent": intent,
-                   "haiku_sources": picks,
-                   "sources": augment_sources(intent, picks)}
+            rec = {"query": query, "intent": intent, "haiku_sources": picks, "sources": augment_sources(intent, picks)}
             out.write(json.dumps(rec) + "\n")
             done[query] = rec
             added += 1

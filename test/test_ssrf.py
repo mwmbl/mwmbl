@@ -1,4 +1,5 @@
 """Tests for the SSRF guard and its wiring into fetch() and add_url()."""
+
 import socket
 
 import pytest
@@ -17,17 +18,21 @@ User = get_user_model()
 # Unit: is_safe_host / validate_url
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("host", [
-    "127.0.0.1",
-    "127.0.0.2",
-    "0.0.0.0",
-    "10.0.0.1",
-    "192.168.1.1",
-    "172.16.0.1",
-    "169.254.169.254",   # cloud metadata endpoint
-    "::1",
-    "::ffff:127.0.0.1",  # IPv4-mapped loopback
-])
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",
+        "127.0.0.2",
+        "0.0.0.0",
+        "10.0.0.1",
+        "192.168.1.1",
+        "172.16.0.1",
+        "169.254.169.254",  # cloud metadata endpoint
+        "::1",
+        "::ffff:127.0.0.1",  # IPv4-mapped loopback
+    ],
+)
 def test_internal_ip_literals_are_unsafe(host):
     assert is_safe_host(host) is False
 
@@ -38,7 +43,8 @@ def test_public_ip_literal_is_safe():
 
 def test_localhost_resolving_to_loopback_is_unsafe(monkeypatch):
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, None, None, "", ("127.0.0.1", 0))],
     )
     assert is_safe_host("localhost") is False
@@ -46,7 +52,8 @@ def test_localhost_resolving_to_loopback_is_unsafe(monkeypatch):
 
 def test_hostname_resolving_to_private_ip_is_unsafe(monkeypatch):
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, None, None, "", ("10.1.2.3", 0))],
     )
     assert is_safe_host("internal.corp") is False
@@ -54,7 +61,8 @@ def test_hostname_resolving_to_private_ip_is_unsafe(monkeypatch):
 
 def test_hostname_resolving_to_public_ip_is_safe(monkeypatch):
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, None, None, "", ("93.184.216.34", 0))],
     )
     assert is_safe_host("example.com") is True
@@ -63,6 +71,7 @@ def test_hostname_resolving_to_public_ip_is_safe(monkeypatch):
 def test_resolution_failure_is_unsafe(monkeypatch):
     def boom(*a, **k):
         raise socket.gaierror("nope")
+
     monkeypatch.setattr(socket, "getaddrinfo", boom)
     assert is_safe_host("does-not-resolve.invalid") is False
 
@@ -83,6 +92,7 @@ def test_validate_url_rejects_internal():
 # fetch() integration
 # ---------------------------------------------------------------------------
 
+
 class _FakeResponse:
     def __init__(self, status_code, headers=None, is_redirect=False, body=b"hello"):
         self.status_code = status_code
@@ -100,8 +110,7 @@ class _FakeResponse:
 
 def test_fetch_blocks_internal_url_without_request(monkeypatch):
     calls = []
-    monkeypatch.setattr(retrieve.requests, "get",
-                        lambda *a, **k: calls.append(a) or _FakeResponse(200))
+    monkeypatch.setattr(retrieve.requests, "get", lambda *a, **k: calls.append(a) or _FakeResponse(200))
     with pytest.raises(UnsafeURLError):
         retrieve.fetch("http://127.0.0.1/secret")
     assert calls == [], "requests.get must not be called for an internal URL"
@@ -122,8 +131,7 @@ def test_fetch_blocks_redirect_to_internal(monkeypatch):
 
 
 def test_fetch_returns_content_for_public_url(monkeypatch):
-    monkeypatch.setattr(retrieve.requests, "get",
-                        lambda *a, **k: _FakeResponse(200, body=b"page body"))
+    monkeypatch.setattr(retrieve.requests, "get", lambda *a, **k: _FakeResponse(200, body=b"page body"))
     status, content, resolved_url = retrieve.fetch("http://93.184.216.34/page")
     assert status == 200
     assert content == b"page body"
@@ -133,10 +141,10 @@ def test_fetch_returns_content_for_public_url(monkeypatch):
 def test_fetch_reports_the_host_that_answered_not_the_one_we_asked(monkeypatch):
     """The last hop is the only place a redirect is visible to a caller. Moderation rejects
     domains that redirect elsewhere, and cannot see one if fetch reports the requested URL."""
+
     def fake_get(url, **kwargs):
         if url == "http://93.184.216.34/start":
-            return _FakeResponse(301, headers={"Location": "http://93.184.216.35/parked"},
-                                 is_redirect=True)
+            return _FakeResponse(301, headers={"Location": "http://93.184.216.35/parked"}, is_redirect=True)
         return _FakeResponse(200, body=b"parking page")
 
     monkeypatch.setattr(retrieve.requests, "get", fake_get)
@@ -149,6 +157,7 @@ def test_fetch_reports_the_host_that_answered_not_the_one_we_asked(monkeypatch):
 # add_url view
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_add_url_rejects_internal_url(monkeypatch):
     user = User.objects.create_user(username="ssrfuser", email="ssrf@example.com", password="x")
@@ -157,6 +166,7 @@ def test_add_url_rejects_internal_url(monkeypatch):
     # Fail loudly if the view ever reaches the network for an internal URL.
     def boom(*a, **k):
         raise AssertionError("requests.get must not be called for an internal URL")
+
     monkeypatch.setattr("mwmbl.views.requests.get", boom)
 
     client = Client()

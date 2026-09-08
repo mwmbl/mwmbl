@@ -5,53 +5,52 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0034_domainsubmission_suggested_reason_and_more'),
+        ("mwmbl", "0034_domainsubmission_suggested_reason_and_more"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='ModerationModelArtifact',
+            name="ModerationModelArtifact",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('version', models.CharField(max_length=50, unique=True)),
-                ('model', models.BinaryField()),
-                ('metrics', models.JSONField(default=dict)),
-                ('created_on', models.DateTimeField(default=django.utils.timezone.now)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("version", models.CharField(max_length=50, unique=True)),
+                ("model", models.BinaryField()),
+                ("metrics", models.JSONField(default=dict)),
+                ("created_on", models.DateTimeField(default=django.utils.timezone.now)),
             ],
             options={
-                'get_latest_by': 'created_on',
+                "get_latest_by": "created_on",
             },
         ),
         migrations.RemoveIndex(
-            model_name='domainevidence',
-            name='mwmbl_domai_state_1c3406_idx',
+            model_name="domainevidence",
+            name="mwmbl_domai_state_1c3406_idx",
         ),
         migrations.RemoveField(
-            model_name='domainevidence',
-            name='review_priority',
+            model_name="domainevidence",
+            name="review_priority",
         ),
         migrations.AddField(
-            model_name='domainevidence',
-            name='reason_confidence',
+            model_name="domainevidence",
+            name="reason_confidence",
             field=models.FloatField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='domainevidence',
-            name='reason_source',
+            model_name="domainevidence",
+            name="reason_source",
             field=models.CharField(blank=True, max_length=10),
         ),
         migrations.AddIndex(
-            model_name='domainsubmission',
-            index=models.Index(fields=['name', 'status'], name='mwmbl_domai_name_0a9d6d_idx'),
+            model_name="domainsubmission",
+            index=models.Index(fields=["name", "status"], name="mwmbl_domai_name_0a9d6d_idx"),
         ),
         migrations.AddIndex(
-            model_name='domainsubmission',
-            index=models.Index(fields=['submitted_by', 'status'], name='mwmbl_domai_submitt_2d8fb1_idx'),
+            model_name="domainsubmission",
+            index=models.Index(fields=["submitted_by", "status"], name="mwmbl_domai_submitt_2d8fb1_idx"),
         ),
         migrations.AddIndex(
-            model_name='moderationmodelartifact',
-            index=models.Index(fields=['-created_on'], name='mwmbl_moder_created_1c74be_idx'),
+            model_name="moderationmodelartifact",
+            index=models.Index(fields=["-created_on"], name="mwmbl_moder_created_1c74be_idx"),
         ),
     ]

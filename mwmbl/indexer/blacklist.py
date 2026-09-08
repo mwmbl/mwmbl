@@ -9,16 +9,15 @@ from typing import Callable, Optional, Set
 
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer.blacklist_providers import (
-    BuiltInRulesBlacklistProvider,
-    HaGeZiBlacklistProvider,
     AdultContentBlacklistProvider,
+    BlacklistProvider,
+    BuiltInRulesBlacklistProvider,
     CombinedBlacklistProvider,
-    BlacklistProvider
+    HaGeZiBlacklistProvider,
 )
 
 
-def get_default_blacklist_provider(
-        get_exempt_domains: Optional[Callable[[], Set[str]]] = None) -> BlacklistProvider:
+def get_default_blacklist_provider(get_exempt_domains: Optional[Callable[[], Set[str]]] = None) -> BlacklistProvider:
     """Get the default blacklist provider configuration.
 
     Domains a moderator has approved override the lists. Callers without a database - the
@@ -28,7 +27,7 @@ def get_default_blacklist_provider(
     return CombinedBlacklistProvider(
         [
             BuiltInRulesBlacklistProvider(),
-            HaGeZiBlacklistProvider('tif_medium'),
+            HaGeZiBlacklistProvider("tif_medium"),
             AdultContentBlacklistProvider(),
         ],
         get_exempt_domains=get_exempt_domains if get_exempt_domains is not None else get_curated_domains,

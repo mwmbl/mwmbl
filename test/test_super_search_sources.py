@@ -5,10 +5,10 @@ result coercion without hitting the network. We also assert that an HTTP
 error returns an empty list rather than propagating — orchestrator robustness
 depends on this.
 """
+
 import re
 
 import httpx
-import pytest
 
 from mwmbl.tinysearchengine.super_search_sources.arxiv import search as search_arxiv
 from mwmbl.tinysearchengine.super_search_sources.github import search as search_github
@@ -26,13 +26,16 @@ async def _client():
 # Hacker News (Algolia)
 # ---------------------------------------------------------------------------
 
+
 async def test_hn_returns_documents(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://hn\.algolia\.com/api/v1/search\?.*query.*python.*"),
-        json={"hits": [
-            {"title": "Why Python", "url": "https://example.com/why", "objectID": "1"},
-            {"title": "Ask HN", "story_text": "Some text", "objectID": "2"},  # no url
-        ]},
+        json={
+            "hits": [
+                {"title": "Why Python", "url": "https://example.com/why", "objectID": "1"},
+                {"title": "Ask HN", "story_text": "Some text", "objectID": "2"},  # no url
+            ]
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_hn(client, "python", 5)
@@ -52,14 +55,20 @@ async def test_hn_swallows_http_errors(httpx_mock):
 # GitHub
 # ---------------------------------------------------------------------------
 
+
 async def test_github_returns_documents(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://api\.github\.com/search/repositories.*"),
-        json={"items": [
-            {"full_name": "psf/requests", "html_url": "https://github.com/psf/requests",
-             "description": "HTTP for humans"},
-            {"name": "noop", "html_url": ""},  # missing url -> skipped
-        ]},
+        json={
+            "items": [
+                {
+                    "full_name": "psf/requests",
+                    "html_url": "https://github.com/psf/requests",
+                    "description": "HTTP for humans",
+                },
+                {"name": "noop", "html_url": ""},  # missing url -> skipped
+            ]
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_github(client, "requests", 5)
@@ -78,13 +87,20 @@ async def test_github_swallows_errors(httpx_mock):
 # Stack Exchange
 # ---------------------------------------------------------------------------
 
+
 async def test_stackexchange_returns_documents(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://api\.stackexchange\.com/.*"),
-        json={"items": [
-            {"title": "How do I &amp; X?", "link": "https://stackoverflow.com/q/1",
-             "tags": ["python", "async"], "score": 12},
-        ]},
+        json={
+            "items": [
+                {
+                    "title": "How do I &amp; X?",
+                    "link": "https://stackoverflow.com/q/1",
+                    "tags": ["python", "async"],
+                    "score": 12,
+                },
+            ]
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_stackexchange(client, "async python", 5)
@@ -109,6 +125,7 @@ ARXIV_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
 </feed>
 """
 
+
 async def test_arxiv_returns_documents(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://export\.arxiv\.org/.*"),
@@ -125,11 +142,17 @@ async def test_arxiv_returns_documents(httpx_mock):
 # PyPI
 # ---------------------------------------------------------------------------
 
+
 async def test_pypi_returns_document(httpx_mock):
     httpx_mock.add_response(
         url="https://pypi.org/pypi/requests/json",
-        json={"info": {"name": "requests", "summary": "HTTP for humans",
-                       "package_url": "https://pypi.org/project/requests/"}},
+        json={
+            "info": {
+                "name": "requests",
+                "summary": "HTTP for humans",
+                "package_url": "https://pypi.org/project/requests/",
+            }
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_pypi(client, "requests", 5)
@@ -156,14 +179,17 @@ async def test_pypi_rejects_invalid_name():
 # IMDb (autosuggest)
 # ---------------------------------------------------------------------------
 
+
 async def test_imdb_maps_ids_to_canonical_urls(httpx_mock):
     httpx_mock.add_response(
         url=re.compile(r"https://v3\.sg\.media-imdb\.com/suggestion/.*"),
-        json={"d": [
-            {"id": "tt0468569", "l": "The Dark Knight", "q": "feature", "s": "Christian Bale"},
-            {"id": "nm0000288", "l": "Christian Bale", "s": "Actor"},
-            {"id": "ls123", "l": "a user list"},  # not a title/name -> skipped
-        ]},
+        json={
+            "d": [
+                {"id": "tt0468569", "l": "The Dark Knight", "q": "feature", "s": "Christian Bale"},
+                {"id": "nm0000288", "l": "Christian Bale", "s": "Actor"},
+                {"id": "ls123", "l": "a user list"},  # not a title/name -> skipped
+            ]
+        },
     )
     async with httpx.AsyncClient() as client:
         docs = await search_imdb(client, "the dark knight", 5)

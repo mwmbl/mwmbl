@@ -3,18 +3,15 @@ from datetime import datetime, timedelta
 from glob import glob
 from itertools import islice
 from logging import getLogger
-from pathlib import Path
 from urllib.parse import urlparse
 
 import django
-from django.conf import settings
 from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.crawler.urls import URLDatabase
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 
 logger = getLogger(__name__)
@@ -288,10 +285,10 @@ class StatsManager:
     def record_dataset(self, hashed_dataset) -> None:
         """Record dataset statistics from a dataset submission."""
         from datetime import datetime
-        
+
         # Parse the date from the dataset
         try:
-            dataset_date = datetime.strptime(hashed_dataset.date, '%Y-%m-%d').date()
+            dataset_date = datetime.strptime(hashed_dataset.date, "%Y-%m-%d").date()
         except ValueError:
             # If date parsing fails, use current date
             dataset_date = datetime.utcnow().date()
@@ -320,14 +317,15 @@ def get_test_batches():
             yield HashedBatch.parse_raw(gzip_file.read())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     django.setup()
-    redis = Redis(host='localhost', port=6379, decode_responses=True)
+    redis = Redis(host="localhost", port=6379, decode_responses=True)
     stats = StatsManager(redis)
     batches = get_test_batches()
     start = datetime.now()
     processed = 0
     import logging
+
     logging.basicConfig(level=logging.INFO)
     for batch in islice(batches, 10000):
         if len(batch.items) <= 2:
@@ -337,4 +335,4 @@ if __name__ == '__main__':
     total_time = (datetime.now() - start).total_seconds()
     print("Processed", processed)
     print("Total time", total_time)
-    print("Time per batch", total_time/processed)
+    print("Time per batch", total_time / processed)

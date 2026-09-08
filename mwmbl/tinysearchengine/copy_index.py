@@ -1,10 +1,11 @@
 """
 Copy an old index into a new one
 """
+
 from collections import defaultdict
 from logging import getLogger
 
-from mwmbl.indexer.index_batches import index_pages, get_url_score
+from mwmbl.indexer.index_batches import get_url_score, index_pages
 from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
 from mwmbl.utils import add_term_infos
 
@@ -16,7 +17,7 @@ def copy_pages(old_index_path: str, new_index_path: str, start_page: int, num_pa
 
     # Get all old indexes:
     page_documents = defaultdict(list)
-    with (TinyIndex(item_factory=Document, index_path=new_index_path) as new_index):
+    with TinyIndex(item_factory=Document, index_path=new_index_path) as new_index:
         with TinyIndex(item_factory=Document, index_path=old_index_path) as old_index:
             logger.info(f"Old index has {old_index.num_pages} pages")
 
@@ -33,14 +34,17 @@ def copy_pages(old_index_path: str, new_index_path: str, start_page: int, num_pa
                     logger.warning("Skipping unreadable page %d of %s", page_index, old_index_path)
                     continue
                 documents_with_terms = add_term_infos(documents, old_index, page_index)
-                documents_with_scores = [Document(
-                    document.title,
-                    document.url,
-                    document.extract,
-                    get_url_score(document.url),
-                    document.term,
-                    state=document.state
-                ) for document in documents_with_terms]
+                documents_with_scores = [
+                    Document(
+                        document.title,
+                        document.url,
+                        document.extract,
+                        get_url_score(document.url),
+                        document.term,
+                        state=document.state,
+                    )
+                    for document in documents_with_terms
+                ]
                 for document in documents_with_scores:
                     new_page = new_index.get_key_page_index(document.term)
                     page_documents[new_page].append(document)

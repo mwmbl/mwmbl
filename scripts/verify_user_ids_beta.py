@@ -12,10 +12,10 @@ Usage:
 """
 
 import argparse
-import sys
-import os
-import time
 import json
+import os
+import sys
+import time
 
 import redis
 import requests
@@ -23,7 +23,7 @@ import requests
 # Must be set before importing retrieve (used in the User-Agent string)
 os.environ.setdefault("MWMBL_CONTACT_INFO", "beta-test@mwmbl.org")
 
-from mwmbl.crawler.retrieve import crawl_url, CRAWLER_VERSION
+from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_url
 from mwmbl.settings import REDIS_URL
 
 _redis = None
@@ -35,6 +35,7 @@ def _get_redis() -> redis.Redis:
     if _redis is None:
         _redis = redis.from_url(REDIS_URL, decode_responses=True)
     return _redis
+
 
 BETA_BASE = "http://localhost:8000"
 MAX_URLS = 5
@@ -76,12 +77,14 @@ def main():
         content = raw.get("content")
         if content and not raw.get("error") and content.get("title"):
             last_crawled = int(raw["timestamp"] / 1000)  # ms → seconds
-            results.append({
-                "url": raw["url"],
-                "title": content["title"],
-                "extract": content.get("extract", ""),
-                "last_crawled": last_crawled,
-            })
+            results.append(
+                {
+                    "url": raw["url"],
+                    "title": content["title"],
+                    "extract": content.get("extract", ""),
+                    "last_crawled": last_crawled,
+                }
+            )
             print(f"        OK — {content['title'][:70]}")
         else:
             err = (raw.get("error") or {}).get("name", "unknown error")

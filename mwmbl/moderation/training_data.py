@@ -44,6 +44,7 @@ Historic malformed submissions are excluded. 70 rows are ``null``, an IP address
 capitalised; migrations 0032/0033 fixed that at the API layer, so training on them would teach
 the model to detect a problem that can no longer occur.
 """
+
 from __future__ import annotations
 
 import json
@@ -55,8 +56,7 @@ from typing import Iterable, Optional
 
 import requests
 
-from mwmbl.indexer.blacklist_providers import (
-    AdultContentBlacklistProvider, HaGeZiBlacklistProvider)
+from mwmbl.indexer.blacklist_providers import AdultContentBlacklistProvider, HaGeZiBlacklistProvider
 from mwmbl.models import DomainEvidence, DomainSubmission
 from mwmbl.moderation.evidence import page_texts
 from mwmbl.moderation.features import ModerationExample
@@ -80,8 +80,8 @@ MAX_DERIVED_DOMAIN_LENGTH = 40
 class TrainingRow:
     domain: str
     rejected: bool
-    reason: str          # "" for approvals
-    source: str          # REAL | DERIVED | SEED
+    reason: str  # "" for approvals
+    source: str  # REAL | DERIVED | SEED
     page_texts: list[str]
     timestamp: Optional[str] = None
     # Who submitted it. Not a feature - the model deliberately does not read the submitter,
@@ -102,41 +102,39 @@ class TrainingRow:
 
 def is_trainable_domain(domain: str) -> bool:
     """Reject the historic malformed names that the API no longer accepts."""
-    return (bool(domain)
-            and domain == domain.lower()
-            and VALID_DOMAIN_REGEX.fullmatch(domain) is not None)
+    return bool(domain) and domain == domain.lower() and VALID_DOMAIN_REGEX.fullmatch(domain) is not None
 
 
 def real_rows() -> list[TrainingRow]:
     """Decided submissions, joined to whatever page text has been crawled for them."""
     evidence_by_domain = {
-        evidence.domain: evidence
-        for evidence in DomainEvidence.objects.filter(state=DomainEvidence.State.READY)
+        evidence.domain: evidence for evidence in DomainEvidence.objects.filter(state=DomainEvidence.State.READY)
     }
 
     rows = []
-    submissions = (DomainSubmission.objects
-                   .filter(status__in=("APPROVED", "REJECTED"))
-                   .order_by("submitted_on"))
+    submissions = DomainSubmission.objects.filter(status__in=("APPROVED", "REJECTED")).order_by("submitted_on")
     for submission in submissions.iterator():
         if not is_trainable_domain(submission.name):
             continue
         rejected = submission.status == "REJECTED"
-        rows.append(TrainingRow(
-            domain=submission.name,
-            rejected=rejected,
-            reason=submission.rejection_reason if rejected else "",
-            source=REAL,
-            page_texts=page_texts(evidence_by_domain.get(submission.name)),
-            timestamp=submission.submitted_on.isoformat() if submission.submitted_on else None,
-            submitter=str(submission.submitted_by_id),
-            suggested_status=submission.suggested_status,
-        ))
+        rows.append(
+            TrainingRow(
+                domain=submission.name,
+                rejected=rejected,
+                reason=submission.rejection_reason if rejected else "",
+                source=REAL,
+                page_texts=page_texts(evidence_by_domain.get(submission.name)),
+                timestamp=submission.submitted_on.isoformat() if submission.submitted_on else None,
+                submitter=str(submission.submitted_by_id),
+                suggested_status=submission.suggested_status,
+            )
+        )
     return rows
 
 
-def derived_rows(reasons_needing_data: Iterable[str], per_reason: int,
-                 exclude: set[str], seed: int = 0) -> list[TrainingRow]:
+def derived_rows(
+    reasons_needing_data: Iterable[str], per_reason: int, exclude: set[str], seed: int = 0
+) -> list[TrainingRow]:
     """Blocklist domains standing in for reason classes with too little real data.
 
     ``exclude`` must contain every domain that appears in the real data, in either split, so a
@@ -156,9 +154,9 @@ def derived_rows(reasons_needing_data: Iterable[str], per_reason: int,
         pool = [domain for domain in _fetch_apex_domains(url) if domain not in exclude]
         random.Random(seed).shuffle(pool)
         rows.extend(
-            TrainingRow(domain=domain, rejected=True, reason=reason, source=DERIVED,
-                        page_texts=[])
-            for domain in pool[:per_reason])
+            TrainingRow(domain=domain, rejected=True, reason=reason, source=DERIVED, page_texts=[])
+            for domain in pool[:per_reason]
+        )
         logger.info("Derived %d %s rows from %s", min(per_reason, len(pool)), reason, url)
     return rows
 
@@ -173,13 +171,15 @@ def seed_rows(path: Path = SEED_LABELS_PATH) -> list[TrainingRow]:
         if not line or line.startswith("#"):
             continue
         record = json.loads(line)
-        rows.append(TrainingRow(
-            domain=record["domain"],
-            rejected=record["status"] == "REJECTED",
-            reason=record.get("reason", ""),
-            source=SEED,
-            page_texts=[record["text"]] if record.get("text") else [],
-        ))
+        rows.append(
+            TrainingRow(
+                domain=record["domain"],
+                rejected=record["status"] == "REJECTED",
+                reason=record.get("reason", ""),
+                source=SEED,
+                page_texts=[record["text"]] if record.get("text") else [],
+            )
+        )
     return rows
 
 
@@ -194,8 +194,7 @@ def _fetch_apex_domains(url: str) -> list[str]:
         if not line:
             continue
         parts = line.split()
-        domain = (parts[1] if len(parts) >= 2 and parts[0] in ("0.0.0.0", "127.0.0.1")
-                  else parts[0])
+        domain = parts[1] if len(parts) >= 2 and parts[0] in ("0.0.0.0", "127.0.0.1") else parts[0]
         labels = domain.split(".")
         if len(labels) != 2 or len(domain) > MAX_DERIVED_DOMAIN_LENGTH:
             continue

@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import
-from __future__ import division, print_function, unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import re
 
 from .utils import normalize_whitespace
-
 
 HEADINGS_PATTERN = re.compile(r"\bh\d\b")
 
 
 class Paragraph(object):
     """Object representing one block of text in HTML."""
+
     def __init__(self, path):
         self.dom_path = path.dom
         self.xpath = path.xpath

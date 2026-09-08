@@ -5,6 +5,7 @@ tech/academic-skewed source catalogue otherwise misses. The NHS search page is
 server-rendered; each result is an ``a.app-search-results-item`` whose real
 target path is URL-encoded in the click-tracker's ``url`` query parameter.
 """
+
 import logging
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 

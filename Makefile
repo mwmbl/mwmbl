@@ -32,7 +32,8 @@ TEST_SETTINGS          := mwmbl.settings_test
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install patch-xgboost migrate test test-file run run-background lint
+.PHONY: help install install-hooks patch-xgboost migrate test test-file run run-background \
+        check fix format format-check lint lint-fix typecheck typecheck-all
 
 help:
 	@echo "Available targets:"
@@ -42,6 +43,16 @@ help:
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
+	@echo ""
+	@echo "  check          Run every check CI runs: format-check, lint, typecheck"
+	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
+	@echo "  format         Reformat the code with ruff"
+	@echo "  format-check   Check formatting without writing (CI gate)"
+	@echo "  lint           Run ruff lint checks"
+	@echo "  lint-fix       Run ruff lint checks, applying safe fixes"
+	@echo "  typecheck      Run ty, failing only on error-level diagnostics (CI gate)"
+	@echo "  typecheck-all  Run ty showing the full warning backlog, never fails"
+	@echo "  install-hooks  Install the pre-commit hooks into .git/hooks"
 
 install:
 	uv sync
@@ -77,3 +88,44 @@ run:
 run-background:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
 		uv run python manage.py process_tasks --settings=$(DJANGO_SETTINGS_MODULE)
+
+# ---------------------------------------------------------------------------
+# Checks
+#
+# `make check` is exactly what CI and the pre-commit hook run. Keep the three
+# targets below in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
+# ---------------------------------------------------------------------------
+
+check: format-check lint typecheck
+
+fix: format lint-fix
+
+format:
+	uv run ruff format
+
+format-check:
+	uv run ruff format --check
+
+lint:
+	uv run ruff check
+
+lint-fix:
+	uv run ruff check --fix
+
+# Most rules are downgraded to "warn" in pyproject.toml (see [tool.ty.rules]) because
+# they have a large pre-existing baseline - notably Django's `Model.objects`, which ty
+# cannot see. Print the error-level diagnostics only, and fail on those alone, so the
+# warning backlog does not bury a real regression.
+typecheck:
+	@output=$$(uv run ty check --exit-zero-on-warning --output-format concise 2>&1); \
+		status=$$?; \
+		echo "$$output" | grep -E ' error\[' || true; \
+		echo "$$output" | tail -n 1; \
+		exit $$status
+
+# The full backlog, warnings included. Advisory: never fails the build.
+typecheck-all:
+	uv run ty check --exit-zero-on-warning
+
+install-hooks:
+	uv run pre-commit install

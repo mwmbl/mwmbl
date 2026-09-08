@@ -1,6 +1,6 @@
 import os
 from collections import Counter
-from datetime import date, timedelta, datetime
+from datetime import date, datetime, timedelta
 from logging import getLogger
 from pathlib import Path
 from random import Random
@@ -36,7 +36,7 @@ def count_urls_continuously():
         start_time = datetime.utcnow()
         count_urls()
         end_time = datetime.utcnow()
-        total_time = (end_time - start_time)
+        total_time = end_time - start_time
         time_remaining = 60 * 60 * 24 - total_time.total_seconds()
         logger.info(f"Counting took {total_time}. Sleeping for {timedelta(seconds=time_remaining)}.")
         sleep(time_remaining)
@@ -72,10 +72,14 @@ def count_urls():
 
     num_results_estimate = int(total_docs / PAGE_PROPORTION_TO_SAMPLE)
     url_count_estimate = smoothed_jackknife_estimator(attributes=dict(url_counts.items()), n_pop=num_results_estimate)
-    domain_count_estimate = smoothed_jackknife_estimator(attributes=dict(domain_counts.items()), n_pop=num_results_estimate)
+    domain_count_estimate = smoothed_jackknife_estimator(
+        attributes=dict(domain_counts.items()), n_pop=num_results_estimate
+    )
 
-    logger.info(f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
-                f"and {num_results_estimate} results in the index.")
+    logger.info(
+        f"Estimated {url_count_estimate} unique URLs, {domain_count_estimate} unique domains, "
+        f"and {num_results_estimate} results in the index."
+    )
 
     redis = get_redis()
 
@@ -135,6 +139,7 @@ def _get_count(redis, count_dict, key, date_i):
 if __name__ == "__main__":
     # configure logging
     import logging
+
     logging.basicConfig(level=logging.INFO)
 
     count_urls()

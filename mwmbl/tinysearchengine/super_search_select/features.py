@@ -15,6 +15,7 @@ profiles are fine; raw query projections/embeddings are not and must never be
 added here. ``test_persisted_features_are_scalar_and_reconstruction_safe``
 trips if a feature name suggests otherwise.
 """
+
 from __future__ import annotations
 
 import re
@@ -36,13 +37,13 @@ from mwmbl.tinysearchengine.super_search_select.registry import SiteMeta
 # to a vector; the dense (intent, source) co-occurrence is what makes this learnable
 # where raw per-term one-hot is ~93% singletons on the eval matrix.
 INTENT_NAMES = [
-    "code",       # programming / software / dev tooling
-    "academic",   # papers / research / formal study
-    "gaming",     # video games, mods, speedruns
-    "music",      # songs, lyrics, albums, instruments
-    "news",       # current events / politics / recency
-    "howto",      # questions / guides / instructional
-    "media",      # books / film / art / reviews
+    "code",  # programming / software / dev tooling
+    "academic",  # papers / research / formal study
+    "gaming",  # video games, mods, speedruns
+    "music",  # songs, lyrics, albums, instruments
+    "news",  # current events / politics / recency
+    "howto",  # questions / guides / instructional
+    "media",  # books / film / art / reviews
     "reference",  # definitions / encyclopedic / "what is"
 ]
 
@@ -51,39 +52,54 @@ _INTENT_PATTERNS = {
         r"\b(python|javascript|typescript|rust|golang|c\+\+|api|sdk|cli|npm|pip|"
         r"pypi|github|gitlab|git|docker|kubernetes|regex|compiler|runtime|library|"
         r"framework|package|module|function|async|bug|error|exception|traceback|"
-        r"syntax|code|coding|programming|developer|debug|install)\b", re.I),
+        r"syntax|code|coding|programming|developer|debug|install)\b",
+        re.I,
+    ),
     "academic": re.compile(
         r"\b(paper|papers|study|studies|research|thesis|dissertation|theorem|proof|"
         r"lemma|journal|arxiv|preprint|citation|hypothesis|equation|dataset|"
-        r"benchmark|algorithm|peer.?review)\b", re.I),
+        r"benchmark|algorithm|peer.?review)\b",
+        re.I,
+    ),
     "gaming": re.compile(
         r"\b(game|games|gaming|gamer|mod|mods|speedrun|playthrough|walkthrough|rpg|"
         r"fps|mmo|roguelike|pokemon|pokémon|minecraft|factorio|steam|itch|"
-        r"console|xbox|playstation|nintendo)\b", re.I),
+        r"console|xbox|playstation|nintendo)\b",
+        re.I,
+    ),
     "music": re.compile(
         r"\b(song|songs|lyric|lyrics|album|albums|band|bands|music|musician|guitar|"
-        r"piano|synth|chord|chords|melody|track|tracks|remix|vinyl|discography)\b", re.I),
+        r"piano|synth|chord|chords|melody|track|tracks|remix|vinyl|discography)\b",
+        re.I,
+    ),
     "news": re.compile(
         r"\b(news|election|elections|president|senate|congress|war|breaking|latest|"
         r"today|recent|court|verdict|policy|sanctions|protest|economy|inflation|"
-        r"20\d\d)\b", re.I),
+        r"20\d\d)\b",
+        re.I,
+    ),
     "howto": re.compile(
         r"\b(how|what|why|who|when|where|guide|guides|tutorial|tutorials|tips|howto|"
-        r"learn|fix|setup|configure|versus|vs|difference)\b", re.I),
+        r"learn|fix|setup|configure|versus|vs|difference)\b",
+        re.I,
+    ),
     "media": re.compile(
         r"\b(book|books|novel|novels|author|authors|film|films|movie|movies|cinema|"
         r"series|art|artist|painting|paintings|museum|gallery|poem|poetry|story|"
-        r"stories|review|reviews)\b", re.I),
+        r"stories|review|reviews)\b",
+        re.I,
+    ),
     "reference": re.compile(
         r"\b(define|definition|meaning|means|history|origin|encyclopedia|wiki|"
-        r"wikipedia|biography|facts|overview|explained|explain)\b", re.I),
+        r"wikipedia|biography|facts|overview|explained|explain)\b",
+        re.I,
+    ),
 }
 
 
 def classify_intent(query: str) -> list[float]:
     """One-hot the query over ``INTENT_NAMES`` via lexicon rules (multi-label)."""
-    return [1.0 if _INTENT_PATTERNS[name].search(query or "") else 0.0
-            for name in INTENT_NAMES]
+    return [1.0 if _INTENT_PATTERNS[name].search(query or "") else 0.0 for name in INTENT_NAMES]
 
 
 # Stable feature order. ``bias`` is the per-arm intercept (lets the bandit learn
@@ -111,6 +127,7 @@ _CODE_RE = re.compile(r"[_/{}();]|::|->|[a-z][A-Z]|\.\w")
 @dataclass
 class QueryContext:
     """Per-query, site-independent context, computed once per search."""
+
     bow: np.ndarray
     cng: np.ndarray
     n_tokens: int
@@ -132,9 +149,10 @@ class QueryContext:
 class SiteStats:
     """Online per-site stats used as features (read from Redis via ``rstats``;
     defaults for cold sites)."""
-    contribution_ema: float = 0.0   # EMA of the source's per-request reward (judge score)
-    latency_ema: float = 0.0        # mean response time, seconds
-    failure_rate: float = 0.0       # fraction of recent queries that errored/timed out
+
+    contribution_ema: float = 0.0  # EMA of the source's per-request reward (judge score)
+    latency_ema: float = 0.0  # mean response time, seconds
+    failure_rate: float = 0.0  # fraction of recent queries that errored/timed out
 
 
 def feature_vector(
@@ -147,19 +165,20 @@ def feature_vector(
     stats = stats or SiteStats()
     bow_profile, cng_profile = profile
     timeout = settings.SUPER_SEARCH_PER_SOURCE_TIMEOUT or 1.0
-    x = np.array([
-        1.0,                                          # bias
-        vectors.cosine(qctx.bow, bow_profile),        # cos_bow
-        vectors.cosine(qctx.cng, cng_profile),        # cos_cng
-        meta.popularity,                              # popularity
-        meta.estimated_pages,                         # estimated_pages
-        stats.contribution_ema,                       # contribution_ema
-        min(stats.latency_ema / timeout, 1.0),        # latency_penalty (0..1)
-        stats.failure_rate,                           # failure_rate
-        min(qctx.n_tokens, 10) / 10.0,                # query_len (normalised)
-        1.0 if qctx.has_code_token else 0.0,          # has_code_token
-        *qctx.intent,                                 # intent_* one-hot block
-    ], dtype=np.float64)
+    x = np.array(
+        [
+            1.0,  # bias
+            vectors.cosine(qctx.bow, bow_profile),  # cos_bow
+            vectors.cosine(qctx.cng, cng_profile),  # cos_cng
+            meta.popularity,  # popularity
+            meta.estimated_pages,  # estimated_pages
+            stats.contribution_ema,  # contribution_ema
+            min(stats.latency_ema / timeout, 1.0),  # latency_penalty (0..1)
+            stats.failure_rate,  # failure_rate
+            min(qctx.n_tokens, 10) / 10.0,  # query_len (normalised)
+            1.0 if qctx.has_code_token else 0.0,  # has_code_token
+            *qctx.intent,  # intent_* one-hot block
+        ],
+        dtype=np.float64,
+    )
     return x
-
-

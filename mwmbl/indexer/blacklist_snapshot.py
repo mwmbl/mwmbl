@@ -40,6 +40,7 @@ access, and every worker picks the exemption up with the next snapshot. The cost
 approval only takes effect on the next rebuild, which is why approving a submission
 schedules one (mwmbl.signals).
 """
+
 import hashlib
 import threading
 import time
@@ -69,7 +70,7 @@ SNAPSHOT_KEY = "blacklist:domain-hashes:v1"
 SNAPSHOT_VERSION_KEY = "blacklist:domain-hashes:v1:version"
 
 # Hashes are stored little-endian so the blob is portable between machines.
-HASH_DTYPE = np.dtype(np.uint64).newbyteorder('<')
+HASH_DTYPE = np.dtype(np.uint64).newbyteorder("<")
 
 
 _redis: Optional[redis.Redis] = None
@@ -94,6 +95,7 @@ def hash_domains(domains: Iterable[str]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Write side - runs in the background task only
 # ---------------------------------------------------------------------------
+
 
 def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
     """Every domain from the remote lists reachable from this provider.
@@ -128,9 +130,13 @@ def build_snapshot(provider: BlacklistProvider) -> bytes:
     num_unblocked = len(listed_domains) - len(domains)
     all_hashes = hash_domains(domains)
     hashes = np.unique(all_hashes)  # np.unique sorts, which is what we need
-    logger.info("Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB; "
-                "%d entries removed by curated domains",
-                len(domains), len(hashes), hashes.nbytes / 1e6, num_unblocked)
+    logger.info(
+        "Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB; %d entries removed by curated domains",
+        len(domains),
+        len(hashes),
+        hashes.nbytes / 1e6,
+        num_unblocked,
+    )
     return hashes.astype(HASH_DTYPE).tobytes()
 
 
@@ -149,8 +155,7 @@ def publish_snapshot(blob: bytes, redis_client: Optional[redis.Redis] = None) ->
     return version
 
 
-def refresh_snapshot(provider: Optional[BlacklistProvider] = None,
-                     redis_client: Optional[redis.Redis] = None) -> str:
+def refresh_snapshot(provider: Optional[BlacklistProvider] = None, redis_client: Optional[redis.Redis] = None) -> str:
     if provider is None:
         provider = get_default_blacklist_provider()
     blob = build_snapshot(provider)
@@ -161,6 +166,7 @@ def refresh_snapshot(provider: Optional[BlacklistProvider] = None,
 # Read side - runs in every search worker
 # ---------------------------------------------------------------------------
 
+
 class SnapshotBlacklist:
     """Membership queries against the published snapshot, plus the local built-in rules.
 
@@ -170,8 +176,7 @@ class SnapshotBlacklist:
     against the previous array.
     """
 
-    def __init__(self, built_in_rules: Optional[BlacklistProvider] = None,
-                 redis_client: Optional[redis.Redis] = None):
+    def __init__(self, built_in_rules: Optional[BlacklistProvider] = None, redis_client: Optional[redis.Redis] = None):
         self._built_in_rules = built_in_rules if built_in_rules is not None else BuiltInRulesBlacklistProvider()
         self._redis = redis_client
         self._array: Optional[np.ndarray] = None
@@ -233,8 +238,12 @@ class SnapshotBlacklist:
             # np.frombuffer would raise, and this runs at import time via search_setup, so
             # a truncated blob would stop every web worker from starting. The published
             # snapshot is always a whole number of hashes, so this means a bad write.
-            logger.error("Blacklist snapshot version %s is %d bytes, not a multiple of %d; ignoring it",
-                         version[:12], len(blob), HASH_DTYPE.itemsize)
+            logger.error(
+                "Blacklist snapshot version %s is %d bytes, not a multiple of %d; ignoring it",
+                version[:12],
+                len(blob),
+                HASH_DTYPE.itemsize,
+            )
             return False
 
         array = np.frombuffer(blob, dtype=HASH_DTYPE)

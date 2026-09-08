@@ -8,6 +8,7 @@ again. The bug these tests guard against was that `update_found_urls` derived
 first-time crawl came back with `last_crawled=None` and `queue_urls` treated it
 as never-crawled.
 """
+
 import glob
 import os
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ from datetime import datetime, timezone
 import fakeredis
 import pytest
 
-from mwmbl.crawler.urls import URLDatabase, FoundURL, URLStatus
+from mwmbl.crawler.urls import FoundURL, URLDatabase, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.redis_url_queue import RedisURLQueue
@@ -24,6 +25,7 @@ from mwmbl.redis_url_queue import RedisURLQueue
 @pytest.fixture
 def clean_bloom_filters():
     """Remove any bloom filter files so each test starts from a clean slate."""
+
     def _remove():
         for path in glob.glob("/tmp/test_urls*.bloom"):
             os.remove(path)

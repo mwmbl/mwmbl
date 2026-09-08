@@ -2,9 +2,8 @@ import os
 
 from mwmbl.settings_dev import *
 
-
 DATA_PATH = f"{os.environ['HOME']}/.mwmbl"
-INDEX_NAME = 'crawl-index.tinysearch'
+INDEX_NAME = "crawl-index.tinysearch"
 
 # Index of around 400Mb = 4096b * 100_000
 NUM_PAGES = 100_000

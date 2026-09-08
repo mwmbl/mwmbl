@@ -1,14 +1,11 @@
 import hashlib
 import secrets
 
+from django.contrib.auth.models import AbstractUser
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
-from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
-from ninja import ModelSchema
-from ninja.orm import create_schema
 
-from mwmbl.usernames import generate_username
 from mwmbl.utils import bare_host
 
 
@@ -20,6 +17,7 @@ class UserCuration(models.Model):
     """
     Deprecated - use Curation instead
     """
+
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
     timestamp = models.DateTimeField()
     url = models.CharField(max_length=300)
@@ -99,12 +97,12 @@ class DomainSubmission(models.Model):
             ("change_domain_submission_status", "Can change the domain submission status"),
         ]
         indexes = [
-            models.Index(fields=['submitted_on']),
+            models.Index(fields=["submitted_on"]),
             # The moderation queue asks "has this domain been decided before?" and "has this
             # submitter?" once per row it renders, as correlated subqueries. Both are lookups
             # into this table by a decided status. See mwmbl.moderation.suggest.
-            models.Index(fields=['name', 'status']),
-            models.Index(fields=['submitted_by', 'status']),
+            models.Index(fields=["name", "status"]),
+            models.Index(fields=["submitted_by", "status"]),
         ]
         constraints = [
             # `choices` is documentation, not enforcement: it is checked by full_clean(),
@@ -130,10 +128,16 @@ class DomainSubmission(models.Model):
     name = models.CharField(max_length=300)
     submitted_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="domain_submissions")
     submitted_on = models.DateTimeField(default=timezone.now)
-    status = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_SUBMISSION_STATUS.items()], default="PENDING")
-    status_changed_by = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, null=True, blank=True, related_name="domain_submissions_changed")
+    status = models.CharField(
+        max_length=20, choices=[(k, v) for k, v in DOMAIN_SUBMISSION_STATUS.items()], default="PENDING"
+    )
+    status_changed_by = models.ForeignKey(
+        MwmblUser, on_delete=models.CASCADE, null=True, blank=True, related_name="domain_submissions_changed"
+    )
     status_changed_on = models.DateTimeField(null=True, blank=True)
-    rejection_reason = models.CharField(max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True)
+    rejection_reason = models.CharField(
+        max_length=20, choices=[(k, v) for k, v in DOMAIN_REJECTION_REASON.items()], blank=True
+    )
     rejection_detail = models.CharField(max_length=300, blank=True)
 
     # What the suggestion model was showing when the moderator made this decision. Deliberately
@@ -162,14 +166,14 @@ def generate_api_key() -> tuple[str, str]:
 
 class ApiKey(models.Model):
     class Scope(models.TextChoices):
-        CRAWL  = "crawl",  "Crawl"
+        CRAWL = "crawl", "Crawl"
         SEARCH = "search", "Search"
 
-    user       = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
-    key        = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    key = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
     created_on = models.DateTimeField(auto_now_add=True)
-    name       = models.CharField(max_length=100, blank=True, default="")
-    scopes     = ArrayField(
+    name = models.CharField(max_length=100, blank=True, default="")
+    scopes = ArrayField(
         models.CharField(max_length=20, choices=Scope.choices),
         default=list,
     )
@@ -195,6 +199,7 @@ class WasmEvaluationJob(models.Model):
 
 class UsageBucket(models.Model):
     """Records a user's API usage for a specific calendar month."""
+
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
     year = models.IntegerField()
     month = models.IntegerField()
@@ -205,9 +210,9 @@ class UsageBucket(models.Model):
     reported_overage = models.IntegerField(default=0)
 
     class Meta:
-        unique_together = [('user', 'year', 'month')]
+        unique_together = [("user", "year", "month")]
         indexes = [
-            models.Index(fields=['year', 'month']),
+            models.Index(fields=["year", "month"]),
         ]
 
 
@@ -229,9 +234,7 @@ class AgreementType(models.TextChoices):
 
 class UserAgreement(models.Model):
     # SET_NULL rather than CASCADE so the audit record survives account deletion.
-    user = models.ForeignKey(
-        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="agreements"
-    )
+    user = models.ForeignKey(MwmblUser, on_delete=models.SET_NULL, null=True, related_name="agreements")
     agreement_type = models.CharField(max_length=50, choices=AgreementType.choices)
     version_id = models.CharField(max_length=100)
     accepted_at = models.DateTimeField(auto_now_add=True)
@@ -254,11 +257,10 @@ class MarketingConsent(models.Model):
     Every opt-in and opt-out writes a new row; the current state for a source is
     the `opted_in` of the latest row. Mirrors UserAgreement.
     """
+
     # SET_NULL (not CASCADE) so the consent proof survives account deletion,
     # matching UserAgreement.
-    user = models.ForeignKey(
-        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="marketing_consents"
-    )
+    user = models.ForeignKey(MwmblUser, on_delete=models.SET_NULL, null=True, related_name="marketing_consents")
     source = models.CharField(max_length=10, choices=MarketingSource.choices)
     opted_in = models.BooleanField()
     timestamp = models.DateTimeField(auto_now_add=True)
@@ -274,7 +276,7 @@ class SearchResultVote(models.Model):
         "upvote": "User upvoted this result",
         "downvote": "User downvoted this result",
     }
-    
+
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
     url = models.URLField(max_length=500)  # The URL of the search result
     query = models.CharField(max_length=300)  # The search query context
@@ -290,13 +292,13 @@ class SearchResultVote(models.Model):
         super().save(*args, **kwargs)
 
     class Meta:
-        unique_together = ['user', 'url', 'query']  # One vote per user per result per query
+        unique_together = ["user", "url", "query"]  # One vote per user per result per query
         indexes = [
-            models.Index(fields=['url', 'query']),
-            models.Index(fields=['timestamp']),
+            models.Index(fields=["url", "query"]),
+            models.Index(fields=["timestamp"]),
             # The per-domain rollup the moderation queue reads: count this domain's upvotes,
             # count its downvotes. See mwmbl.moderation.suggest.annotate_votes.
-            models.Index(fields=['domain', 'vote_type']),
+            models.Index(fields=["domain", "vote_type"]),
         ]
 
 
@@ -308,15 +310,16 @@ class SuperSearchImpression(models.Model):
     durable training data for the contextual bandit. Deliberately does not
     store the query text, to avoid persisting user search history.
     """
-    candidates = models.JSONField(default=list)   # all selectable source names (action space)
-    selected = models.JSONField(default=list)     # sources actually queried
-    features = models.JSONField(default=dict)     # {source: [feature vector]} for selected sources
-    rewards = models.JSONField(default=dict)      # {source: reward in [0, 1]}
+
+    candidates = models.JSONField(default=list)  # all selectable source names (action space)
+    selected = models.JSONField(default=list)  # sources actually queried
+    features = models.JSONField(default=dict)  # {source: [feature vector]} for selected sources
+    rewards = models.JSONField(default=dict)  # {source: reward in [0, 1]}
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         indexes = [
-            models.Index(fields=['timestamp']),
+            models.Index(fields=["timestamp"]),
         ]
 
 
@@ -328,16 +331,19 @@ class SourceProvenance(models.Model):
     offline including for descendant pages. Deliberately does not store the
     query text, to avoid persisting user search history.
     """
-    url = models.URLField(max_length=500, unique=True)   # first source wins, matches source_by_url semantics
-    source = models.CharField(max_length=128)            # super-search source name (e.g. "gov.uk")
-    parent_url = models.URLField(max_length=500, null=True, blank=True)  # page this URL was found on (null = direct result)
-    depth = models.IntegerField(default=0)               # 0 = direct super-search result; +1 per crawl hop
+
+    url = models.URLField(max_length=500, unique=True)  # first source wins, matches source_by_url semantics
+    source = models.CharField(max_length=128)  # super-search source name (e.g. "gov.uk")
+    parent_url = models.URLField(
+        max_length=500, null=True, blank=True
+    )  # page this URL was found on (null = direct result)
+    depth = models.IntegerField(default=0)  # 0 = direct super-search result; +1 per crawl hop
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         indexes = [
-            models.Index(fields=['source']),
-            models.Index(fields=['timestamp']),
+            models.Index(fields=["source"]),
+            models.Index(fields=["timestamp"]),
         ]
 
 
@@ -371,13 +377,13 @@ class DomainEvidence(models.Model):
 
     # Crawl results.
     http_status = models.IntegerField(null=True, blank=True)
-    final_domain = models.CharField(max_length=300, blank=True)   # after redirects
-    error = models.CharField(max_length=100, blank=True)          # RobotsDenied, AbortError, ...
-    pages = models.JSONField(default=list)      # [{url, status, title, extract}], up to 3
-    signals = models.JSONField(default=dict)    # derived: lang, has_links, ad_script_count, ...
+    final_domain = models.CharField(max_length=300, blank=True)  # after redirects
+    error = models.CharField(max_length=100, blank=True)  # RobotsDenied, AbortError, ...
+    pages = models.JSONField(default=list)  # [{url, status, title, extract}], up to 3
+    signals = models.JSONField(default=dict)  # derived: lang, has_links, ad_script_count, ...
 
     # Precomputed suggestion. The queue reads these columns; it never calls the model.
-    suggested_action = models.CharField(max_length=10, blank=True)   # APPROVE | REJECT | UNSURE
+    suggested_action = models.CharField(max_length=10, blank=True)  # APPROVE | REJECT | UNSURE
     suggested_reason = models.CharField(max_length=20, blank=True)
     confidence = models.FloatField(null=True, blank=True)
     # How sure we are of the *reason*, and where it came from - both separate from the numbers
@@ -386,8 +392,8 @@ class DomainEvidence(models.Model):
     # and keeps `derived` (a reason class learned from blocklists rather than from moderator
     # decisions) visible to the moderator it is a caveat for.
     reason_confidence = models.FloatField(null=True, blank=True)
-    reason_source = models.CharField(max_length=10, blank=True)   # rule | model | derived
-    evidence = models.JSONField(default=list)   # cached rule + model evidence items
+    reason_source = models.CharField(max_length=10, blank=True)  # rule | model | derived
+    evidence = models.JSONField(default=list)  # cached rule + model evidence items
     model_version = models.CharField(max_length=50, blank=True)
 
     class Meta:
@@ -417,8 +423,8 @@ class ModerationModelArtifact(models.Model):
     """
 
     version = models.CharField(max_length=50, unique=True)
-    model = models.BinaryField()                # joblib pickle of a ModerationModel, ~1 MB
-    metrics = models.JSONField(default=dict)    # what train.evaluate measured for this model
+    model = models.BinaryField()  # joblib pickle of a ModerationModel, ~1 MB
+    metrics = models.JSONField(default=dict)  # what train.evaluate measured for this model
     created_on = models.DateTimeField(default=timezone.now)
 
     class Meta:

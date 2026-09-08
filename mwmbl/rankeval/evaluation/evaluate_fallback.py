@@ -39,6 +39,7 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \\
         uv run python -m mwmbl.rankeval.evaluation.evaluate_fallback --fraction 0.05
 """
+
 import os
 from argparse import ArgumentParser
 
@@ -53,12 +54,18 @@ django.setup()
 
 import mwmbl.rankeval.evaluation.evaluate_super_search as ss_module  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import (  # noqa: E402
-    NUM_RESULTS_FOR_EVAL, RankingModel, gold_scores_for)
+    NUM_RESULTS_FOR_EVAL,
+    RankingModel,
+    gold_scores_for,
+)
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter, MwmblRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
 from mwmbl.rankeval.paths import (  # noqa: E402
-    RANKINGS_DATASET_TEST_PATH, RANKINGS_DATASET_TRAIN_PATH, RUST_MODEL_PATH)
+    RANKINGS_DATASET_TEST_PATH,
+    RANKINGS_DATASET_TRAIN_PATH,
+    RUST_MODEL_PATH,
+)
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline  # noqa: E402
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker  # noqa: E402
 from mwmbl.tinysearchengine.mmr_rank import MMRRanker  # noqa: E402
@@ -72,6 +79,7 @@ def _standard_model(use_local: bool) -> MwmblRankingModel:
     """
     if use_local:
         from mwmbl.search_setup import ranker  # local index + LTR + MMR + wiki
+
         return MwmblRankingModel(ranker)
     model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
     ranker = MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), model, True, 3))
@@ -117,21 +125,33 @@ def _mean_sem(values: list[float]) -> str:
 
 def run():
     parser = ArgumentParser()
-    parser.add_argument("--fraction", type=float, default=0.05,
-                        help="Fraction of gold queries to sample (Super Search is slow).")
-    parser.add_argument("--thresholds", type=int, nargs="+", default=[1, 3, 5],
-                        help="Fallback when standard returns <= threshold results.")
-    parser.add_argument("--train", action="store_true",
-                        help="Evaluate on the train split instead of test.")
-    parser.add_argument("--local", action="store_true",
-                        help="Use the local dev index for standard search instead of "
-                             "the remote production index (fallback then fires on almost "
-                             "every query — for debugging only).")
-    parser.add_argument("--fired-only", action="store_true",
-                        help="Only run Super Search on queries where the fallback fires "
-                             "(faster, but omits the always-Super-Search comparison arm).")
-    parser.add_argument("--clear-cache", action="store_true",
-                        help="Clear the Super Search doc-pool cache before evaluating.")
+    parser.add_argument(
+        "--fraction", type=float, default=0.05, help="Fraction of gold queries to sample (Super Search is slow)."
+    )
+    parser.add_argument(
+        "--thresholds",
+        type=int,
+        nargs="+",
+        default=[1, 3, 5],
+        help="Fallback when standard returns <= threshold results.",
+    )
+    parser.add_argument("--train", action="store_true", help="Evaluate on the train split instead of test.")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Use the local dev index for standard search instead of "
+        "the remote production index (fallback then fires on almost "
+        "every query — for debugging only).",
+    )
+    parser.add_argument(
+        "--fired-only",
+        action="store_true",
+        help="Only run Super Search on queries where the fallback fires "
+        "(faster, but omits the always-Super-Search comparison arm).",
+    )
+    parser.add_argument(
+        "--clear-cache", action="store_true", help="Clear the Super Search doc-pool cache before evaluating."
+    )
     args = parser.parse_args()
 
     if args.clear_cache:
@@ -182,24 +202,27 @@ def run():
         print("Super Search  (always):       NDCG =", _mean_sem(list(super_ndcg.values())))
     print(f"{'=' * 78}")
 
-    print(f"\n{'thresh':>6}  {'fired':>12}  {'fallback NDCG (all)':>22}  "
-          f"{'fired-subset std':>17}  {'fired-subset super':>18}  {'Δ on fired':>11}")
+    print(
+        f"\n{'thresh':>6}  {'fired':>12}  {'fallback NDCG (all)':>22}  "
+        f"{'fired-subset std':>17}  {'fired-subset super':>18}  {'Δ on fired':>11}"
+    )
     for threshold in sorted(args.thresholds):
         fired = [q for q, c in standard_count.items() if c <= threshold]
-        fallback_all = [
-            super_ndcg[q] if standard_count[q] <= threshold else standard_ndcg[q]
-            for q in standard_ndcg
-        ]
+        fallback_all = [super_ndcg[q] if standard_count[q] <= threshold else standard_ndcg[q] for q in standard_ndcg]
         fired_std = [standard_ndcg[q] for q in fired]
         fired_super = [super_ndcg[q] for q in fired]
         delta = (np.mean(fired_super) - np.mean(fired_std)) if fired else float("nan")
         n_total = len(standard_ndcg)
-        print(f"{threshold:>6}  {len(fired):>5}/{n_total:<6}  {_mean_sem(fallback_all):>22}  "
-              f"{_mean_sem(fired_std):>17}  {_mean_sem(fired_super):>18}  {delta:>+11.4f}")
+        print(
+            f"{threshold:>6}  {len(fired):>5}/{n_total:<6}  {_mean_sem(fallback_all):>22}  "
+            f"{_mean_sem(fired_std):>17}  {_mean_sem(fired_super):>18}  {delta:>+11.4f}"
+        )
 
-    print("\nfired-subset Δ = mean(Super Search NDCG − standard NDCG) on queries where the "
-          "fallback fires;\npositive means falling back to Super Search helps where standard "
-          "is starved.")
+    print(
+        "\nfired-subset Δ = mean(Super Search NDCG − standard NDCG) on queries where the "
+        "fallback fires;\npositive means falling back to Super Search helps where standard "
+        "is starved."
+    )
 
 
 if __name__ == "__main__":

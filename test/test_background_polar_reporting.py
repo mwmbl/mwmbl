@@ -22,7 +22,9 @@ User = get_user_model()
 @pytest.fixture
 def billed_user(db):
     user = User.objects.create_user(
-        username="billeduser", email="billed@example.com", password="testpass123",
+        username="billeduser",
+        email="billed@example.com",
+        password="testpass123",
     )
     EmailAddress.objects.create(user=user, email="billed@example.com", verified=True, primary=True)
     UserBilling.objects.create(
@@ -38,8 +40,11 @@ def billed_user(db):
 def test_report_usage_to_polar_ingests_delta_only(billed_user):
     now = datetime.now(timezone.utc)
     bucket = UsageBucket.objects.create(
-        user=billed_user, year=now.year, month=now.month,
-        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500, reported_overage=0,
+        user=billed_user,
+        year=now.year,
+        month=now.month,
+        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500,
+        reported_overage=0,
     )
 
     with patch("polar_sdk.Polar") as MockPolar:
@@ -60,13 +65,18 @@ def test_report_usage_to_polar_ingests_delta_only(billed_user):
 @pytest.mark.django_db
 def test_report_usage_to_polar_skips_users_without_polar_customer(db):
     user = User.objects.create_user(
-        username="nocustomer", email="nocustomer@example.com", password="testpass123",
+        username="nocustomer",
+        email="nocustomer@example.com",
+        password="testpass123",
     )
     EmailAddress.objects.create(user=user, email="nocustomer@example.com", verified=True, primary=True)
     now = datetime.now(timezone.utc)
     UsageBucket.objects.create(
-        user=user, year=now.year, month=now.month,
-        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500, reported_overage=0,
+        user=user,
+        year=now.year,
+        month=now.month,
+        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500,
+        reported_overage=0,
     )
 
     with patch("polar_sdk.Polar") as MockPolar:
@@ -80,8 +90,11 @@ def test_report_usage_to_polar_skips_users_without_polar_customer(db):
 def test_report_usage_to_polar_no_op_below_free_allowance(billed_user):
     now = datetime.now(timezone.utc)
     bucket = UsageBucket.objects.create(
-        user=billed_user, year=now.year, month=now.month,
-        count=pricing.FREE_KEYED_MONTHLY_LIMIT - 1, reported_overage=0,
+        user=billed_user,
+        year=now.year,
+        month=now.month,
+        count=pricing.FREE_KEYED_MONTHLY_LIMIT - 1,
+        reported_overage=0,
     )
 
     with patch("polar_sdk.Polar") as MockPolar:
@@ -97,8 +110,11 @@ def test_report_usage_to_polar_no_op_below_free_allowance(billed_user):
 def test_report_usage_to_polar_incremental_second_run(billed_user):
     now = datetime.now(timezone.utc)
     bucket = UsageBucket.objects.create(
-        user=billed_user, year=now.year, month=now.month,
-        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500, reported_overage=500,
+        user=billed_user,
+        year=now.year,
+        month=now.month,
+        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500,
+        reported_overage=500,
     )
 
     # More usage has accumulated since the last report.

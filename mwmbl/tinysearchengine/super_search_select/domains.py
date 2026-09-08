@@ -7,6 +7,7 @@ last two labels — three for known multi-label suffixes like ``co.uk``); exact-
 string equality is what the NDCG harness scores on, but for "which source contains
 this result" the registrable domain is the right granularity.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -16,10 +17,31 @@ from urllib.parse import urlparse
 # e.g. bbc.co.uk -> co.uk. Not exhaustive (no full public-suffix list), but covers
 # the suffixes that actually appear in the gold set / source shortlist.
 _MULTI_SUFFIXES = {
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk",
-    "com.au", "net.au", "org.au", "edu.au", "gov.au",
-    "co.nz", "co.za", "co.in", "co.jp", "co.kr", "com.br", "com.mx",
-    "com.cn", "com.tr", "com.sg", "com.hk", "or.jp", "ne.jp",
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "me.uk",
+    "ltd.uk",
+    "plc.uk",
+    "com.au",
+    "net.au",
+    "org.au",
+    "edu.au",
+    "gov.au",
+    "co.nz",
+    "co.za",
+    "co.in",
+    "co.jp",
+    "co.kr",
+    "com.br",
+    "com.mx",
+    "com.cn",
+    "com.tr",
+    "com.sg",
+    "com.hk",
+    "or.jp",
+    "ne.jp",
 }
 
 
@@ -35,7 +57,7 @@ def host_of(url: str) -> str:
 def _strip_www(host: str) -> str:
     for prefix in ("www.", "m."):
         if host.startswith(prefix):
-            return host[len(prefix):]
+            return host[len(prefix) :]
     return host
 
 

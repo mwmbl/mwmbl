@@ -2,6 +2,7 @@
 Record which source domains link to destination domains. Each source domain is a bloom filter containing sets of
 destination domains.
 """
+
 from itertools import islice
 from logging import getLogger
 
@@ -10,17 +11,16 @@ from pybloomfilter import BloomFilter
 
 from mwmbl.hn_top_domains_filtered import DOMAINS
 
-
 logger = getLogger(__name__)
 
 DOMAIN_GROUPS = [
-    ('github.com', 10),
-    ('en.wikipedia.org', 10),
-    ('news.ycombinator.com', 10),
-    ('lemmy.ml', 2),
-    ('mastodon.social', 2),
-    ('top', 5),
-    ('other', 1),
+    ("github.com", 10),
+    ("en.wikipedia.org", 10),
+    ("news.ycombinator.com", 10),
+    ("lemmy.ml", 2),
+    ("mastodon.social", 2),
+    ("top", 5),
+    ("other", 1),
 ]
 
 TOP_DOMAINS = set(islice(DOMAINS, 4000))
@@ -31,8 +31,12 @@ def get_bloom_filter(domain_group: str) -> BloomFilter:
     try:
         bloom_filter = BloomFilter.open(settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(domain_group=domain_group))
     except FileNotFoundError:
-        bloom_filter = BloomFilter(settings.NUM_DOMAINS_IN_BLOOM_FILTER, 1e-6,
-                                   settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(domain_group=domain_group), perm=0o666)
+        bloom_filter = BloomFilter(
+            settings.NUM_DOMAINS_IN_BLOOM_FILTER,
+            1e-6,
+            settings.DOMAIN_LINKS_BLOOM_FILTER_PATH.format(domain_group=domain_group),
+            perm=0o666,
+        )
     return bloom_filter
 
 
@@ -52,9 +56,9 @@ class DomainLinkDatabase:
         if source in DOMAIN_GROUPS:
             domain_group = source
         elif source in TOP_DOMAINS:
-            domain_group = 'top'
+            domain_group = "top"
         elif source in OTHER_DOMAINS:
-            domain_group = 'other'
+            domain_group = "other"
         else:
             # This is a URL that we don't care about
             return

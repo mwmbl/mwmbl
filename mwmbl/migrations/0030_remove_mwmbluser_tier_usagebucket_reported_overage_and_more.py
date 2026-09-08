@@ -4,24 +4,23 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0029_delete_supersearchbanditstate'),
+        ("mwmbl", "0029_delete_supersearchbanditstate"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='mwmbluser',
-            name='tier',
+            model_name="mwmbluser",
+            name="tier",
         ),
         migrations.AddField(
-            model_name='usagebucket',
-            name='reported_overage',
+            model_name="usagebucket",
+            name="reported_overage",
             field=models.IntegerField(default=0),
         ),
         migrations.AddField(
-            model_name='userbilling',
-            name='max_monthly_spend_cents',
+            model_name="userbilling",
+            name="max_monthly_spend_cents",
             field=models.IntegerField(default=0),
         ),
     ]

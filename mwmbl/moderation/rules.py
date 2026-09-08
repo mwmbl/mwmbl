@@ -15,6 +15,7 @@ Two kinds of rule, split by whether the answer can change while the domain does 
   reads, and caching them would mean showing a moderator a stale "first submission from this
   user" after that user's tenth submission.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -30,19 +31,53 @@ NEUTRAL = "neutral"
 # Domains we will not crawl whatever a submitter says, each of which has actually been
 # submitted and rejected with a hand-written explanation ("don't crawl ourselves", "same as
 # google.com no actual useful links apart from the search UI").
-DO_NOT_CRAWL = frozenset({
-    "mwmbl.org", "www.mwmbl.org",
-    "google.com", "www.google.com", "scholar.google.com",
-})
+DO_NOT_CRAWL = frozenset(
+    {
+        "mwmbl.org",
+        "www.mwmbl.org",
+        "google.com",
+        "www.google.com",
+        "scholar.google.com",
+    }
+)
 
 # Country TLDs that mostly carry non-English sites. This only ever produces a *neutral* "worth
 # checking" line, never a rejection, because plenty of English sites live under .de and .nl -
 # the reject-or-not call belongs to the model, whose TLD block learned .pt, .tw and .cn as
 # reject-side features from actual decisions rather than from this list.
-NON_ENGLISH_TLDS = frozenset({
-    "cn", "tw", "jp", "kr", "ru", "ua", "pl", "cz", "sk", "hu", "ro", "bg", "gr", "tr",
-    "pt", "es", "it", "fr", "de", "nl", "se", "no", "fi", "dk", "vn", "th", "id", "il", "ir",
-})
+NON_ENGLISH_TLDS = frozenset(
+    {
+        "cn",
+        "tw",
+        "jp",
+        "kr",
+        "ru",
+        "ua",
+        "pl",
+        "cz",
+        "sk",
+        "hu",
+        "ro",
+        "bg",
+        "gr",
+        "tr",
+        "pt",
+        "es",
+        "it",
+        "fr",
+        "de",
+        "nl",
+        "se",
+        "no",
+        "fi",
+        "dk",
+        "vn",
+        "th",
+        "id",
+        "il",
+        "ir",
+    }
+)
 
 # How much an earlier decision on the same domain is worth. Named because the queue's SQL
 # reproduces this check to filter and order on it (mwmbl.moderation.suggest), and the two
@@ -54,9 +89,10 @@ PRIOR_DECISION_REASON = "OTHER"
 @dataclass(frozen=True)
 class EvidenceItem:
     """One checkable fact, shown to the moderator as a line in the evidence list."""
+
     kind: str
-    direction: str          # REJECT | APPROVE | NEUTRAL
-    label: str              # moderator-facing, e.g. "Homepage returns 404"
+    direction: str  # REJECT | APPROVE | NEUTRAL
+    label: str  # moderator-facing, e.g. "Homepage returns 404"
     # Set when the fact is decisive on its own. The suggester takes the strongest of these
     # in preference to the model, because a 404 is not a matter of opinion.
     implies_action: Optional[str] = None
@@ -78,10 +114,16 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
     signals = crawl.get("signals") or {}
 
     if domain in DO_NOT_CRAWL:
-        items.append(EvidenceItem(
-            "do_not_crawl", REJECT, "On the do-not-crawl list (we don't crawl ourselves, "
-            "or it's another search engine)",
-            implies_action="REJECT", implies_reason="OTHER", implies_confidence=0.99))
+        items.append(
+            EvidenceItem(
+                "do_not_crawl",
+                REJECT,
+                "On the do-not-crawl list (we don't crawl ourselves, or it's another search engine)",
+                implies_action="REJECT",
+                implies_reason="OTHER",
+                implies_confidence=0.99,
+            )
+        )
 
     error = crawl.get("error") or ""
     status = crawl.get("http_status")
@@ -91,23 +133,46 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
         # distinct rejection details moderators have written mentions robots.txt. The
         # crawler respects robots regardless of what is approved, so this is information a
         # moderator should have, not a decision to make for them.
-        items.append(EvidenceItem(
-            "robots", NEUTRAL,
-            "robots.txt forbids our crawler - approving will not make this site crawlable"))
+        items.append(
+            EvidenceItem(
+                "robots", NEUTRAL, "robots.txt forbids our crawler - approving will not make this site crawlable"
+            )
+        )
     elif error:
-        items.append(EvidenceItem(
-            "unreachable", REJECT, f"Could not be fetched ({error})",
-            implies_action="REJECT", implies_reason="OTHER", implies_confidence=0.9))
+        items.append(
+            EvidenceItem(
+                "unreachable",
+                REJECT,
+                f"Could not be fetched ({error})",
+                implies_action="REJECT",
+                implies_reason="OTHER",
+                implies_confidence=0.9,
+            )
+        )
     elif status is not None and not 200 <= status < 300:
-        items.append(EvidenceItem(
-            "http_status", REJECT, f"Homepage returns HTTP {status}",
-            implies_action="REJECT", implies_reason="OTHER", implies_confidence=0.9))
+        items.append(
+            EvidenceItem(
+                "http_status",
+                REJECT,
+                f"Homepage returns HTTP {status}",
+                implies_action="REJECT",
+                implies_reason="OTHER",
+                implies_confidence=0.9,
+            )
+        )
 
     final_domain = crawl.get("final_domain") or ""
     if final_domain and registrable(final_domain) != registrable(domain):
-        items.append(EvidenceItem(
-            "redirect", REJECT, f"Redirects to {final_domain}",
-            implies_action="REJECT", implies_reason="OTHER", implies_confidence=0.85))
+        items.append(
+            EvidenceItem(
+                "redirect",
+                REJECT,
+                f"Redirects to {final_domain}",
+                implies_action="REJECT",
+                implies_reason="OTHER",
+                implies_confidence=0.85,
+            )
+        )
 
     # Only meaningful when we actually got a page. After a failed or forbidden fetch there is
     # trivially no title and no text, and reporting three further "problems" would pad the
@@ -116,11 +181,9 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
     if fetched and not any(page.get("title") for page in pages):
         items.append(EvidenceItem("no_title", REJECT, "No page on the site has a title"))
     if fetched and not any(page.get("extract") for page in pages):
-        items.append(EvidenceItem(
-            "no_extract", REJECT, "No readable body text found on any page"))
+        items.append(EvidenceItem("no_extract", REJECT, "No readable body text found on any page"))
     if fetched and not signals.get("has_links"):
-        items.append(EvidenceItem(
-            "no_links", REJECT, "No links found to crawl on from the homepage"))
+        items.append(EvidenceItem("no_links", REJECT, "No links found to crawl on from the homepage"))
 
     # Language is left to the model rather than asserted here. crawl_url does not surface the
     # <html lang> attribute, and the one behavioural clue - justext finding no 'good'
@@ -128,9 +191,9 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
     # on a JavaScript-rendered English site. So: a hint for the moderator, and the model's TLD
     # block (which learned .pt, .tw and .cn as reject-side features) does the calling.
     if _tld(domain) in NON_ENGLISH_TLDS:
-        items.append(EvidenceItem(
-            "tld_language", NEUTRAL,
-            f"Country domain (.{_tld(domain)}) - check the site is in English"))
+        items.append(
+            EvidenceItem("tld_language", NEUTRAL, f"Country domain (.{_tld(domain)}) - check the site is in English")
+        )
 
     if signals.get("blacklisted"):
         # Strong evidence, but not decisive, and the reason is written down in
@@ -139,10 +202,14 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
         # and character.ai are all in The Block List Project's porn.txt. Overriding those is
         # precisely what an approval is *for*, so a decisive rejection here would have the
         # tool arguing against the mechanism it is supposed to be serving.
-        items.append(EvidenceItem(
-            "blocklist", REJECT,
-            "On a public malware/adult blocklist - approving here also unblocks it. "
-            "These lists are built for ad-blocking and do have false positives."))
+        items.append(
+            EvidenceItem(
+                "blocklist",
+                REJECT,
+                "On a public malware/adult blocklist - approving here also unblocks it. "
+                "These lists are built for ad-blocking and do have false positives.",
+            )
+        )
 
     # Neutral for the same reason robots.txt is: a fact the moderator should have, not a
     # decision to make for them. Plenty of small personal sites - the ones this index exists
@@ -151,14 +218,16 @@ def crawl_evidence(domain: str, crawl: dict) -> list[EvidenceItem]:
     # fetch "https: False" says the https attempt failed, which the unreachable line already
     # said better.
     if fetched and signals.get("https") is False:
-        items.append(EvidenceItem(
-            "no_tls", NEUTRAL, "Served over plain HTTP - no TLS certificate"))
+        items.append(EvidenceItem("no_tls", NEUTRAL, "Served over plain HTTP - no TLS certificate"))
 
     if fetched:
-        items.append(EvidenceItem(
-            "reachable", APPROVE,
-            f"Crawled {sum(1 for page in pages if page.get('title'))} of {len(pages)} "
-            f"page(s) successfully"))
+        items.append(
+            EvidenceItem(
+                "reachable",
+                APPROVE,
+                f"Crawled {sum(1 for page in pages if page.get('title'))} of {len(pages)} page(s) successfully",
+            )
+        )
 
     return items
 
@@ -177,22 +246,37 @@ def live_evidence(submitter_record: dict, prior_decisions: dict) -> list[Evidenc
     if total == 0:
         # Worth saying plainly: on the last year of decisions, submissions from someone with no
         # track record were rejected 54% of the time, against 1% for established submitters.
-        items.append(EvidenceItem(
-            "submitter", NEUTRAL, "First submission from this user - no track record yet"))
+        items.append(EvidenceItem("submitter", NEUTRAL, "First submission from this user - no track record yet"))
     else:
-        items.append(EvidenceItem(
-            "submitter", APPROVE if rejected == 0 and approved >= 5 else NEUTRAL,
-            f"Submitter has {approved} approved and {rejected} rejected"))
+        items.append(
+            EvidenceItem(
+                "submitter",
+                APPROVE if rejected == 0 and approved >= 5 else NEUTRAL,
+                f"Submitter has {approved} approved and {rejected} rejected",
+            )
+        )
 
     if prior_decisions.get("approved"):
-        items.append(EvidenceItem(
-            "prior_decision", APPROVE, "This domain has already been approved before",
-            implies_action="APPROVE", implies_confidence=PRIOR_DECISION_CONFIDENCE))
+        items.append(
+            EvidenceItem(
+                "prior_decision",
+                APPROVE,
+                "This domain has already been approved before",
+                implies_action="APPROVE",
+                implies_confidence=PRIOR_DECISION_CONFIDENCE,
+            )
+        )
     elif prior_decisions.get("rejected"):
-        items.append(EvidenceItem(
-            "prior_decision", REJECT, "This domain has already been rejected before",
-            implies_action="REJECT", implies_reason=PRIOR_DECISION_REASON,
-            implies_confidence=PRIOR_DECISION_CONFIDENCE))
+        items.append(
+            EvidenceItem(
+                "prior_decision",
+                REJECT,
+                "This domain has already been rejected before",
+                implies_action="REJECT",
+                implies_reason=PRIOR_DECISION_REASON,
+                implies_confidence=PRIOR_DECISION_CONFIDENCE,
+            )
+        )
 
     return items
 
@@ -251,8 +335,7 @@ def other_detail(items: list[EvidenceItem]) -> str:
     That is also the only form of the question SQL can ask of stored evidence - see
     IMPLIES_OTHER - which is what lets the queue agree with what the moderator is shown.
     """
-    implying_other = [item for item in items
-                      if item.implies_action == "REJECT" and item.implies_reason == "OTHER"]
+    implying_other = [item for item in items if item.implies_action == "REJECT" and item.implies_reason == "OTHER"]
     if not implying_other:
         return ""
     return implied_detail(max(implying_other, key=lambda item: item.implies_confidence))

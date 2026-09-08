@@ -10,6 +10,7 @@ Usage::
     DJANGO_SETTINGS_MODULE=mwmbl.settings_dev DATABASE_URL="postgres://daoud@" \
         uv run python scripts/llm_relabel_pass1.py --num 100 --seed 42
 """
+
 import json
 import os
 from argparse import ArgumentParser
@@ -36,10 +37,22 @@ ADAPTER_DESC = {
     "arxiv": ("academia", "arXiv — academic preprints in physics, CS, maths, biology, etc."),
     "pypi": ("code", "PyPI — the Python package index."),
     "imdb": ("entertainment", "IMDb — films, TV shows, actors, and entertainment."),
-    "nhs": ("health", "NHS — authoritative UK consumer health: conditions, symptoms, treatments, medicines and dosages."),
-    "openstreetmap_org": ("maps-places", "OpenStreetMap — places, towns, addresses, and local points of interest (maps/local)."),
-    "wikidata_official": ("navigational", "Official website of a named brand, company, organisation or person (resolved via Wikidata)."),
-    "homepage": ("navigational", "Best-guess official homepage for a brand or site name — for navigational brand queries."),
+    "nhs": (
+        "health",
+        "NHS — authoritative UK consumer health: conditions, symptoms, treatments, medicines and dosages.",
+    ),
+    "openstreetmap_org": (
+        "maps-places",
+        "OpenStreetMap — places, towns, addresses, and local points of interest (maps/local).",
+    ),
+    "wikidata_official": (
+        "navigational",
+        "Official website of a named brand, company, organisation or person (resolved via Wikidata).",
+    ),
+    "homepage": (
+        "navigational",
+        "Best-guess official homepage for a brand or site name — for navigational brand queries.",
+    ),
     "guardian": ("news", "The Guardian — UK/world news, politics, sport and current events."),
 }
 
@@ -113,7 +126,7 @@ def main():
     # Catalog text block (for the Haiku prompt)
     print("\n===CATALOG===")
     for name, meta in sorted(catalog.items()):
-        print(f"{name} [{meta.get('field','')}]: {meta['description']}")
+        print(f"{name} [{meta.get('field', '')}]: {meta['description']}")
     print("\n===QUERIES===")
     for q in sample:
         print(q)

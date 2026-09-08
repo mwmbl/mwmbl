@@ -29,7 +29,6 @@ def normalize_names(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("mwmbl", "0031_dedupe_background_task_schedules"),
     ]

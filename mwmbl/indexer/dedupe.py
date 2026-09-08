@@ -1,6 +1,7 @@
 """
 Dedupe pages that have been crawled more than once and prepare them for indexing
 """
+
 import glob
 import gzip
 import json
@@ -17,8 +18,8 @@ def get_deduped_pages():
     seen_urls = set()
     for path in sorted(glob.glob(CRAWL_GLOB), reverse=True):
         data = json.load(gzip.open(path))
-        for item in data['items']:
-            url = item['url']
+        for item in data["items"]:
+            url = item["url"]
             if url in seen_urls:
                 continue
 
@@ -27,10 +28,10 @@ def get_deduped_pages():
 
 
 def queue_deduped_items(deduped_pages):
-    output_queue = FSQueue(TINYSEARCH_DATA_DIR, 'mwmbl-search-items', GzipJsonBlobSerializer())
+    output_queue = FSQueue(TINYSEARCH_DATA_DIR, "mwmbl-search-items", GzipJsonBlobSerializer())
 
     for batch in grouper(BATCH_SIZE, deduped_pages):
-        data = {'items': batch}
+        data = {"items": batch}
         output_queue.put(data)
 
 
@@ -39,7 +40,7 @@ def run():
     queue_deduped_items(deduped_pages)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
 
 

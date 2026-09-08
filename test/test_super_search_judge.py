@@ -1,4 +1,5 @@
 """Tests for the fine-tuned relevance judge (super_search_select/judge.py)."""
+
 from pathlib import Path
 
 import pytest
@@ -26,15 +27,17 @@ def test_get_judge_unavailable_returns_none(monkeypatch):
     assert ss_judge.get_judge() is None
 
 
-@pytest.mark.skipif(not (MODEL_DIR / "model.onnx").exists(),
-                    reason="judge model artifact not present")
+@pytest.mark.skipif(not (MODEL_DIR / "model.onnx").exists(), reason="judge model artifact not present")
 def test_judge_scores_relevant_above_irrelevant():
     judge = ss_judge.Judge(MODEL_DIR)
-    scores = judge.score("python asyncio tutorial", [
-        ss_judge.doc_text("Async IO in Python: A Complete Walkthrough",
-                          "A tutorial covering asyncio, coroutines and event loops."),
-        ss_judge.doc_text("Best chocolate cake recipes",
-                          "Moist chocolate cake with simple ingredients."),
-    ])
+    scores = judge.score(
+        "python asyncio tutorial",
+        [
+            ss_judge.doc_text(
+                "Async IO in Python: A Complete Walkthrough", "A tutorial covering asyncio, coroutines and event loops."
+            ),
+            ss_judge.doc_text("Best chocolate cake recipes", "Moist chocolate cake with simple ingredients."),
+        ],
+    )
     assert all(0.0 <= s <= 1.0 for s in scores)
     assert scores[0] > scores[1]

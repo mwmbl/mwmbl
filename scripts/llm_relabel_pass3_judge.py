@@ -26,6 +26,7 @@ Usage::
     ... --merge judge_out.txt --tag cal1
     ... --calibration
 """
+
 import json
 import os
 from argparse import ArgumentParser
@@ -131,7 +132,7 @@ CANDIDATES TO JUDGE:
 def _load_jsonl(path):
     if not os.path.exists(path):
         return []
-    return [json.loads(l) for l in open(path) if l.strip()]
+    return [json.loads(line) for line in open(path) if line.strip()]
 
 
 def _pool():
@@ -148,8 +149,7 @@ def _done_pairs():
 
 def cmd_dump_batch(n_queries: int, tag: str):
     pool, intents, done = _pool(), _intents(), _done_pairs()
-    todo = [q for q, r in pool.items()
-            if any((q, c["url"]) not in done for c in r["candidates"])]
+    todo = [q for q, r in pool.items() if any((q, c["url"]) not in done for c in r["candidates"])]
     batch = todo[:n_queries]
 
     manifest, lines, cid = [], [], 0
@@ -187,8 +187,7 @@ def cmd_merge(path: str, tag: str):
                 bad += 1
                 continue
             try:
-                cid, rel, eth, ov = (int(parts[0]), int(parts[1]),
-                                     int(parts[2]), int(parts[3]))
+                cid, rel, eth, ov = (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
             except ValueError:
                 bad += 1
                 continue
@@ -200,8 +199,9 @@ def cmd_merge(path: str, tag: str):
             if key in done:
                 skipped += 1
                 continue
-            out.write(json.dumps({"query": m["query"], "url": m["url"],
-                                  "relevance": rel, "ethos": eth, "overall": ov}) + "\n")
+            out.write(
+                json.dumps({"query": m["query"], "url": m["url"], "relevance": rel, "ethos": eth, "overall": ov}) + "\n"
+            )
             done.add(key)
             added += 1
     print(f"merged {path} (tag={tag}): +{added} added, {skipped} dup, {bad} malformed")
@@ -212,8 +212,7 @@ def cmd_status():
     judged = _load_jsonl(CHECKPOINT)
     total_cand = sum(len(r["candidates"]) for r in pool.values())
     qs_done = {j["query"] for j in judged}
-    print(f"judged {len(judged)} / {total_cand} candidates; "
-          f"queries touched {len(qs_done)} / {len(pool)}")
+    print(f"judged {len(judged)} / {total_cand} candidates; queries touched {len(qs_done)} / {len(pool)}")
     if judged:
         for axis in ("relevance", "ethos", "overall"):
             dist = Counter(j[axis] for j in judged)
@@ -225,7 +224,7 @@ def cmd_calibration():
     pool = _pool()
     judged = {(j["query"], j["url"]): j for j in _load_jsonl(CHECKPOINT)}
     # url provenance from the pool
-    buckets = defaultdict(list)   # pool tag -> list of judgments
+    buckets = defaultdict(list)  # pool tag -> list of judgments
     for q, r in pool.items():
         for c in r["candidates"]:
             j = judged.get((q, c["url"]))
@@ -256,7 +255,7 @@ def cmd_calibration():
     for s, js in sorted(src.items(), key=lambda kv: -len(kv[1])):
         n = len(js)
         rel = sum(j["relevance"] for j in js) / n
-        print(f"  {s:18s} n={n:4d}  rel={rel:.2f}  overall={sum(j['overall'] for j in js)/n:.2f}")
+        print(f"  {s:18s} n={n:4d}  rel={rel:.2f}  overall={sum(j['overall'] for j in js) / n:.2f}")
 
 
 def main():

@@ -4,19 +4,19 @@ import json
 import os
 import struct
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from enum import IntEnum
 from io import UnsupportedOperation
 from json import JSONDecodeError
 from logging import getLogger
-from mmap import mmap, PROT_READ, PROT_WRITE
-from typing import TypeVar, Generic, Callable, List, Optional
+from mmap import PROT_READ, PROT_WRITE, mmap
+from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
-from zstandard import ZstdDecompressor, ZstdCompressor, ZstdError
+from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError
 
 VERSION = 1
-METADATA_CONSTANT = b'mwmbl-tiny-search'
+METADATA_CONSTANT = b"mwmbl-tiny-search"
 METADATA_SIZE = 4096
 
 PAGE_SIZE = 4096
@@ -48,22 +48,21 @@ _FLOCK_STRUCT = "hhqqi4x"
 # one-off failure to take it: an old kernel rejects the F_OFD_SETLKW command with EINVAL,
 # and a filesystem with no record-lock support answers ENOLCK/ENOSYS/ENOTSUP. Only these
 # latch locking off for the process - see _locked_page.
-UNSUPPORTED_LOCK_ERRNOS = frozenset({errno.EINVAL, errno.ENOLCK, errno.ENOSYS,
-                                     errno.ENOTSUP, errno.EOPNOTSUPP})
+UNSUPPORTED_LOCK_ERRNOS = frozenset({errno.EINVAL, errno.ENOLCK, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP})
 
 # Set False the first time locking turns out to be unsupported here - see _locked_page.
 _page_locking_supported = True
 
 
 def _set_page_lock(fileno: int, lock_type: int, start: int, length: int):
-    fcntl.fcntl(fileno, F_OFD_SETLKW,
-                struct.pack(_FLOCK_STRUCT, lock_type, os.SEEK_SET, start, length, 0))
+    fcntl.fcntl(fileno, F_OFD_SETLKW, struct.pack(_FLOCK_STRUCT, lock_type, os.SEEK_SET, start, length, 0))
 
 
 class DocumentState(IntEnum):
     """
     The state of the document in the index. A value of None indicates an organic search result.
     """
+
     SYNCED_WITH_MAIN_INDEX = -2
     DELETED = -1
     FROM_USER = 2
@@ -87,6 +86,7 @@ class DocumentSource(IntEnum):
     number for a different provider, or a stale cache entry becomes a lie about where its
     results came from.
     """
+
     WIKIPEDIA = 1
     # Reserved, not yet wired up to a provider. The number is here rather than added later
     # because it is the numbering registry: with only one member the source field cannot be
@@ -107,22 +107,22 @@ class Document:
     source: Optional[int] = None
 
     def __init__(
-            self,
-            title: str,
-            url: str,
-            extract: str,
-            score: Optional[float] = None,
-            term: Optional[str] = None,
-            state: Optional[int | DocumentState] = None,
-            user_ids: Optional[List[int]] = None,
-            last_crawled: Optional[int] = None,
-            source: Optional[int | DocumentSource] = None,
+        self,
+        title: str,
+        url: str,
+        extract: str,
+        score: Optional[float] = None,
+        term: Optional[str] = None,
+        state: Optional[int | DocumentState] = None,
+        user_ids: Optional[List[int]] = None,
+        last_crawled: Optional[int] = None,
+        source: Optional[int | DocumentSource] = None,
     ):
         # Sometimes the title or extract may be None, probably because of user generated content
         # It's not allowed to be None though, or things will break
-        self.title = title if title is not None else ''
+        self.title = title if title is not None else ""
         self.url = url
-        self.extract = extract if extract is not None else ''
+        self.extract = extract if extract is not None else ""
         self.score = score
         self.term = term
         self.state = None if state is None else DocumentState(state)
@@ -155,7 +155,7 @@ class TokenizedDocument(Document):
     tokens: List[str] = field(default_factory=list)
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class PageError(Exception):
@@ -170,7 +170,7 @@ class TinyIndexMetadata:
     item_factory: str
 
     def to_bytes(self) -> bytes:
-        metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode('utf8')
+        metadata_bytes = METADATA_CONSTANT + json.dumps(asdict(self)).encode("utf8")
         assert len(metadata_bytes) <= METADATA_SIZE
         return metadata_bytes
 
@@ -181,7 +181,7 @@ class TinyIndexMetadata:
         if metadata_constant != METADATA_CONSTANT:
             raise ValueError("This doesn't seem to be an index file")
 
-        values = json.loads(data[constant_length:].decode('utf8'))
+        values = json.loads(data[constant_length:].decode("utf8"))
         return TinyIndexMetadata(**values)
 
 
@@ -189,22 +189,22 @@ class TinyIndexMetadata:
 # We do this by leveraging binary search to quickly find the index where:
 #     - index+1 cannot fit onto a page
 #     - <=index can fit on a page
-def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items:list[T], lo:int, hi:int):
+def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items: list[T], lo: int, hi: int):
     # Base case: our binary search has gone too far
     if lo > hi:
         return -1, None
     # Check the midpoint to see if it will fit onto a page
-    mid = (lo+hi)//2
-    compressed_data = compressor.compress(json.dumps(items[:mid]).encode('utf8'))
+    mid = (lo + hi) // 2
+    compressed_data = compressor.compress(json.dumps(items[:mid]).encode("utf8"))
     size = len(compressed_data)
     if size > page_size:
         # We cannot fit this much data into a page
         # Reduce the hi boundary, and try again
-        return _binary_search_fitting_size(compressor, page_size, items, lo, mid-1)
+        return _binary_search_fitting_size(compressor, page_size, items, lo, mid - 1)
     else:
         # We can fit this data into a page, but maybe we can fit more data
         # Try to see if we have a better match
-        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid+1, hi)
+        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid + 1, hi)
         if potential_target != -1:
             # We found a larger index that can still fit onto a page, so use that
             return potential_target, potential_data
@@ -213,7 +213,7 @@ def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, item
             return mid, compressed_data
 
 
-def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items:list[T]):
+def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items: list[T]):
     # Find max number of items that fit on a page
     return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
 
@@ -223,7 +223,7 @@ def _get_page_data(page_size: int, items: list[T]):
     compressor = ZstdCompressor()
     num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
 
-    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode('utf8'))
+    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode("utf8"))
     assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
     return _pad_to_page_size(compressed_data, page_size), num_fitting
 
@@ -232,7 +232,7 @@ def _pad_to_page_size(data: bytes, page_size: int):
     page_length = len(data)
     if page_length > page_size:
         raise PageError(f"Data is too big ({page_length}) for page size ({page_size})")
-    padding = b'\x00' * (page_size - page_length)
+    padding = b"\x00" * (page_size - page_length)
     page_data = data + padding
     return page_data
 
@@ -240,7 +240,7 @@ def _pad_to_page_size(data: bytes, page_size: int):
 class _OpenPage(Generic[T]):
     """One page of the index, open for a read-modify-write. See TinyIndex.page."""
 
-    def __init__(self, index: 'TinyIndex[T]', page_index: int, locked: bool):
+    def __init__(self, index: "TinyIndex[T]", page_index: int, locked: bool):
         self._index = index
         self._page_index = page_index
         self.reset = False
@@ -273,18 +273,20 @@ class _OpenPage(Generic[T]):
 
 
 class TinyIndex(Generic[T]):
-    def __init__(self, item_factory: Callable[..., T], index_path, mode='r'):
-        if mode not in {'r', 'w'}:
+    def __init__(self, item_factory: Callable[..., T], index_path, mode="r"):
+        if mode not in {"r", "w"}:
             raise ValueError(f"Mode should be one of 'r' or 'w', got {mode}")
 
-        with open(index_path, 'rb') as index_file:
+        with open(index_path, "rb") as index_file:
             metadata_page = index_file.read(METADATA_SIZE)
 
-        metadata_bytes = metadata_page.rstrip(b'\x00')
+        metadata_bytes = metadata_page.rstrip(b"\x00")
         metadata = TinyIndexMetadata.from_bytes(metadata_bytes)
         if metadata.item_factory != item_factory.__name__:
-            raise ValueError(f"Metadata item factory '{metadata.item_factory}' in the index "
-                             f"does not match the passed item factory: '{item_factory.__name__}'")
+            raise ValueError(
+                f"Metadata item factory '{metadata.item_factory}' in the index "
+                f"does not match the passed item factory: '{item_factory.__name__}'"
+            )
 
         self.item_factory = item_factory
         self.index_path = index_path
@@ -297,8 +299,8 @@ class TinyIndex(Generic[T]):
         self.mmap = None
 
     def __enter__(self):
-        self.index_file = open(self.index_path, 'r+b')
-        prot = PROT_READ if self.mode == 'r' else PROT_READ | PROT_WRITE
+        self.index_file = open(self.index_path, "r+b")
+        prot = PROT_READ if self.mode == "r" else PROT_READ | PROT_WRITE
         self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
         return self
 
@@ -349,7 +351,7 @@ class TinyIndex(Generic[T]):
         anything else is treated as a one-off and locking is tried again next time.
         """
         global _page_locking_supported
-        if self.mode != 'w':
+        if self.mode != "w":
             raise UnsupportedOperation("The file is open in read mode, you cannot lock a page")
 
         start = i * self.page_size + METADATA_SIZE
@@ -365,10 +367,11 @@ class TinyIndex(Generic[T]):
                     logger.warning(
                         "Index page locking is not available here (%s); index writes will "
                         "race as they did before it was added. Concurrent writers to one "
-                        "page can lose documents.", e)
+                        "page can lose documents.",
+                        e,
+                    )
                 else:
-                    logger.warning("Could not lock index page %d (%s); writing it unlocked",
-                                   i, e)
+                    logger.warning("Could not lock index page %d (%s); writing it unlocked", i, e)
         try:
             yield locked
         finally:
@@ -398,7 +401,7 @@ class TinyIndex(Generic[T]):
                 if len(item) <= STATE_INDEX:
                     logger.error(f"Could not recover item in index page {i}, skipping. Item: {item}")
                     continue
-                fixed_item = list(item[:STATE_INDEX]) + [None] + list(item[STATE_INDEX + 1:])
+                fixed_item = list(item[:STATE_INDEX]) + [None] + list(item[STATE_INDEX + 1 :])
                 try:
                     items.append(self.item_factory(*fixed_item))
                 except Exception as e2:
@@ -414,11 +417,11 @@ class TinyIndex(Generic[T]):
         over everything that was on the page. Readers that would rather have no results
         than an error catch this - see retrieve.
         """
-        page_data = self.mmap[i * self.page_size + METADATA_SIZE:(i + 1) * self.page_size + METADATA_SIZE]
+        page_data = self.mmap[i * self.page_size + METADATA_SIZE : (i + 1) * self.page_size + METADATA_SIZE]
         decompressor = ZstdDecompressor()
         try:
             decompressed_data = decompressor.decompress(page_data)
-            return json.loads(decompressed_data.decode('utf8'))
+            return json.loads(decompressed_data.decode("utf8"))
         except (ZstdError, UnicodeDecodeError, JSONDecodeError) as e:
             # Damage that gets past zstd's checksum lands on the decode or the parse
             # instead, and it is the same kind of unreadable. Callers catch PageError and
@@ -441,12 +444,12 @@ class TinyIndex(Generic[T]):
         If the data is too big, it will store the first items in the list and discard the
         rest; the number actually stored is returned.
         """
-        if self.mode != 'w':
+        if self.mode != "w":
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
         page_data, num_stored = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size + METADATA_SIZE:(i+1) * self.page_size + METADATA_SIZE] = page_data
+        self.mmap[i * self.page_size + METADATA_SIZE : (i + 1) * self.page_size + METADATA_SIZE] = page_data
         return num_stored
 
     @contextmanager
@@ -489,10 +492,9 @@ class TinyIndex(Generic[T]):
 
         page_bytes, _ = _get_page_data(page_size, [])
 
-        with open(index_path, 'wb') as index_file:
+        with open(index_path, "wb") as index_file:
             index_file.write(metadata_padded)
             for i in range(num_pages):
                 index_file.write(page_bytes)
 
         return TinyIndex(item_factory, index_path=index_path)
-

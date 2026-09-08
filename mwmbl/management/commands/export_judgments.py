@@ -19,6 +19,7 @@ across the three files so per-user noise filtering still works downstream), and
 result documents keep only url/title/extract/score/state — ``user_ids`` and
 ``term`` are dropped.
 """
+
 import gzip
 import json
 from collections import Counter
@@ -37,11 +38,7 @@ def sanitize_results(results) -> list[dict]:
     """Keep only the document fields safe and useful for training."""
     if not isinstance(results, list):
         return []
-    return [
-        {field: doc.get(field) for field in DOCUMENT_FIELDS}
-        for doc in results
-        if isinstance(doc, dict)
-    ]
+    return [{field: doc.get(field) for field in DOCUMENT_FIELDS} for doc in results if isinstance(doc, dict)]
 
 
 def query_from_results_url(url: str) -> str | None:
@@ -59,14 +56,20 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--output-dir", default="devdata/judgments",
-            help="Directory to write the export files to (created if missing)")
+            "--output-dir",
+            default="devdata/judgments",
+            help="Directory to write the export files to (created if missing)",
+        )
         parser.add_argument(
-            "--since", type=parse_date, default=None, metavar="YYYY-MM-DD",
-            help="Only export records with timestamp on or after this date")
+            "--since",
+            type=parse_date,
+            default=None,
+            metavar="YYYY-MM-DD",
+            help="Only export records with timestamp on or after this date",
+        )
         parser.add_argument(
-            "--stats-only", action="store_true",
-            help="Only compute and print the stats summary; write no data files")
+            "--stats-only", action="store_true", help="Only compute and print the stats summary; write no data files"
+        )
 
     def handle(self, *args, **options):
         output_dir = Path(options["output_dir"])
@@ -107,8 +110,7 @@ class Command(BaseCommand):
         if since:
             flag_queryset = flag_queryset.filter(curation__timestamp__date__gte=since)
         for flag in flag_queryset:
-            flags_by_curation.setdefault(flag.curation_id, []).append(
-                {"flag": flag.flag, "status": flag.status})
+            flags_by_curation.setdefault(flag.curation_id, []).append({"flag": flag.flag, "status": flag.status})
 
         count = 0
         no_ops = 0
@@ -155,8 +157,9 @@ class Command(BaseCommand):
             "queries_curated_more_than_once": sum(1 for c in query_counts.values() if c > 1),
             "no_op_curations": no_ops,
             "num_changes_distribution": dict(sorted(num_changes.items())[:20]),
-            "mean_original_results_length": round(
-                sum(results_lengths) / len(results_lengths), 1) if results_lengths else None,
+            "mean_original_results_length": round(sum(results_lengths) / len(results_lengths), 1)
+            if results_lengths
+            else None,
             "timestamp_range": timestamps.range(),
             "flag_status_counts": dict(flag_status_counts),
             "flag_type_counts": dict(flag_type_counts),
@@ -239,7 +242,6 @@ class Command(BaseCommand):
             "timestamp_range": timestamps.range(),
         }
 
-
     def export_domains(self, writer, anon, since):
         queryset = DomainSubmission.objects.order_by("id")
         if since:
@@ -301,8 +303,7 @@ class AnonymousUserIds:
         return {
             "distinct_users": len(self._ids),
             "total_contributions": total,
-            "top_10_user_share": round(
-                sum(count for _, count in top) / total, 3) if total else None,
+            "top_10_user_share": round(sum(count for _, count in top) / total, 3) if total else None,
             "top_10_user_contributions": [count for _, count in top],
         }
 

@@ -10,6 +10,7 @@ were made up to two years ago, so a site that was live when it was approved in 2
 dead today would teach the model "dead -> approve". The model only judges what is stable about
 a domain: whether its name and its text read as spam, promotion or a non-English site.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,8 +25,25 @@ logger = getLogger(__name__)
 # Substrings that recur in the SEO/AI-slop domains moderators reject: aianimegenerator.cloud,
 # seobacklinkhub.org, stepupsipcalculator.net, bestaitoolsforthat.com, collegetools.io.
 SPAM_WORDS = [
-    "ai", "seo", "generator", "calculator", "tool", "free", "best", "top", "online", "shop",
-    "buy", "cheap", "review", "guide", "app", "hub", "pro", "download", "crypto",
+    "ai",
+    "seo",
+    "generator",
+    "calculator",
+    "tool",
+    "free",
+    "best",
+    "top",
+    "online",
+    "shop",
+    "buy",
+    "cheap",
+    "review",
+    "guide",
+    "app",
+    "hub",
+    "pro",
+    "download",
+    "crypto",
 ]
 
 # How much page text the model reads. Titles and extracts are already truncated by the
@@ -42,13 +60,13 @@ INDICATOR_FEATURE_NAMES = ["www"]
 # Held out separately from the text block, because the two can fail independently: the block
 # can earn its place while the indicator is a trap. See Featuriser.
 OPTIONAL_INDICATOR_FEATURE_NAMES = ["has_text"]
-NUM_SHAPE_FEATURES = (len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES)
-                      + len(OPTIONAL_INDICATOR_FEATURE_NAMES))
+NUM_SHAPE_FEATURES = len(COUNT_FEATURE_NAMES) + len(INDICATOR_FEATURE_NAMES) + len(OPTIONAL_INDICATOR_FEATURE_NAMES)
 
 
 @dataclass
 class ModerationExample:
     """One thing to score: a domain, plus whatever page text we managed to crawl for it."""
+
     domain: str
     page_texts: list[str] = field(default_factory=list)
 
@@ -130,15 +148,13 @@ class Featuriser:
         self.use_has_text = use_has_text
         # char_wb over the domain: catches the morphology of generated spam names, and the
         # word-boundary variant keeps n-grams from spanning label boundaries.
-        self.domain_chars = TfidfVectorizer(
-            analyzer="char_wb", ngram_range=(2, 5), min_df=2, sublinear_tf=True)
+        self.domain_chars = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), min_df=2, sublinear_tf=True)
         # The TLD earns its own block rather than being left to the char n-grams: .ai was 30/33
         # rejected and .org 24/1079, and that is a whole-token effect, not a substring one.
-        self.tlds = TfidfVectorizer(
-            analyzer="word", tokenizer=_tld_tokens, token_pattern=None, min_df=1)
+        self.tlds = TfidfVectorizer(analyzer="word", tokenizer=_tld_tokens, token_pattern=None, min_df=1)
         self.text = TfidfVectorizer(
-            analyzer="word", ngram_range=(1, 2), min_df=2, sublinear_tf=True,
-            strip_accents="unicode", lowercase=True)
+            analyzer="word", ngram_range=(1, 2), min_df=2, sublinear_tf=True, strip_accents="unicode", lowercase=True
+        )
 
     def fit_transform(self, examples: list[ModerationExample]) -> csr_matrix:
         domains = [example.domain for example in examples]
@@ -157,8 +173,11 @@ class Featuriser:
                 raise ValueError("text block disabled for this fit")
             blocks.append(self.text.fit_transform(texts))
         except ValueError:
-            logger.info("No text block over %d examples (disabled, or not enough text to fit "
-                        "one); the model will judge on the domain name alone", len(examples))
+            logger.info(
+                "No text block over %d examples (disabled, or not enough text to fit "
+                "one); the model will judge on the domain name alone",
+                len(examples),
+            )
             self.text = None
 
         blocks.append(self._shape_block(examples))
@@ -177,8 +196,7 @@ class Featuriser:
 
     def _shape_block(self, examples: list[ModerationExample]) -> csr_matrix:
         counts = np.array([shape_features(example.domain) for example in examples], dtype=float)
-        indicators = np.array([indicator_features(example, self.use_has_text)
-                               for example in examples], dtype=float)
+        indicators = np.array([indicator_features(example, self.use_has_text) for example in examples], dtype=float)
         return csr_matrix(np.hstack([counts / SHAPE_SCALE, indicators]))
 
     def feature_names(self) -> np.ndarray:
@@ -188,9 +206,7 @@ class Featuriser:
             np.array([f"tld={name}" for name in self.tlds.get_feature_names_out()]),
         ]
         if self.text is not None:
-            names.append(np.array([f"text={name}"
-                                   for name in self.text.get_feature_names_out()]))
-        indicators = INDICATOR_FEATURE_NAMES + (
-            OPTIONAL_INDICATOR_FEATURE_NAMES if self.use_has_text else [])
+            names.append(np.array([f"text={name}" for name in self.text.get_feature_names_out()]))
+        indicators = INDICATOR_FEATURE_NAMES + (OPTIONAL_INDICATOR_FEATURE_NAMES if self.use_has_text else [])
         names.append(np.array(COUNT_FEATURE_NAMES + indicators))
         return np.concatenate(names)
