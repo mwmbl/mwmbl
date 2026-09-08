@@ -22,12 +22,16 @@ name: Claude issue automation
 
 on:
   # Both queues are pure functions of repository state, so the triggers are the events
-  # that can change that state: a triage label going on an issue, and anything landing
-  # on main (a merged plan, or a merged part that frees the issue for the next one).
+  # that can change that state: a triage label going on an issue, and a pull request
+  # merging (a plan, or a part that frees its issue for the next one).
   issues:
     types: [labeled]
-  push:
-    branches: [main]
+  # Not `push`: claude-code-action rejects that event outright ("Unsupported event type:
+  # push"), which failed every job on every merge to main. A merged pull request is the
+  # state change we actually care about anyway — a plan landing, or a part freeing its
+  # issue for the next one — and it is an event the action accepts.
+  pull_request:
+    types: [closed]
   workflow_dispatch:
     inputs:
       issue:
@@ -58,12 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     # Only the two triage labels start work; every other label edit is noise.
     if: >-
-      github.event_name != 'issues'
-      || github.event.label.name == 'ready to plan'
-      || github.event.label.name == 'ready to code'
-    # A run of merges should produce one selection rather than one per push. A superseded
+      (github.event_name != 'issues'
+        || github.event.label.name == 'ready to plan'
+        || github.event.label.name == 'ready to code')
+      && (github.event_name != 'pull_request' || github.event.pull_request.merged)
+    # A run of merges should produce one selection rather than one per merge. A superseded
     # selection has not started any work yet, so cancelling it costs nothing; a targeted
-    # workflow_dispatch gets its own group so a push cannot cancel it.
+    # workflow_dispatch gets its own group so a merge cannot cancel it.
     concurrency:
       group: claude-issue-select-${{ inputs.issue || 'all' }}
       cancel-in-progress: true
