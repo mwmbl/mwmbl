@@ -55,6 +55,10 @@ _curated_domains_cache: set[str] = set()
 _curated_domains_fetched_at: float = 0.0
 CURATED_DOMAINS_CACHE_SECONDS = 300.0
 
+# How many of a term's new items must be expected to survive in the main index before we
+# submit the term at all. See count_new_index_entries for where the expectation comes from.
+MIN_NEW_INDEX_ENTRIES = 1
+
 
 def _fetch_curated_domains() -> set[str]:
     global _curated_domains_cache, _curated_domains_fetched_at
@@ -75,6 +79,39 @@ def _fetch_curated_domains() -> set[str]:
     except Exception:
         logger.exception("Failed to fetch curated domains, using cached value")
     return _curated_domains_cache
+
+
+def count_new_index_entries(term: str, new_items: list[Document], remote_items: list[Document]) -> int:
+    """
+    Estimate how many of our new local items the main index will actually keep for a term.
+
+    The main index holds a fixed number of bytes per page and drops the tail that does not
+    fit, so contributing to a term the index already covers means displacing something. The
+    server ranks each term's documents by score_result on the way in and keeps the best of
+    them (index_batches.sort_documents, TinyIndex.store), so a new item survives roughly when
+    it outranks one of the documents currently occupying the term's slots. Merging our scores
+    into the remote ones and counting how many of ours land in the top len(remote_items) is
+    that question asked directly. Ties go to the incumbent: matching what is already indexed
+    gains the index nothing.
+
+    A term the index has never seen has nothing to displace, so every item that matches the
+    term at all is a new entry.
+
+    This is an estimate, not a simulation. The remote page also holds documents for other
+    terms that hash to it, which we cannot see, so the real capacity is lower than
+    len(remote_items) suggests and blacklisting can drop items server-side. run_indexing logs
+    the estimate next to the number the index actually kept, which is how to calibrate it.
+    """
+    terms = tokenize(term)
+    new_scores = [score_result(terms, item, True) for item in new_items]
+    matching_new_scores = [score for score in new_scores if score > 0.0]
+    if not remote_items:
+        return len(matching_new_scores)
+
+    remote_scores = [score_result(terms, item, True) for item in remote_items]
+    candidates = [(score, True) for score in matching_new_scores] + [(score, False) for score in remote_scores]
+    candidates.sort(key=lambda candidate: (-candidate[0], candidate[1]))
+    return sum(1 for _, is_new in candidates[: len(remote_scores)] if is_new)
 
 
 # Validate environment variables when actually needed
@@ -196,8 +233,17 @@ class Crawler:
         to the main Mwmbl search index, while also keeping the local index updated
         with the latest remote results for better search quality.
 
-        Only results that score higher than existing remote results are submitted,
-        preventing low-quality content from polluting the main index.
+        A term is submitted when enough of its new local items are expected to survive in
+        the main index - see count_new_index_entries and MIN_NEW_INDEX_ENTRIES. Once a term
+        clears that bar all of its new items go, not just the ones that cleared it: the
+        server re-tokenizes each submitted document and files it under every term it matches,
+        ranking it against that term's existing documents on the way in
+        (index_batches.sort_documents), so an item that is weak here cannot jump the queue -
+        it loses here and may win on a term we never asked about. Submitting a URL the index
+        already holds is useful in its own right: combine_documents keeps the largest
+        last_crawled per URL, so the re-submission refreshes the stored crawl date (the one
+        the API reports; recrawl scheduling reads FoundURL.last_crawled from the URL
+        database, which this path does not touch).
         """
         index_path = data_path / settings.INDEX_NAME
         batch_jsons = self.redis.lpop(BATCH_QUEUE_KEY, 10)
@@ -221,16 +267,13 @@ class Crawler:
                 new_items = [item for item in local_items if item.url not in remote_item_urls]
                 logger.info(f"Found {len(new_items)} new items for term {term}")
 
-                terms = tokenize(term)
-                remote_item_scores = [score_result(terms, item, True) for item in remote_items]
-                min_remote_score = min(remote_item_scores, default=0.0)
-                local_scores = [score_result(terms, item, True) for item in new_items]
-                max_local_score = max(local_scores, default=0.0)
-                logger.info(f"Max local score: {max_local_score}, min remote score: {min_remote_score}")
+                estimated_new_entries = count_new_index_entries(term, new_items, remote_items)
+                logger.info(
+                    f"Estimated {estimated_new_entries} of {len(new_items)} new items would be "
+                    f'kept by the main index for term "{term}"'
+                )
 
-                new_high_score = max_local_score < min_remote_score
-
-                if new_high_score:
+                if estimated_new_entries >= MIN_NEW_INDEX_ENTRIES:
                     result_items = [
                         Result(
                             url=doc.url,
@@ -259,7 +302,10 @@ class Crawler:
                 # Check how many of our items were indexed
                 new_remote_item_urls = {item.url for item in new_remote_items}
                 indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)
-                logger.info(f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}"')
+                logger.info(
+                    f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}" '
+                    f"(estimated {estimated_new_entries})"
+                )
 
                 page_index = local_index.get_key_page_index(term)
                 index_pages(index_path, {page_index: new_remote_items}, mark_synced=True)
