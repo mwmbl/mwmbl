@@ -10,6 +10,11 @@ name: Claude issue automation
 # after the previous one is merged. See .github/claude/*.md for what Claude is told, and
 # docs/plans/README.md for the plan format.
 #
+# Both jobs authenticate with the CLAUDE_CODE_OAUTH_TOKEN secret, a one-year token from
+# `claude setup-token`. It runs against a Claude subscription rather than API credit, so
+# these runs share the usage windows of an interactive session, and the token has to be
+# regenerated when it expires.
+#
 # Note that an issue only enters these queues once someone with write access labels it,
 # so untriaged issue text never reaches a run. That gate is what makes an unrestricted
 # Bash tool below reasonable: the runner is ephemeral, but it holds an API key and a
@@ -105,7 +110,10 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A subscription token from `claude setup-token`, not a Console API key: these
+          # runs draw on the same subscription as an interactive session, so they share
+          # its usage windows.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           display_report: true
           prompt: |
             Follow the instructions in .github/claude/plan-issue.md exactly.
@@ -160,7 +168,7 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           display_report: true
           prompt: |
             Follow the instructions in .github/claude/implement-issue.md exactly.
