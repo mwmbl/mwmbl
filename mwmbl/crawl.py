@@ -89,6 +89,17 @@ def is_new_high_score(term: str, new_items: list[Document], remote_items: list[D
     An empty remote result set scores 0.0, so any local item that matches the term at all is
     promoted. That is deliberate: the main index has nothing for this term, and a result is
     better than no result.
+
+    The answer is per term, not per item: when it is yes the caller submits every new local
+    item for the term, including ones that lose to the remote index. That is not the leak it
+    looks like. The server re-tokenizes each submitted document and files it under every term
+    it matches, ranking it against that term's existing documents on the way in
+    (index_batches.sort_documents), so an item that is weak for this term cannot jump the
+    queue - it loses here and may win on a term we never asked about. Submitting a URL the
+    index already holds is useful in its own right: combine_documents keeps the largest
+    last_crawled per URL, so the re-submission refreshes the stored crawl date (the one the
+    API reports; recrawl scheduling reads FoundURL.last_crawled from the URL database, which
+    this path does not touch).
     """
     terms = tokenize(term)
     remote_item_scores = [score_result(terms, item, True) for item in remote_items]
@@ -218,9 +229,10 @@ class Crawler:
         to the main Mwmbl search index, while also keeping the local index updated
         with the latest remote results for better search quality.
 
-        Only results that score higher than existing remote results are submitted,
-        preventing low-quality content from polluting the main index. See is_new_high_score
-        for where that bar sits.
+        A term's new local items are submitted only when the best of them beats the best
+        result the main index already holds for that term, so a term the main index already
+        covers well is left alone. See is_new_high_score for where that bar sits and why the
+        whole term goes when it is cleared.
         """
         index_path = data_path / settings.INDEX_NAME
         batch_jsons = self.redis.lpop(BATCH_QUEUE_KEY, 10)
