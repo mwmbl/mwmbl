@@ -9,6 +9,7 @@ from typing import Callable
 from redis import Redis
 
 from mwmbl.crawler.domains import TOP_DOMAINS, DomainLinkDatabase
+from mwmbl.crawler.env_vars import CRAWL_ALLOWED_DOMAINS, CRAWL_BATCH_SIZE
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
@@ -36,7 +37,6 @@ MAX_OTHER_DOMAINS = 10000
 NUM_TOP_DOMAIN_URLS_TO_INCLUDE = 50
 NUM_OTHER_URLS_TO_INCLUDE = 100
 
-BATCH_SIZE = 100
 
 # Discount URLs crawled recently - this is the scale - currently 10 months
 SCORE_TIME_CONSTANT = 60 * 60 * 24 * 30 * 10
@@ -106,27 +106,40 @@ class RedisURLQueue:
         logger.info(f"Queued {len(found_urls)} URLs, number of domains: {self.redis.zcard(DOMAIN_SCORE_KEY)}")
 
     def get_batch(self, user_id: str) -> list[str]:
-        top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
-        top_other_domains = top_scoring_domains - DOMAINS.keys()
         curated_domains = self.get_curated_domains_function()
 
-        domains = list(CORE_DOMAINS)
-        top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
-        if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
-            domains += random.sample(list(top_curated_domains), NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
+        if CRAWL_ALLOWED_DOMAINS:
+            # An allowlist replaces the candidates outright: a CI crawl has to touch a set
+            # of sites we chose, not a sample of whatever the live queue happens to hold.
+            # Sorting keeps the seed choice reproducible despite the randomised
+            # PYTHONHASHSEED the crawler image sets.
+            domains = sorted(CRAWL_ALLOWED_DOMAINS)
+            seed_domains = sorted(CRAWL_ALLOWED_DOMAINS)
         else:
-            domains += list(top_curated_domains)
+            top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
+            top_other_domains = top_scoring_domains - DOMAINS.keys()
 
-        if len(top_other_domains) > NUM_OTHER_URLS_TO_INCLUDE:
-            domains += random.sample(list(top_other_domains), NUM_OTHER_URLS_TO_INCLUDE)
-        else:
-            domains += list(top_other_domains)
+            domains = list(CORE_DOMAINS)
+            top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
+            if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
+                domains += random.sample(list(top_curated_domains), NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
+            else:
+                domains += list(top_curated_domains)
+
+            if len(top_other_domains) > NUM_OTHER_URLS_TO_INCLUDE:
+                domains += random.sample(list(top_other_domains), NUM_OTHER_URLS_TO_INCLUDE)
+            else:
+                domains += list(top_other_domains)
+
+            seed_domains = list(DOMAINS.keys() | curated_domains)
 
         domains = [domain for domain in domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
         logger.info(f"Getting batch from domains {domains}")
 
-        # Add a random url as the root domain of one of DOMAINS
-        random_domain = random.choice(list(DOMAINS.keys() | curated_domains))
+        # Add a random url as the root domain of one of DOMAINS. The seed needs the same
+        # blacklist filter as the rest: it is a URL we are about to fetch.
+        seed_domains = [domain for domain in seed_domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
+        random_domain = random.choice(seed_domains)
         urls = [f"https://{random_domain}/"]
 
         # Pop the highest scoring URL from each domain
@@ -146,7 +159,7 @@ class RedisURLQueue:
             for url, score in domain_urls_scores:
                 urls.append(url)
 
-            if len(urls) >= BATCH_SIZE:
+            if len(urls) >= CRAWL_BATCH_SIZE:
                 break
 
         logger.info(f"Returning URLs: {urls}")

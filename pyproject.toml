@@ -68,7 +68,7 @@ indexer = [
 
 [project.scripts]
 mwmbl-tinysearchengine = "mwmbl.main:run"
-mwmbl-crawl = "mwmbl.crawl:run"
+mwmbl-crawl = "mwmbl.crawl:main"
 
 [dependency-groups]
 dev = [
