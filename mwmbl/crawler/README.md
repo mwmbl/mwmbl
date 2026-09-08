@@ -43,7 +43,7 @@ The crawler fetches **web pages (HTML content)** from URLs, specifically:
 This is an **on-demand, distributed crawler**:
 
 1. **URL Assignment**: Users request batches of URLs to crawl via `/api/v1/crawler/batches/new`
-2. **Batch Processing**: The system assigns up to 100 URLs at a time (configurable via `BATCH_SIZE`)
+2. **Batch Processing**: The system assigns up to 100 URLs at a time (configurable via the `CRAWL_BATCH_SIZE` environment variable)
 3. **Crawling**: Users crawl those URLs with rate limiting (configurable delay between requests)
 4. **Result Submission**: Users submit crawled results back via `/api/v1/crawler/batches/`
 

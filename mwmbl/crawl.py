@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import random
@@ -29,7 +30,15 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 django.setup()
 
 from mwmbl.crawler.batch import HashedBatch, Result, Results
-from mwmbl.crawler.env_vars import CRAWL_DELAY_SECONDS, CRAWLER_WORKERS, MWMBL_API_KEY, MWMBL_CONTACT_INFO
+from mwmbl.crawler.env_vars import (
+    CRAWL_DELAY_SECONDS,
+    CRAWL_SUBMIT_MODE,
+    CRAWLER_WORKERS,
+    MWMBL_API_KEY,
+    MWMBL_CONTACT_INFO,
+    SUBMIT_MODE_DRY_RUN,
+    SUBMIT_MODE_OFF,
+)
 from mwmbl.crawler.retrieve import CRAWLER_VERSION, USER_AGENT, crawl_url
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
@@ -71,7 +80,7 @@ def _fetch_curated_domains() -> set[str]:
 # Validate environment variables when actually needed
 def validate_environment():
     """Validate required environment variables for crawler operation."""
-    if not MWMBL_API_KEY.strip():
+    if CRAWL_SUBMIT_MODE != SUBMIT_MODE_OFF and not MWMBL_API_KEY.strip():
         raise ValueError("An environment variable MWMBL_API_KEY must be set to run the crawler")
 
     if MWMBL_CONTACT_INFO == "CHANGE_ME@example.com":
@@ -234,11 +243,17 @@ class Crawler:
                         )
                         for doc in new_items
                     ]
-                    results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
-                    logger.info(f"Posting {len(result_items)} results")
-                    response = requests.post("https://api.mwmbl.org/api/v1/crawler/results", json=results.dict())
-                    logger.info(f"Response: {response.text}")
-                    response.raise_for_status()
+                    if CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
+                        logger.info(f"Submission is off, not posting {len(result_items)} results")
+                    else:
+                        results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
+                        results_url = f"{REMOTE_SERVER}/api/v1/crawler/results"
+                        if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
+                            results_url += "?dry_run=true"
+                        logger.info(f"Posting {len(result_items)} results to {results_url}")
+                        response = requests.post(results_url, json=results.dict())
+                        logger.info(f"Response: {response.text}")
+                        response.raise_for_status()
 
                 new_remote_items = remote_index.retrieve(term, refresh=True)
                 # Check how many of our items were indexed
@@ -272,6 +287,20 @@ class Crawler:
             except Exception as err:
                 logger.exception(f"Error running indexing: '{err}'")
                 time.sleep(10)
+
+    def run_once(self):
+        """
+        Crawl one batch and index it, in this process, then return.
+
+        The continuous loops swallow every exception and restart, which is what a
+        long-running volunteer crawler wants and useless as a check: the process stays
+        alive and reports nothing while every pass fails. This runs the same pipeline
+        with errors fatal, so a caller - CI, mainly - can use the exit code.
+        """
+        validate_environment()
+        self.check_redis()
+        self.process_batch()
+        self.run_indexing()
 
     def run(self):
         """
@@ -374,5 +403,28 @@ def run():
     return get_default_crawler().run()
 
 
+def run_once():
+    """Run a single crawl and indexing pass (backward compatibility)."""
+    return get_default_crawler().run_once()
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="mwmbl-crawl", description="Run the Mwmbl crawler.")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help=(
+            "Crawl one batch, index it and exit, failing on the first error instead of "
+            "restarting. Intended for smoke tests, not for crawling."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.once:
+        run_once()
+    else:
+        run()
+
+
 if __name__ == "__main__":
-    run()
+    main()
