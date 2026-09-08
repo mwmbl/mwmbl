@@ -60,7 +60,7 @@ jobs:
     needs: select
     if: needs.select.outputs.has_plan == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.plan_matrix) }}
@@ -70,17 +70,40 @@ jobs:
       group: claude-issue-${{ matrix.item.issue }}
       cancel-in-progress: false
     name: "plan #${{ matrix.item.issue }}"
+
+    # A plan is only as good as the facts behind it, so give the planning run the same
+    # environment as the implementing one: it can then count lint violations, run the
+    # suite and check what actually breaks, rather than estimating from a read.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_mwmbl
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       # Full history: the instructions diff the branch against main.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Set up the project
+        uses: ./.github/actions/setup-project
       # No github_token input: the action then authenticates as the Claude GitHub App,
       # which sets GH_TOKEN and the git credentials for Claude and, unlike the workflow
       # token, lets CI run on the pull requests it pushes.
       - name: Write the plan
         uses: anthropics/claude-code-action@v1
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           display_report: true
@@ -108,8 +131,8 @@ jobs:
       cancel-in-progress: false
     name: "implement #${{ matrix.item.issue }}"
 
-    # The environment below is the test job of ci.yml: Claude has to get the same gates
-    # green before it opens a pull request, so it needs the same database and toolchain.
+    # Claude has to get the same gates green before it opens a pull request as CI runs
+    # afterwards, so it needs the same database and toolchain as ci.yml's test job.
     services:
       postgres:
         image: postgres:15
@@ -129,23 +152,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Set up python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11.12'
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
-        run: uv sync --group dev
-      - name: Install project with maturin
-        run: uv run maturin develop
-      - name: Create test directories and files
-        run: mkdir -p /tmp/test_mwmbl_data
+      - name: Set up the project
+        uses: ./.github/actions/setup-project
       - name: Implement the next part
         uses: anthropics/claude-code-action@v1
         env:

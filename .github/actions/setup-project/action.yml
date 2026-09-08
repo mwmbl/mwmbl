@@ -1,0 +1,29 @@
+name: Set up the project
+description: >-
+  Install python, uv, the Rust toolchain and the project itself, so that make check and
+  uv run pytest work. These are the same steps as the test job in ci.yml; a job that uses
+  this still has to provide the postgres service and DATABASE_URL itself.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11.12'
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install dependencies
+      run: uv sync --group dev
+      shell: bash
+    - name: Install project with maturin
+      run: uv run maturin develop
+      shell: bash
+    - name: Create test directories and files
+      run: mkdir -p /tmp/test_mwmbl_data
+      shell: bash
