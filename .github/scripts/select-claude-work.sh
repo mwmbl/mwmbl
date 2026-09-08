@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
 #
-# Pick the issues that the Claude issue-automation workflow should act on.
+# Pick the work items the Claude issue-automation workflow should act on.
 #
-# The queues are derived entirely from repository and issue state, never from a label
-# the automation itself has to remember to change, so a rerun after a failed job is
-# harmless and a human can redirect the work by editing a plan file:
+# An item is one issue plus the kind of attention it needs. The kinds are ordered so
+# that finishing something always beats starting something:
 #
+#   respond    an open claude/issue-<N>-* pull request needs a change: someone with
+#              write access left feedback after the last commit, its checks are red, or
+#              it no longer merges cleanly
 #   implement  the issue has a plan under docs/plans/ with a section not marked (Done),
 #              or it is labelled "ready to code" and has no plan at all
 #   plan       the issue is labelled "ready to plan" and has no plan yet
 #
-# An issue with an open claude/issue-<N>-* pull request is skipped in both queues. That
-# is what enforces "one PR at a time per issue": the next part cannot start until the
-# previous one is merged (or closed).
+# The queues are derived entirely from repository and issue state, never from a label the
+# automation has to remember to set, so a rerun after a failed job is harmless and a human
+# can redirect the work by editing a plan file or leaving a review.
 #
-# Each queue is ordered by the "priority: high|medium|low" label before it is truncated to
-# CLAUDE_MAX_ITEMS, so raising an issue's priority moves it up the queue. Issues without a
-# priority label sort last, behind "priority: low".
+# Still one pull request at a time per issue: an issue with an open claude/issue-<N>-*
+# pull request can only produce a "respond" item, never a new branch. What changed is that
+# such an issue is no longer simply skipped — an unanswered review is the most valuable
+# thing the automation can pick up, because it is what a human is waiting on.
 #
-# Writes plan_matrix/implement_matrix (and has_plan/has_implement) to $GITHUB_OUTPUT, or
-# to stdout when that is unset, so the selection can be dry-run locally with:
+# The one label the automation writes is "claude: stuck", added by the workflow when a run
+# fails for a reason that is not a usage limit. Items on a stuck issue are skipped so a
+# broken item cannot burn the budget on every scheduled run; a human removes the label, or
+# reruns that issue alone with workflow_dispatch, which ignores it.
+#
+# Each kind is ordered by the "priority: high|medium|low" label before the queue is
+# truncated to CLAUDE_MAX_ITEMS, so raising an issue's priority moves it up. Issues without
+# a priority label sort last, behind "priority: low".
+#
+# Writes items_matrix (and has_items) to $GITHUB_OUTPUT, or to stdout when that is unset,
+# so the selection can be dry-run locally with:
 #
 #   GH_TOKEN=$(gh auth token) bash .github/scripts/select-claude-work.sh
 
@@ -32,8 +44,43 @@ readonly only_issue="${CLAUDE_ONLY_ISSUE:-}"
 open_issues=$(gh issue list --state open --limit 200 --json number,title,labels)
 open_branches=$(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName')
 
-# An open PR on a claude/issue-<N>-* branch means part <k> of issue <N> is still in
-# review; nothing new may start for that issue.
+# What needs answering on one open pull request, if anything. Feedback counts only from an
+# OWNER, MEMBER or COLLABORATOR — a drive-by comment on a public repository must not be
+# able to steer a run — and only when it is newer than the last commit on the branch, which
+# is what "already addressed" means here. A review carrying inline comments and no body
+# still arrives as a review with a submittedAt, so inline-only feedback is caught too.
+#
+# Asked per pull request rather than across the list: `gh pr list --json commits` walks
+# every author of every commit of every open pull request, which exceeds GitHub's GraphQL
+# node limit on a repository this size.
+readonly reason_filter='
+def is_maintainer:
+    (.authorAssociation | . == "OWNER" or . == "MEMBER" or . == "COLLABORATOR")
+    and (.author.login | endswith("[bot]") | not);
+
+{ last_commit: (.commits | last | .committedDate),
+  feedback: ([ (.reviews[] | select(is_maintainer) | .submittedAt),
+               (.comments[] | select(is_maintainer) | .createdAt) ] | max),
+  failing: [ .statusCheckRollup[] | select(.conclusion == "FAILURE") | .name ],
+  conflicting: (.mergeable == "CONFLICTING") }
+| [ (if .feedback != null and .feedback > .last_commit
+     then "unanswered feedback" else empty end),
+    (if (.failing | length) > 0
+     then "failing checks: " + (.failing | join(", ")) else empty end),
+    (if .conflicting then "conflicts with main" else empty end) ]
+| join("; ")
+'
+
+reason_to_respond() {
+    gh pr view "$1" --json mergeable,statusCheckRollup,reviews,comments,commits \
+        --jq "$reason_filter"
+}
+
+pull_request_for() {
+    gh pr list --state open --limit 200 --json number,headRefName \
+        --jq ".[] | select(.headRefName | startswith(\"claude/issue-$1-\")) | .number" | head -1
+}
+
 has_open_pull_request() {
     grep -qE "^claude/issue-$1-" <<<"$open_branches"
 }
@@ -68,34 +115,50 @@ priority_rank() {
     esac
 }
 
-# Each entry is "<rank>\t<item json>", so the arrays can be sorted before the max_items cut.
-plan_items=()
+# Each entry is "<rank>\t<item json>", so a queue can be sorted before the max_items cut.
+respond_items=()
 implement_items=()
+plan_items=()
 
 while IFS=$'\t' read -r number title labels; do
     if [[ -n $only_issue && $number != "$only_issue" ]]; then
         continue
     fi
-    if has_open_pull_request "$number"; then
-        echo "issue #$number: skipped, a claude/issue-$number-* pull request is still open" >&2
+    # workflow_dispatch on one issue is the escape hatch from a stuck label, so the skip
+    # only applies to the untargeted queues.
+    if [[ -z $only_issue && ,$labels, == *,"claude: stuck",* ]]; then
+        echo "issue #$number: skipped, labelled 'claude: stuck'" >&2
         continue
     fi
 
+    rank=$(priority_rank "$labels")
     plan_file=$(plan_file_for "$number")
-    item=$(printf '%s\t%s' \
-        "$(priority_rank "$labels")" \
-        "$(jq -nc --argjson issue "$number" --arg title "$title" '{issue: $issue, title: $title}')")
 
-    if [[ -n $plan_file ]]; then
+    emit() {
+        printf '%s\t%s' "$rank" "$(jq -nc \
+            --argjson issue "$number" --arg title "$title" --arg kind "$1" \
+            --argjson pr "${2:-0}" --arg reason "${3:-}" \
+            '{issue: $issue, title: $title, kind: $kind, pr: $pr, reason: $reason}')"
+    }
+
+    if has_open_pull_request "$number"; then
+        pull_request=$(pull_request_for "$number")
+        reason=$(reason_to_respond "$pull_request")
+        if [[ -n $reason ]]; then
+            respond_items+=("$(emit respond "$pull_request" "$reason")")
+        else
+            echo "issue #$number: skipped, claude/issue-$number-* is open and up to date" >&2
+        fi
+    elif [[ -n $plan_file ]]; then
         if has_pending_section "$plan_file"; then
-            implement_items+=("$item")
+            implement_items+=("$(emit implement)")
         else
             echo "issue #$number: $plan_file has no pending section but was not deleted" >&2
         fi
     elif [[ ,$labels, == *,"ready to code",* ]]; then
-        implement_items+=("$item")
+        implement_items+=("$(emit implement)")
     elif [[ ,$labels, == *,"ready to plan",* ]]; then
-        plan_items+=("$item")
+        plan_items+=("$(emit plan)")
     fi
 done < <(jq -r '.[] | [.number, .title, ([.labels[].name] | join(","))] | @tsv' <<<"$open_issues")
 
@@ -108,31 +171,22 @@ by_priority() {
     printf '%s\n' "$@" | sort -s -n -k1,1 | cut -f2-
 }
 
-mapfile -t plan_items < <(by_priority ${plan_items+"${plan_items[@]}"})
-mapfile -t implement_items < <(by_priority ${implement_items+"${implement_items[@]}"})
+mapfile -t ordered < <(
+    by_priority ${respond_items+"${respond_items[@]}"}
+    by_priority ${implement_items+"${implement_items[@]}"}
+    by_priority ${plan_items+"${plan_items[@]}"}
+)
+selected=("${ordered[@]:0:max_items}")
 
-# Finishing work already under way beats starting more of it, so implement items take
-# the budget first.
-selected_implement=("${implement_items[@]:0:max_items}")
-remaining=$((max_items - ${#selected_implement[@]}))
-selected_plan=("${plan_items[@]:0:remaining}")
-
-as_matrix() {
-    if (($# == 0)); then
-        echo '{"item":[]}'
-    else
-        printf '%s\n' "$@" | jq -sc '{item: .}'
-    fi
-}
-
-plan_matrix=$(as_matrix ${selected_plan+"${selected_plan[@]}"})
-implement_matrix=$(as_matrix ${selected_implement+"${selected_implement[@]}"})
+if ((${#selected[@]} == 0)); then
+    items_matrix='{"item":[]}'
+else
+    items_matrix=$(printf '%s\n' "${selected[@]}" | jq -sc '{item: .}')
+fi
 
 output() {
     printf '%s=%s\n' "$1" "$2" >>"${GITHUB_OUTPUT:-/dev/stdout}"
 }
 
-output plan_matrix "$plan_matrix"
-output implement_matrix "$implement_matrix"
-output has_plan "$([[ $plan_matrix == '{"item":[]}' ]] && echo false || echo true)"
-output has_implement "$([[ $implement_matrix == '{"item":[]}' ]] && echo false || echo true)"
+output items_matrix "$items_matrix"
+output has_items "$([[ $items_matrix == '{"item":[]}' ]] && echo false || echo true)"
