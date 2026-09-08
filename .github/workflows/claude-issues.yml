@@ -11,7 +11,9 @@ name: Claude issue automation
 # docs/plans/README.md for the plan format.
 #
 # Note that an issue only enters these queues once someone with write access labels it,
-# so untriaged issue text never reaches a run.
+# so untriaged issue text never reaches a run. That gate is what makes an unrestricted
+# Bash tool below reasonable: the runner is ephemeral, but it holds an API key and a
+# repository token, so nothing unreviewed should ever reach it.
 
 on:
   schedule:
@@ -81,6 +83,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          display_report: true
           prompt: |
             Follow the instructions in .github/claude/plan-issue.md exactly.
 
@@ -90,7 +93,7 @@ jobs:
           claude_args: |
             --model claude-opus-5
             --max-turns 60
-            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash(git:*),Bash(gh:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(mkdir:*)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
 
   implement:
     needs: select
@@ -150,6 +153,7 @@ jobs:
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          display_report: true
           prompt: |
             Follow the instructions in .github/claude/implement-issue.md exactly.
 
@@ -159,4 +163,4 @@ jobs:
           claude_args: |
             --model claude-opus-5
             --max-turns 100
-            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(uv:*),Bash(python:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(mkdir:*),Bash(sed:*),Bash(diff:*)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
