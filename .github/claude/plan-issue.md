@@ -11,11 +11,11 @@ file. **Write no application code in this run.**
 - `gh issue view $N --comments` — read the whole thread, including what people have
   ruled out.
 - Read `AGENTS.md` for the project's commands and conventions.
-- The project is **not installed** in this job — there is no virtualenv, no database and
-  no Rust build, so `uv`, `make` and `pytest` will not work. Plan from reading the code.
-  Where the issue quotes a command whose output you would need (a lint count, a test
-  result), say in the plan that the implementing run must confirm it, rather than
-  guessing a number or trying to install anything.
+- The project is installed and a test database is running, so you can check facts rather
+  than estimate them: run the linter, run `uv run pytest`, run whatever command the issue
+  quotes. A count you measured is worth far more in a plan than one you guessed, and it
+  is what makes the per-section line estimates trustworthy. Put the numbers you measured
+  in the plan, and say how you got them.
 - Explore the code the issue touches before deciding anything. Search for functions,
   models and helpers that already do part of the job: a plan that reuses what exists is
   worth far more than one that invents a parallel implementation.
