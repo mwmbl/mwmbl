@@ -202,8 +202,9 @@ devdata/ss_judge_matrix*
 devdata/ss_judge_queries.txt
 devdata/super_search_xgb/
 
-# AI planning documents
-plans/
+# Local AI planning documents. Anchored to the root so that docs/plans/, which the
+# Claude issue automation writes and reads, stays tracked.
+/plans/
 
 # Claude Code configuration
 .claude/

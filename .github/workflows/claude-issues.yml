@@ -1,0 +1,162 @@
+name: Claude issue automation
+
+# Turns triaged issues into pull requests, hourly.
+#
+#   "ready to plan"  ->  a PR adding docs/plans/issue-<N>-<slug>.md and nothing else
+#   "ready to code"  ->  a PR implementing the issue (or a plan, if it is too big for one)
+#   a plan on main   ->  one PR per unfinished "## PR <k>:" section, in order
+#
+# Only one claude/issue-<N>-* pull request is ever open per issue: the next part starts
+# after the previous one is merged. See .github/claude/*.md for what Claude is told, and
+# docs/plans/README.md for the plan format.
+#
+# Note that an issue only enters these queues once someone with write access labels it,
+# so untriaged issue text never reaches a run.
+
+on:
+  schedule:
+    # Hourly, off the hour: runs at :00 queue behind everyone else's.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Act on this issue number only (blank = every eligible issue)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write # OIDC exchange for the Claude GitHub App
+  actions: read
+
+env:
+  # How many issues may be worked on in one run, implement items first.
+  CLAUDE_MAX_ITEMS: "3"
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      plan_matrix: ${{ steps.select.outputs.plan_matrix }}
+      implement_matrix: ${{ steps.select.outputs.implement_matrix }}
+      has_plan: ${{ steps.select.outputs.has_plan }}
+      has_implement: ${{ steps.select.outputs.has_implement }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # Read-only listing, so the default workflow token is enough here.
+      - name: Select the issues to act on
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLAUDE_ONLY_ISSUE: ${{ inputs.issue }}
+        run: .github/scripts/select-claude-work.sh
+
+  plan:
+    needs: select
+    if: needs.select.outputs.has_plan == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.plan_matrix) }}
+    # Never two runs on one issue at once; a queued duplicate exits early when it sees
+    # the pull request the first one opened.
+    concurrency:
+      group: claude-issue-${{ matrix.item.issue }}
+      cancel-in-progress: false
+    name: "plan #${{ matrix.item.issue }}"
+    steps:
+      # Full history: the instructions diff the branch against main.
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # No github_token input: the action then authenticates as the Claude GitHub App,
+      # which sets GH_TOKEN and the git credentials for Claude and, unlike the workflow
+      # token, lets CI run on the pull requests it pushes.
+      - name: Write the plan
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Follow the instructions in .github/claude/plan-issue.md exactly.
+
+            ISSUE_NUMBER: ${{ matrix.item.issue }}
+            ISSUE_TITLE: ${{ matrix.item.title }}
+            REPOSITORY: ${{ github.repository }}
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 60
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash(git:*),Bash(gh:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(mkdir:*)"
+
+  implement:
+    needs: select
+    if: needs.select.outputs.has_implement == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.implement_matrix) }}
+    concurrency:
+      group: claude-issue-${{ matrix.item.issue }}
+      cancel-in-progress: false
+    name: "implement #${{ matrix.item.issue }}"
+
+    # The environment below is the test job of ci.yml: Claude has to get the same gates
+    # green before it opens a pull request, so it needs the same database and toolchain.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_mwmbl
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Install project with maturin
+        run: uv run maturin develop
+      - name: Create test directories and files
+        run: mkdir -p /tmp/test_mwmbl_data
+      - name: Implement the next part
+        uses: anthropics/claude-code-action@v1
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Follow the instructions in .github/claude/implement-issue.md exactly.
+
+            ISSUE_NUMBER: ${{ matrix.item.issue }}
+            ISSUE_TITLE: ${{ matrix.item.title }}
+            REPOSITORY: ${{ github.repository }}
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 100
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(uv:*),Bash(python:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(mkdir:*),Bash(sed:*),Bash(diff:*)"
