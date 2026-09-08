@@ -1,0 +1,93 @@
+name: Crawler smoke
+
+# Builds the crawler image and runs it, which nothing else in CI does. Two failures came
+# from that gap: the image stopped building when Debian bullseye went end of life (#380),
+# and before that the container crash-looped on an import that reached Django too early
+# (#360). Both were only noticed after they had landed on main.
+#
+# The run is bounded so it can go on every pull request: one batch of at most ten URLs,
+# from two domains we chose, submitting nothing to the production index. `--once` makes
+# the crawler do a single crawl and indexing pass and exit with a status - the normal
+# loops catch every exception and restart, so a container that is failing every pass
+# still looks alive.
+#
+# The schedule matters as much as the pull request trigger: the bullseye expiry broke the
+# build with no commit to blame, and only a scheduled run catches that kind of breakage
+# before someone's unrelated push does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * 1"  # 05:00 UTC every Monday
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      redis:
+        image: redis:alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Load the image into the local daemon instead of pushing it: this job only needs to
+      # run it. Single platform, because the run is what we are testing and the multi-arch
+      # build already happens on the publish workflow.
+      - name: Build the crawler image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.crawler
+          push: false
+          load: true
+          tags: mwmbl/crawler:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Pull requests from a fork get no secrets, so there is no key to submit with and the
+      # run has to skip submission. Everything else - the crawl, the local index, the sync
+      # against the remote index - still runs. With a key we go one step further and post
+      # the results as a dry run, which authenticates and validates them server-side
+      # without indexing anything.
+      - name: Choose a submit mode
+        id: submit
+        env:
+          MWMBL_API_KEY: ${{ secrets.MWMBL_API_KEY }}
+        run: |
+          if [ -n "$MWMBL_API_KEY" ]; then
+            echo "mode=dry-run" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=off" >> "$GITHUB_OUTPUT"
+            echo "::notice::No MWMBL_API_KEY available (expected on pull requests from a fork) - skipping result submission."
+          fi
+
+      - name: Crawl one batch and index it
+        env:
+          MWMBL_API_KEY: ${{ secrets.MWMBL_API_KEY }}
+        run: |
+          docker run --rm --network host \
+            -e MWMBL_API_KEY="$MWMBL_API_KEY" \
+            -e MWMBL_CONTACT_INFO=ci@mwmbl.org \
+            -e CRAWL_SUBMIT_MODE=${{ steps.submit.outputs.mode }} \
+            -e CRAWL_BATCH_SIZE=10 \
+            -e CRAWL_ALLOWED_DOMAINS=mwmbl.org,en.wikipedia.org \
+            -e CRAWLER_WORKERS=1 \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e PYTHONUNBUFFERED=1 \
+            mwmbl/crawler:smoke /venv/bin/mwmbl-crawl --once
