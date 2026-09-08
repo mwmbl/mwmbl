@@ -6,7 +6,18 @@ are the only step that is allowed to push.
 
 `ISSUE_NUMBER` is in the prompt; `$N` below means that number.
 
-## 1. Verify before you publish
+## 1. Read what the earlier steps reported
+
+Each step of this pipeline is a fresh session, so the only thing you know about the two
+before you is what they wrote down. `BUILD_SUMMARY` and `REVIEW_SUMMARY` in the prompt are
+the paths of their final messages — the build step's, and the review step's. Read both.
+
+That is what the body describes, and it is the only honest source for it. An empty file
+means that step left no final message; write that it reported nothing rather than
+inventing what it might have found. Their claims about the gates are theirs, not yours:
+section 2 is where you measure that for yourself.
+
+## 2. Verify before you publish
 
 Nothing on this branch has been checked since the last commit landed, so check it:
 
@@ -19,7 +30,7 @@ Both must pass. If either fails, **push nothing** — say exactly what fails in 
 message and stop. A pull request that does not build blocks every later part of the issue,
 and a branch that was never pushed costs nothing to redo.
 
-## 2. Check the size budget
+## 3. Check the size budget
 
 ```
 git diff --numstat origin/main...HEAD
@@ -29,7 +40,7 @@ Sum the added lines, ignoring `uv.lock`, `poetry.lock`, `devdata/`, `front-end/`
 output and `docs/plans/`. Over 500 is a problem to report in the body, not to fix by
 rewriting the change at this stage — say so plainly so the reviewer can decide.
 
-## 3. Check the plan bookkeeping
+## 4. Check the plan bookkeeping
 
 If `docs/plans/issue-$N-*.md` exists, the build step should have either appended ` (Done)`
 to exactly one section heading, or `git rm`-ed the file when it built the last section. If
@@ -38,7 +49,7 @@ it — otherwise the next run rebuilds the same section.
 
 A plan branch (`claude/issue-$N-plan`) adds the plan file and changes nothing else.
 
-## 4. Push
+## 5. Push
 
 ```
 git push -u origin $(git branch --show-current)
@@ -47,7 +58,7 @@ git push -u origin $(git branch --show-current)
 If the build step said it rebased the branch, use `--force-with-lease` instead — a rebase
 cannot fast-forward. Otherwise never force-push.
 
-## 5. Open or update the pull request
+## 6. Open or update the pull request
 
 ```
 gh pr list --head "$(git branch --show-current)" --state open --json number

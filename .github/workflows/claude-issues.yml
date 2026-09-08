@@ -3,11 +3,13 @@ name: Claude issue automation
 # Turns triaged issues into pull requests, and keeps the pull requests it opened moving.
 #
 # A run picks up one issue and decides what it needs — write a plan, build the next part,
-# answer a review, fix red checks, rebase, or ask a question — then builds it, reviews it
-# in a fresh context, and opens or updates the pull request. The three Claude steps below
-# are that pipeline; .github/scripts/select-claude-work.sh decides what to point it at and
-# .github/claude/*.md is what each step is told. See docs/plans/README.md for the plan
-# format the queues are derived from.
+# answer a review, fix red checks, rebase, answer a question, ask one, or file what it
+# found and should not fix here — then builds it, reviews it in a fresh context, and opens
+# or updates the pull request. Changing no code is a normal outcome, and one a run says out
+# loud rather than ending in silence. The three Claude steps below are that pipeline;
+# .github/scripts/select-claude-work.sh decides what to point it at and .github/claude/*.md
+# is what each step is told. See docs/plans/README.md for the plan format the queues are
+# derived from.
 #
 # Only one claude/issue-<N>-* pull request is ever open per issue. It no longer blocks the
 # issue, though: while it is open the only thing the automation may do to that issue is
@@ -82,19 +84,28 @@ jobs:
     # access must never be able to start a run on a public repository, so a comment or
     # review only counts from an OWNER, MEMBER or COLLABORATOR, and never from a bot —
     # which is also what stops the automation waking itself with its own comments.
+    #
+    # A pull request from a fork is out of scope for the same reason, and for a practical
+    # one: GitHub gives a fork's pull_request event no secrets and a read-only token
+    # whatever the permissions block above says, so CLAUDE_CODE_OAUTH_TOKEN would be
+    # empty, every Claude step would fail and the classifier's label write would 403.
     if: >-
       (github.event_name != 'issues' || github.event.action != 'labeled'
         || github.event.label.name == 'ready to plan'
         || github.event.label.name == 'ready to code')
-      && (github.event_name != 'pull_request' || github.event.pull_request.merged)
+      && (github.event_name != 'pull_request'
+        || (github.event.pull_request.merged
+            && github.event.pull_request.head.repo.full_name == github.repository))
       && (github.event_name != 'issue_comment'
         || (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
             && !endsWith(github.event.comment.user.login, '[bot]')))
       && (github.event_name != 'pull_request_review'
         || (startsWith(github.event.pull_request.head.ref, 'claude/')
+            && github.event.pull_request.head.repo.full_name == github.repository
             && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)))
       && (github.event_name != 'pull_request_review_comment'
         || (startsWith(github.event.pull_request.head.ref, 'claude/')
+            && github.event.pull_request.head.repo.full_name == github.repository
             && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
       && (github.event_name != 'workflow_run'
         || (github.event.workflow_run.conclusion == 'failure'
@@ -111,6 +122,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
       # Read-only listing, so the default workflow token is enough here.
       - name: Select the work to act on
         id: select
@@ -153,24 +166,29 @@ jobs:
           - 5432:5432
 
     env:
-      CLAUDE_RUN_LOG: ${{ github.workspace }}/claude-runs.jsonl
+      # Outside the checkout, both of these. The review and finalise steps run git with an
+      # unrestricted Bash tool and are asked to commit; a file sitting untracked in the
+      # working tree is one `git add -A` away from being part of the pull request.
+      CLAUDE_RUN_LOG: ${{ runner.temp }}/claude-runs.jsonl
+      CLAUDE_SUMMARY_DIR: ${{ runner.temp }}/claude-summaries
       ISSUE_NUMBER: ${{ matrix.item.issue }}
 
     steps:
-      # Full history: every step diffs the branch against main.
+      # Full history: every step diffs the branch against main, and the step below
+      # compares HEAD against the branch's own remote tip.
+      #
+      # The ref is pinned because `pull_request` hands github.ref as refs/pull/<n>/merge:
+      # a ref GitHub stops guaranteeing once the pull request closes, and a snapshot of a
+      # merge that is not main even when it does resolve. Every other trigger here already
+      # resolves to the default branch, and workflow_dispatch keeps the branch it was
+      # dispatched on so this pipeline can be tested from one.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
           fetch-depth: 0
       - name: Set up the project
         uses: ./.github/actions/setup-project
-
-      # What "the build committed something" is measured against. Taken before the first
-      # step rather than derived from the branch, because a run answering review feedback
-      # checks out a branch that already has commits on it.
-      - name: Note the starting commit
-        id: start
-        run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
 
       # No github_token input on any Claude step: the action then authenticates as the
       # Claude GitHub App, which sets GH_TOKEN and the git credentials for Claude and,
@@ -217,16 +235,31 @@ jobs:
 
       # Derived from git state rather than from anything a step has to remember to set, so
       # a rerun is as harmless as the selector's queues are. A run that committed nothing —
-      # it asked a question, or found the work already done — skips the rest of the job.
+      # it asked a question, answered one, or found the work already done — skips the rest
+      # of the job.
+      #
+      # Measured against the branch's own published tip rather than against the commit this
+      # job checked out. A `respond` run starts with `gh pr checkout`, which moves HEAD to
+      # commits that are already pushed and already reviewed: comparing against where the
+      # job started would call every one of those runs a build.
       - name: Did the run commit anything?
         id: built
         run: |
-          if [[ $(git rev-parse HEAD) != "${{ steps.start.outputs.sha }}" \
-                && $(git branch --show-current) == claude/* ]]; then
-            echo "built=true" >>"$GITHUB_OUTPUT"
-          else
+          branch=$(git branch --show-current)
+          if [[ $branch != claude/* ]]; then
             echo "built=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::No new commit on a claude/* branch; nothing to review or push."
+            echo "::notice::Not on a claude/* branch; nothing to review or push."
+            exit 0
+          fi
+          published="origin/$branch"
+          if ! git rev-parse --verify --quiet "$published" >/dev/null; then
+            published=origin/main
+          fi
+          if [[ $(git rev-parse HEAD) == $(git rev-parse "$published") ]]; then
+            echo "built=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::$branch is unchanged from $published; nothing to review or push."
+          else
+            echo "built=true" >>"$GITHUB_OUTPUT"
           fi
 
       # A fresh context is the whole point: this step has no memory of the reasoning that
@@ -263,9 +296,18 @@ jobs:
 
       # The only step allowed to push. It re-runs both gates first, so the pull request
       # body describes the code as it stands after the review rather than before it.
+      #
+      # The review step is continue-on-error, so a review that ran out of turns part-way
+      # through a fix ends red having left the branch mid-change. Publishing that is the
+      # "opens a pull request nobody reviewed" failure the review step exists to prevent,
+      # so its outcome gates this step exactly as the build's does. When review is skipped
+      # this step is skipped too: both are guarded on the same build.
       - name: Open or update the pull request
         id: finalise
-        if: steps.built.outputs.built == 'true' && steps.coordinate.outcome == 'success'
+        if: >-
+          steps.built.outputs.built == 'true'
+          && steps.coordinate.outcome == 'success'
+          && steps.review.outcome == 'success'
         uses: anthropics/claude-code-action@v1
         continue-on-error: true
         env:
@@ -281,6 +323,8 @@ jobs:
             ISSUE_NUMBER: ${{ matrix.item.issue }}
             ISSUE_TITLE: ${{ matrix.item.title }}
             REPOSITORY: ${{ github.repository }}
+            BUILD_SUMMARY: ${{ runner.temp }}/claude-summaries/coordinate.md
+            REVIEW_SUMMARY: ${{ runner.temp }}/claude-summaries/review.md
           claude_args: |
             --model claude-opus-5
             --max-turns 30
@@ -297,8 +341,24 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: claude-run-${{ matrix.item.issue }}
-          path: claude-runs.jsonl
+          path: ${{ runner.temp }}/claude-runs.jsonl
           if-no-files-found: ignore
+
+      # A run that changes nothing leaves the repository exactly as the selector found
+      # it, so the same red checks or the same unanswered review would select this pull
+      # request again on the next trigger, and on every scheduled run after that, at three
+      # Opus steps a time. This comment is the record that stops it; select-claude-work.sh
+      # reads it as "this commit has already had its turn".
+      - name: Say on the pull request that nothing changed
+        if: >-
+          matrix.item.kind == 'respond'
+          && steps.coordinate.outcome == 'success'
+          && steps.built.outputs.built != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ matrix.item.pr }}
+          REASON: ${{ matrix.item.reason }}
+        run: .github/scripts/report-no-change.sh
 
       - name: Report how the run ended
         if: always()

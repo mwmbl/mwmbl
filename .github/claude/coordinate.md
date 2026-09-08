@@ -8,6 +8,11 @@ branch and stop there. A review step then reads what you committed in a fresh co
 fixes what it finds, and a finalise step pushes the branch and opens or updates the pull
 request. So: **never `git push`, and never run `gh pr create`.**
 
+Committing is not the only thing you can do, though, and it is often not the useful one.
+Answering a question, saying what you could not work out, recording what you learnt on the
+issue and filing what you found but should not fix here are all first-class outcomes —
+section 2 lists them alongside the ones that write code.
+
 The prompt carries:
 
 - `ISSUE_NUMBER` — `$N` below.
@@ -57,19 +62,59 @@ growing this pull request past its budget.
 
 **Fix the failing checks.** `gh pr checkout $PULL_REQUEST`, reproduce the failure locally,
 fix the cause, commit. Never make a check pass by weakening or deleting the test that
-caught the problem.
+caught the problem. If the failure is not the branch's — a flake, or something broken in
+the environment — say so on the pull request with the evidence and commit nothing, rather
+than committing a change that pretends to fix it.
 
 **Rebase onto main.** The branch conflicts. `gh pr checkout $PULL_REQUEST`, then
 `git rebase origin/main`, resolve, re-run both gates. Say in your final message that the
 branch was rebased, so the finalise step force-pushes rather than failing on a non-fast
 -forward.
 
+**Answer the question, and commit nothing.** The feedback asks about the change rather
+than asking for a change to it: why it was done this way, whether something was
+considered, what a test actually covers. Work the answer out from the code — not from what
+the pull request body claims — and post it on the thread it was asked on:
+
+```
+gh pr comment $PULL_REQUEST --body "..."
+gh api repos/$REPOSITORY/pulls/comments/<comment-id>/replies -f body="..."   # inline thread
+```
+
+Say what you looked at, so the reviewer can check the answer rather than take it. If
+working it out shows the reviewer was right, make the change instead: an articulate
+explanation of a mistake is worth nothing.
+
 **Ask, and commit nothing.** The issue or the feedback is too ambiguous to act on without
 guessing. Post the specific questions that block you with `gh issue comment $N` (or
 `gh pr comment $PULL_REQUEST`), and stop. Guessing wastes a review; a question does not.
 
+Two things can go with any of the above, and neither is an action on its own:
+
+**Record what you found out, on the issue.** `gh issue comment $N` when the run turned up
+something the next run or a human needs and the pull request is the wrong place for it: a
+plan section that cannot be built as written, a constraint the issue does not mention, a
+failure you could not reproduce. These runs have no memory between them, so the thread is
+the only place a finding survives. Correct the issue's own description only when a
+maintainer asked you to (`gh issue edit $N`), and never rewrite what someone else wrote —
+saying in a comment that the description is out of date is honest; quietly replacing it is
+not.
+
+**File a follow-up issue.** Something real turned up that this issue is not about: a bug
+you noticed while reading the code, a request from a reviewer that belongs to a different
+change. Search for it first with `gh issue list --search "<terms>" --state all`, then
+`gh issue create`: say what you saw, where, and how you noticed it, and link this issue
+and the pull request. Leave it unlabelled. An issue reaches these queues only when
+someone with write access labels it, and an automation that could label its own would be
+feeding itself. At most one per run, and never for a style preference, for something a
+plan section already covers, or for anything you could simply have fixed here.
+
 Committing nothing is a valid outcome. The review and finalise steps are skipped when the
-run leaves no new commit, and the item stays queued for whenever the answer arrives.
+run leaves no new commit, and on a pull request the workflow then comments to say the run
+changed nothing — which is also what stops the same red checks or the same unanswered
+review selecting this pull request on every trigger from here to eternity. Nothing else
+happens until a new commit lands or someone says something new, so whatever you post
+before you stop is all a human has to go on: make it specific.
 
 ## 3. Both gates must pass before you stop
 
@@ -90,10 +135,17 @@ Your final message is what the finalise step writes the pull request body from. 
 action you took and why, what changed, what you deliberately did not do, and the actual
 results of the two gates.
 
+If you committed nothing, no later step runs and nobody reads that message. Everything a
+human needs has to be in what you posted on the issue or the pull request before you
+stopped.
+
 ## Rules
 
 - Never `git push`. Never `gh pr create`. The finalise step does both.
-- Do not merge anything, do not close the issue, do not change labels.
+- Do not merge anything, and do not close the issue — the pull request closes it, by
+  saying `Closes #$N` when it finishes the last section of the plan.
+- Do not add or remove labels, on this issue or on one you file. Labels are how a human
+  says what the automation may pick up, and `claude: stuck` is the workflow's own.
 - One action per run, and one pull request open per issue at a time.
 - At most about 500 added lines including tests, excluding `uv.lock`, `devdata/`,
   `front-end/` build output and `docs/plans/`.

@@ -21,6 +21,10 @@
 # such an issue is no longer simply skipped — an unanswered review is the most valuable
 # thing the automation can pick up, because it is what a human is waiting on.
 #
+# Pull requests from forks are not the automation's to work on and are ignored throughout,
+# branch name notwithstanding: a fork's branch is code nobody here has reviewed, and the
+# workflow could not check it out with a working token even if it wanted to.
+#
 # The one label the automation writes is "claude: stuck", added by the workflow when a run
 # fails for a reason that is not a usage limit. Items on a stuck issue are skipped so a
 # broken item cannot burn the budget on every scheduled run; a human removes the label, or
@@ -42,47 +46,82 @@ readonly max_items="${CLAUDE_MAX_ITEMS:-3}"
 readonly only_issue="${CLAUDE_ONLY_ISSUE:-}"
 
 open_issues=$(gh issue list --state open --limit 200 --json number,title,labels)
-open_branches=$(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName')
+open_pull_requests=$(gh pr list --state open --limit 200 \
+    --json number,headRefName,isCrossRepository \
+    --jq '[.[] | select(.isCrossRepository | not)]')
 
-# What needs answering on one open pull request, if anything. Feedback counts only from an
-# OWNER, MEMBER or COLLABORATOR — a drive-by comment on a public repository must not be
-# able to steer a run — and only when it is newer than the last commit on the branch, which
-# is what "already addressed" means here. A review carrying inline comments and no body
-# still arrives as a review with a submittedAt, so inline-only feedback is caught too.
+# What a run that changed nothing leaves behind, so that it is not asked the same question
+# on the next trigger and every scheduled run after it. Written by
+# .github/scripts/report-no-change.sh — the two strings have to stay in step.
+readonly no_change_marker='<!-- claude-run: no change -->'
+
+# What needs answering on one open pull request, if anything.
+#
+# Feedback counts only from an OWNER, MEMBER or COLLABORATOR — a drive-by comment on a
+# public repository must not be able to steer a run — and only when it is newer than the
+# last commit on the branch, which is what "already addressed" means here. A review
+# carrying inline comments and no body still arrives as a review with a timestamp, so
+# inline-only feedback is caught too.
+#
+# The last thing a run said about the current commit bounds the retries. A run that ends
+# without committing changes nothing the queues are derived from, so failing checks it
+# could not fix, or a question it could not answer without guessing, would select this
+# pull request again on every trigger for as long as they stood. Once it has reported on a
+# commit, the mechanical reasons stop counting for that commit and only something said
+# after the report counts as feedback — a new commit, or a human replying, is what starts
+# it again.
+#
+# Comments and reviews come from the REST API rather than from `gh pr view`, which is the
+# only one of the two that says whether an author is a bot: GraphQL gives a Bot actor a
+# login without the "[bot]" suffix, so a suffix test against gh's projection silently
+# matches nothing and the automation reads its own comments as a maintainer's.
 #
 # Asked per pull request rather than across the list: `gh pr list --json commits` walks
 # every author of every commit of every open pull request, which exceeds GitHub's GraphQL
 # node limit on a repository this size.
 readonly reason_filter='
 def is_maintainer:
-    (.authorAssociation | . == "OWNER" or . == "MEMBER" or . == "COLLABORATOR")
-    and (.author.login | endswith("[bot]") | not);
+    (.author_association | . == "OWNER" or . == "MEMBER" or . == "COLLABORATOR")
+    and (.user.type != "Bot");
 
-{ last_commit: (.commits | last | .committedDate),
-  feedback: ([ (.reviews[] | select(is_maintainer) | .submittedAt),
-               (.comments[] | select(is_maintainer) | .createdAt) ] | max),
-  failing: [ .statusCheckRollup[] | select(.conclusion == "FAILURE") | .name ],
-  conflicting: (.mergeable == "CONFLICTING") }
-| [ (if .feedback != null and .feedback > .last_commit
+($state.commits | last | .committedDate) as $last_commit
+| ([ $comments[]
+     | select(.user.type == "Bot")
+     | select(.body | contains($marker))
+     | .created_at ] | max) as $reported
+| ([ ($reviews[] | select(is_maintainer) | .submitted_at),
+     ($comments[] | select(is_maintainer) | .created_at) ] | max) as $feedback
+| ($reported != null and $reported > $last_commit) as $already_reported
+| [ (if $feedback != null and $feedback > $last_commit
+        and ($reported == null or $feedback > $reported)
      then "unanswered feedback" else empty end),
-    (if (.failing | length) > 0
-     then "failing checks: " + (.failing | join(", ")) else empty end),
-    (if .conflicting then "conflicts with main" else empty end) ]
+    (if $already_reported then empty
+     else ([ $state.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name ]
+           | if length > 0 then "failing checks: " + join(", ") else empty end)
+     end),
+    (if $state.mergeable == "CONFLICTING" and ($already_reported | not)
+     then "conflicts with main" else empty end) ]
 | join("; ")
 '
 
+# `gh api --paginate` prints one JSON document per page, which jq -s puts back together.
+whole_of() {
+    gh api "$1" --paginate | jq -s 'add // []'
+}
+
 reason_to_respond() {
-    gh pr view "$1" --json mergeable,statusCheckRollup,reviews,comments,commits \
-        --jq "$reason_filter"
+    local state comments reviews
+    state=$(gh pr view "$1" --json mergeable,statusCheckRollup,commits)
+    comments=$(whole_of "repos/{owner}/{repo}/issues/$1/comments")
+    reviews=$(whole_of "repos/{owner}/{repo}/pulls/$1/reviews")
+    jq -nr --argjson state "$state" --argjson comments "$comments" \
+        --argjson reviews "$reviews" --arg marker "$no_change_marker" "$reason_filter"
 }
 
 pull_request_for() {
-    gh pr list --state open --limit 200 --json number,headRefName \
-        --jq ".[] | select(.headRefName | startswith(\"claude/issue-$1-\")) | .number" | head -1
-}
-
-has_open_pull_request() {
-    grep -qE "^claude/issue-$1-" <<<"$open_branches"
+    jq -r --arg prefix "claude/issue-$1-" \
+        'map(select(.headRefName | startswith($prefix))) | first | .number // empty' \
+        <<<"$open_pull_requests"
 }
 
 plan_file_for() {
@@ -141,8 +180,9 @@ while IFS=$'\t' read -r number title labels; do
             '{issue: $issue, title: $title, kind: $kind, pr: $pr, reason: $reason}')"
     }
 
-    if has_open_pull_request "$number"; then
-        pull_request=$(pull_request_for "$number")
+    pull_request=$(pull_request_for "$number")
+
+    if [[ -n $pull_request ]]; then
         reason=$(reason_to_respond "$pull_request")
         if [[ -n $reason ]]; then
             respond_items+=("$(emit respond "$pull_request" "$reason")")
