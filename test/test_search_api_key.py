@@ -568,6 +568,55 @@ def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
 
 
 @pytest.mark.django_db
+def test_post_results_dry_run_validates_without_indexing(api_client, crawl_api_key):
+    """A dry run authenticates and validates the payload but must not touch the index."""
+    past_ts = int(datetime.now(stdlib_timezone.utc).timestamp()) - 60
+
+    with (
+        patch("mwmbl.crawler.app.index_documents") as index_documents,
+        patch("mwmbl.crawler.app.upload_object") as upload_object,
+        patch("mwmbl.crawler.app.stats_manager") as stats_manager,
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results?dry_run=true",
+            content_type="application/json",
+            data={"results": [{"url": "https://example.com", "title": "t", "extract": "e", "last_crawled": past_ts}]},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "dry-run", "url": None}
+    index_documents.assert_not_called()
+    upload_object.assert_not_called()
+    stats_manager.record_results.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_post_results_dry_run_still_requires_a_valid_key(api_client, search_api_key):
+    """dry_run must not become an unauthenticated endpoint."""
+    response = api_client.post(
+        "/api/v1/crawler/results?dry_run=true",
+        content_type="application/json",
+        data={"results": []},
+        **api_key_header(search_api_key.raw_key),
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_post_results_dry_run_still_rejects_future_last_crawled(api_client, crawl_api_key):
+    """Validation a real submission would fail on has to fail the dry run too, or CI proves nothing."""
+    future_ts = int(datetime.now(stdlib_timezone.utc).timestamp()) + 3600
+    response = api_client.post(
+        "/api/v1/crawler/results?dry_run=true",
+        content_type="application/json",
+        data={"results": [{"url": "https://example.com", "title": "t", "extract": "e", "last_crawled": future_ts}]},
+        **api_key_header(crawl_api_key.raw_key),
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
 def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
     captured = []
 

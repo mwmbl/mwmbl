@@ -284,10 +284,12 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
             "Requires a valid crawl-scoped API key passed in the `X-API-Key` request header "
             "(preferred) or in the request body `api_key` field (deprecated). "
             "Results are indexed immediately and also stored in object storage. "
-            "This endpoint is intended for trusted crawlers."
+            "This endpoint is intended for trusted crawlers.\n\n"
+            "Pass `?dry_run=true` to authenticate and validate the request without indexing "
+            "or storing anything. Useful for exercising the submission path from CI."
         ),
     )
-    def post_results(request, results: Results):
+    def post_results(request, results: Results, dry_run: bool = False):
         # Prefer X-API-Key header; fall back to deprecated body field
         raw_key = request.headers.get("X-API-Key") or results.api_key
         if not raw_key:
@@ -322,6 +324,9 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
                     last_crawled=last_crawled,
                 )
             )
+
+        if dry_run:
+            return {"status": "dry-run", "url": None}
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
