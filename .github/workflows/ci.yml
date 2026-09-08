@@ -79,15 +79,19 @@ jobs:
 
       #----------------------------------------------
       # install dependencies
+      #
+      # Retried for the same reason as in .github/actions/setup-project: building the
+      # Rust extension downloads a prebuilt libxgboost.so, and a reset connection there
+      # panics the build script rather than being retried by it.
       #----------------------------------------------
       - name: Install dependencies
-        run: uv sync --group dev
+        run: .github/scripts/retry.sh uv sync --group dev
       #----------------------------------------------
       # build and install the project with maturin
       # (compiles the Rust extension and installs the package)
       #----------------------------------------------
       - name: Install project with maturin
-        run: uv run maturin develop
+        run: .github/scripts/retry.sh uv run maturin develop
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
