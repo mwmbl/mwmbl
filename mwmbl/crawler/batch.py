@@ -215,11 +215,14 @@ class PostResultsResponse(Schema):
     """Response returned after successfully submitting results for indexing."""
 
     status: str = Field(
-        description="Always `ok` on success.",
+        description="`ok` when the results were indexed, `dry-run` when they were only validated.",
         example="ok",
     )
-    url: str = Field(
-        description="Public URL of the uploaded results file in object storage.",
+    url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Public URL of the uploaded results file in object storage. Null for a dry run, which uploads nothing."
+        ),
         example="https://storage.mwmbl.org/1/v1/2024-01-01/results/username/00001__abcd1234.json.gz",
     )
 
