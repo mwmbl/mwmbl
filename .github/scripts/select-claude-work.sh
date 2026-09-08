@@ -14,6 +14,10 @@
 # is what enforces "one PR at a time per issue": the next part cannot start until the
 # previous one is merged (or closed).
 #
+# Each queue is ordered by the "priority: high|medium|low" label before it is truncated to
+# CLAUDE_MAX_ITEMS, so raising an issue's priority moves it up the queue. Issues without a
+# priority label sort last, behind "priority: low".
+#
 # Writes plan_matrix/implement_matrix (and has_plan/has_implement) to $GITHUB_OUTPUT, or
 # to stdout when that is unset, so the selection can be dry-run locally with:
 #
@@ -53,6 +57,18 @@ has_pending_section() {
     ((total > done_count))
 }
 
+# Sort key for a queue: lower comes first. Unlabelled issues sort behind "priority: low",
+# so adding the label can only ever promote an issue, never demote it below the backlog.
+priority_rank() {
+    case ",$1," in
+        *,"priority: high",*) echo 0 ;;
+        *,"priority: medium",*) echo 1 ;;
+        *,"priority: low",*) echo 2 ;;
+        *) echo 3 ;;
+    esac
+}
+
+# Each entry is "<rank>\t<item json>", so the arrays can be sorted before the max_items cut.
 plan_items=()
 implement_items=()
 
@@ -66,7 +82,9 @@ while IFS=$'\t' read -r number title labels; do
     fi
 
     plan_file=$(plan_file_for "$number")
-    item=$(jq -nc --argjson issue "$number" --arg title "$title" '{issue: $issue, title: $title}')
+    item=$(printf '%s\t%s' \
+        "$(priority_rank "$labels")" \
+        "$(jq -nc --argjson issue "$number" --arg title "$title" '{issue: $issue, title: $title}')")
 
     if [[ -n $plan_file ]]; then
         if has_pending_section "$plan_file"; then
@@ -80,6 +98,18 @@ while IFS=$'\t' read -r number title labels; do
         plan_items+=("$item")
     fi
 done < <(jq -r '.[] | [.number, .title, ([.labels[].name] | join(","))] | @tsv' <<<"$open_issues")
+
+# Highest priority first, and a stable sort within a rank so that equal-priority issues
+# keep the order gh listed them in.
+by_priority() {
+    if (($# == 0)); then
+        return
+    fi
+    printf '%s\n' "$@" | sort -s -n -k1,1 | cut -f2-
+}
+
+mapfile -t plan_items < <(by_priority ${plan_items+"${plan_items[@]}"})
+mapfile -t implement_items < <(by_priority ${implement_items+"${implement_items[@]}"})
 
 # Finishing work already under way beats starting more of it, so implement items take
 # the budget first.
