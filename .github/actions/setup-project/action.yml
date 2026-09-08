@@ -18,11 +18,18 @@ runs:
         cache-dependency-glob: "uv.lock"
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+    # Both of these build the Rust extension, and its xgboost_lib-sys dependency's build
+    # script downloads a prebuilt libxgboost.so from github.com every time it runs. That
+    # download is not retried and its failure is a panic, so a single reset connection
+    # ends the whole job before Claude has started - which is what killed run 34278357092
+    # ("Connection reset by peer" fetching libxgboost.so). Retrying the build is enough:
+    # the download is repeated from scratch each attempt, and everything cargo already
+    # compiled is still in target/, so a second attempt costs little.
     - name: Install dependencies
-      run: uv sync --group dev
+      run: .github/scripts/retry.sh uv sync --group dev
       shell: bash
     - name: Install project with maturin
-      run: uv run maturin develop
+      run: .github/scripts/retry.sh uv run maturin develop
       shell: bash
     - name: Create test directories and files
       run: mkdir -p /tmp/test_mwmbl_data
