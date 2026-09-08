@@ -1,6 +1,6 @@
 name: Claude issue automation
 
-# Turns triaged issues into pull requests, hourly.
+# Turns triaged issues into pull requests, as soon as they are ready.
 #
 #   "ready to plan"  ->  a PR adding docs/plans/issue-<N>-<slug>.md and nothing else
 #   "ready to code"  ->  a PR implementing the issue (or a plan, if it is too big for one)
@@ -21,15 +21,26 @@ name: Claude issue automation
 # repository token, so nothing unreviewed should ever reach it.
 
 on:
-  schedule:
-    # Hourly, off the hour: runs at :00 queue behind everyone else's.
-    - cron: "17 * * * *"
+  # Both queues are pure functions of repository state, so the triggers are the events
+  # that can change that state: a triage label going on an issue, and anything landing
+  # on main (a merged plan, or a merged part that frees the issue for the next one).
+  issues:
+    types: [labeled]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       issue:
         description: "Act on this issue number only (blank = every eligible issue)"
         required: false
         type: string
+  schedule:
+    # A safety net, not the cadence. GitHub dispatches schedule events off a shared,
+    # best-effort queue and drops them under load: every scheduled run this repository
+    # has had arrived between 40 minutes and 6 hours late, so an hourly cron fired
+    # exactly never. The triggers above are what keep the queue moving; this is only
+    # here to pick up work whose event was missed.
+    - cron: "17 * * * *"
 
 permissions:
   contents: write
@@ -45,6 +56,17 @@ env:
 jobs:
   select:
     runs-on: ubuntu-latest
+    # Only the two triage labels start work; every other label edit is noise.
+    if: >-
+      github.event_name != 'issues'
+      || github.event.label.name == 'ready to plan'
+      || github.event.label.name == 'ready to code'
+    # A run of merges should produce one selection rather than one per push. A superseded
+    # selection has not started any work yet, so cancelling it costs nothing; a targeted
+    # workflow_dispatch gets its own group so a push cannot cancel it.
+    concurrency:
+      group: claude-issue-select-${{ inputs.issue || 'all' }}
+      cancel-in-progress: true
     outputs:
       plan_matrix: ${{ steps.select.outputs.plan_matrix }}
       implement_matrix: ${{ steps.select.outputs.implement_matrix }}
