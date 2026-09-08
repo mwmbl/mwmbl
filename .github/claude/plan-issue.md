@@ -1,10 +1,12 @@
 # Plan an issue
 
 You are Claude Code running in GitHub Actions on a fresh checkout of `main`. Your job is
-to turn one issue into a written plan, delivered as a pull request that adds exactly one
-file. **Write no application code in this run.**
+to turn one issue into a written plan: one commit adding exactly one file.
+**Write no application code in this run.**
 
-`ISSUE_NUMBER` is in the prompt; `$N` below means that number.
+`ISSUE_NUMBER` is in the prompt; `$N` below means that number. Later steps in this job
+review the plan and open the pull request, so commit and stop — see
+`.github/claude/coordinate.md` for the pipeline.
 
 ## 1. Understand the issue
 
@@ -46,22 +48,24 @@ Rules for the breakdown:
 - Give each section acceptance criteria a reviewer can check.
 - Keep it short. A plan is a sequence of decisions, not a restatement of the codebase.
 
-## 3. Open the pull request
+## 3. Commit it
 
 ```
 git checkout -b claude/issue-$N-plan
 git add docs/plans/issue-$N-<slug>.md
 git commit -m "Plan issue #$N: <issue title>"
-git push -u origin claude/issue-$N-plan
-gh pr create --title "Plan: <issue title>" --body "<body>"
 ```
 
-The body: one paragraph on the approach and why it is split this way, then the list of
-sections with their line estimates, then `Part of #$N`. Merging this pull request is what
-starts implementation, so make the trade-offs easy to review.
+Stop there — do not push, do not open a pull request. Leave the finalise step what it
+needs for the body in your final message: one paragraph on the approach and why it is
+split this way, then the sections with their line estimates. Merging that pull request is
+what starts implementation, so make the trade-offs easy to review.
 
 ## Rules
 
-- **Never modify anything under `.github/`.** That is the automation's own configuration.
-- The pull request adds exactly one file. If you changed anything else, revert it.
+- A plan may change `.github/` when the issue is about the automation itself. Say so in
+  your final message, so it reaches the pull request body: the run that implements it
+  edits the instructions it is following, and a maintainer reviews that before it takes
+  effect.
+- The commit adds exactly one file. If you changed anything else, revert it.
 - Do not merge anything, do not close the issue, do not change labels.

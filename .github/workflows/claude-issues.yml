@@ -1,33 +1,52 @@
 name: Claude issue automation
 
-# Turns triaged issues into pull requests, as soon as they are ready.
+# Turns triaged issues into pull requests, and keeps the pull requests it opened moving.
 #
-#   "ready to plan"  ->  a PR adding docs/plans/issue-<N>-<slug>.md and nothing else
-#   "ready to code"  ->  a PR implementing the issue (or a plan, if it is too big for one)
-#   a plan on main   ->  one PR per unfinished "## PR <k>:" section, in order
+# A run picks up one issue and decides what it needs — write a plan, build the next part,
+# answer a review, fix red checks, rebase, answer a question, ask one, or file what it
+# found and should not fix here — then builds it, reviews it in a fresh context, and opens
+# or updates the pull request. Changing no code is a normal outcome, and one a run says out
+# loud rather than ending in silence. The three Claude steps below are that pipeline;
+# .github/scripts/select-claude-work.sh decides what to point it at and .github/claude/*.md
+# is what each step is told. See docs/plans/README.md for the plan format the queues are
+# derived from.
 #
-# Only one claude/issue-<N>-* pull request is ever open per issue: the next part starts
-# after the previous one is merged. See .github/claude/*.md for what Claude is told, and
-# docs/plans/README.md for the plan format.
+# Only one claude/issue-<N>-* pull request is ever open per issue. It no longer blocks the
+# issue, though: while it is open the only thing the automation may do to that issue is
+# answer what is holding the pull request up, which is what a human is actually waiting on.
 #
-# Both jobs authenticate with the CLAUDE_CODE_OAUTH_TOKEN secret, a one-year token from
+# Every step authenticates with the CLAUDE_CODE_OAUTH_TOKEN secret, a one-year token from
 # `claude setup-token`. It runs against a Claude subscription rather than API credit, so
 # these runs share the usage windows of an interactive session, and the token has to be
-# regenerated when it expires.
+# regenerated when it expires. A run that finds the window spent ends green and stays
+# queued; see .github/scripts/classify-claude-run.sh.
 #
-# Note that an issue only enters these queues once someone with write access labels it,
-# so untriaged issue text never reaches a run. That gate is what makes an unrestricted
-# Bash tool below reasonable: the runner is ephemeral, but it holds an API key and a
-# repository token, so nothing unreviewed should ever reach it.
+# Note that an issue only enters these queues once someone with write access labels it, and
+# only a maintainer's review or comment wakes a run on a pull request, so untriaged text
+# never reaches a run. That gate is what makes an unrestricted Bash tool below reasonable:
+# the runner is ephemeral, but it holds an API key and a repository token, so nothing
+# unreviewed should ever reach it.
 
 on:
-  # Both queues are pure functions of repository state, so the triggers are the events
-  # that can change that state: a triage label going on an issue, and anything landing
-  # on main (a merged plan, or a merged part that frees the issue for the next one).
+  # The queues are pure functions of repository state, so the triggers are the events that
+  # can change that state. Not `push`: claude-code-action rejects that event outright
+  # ("Unsupported event type: push"), which is what failed every job on every merge to main
+  # between a5eb9e3 and 141ae84.
   issues:
-    types: [labeled]
-  push:
-    branches: [main]
+    types: [labeled, edited, reopened]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [closed]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  # CI going red on a branch the automation owns is a state change it can act on without
+  # waiting for a human to notice.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       issue:
@@ -38,8 +57,9 @@ on:
     # A safety net, not the cadence. GitHub dispatches schedule events off a shared,
     # best-effort queue and drops them under load: every scheduled run this repository
     # has had arrived between 40 minutes and 6 hours late, so an hourly cron fired
-    # exactly never. The triggers above are what keep the queue moving; this is only
-    # here to pick up work whose event was missed.
+    # exactly never. The triggers above are what keep the queue moving; this is what
+    # picks up work whose event was missed, and work that stopped because the
+    # subscription's usage window was spent.
     - cron: "17 * * * *"
 
 permissions:
@@ -50,57 +70,92 @@ permissions:
   actions: read
 
 env:
-  # How many issues may be worked on in one run, implement items first.
+  # How many issues may be worked on in one run.
   CLAUDE_MAX_ITEMS: "3"
 
 jobs:
   select:
     runs-on: ubuntu-latest
-    # Only the two triage labels start work; every other label edit is noise.
+    # Which events are worth a selection at all. Everything here is about not starting a
+    # run: the selector re-derives the whole queue from repository state regardless of
+    # what woke it, so a trigger that gets through costs one cheap job and nothing more.
+    #
+    # The author checks matter for more than noise. Feedback from someone without write
+    # access must never be able to start a run on a public repository, so a comment or
+    # review only counts from an OWNER, MEMBER or COLLABORATOR, and never from a bot —
+    # which is also what stops the automation waking itself with its own comments. The
+    # login test belongs on all three: a run that answers a question posts as the Claude
+    # app rather than with GITHUB_TOKEN, so unlike a GITHUB_TOKEN comment it does raise an
+    # event, and author_association is not a reliable way to recognise an app.
+    #
+    # A pull request from a fork is out of scope for the same reason, and for a practical
+    # one: GitHub gives a fork's pull_request event no secrets and a read-only token
+    # whatever the permissions block above says, so CLAUDE_CODE_OAUTH_TOKEN would be
+    # empty, every Claude step would fail and the classifier's label write would 403.
     if: >-
-      github.event_name != 'issues'
-      || github.event.label.name == 'ready to plan'
-      || github.event.label.name == 'ready to code'
-    # A run of merges should produce one selection rather than one per push. A superseded
+      (github.event_name != 'issues' || github.event.action != 'labeled'
+        || github.event.label.name == 'ready to plan'
+        || github.event.label.name == 'ready to code')
+      && (github.event_name != 'pull_request'
+        || (github.event.pull_request.merged
+            && github.event.pull_request.head.repo.full_name == github.repository))
+      && (github.event_name != 'issue_comment'
+        || (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+            && !endsWith(github.event.comment.user.login, '[bot]')))
+      && (github.event_name != 'pull_request_review'
+        || (startsWith(github.event.pull_request.head.ref, 'claude/')
+            && github.event.pull_request.head.repo.full_name == github.repository
+            && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+            && !endsWith(github.event.review.user.login, '[bot]')))
+      && (github.event_name != 'pull_request_review_comment'
+        || (startsWith(github.event.pull_request.head.ref, 'claude/')
+            && github.event.pull_request.head.repo.full_name == github.repository
+            && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+            && !endsWith(github.event.comment.user.login, '[bot]')))
+      && (github.event_name != 'workflow_run'
+        || (github.event.workflow_run.conclusion == 'failure'
+            && startsWith(github.event.workflow_run.head_branch, 'claude/')))
+    # A burst of events should produce one selection rather than one each. A superseded
     # selection has not started any work yet, so cancelling it costs nothing; a targeted
-    # workflow_dispatch gets its own group so a push cannot cancel it.
+    # workflow_dispatch gets its own group so nothing else can cancel it.
     concurrency:
       group: claude-issue-select-${{ inputs.issue || 'all' }}
       cancel-in-progress: true
     outputs:
-      plan_matrix: ${{ steps.select.outputs.plan_matrix }}
-      implement_matrix: ${{ steps.select.outputs.implement_matrix }}
-      has_plan: ${{ steps.select.outputs.has_plan }}
-      has_implement: ${{ steps.select.outputs.has_implement }}
+      items_matrix: ${{ steps.select.outputs.items_matrix }}
+      has_items: ${{ steps.select.outputs.has_items }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
       # Read-only listing, so the default workflow token is enough here.
-      - name: Select the issues to act on
+      - name: Select the work to act on
         id: select
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLAUDE_ONLY_ISSUE: ${{ inputs.issue }}
         run: .github/scripts/select-claude-work.sh
 
-  plan:
+  work:
     needs: select
-    if: needs.select.outputs.has_plan == 'true'
+    if: needs.select.outputs.has_items == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Three Claude steps and up to four runs of a 67-second test suite.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.select.outputs.plan_matrix) }}
-    # Never two runs on one issue at once; a queued duplicate exits early when it sees
-    # the pull request the first one opened.
+      matrix: ${{ fromJSON(needs.select.outputs.items_matrix) }}
+    # Never two runs on one issue at once.
     concurrency:
       group: claude-issue-${{ matrix.item.issue }}
       cancel-in-progress: false
-    name: "plan #${{ matrix.item.issue }}"
+    name: "#${{ matrix.item.issue }} ${{ matrix.item.kind }}"
 
-    # A plan is only as good as the facts behind it, so give the planning run the same
-    # environment as the implementing one: it can then count lint violations, run the
-    # suite and check what actually breaks, rather than estimating from a read.
+    # Claude has to get the same gates green before it opens a pull request as CI runs
+    # afterwards, so it needs the same database and toolchain as ci.yml's test job. The
+    # planning run gets it too: a plan is only as good as the facts behind it, and this
+    # lets it count lint violations and see what actually breaks rather than estimating.
     services:
       postgres:
         image: postgres:15
@@ -115,19 +170,41 @@ jobs:
         ports:
           - 5432:5432
 
+    env:
+      # Outside the checkout, both of these. The review and finalise steps run git with an
+      # unrestricted Bash tool and are asked to commit; a file sitting untracked in the
+      # working tree is one `git add -A` away from being part of the pull request.
+      CLAUDE_RUN_LOG: ${{ runner.temp }}/claude-runs.jsonl
+      CLAUDE_SUMMARY_DIR: ${{ runner.temp }}/claude-summaries
+      ISSUE_NUMBER: ${{ matrix.item.issue }}
+
     steps:
-      # Full history: the instructions diff the branch against main.
+      # Full history: every step diffs the branch against main, and the step below
+      # compares HEAD against the branch's own remote tip.
+      #
+      # The ref is pinned because `pull_request` hands github.ref as refs/pull/<n>/merge:
+      # a ref GitHub stops guaranteeing once the pull request closes, and a snapshot of a
+      # merge that is not main even when it does resolve. Every other trigger here already
+      # resolves to the default branch, and workflow_dispatch keeps the branch it was
+      # dispatched on so this pipeline can be tested from one.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
           fetch-depth: 0
       - name: Set up the project
         uses: ./.github/actions/setup-project
-      # No github_token input: the action then authenticates as the Claude GitHub App,
-      # which sets GH_TOKEN and the git credentials for Claude and, unlike the workflow
-      # token, lets CI run on the pull requests it pushes.
-      - name: Write the plan
+
+      # No github_token input on any Claude step: the action then authenticates as the
+      # Claude GitHub App, which sets GH_TOKEN and the git credentials for Claude and,
+      # unlike the workflow token, lets CI run on the pull requests it pushes.
+      #
+      # continue-on-error throughout, so that the last step can classify how the run ended
+      # rather than the job dying at the first red step with no explanation.
+      - name: Decide what the issue needs and do it
+        id: coordinate
         uses: anthropics/claude-code-action@v1
+        continue-on-error: true
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
@@ -136,69 +213,160 @@ jobs:
           # runs draw on the same subscription as an interactive session, so they share
           # its usage windows.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A workflow_run event carries the actor of the run that failed, which on a
+          # claude/* branch is the app itself. The workflow's own `if` above is what keeps
+          # untrusted actors out.
+          allowed_bots: claude
           display_report: true
           prompt: |
-            Follow the instructions in .github/claude/plan-issue.md exactly.
+            Follow the instructions in .github/claude/coordinate.md exactly.
 
             ISSUE_NUMBER: ${{ matrix.item.issue }}
             ISSUE_TITLE: ${{ matrix.item.title }}
+            ITEM_KIND: ${{ matrix.item.kind }}
+            PULL_REQUEST: ${{ matrix.item.pr }}
+            REASON: ${{ matrix.item.reason }}
             REPOSITORY: ${{ github.repository }}
           claude_args: |
             --model claude-opus-5
-            --max-turns 60
+            --max-turns 120
             --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
-
-  implement:
-    needs: select
-    if: needs.select.outputs.has_implement == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.select.outputs.implement_matrix) }}
-    concurrency:
-      group: claude-issue-${{ matrix.item.issue }}
-      cancel-in-progress: false
-    name: "implement #${{ matrix.item.issue }}"
-
-    # Claude has to get the same gates green before it opens a pull request as CI runs
-    # afterwards, so it needs the same database and toolchain as ci.yml's test job.
-    services:
-      postgres:
-        image: postgres:15
+      - name: Record the coordinate step
+        if: always()
         env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_mwmbl
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+          OUTCOME: ${{ steps.coordinate.outcome }}
+          EXECUTION_FILE: ${{ steps.coordinate.outputs.execution_file }}
+        run: .github/scripts/record-claude-run.sh coordinate
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Set up the project
-        uses: ./.github/actions/setup-project
-      - name: Implement the next part
+      # Derived from git state rather than from anything a step has to remember to set, so
+      # a rerun is as harmless as the selector's queues are. A run that committed nothing —
+      # it asked a question, answered one, or found the work already done — skips the rest
+      # of the job.
+      #
+      # Measured against the branch's own published tip rather than against the commit this
+      # job checked out. A `respond` run starts with `gh pr checkout`, which moves HEAD to
+      # commits that are already pushed and already reviewed: comparing against where the
+      # job started would call every one of those runs a build.
+      - name: Did the run commit anything?
+        id: built
+        run: |
+          branch=$(git branch --show-current)
+          if [[ $branch != claude/* ]]; then
+            echo "built=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::Not on a claude/* branch; nothing to review or push."
+            exit 0
+          fi
+          published="origin/$branch"
+          if ! git rev-parse --verify --quiet "$published" >/dev/null; then
+            published=origin/main
+          fi
+          if [[ $(git rev-parse HEAD) == $(git rev-parse "$published") ]]; then
+            echo "built=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::$branch is unchanged from $published; nothing to review or push."
+          else
+            echo "built=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      # A fresh context is the whole point: this step has no memory of the reasoning that
+      # produced the change, so it reads the diff the way a reviewer would. It is also why
+      # the build step above is not simply told to check its own work.
+      - name: Review the change
+        id: review
+        if: steps.built.outputs.built == 'true' && steps.coordinate.outcome == 'success'
         uses: anthropics/claude-code-action@v1
+        continue-on-error: true
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
           display_report: true
           prompt: |
-            Follow the instructions in .github/claude/implement-issue.md exactly.
+            Follow the instructions in .github/claude/review-changes.md exactly.
 
             ISSUE_NUMBER: ${{ matrix.item.issue }}
             ISSUE_TITLE: ${{ matrix.item.title }}
             REPOSITORY: ${{ github.repository }}
           claude_args: |
             --model claude-opus-5
-            --max-turns 100
+            --max-turns 40
             --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
+      - name: Record the review step
+        if: always()
+        env:
+          OUTCOME: ${{ steps.review.outcome }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+        run: .github/scripts/record-claude-run.sh review
+
+      # The only step allowed to push. It re-runs both gates first, so the pull request
+      # body describes the code as it stands after the review rather than before it.
+      #
+      # The review step is continue-on-error, so a review that ran out of turns part-way
+      # through a fix ends red having left the branch mid-change. Publishing that is the
+      # "opens a pull request nobody reviewed" failure the review step exists to prevent,
+      # so its outcome gates this step exactly as the build's does. When review is skipped
+      # this step is skipped too: both are guarded on the same build.
+      - name: Open or update the pull request
+        id: finalise
+        if: >-
+          steps.built.outputs.built == 'true'
+          && steps.coordinate.outcome == 'success'
+          && steps.review.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          display_report: true
+          prompt: |
+            Follow the instructions in .github/claude/finalise-pull-request.md exactly.
+
+            ISSUE_NUMBER: ${{ matrix.item.issue }}
+            ISSUE_TITLE: ${{ matrix.item.title }}
+            REPOSITORY: ${{ github.repository }}
+            BUILD_SUMMARY: ${{ runner.temp }}/claude-summaries/coordinate.md
+            REVIEW_SUMMARY: ${{ runner.temp }}/claude-summaries/review.md
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 30
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
+      - name: Record the finalise step
+        if: always()
+        env:
+          OUTCOME: ${{ steps.finalise.outcome }}
+          EXECUTION_FILE: ${{ steps.finalise.outputs.execution_file }}
+        run: .github/scripts/record-claude-run.sh finalise
+
+      - name: Upload the run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-run-${{ matrix.item.issue }}
+          path: ${{ runner.temp }}/claude-runs.jsonl
+          if-no-files-found: ignore
+
+      # A run that changes nothing leaves the repository exactly as the selector found
+      # it, so the same red checks or the same unanswered review would select this pull
+      # request again on the next trigger, and on every scheduled run after that, at three
+      # Opus steps a time. This comment is the record that stops it; select-claude-work.sh
+      # reads it as "this commit has already had its turn".
+      - name: Say on the pull request that nothing changed
+        if: >-
+          matrix.item.kind == 'respond'
+          && steps.coordinate.outcome == 'success'
+          && steps.built.outputs.built != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ matrix.item.pr }}
+          REASON: ${{ matrix.item.reason }}
+        run: .github/scripts/report-no-change.sh
+
+      - name: Report how the run ended
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/classify-claude-run.sh
