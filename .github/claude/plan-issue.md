@@ -11,6 +11,11 @@ file. **Write no application code in this run.**
 - `gh issue view $N --comments` — read the whole thread, including what people have
   ruled out.
 - Read `AGENTS.md` for the project's commands and conventions.
+- The project is **not installed** in this job — there is no virtualenv, no database and
+  no Rust build, so `uv`, `make` and `pytest` will not work. Plan from reading the code.
+  Where the issue quotes a command whose output you would need (a lint count, a test
+  result), say in the plan that the implementing run must confirm it, rather than
+  guessing a number or trying to install anything.
 - Explore the code the issue touches before deciding anything. Search for functions,
   models and helpers that already do part of the job: a plan that reuses what exists is
   worth far more than one that invents a parallel implementation.
