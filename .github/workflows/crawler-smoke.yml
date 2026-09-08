@@ -23,6 +23,13 @@ on:
     - cron: "0 5 * * 1"  # 05:00 UTC every Monday
   workflow_dispatch:
 
+# A push to a pull request supersedes the run already going for it. Without this each
+# force-push leaves a full image build running for a commit that no longer exists.
+# Runs on main and on the schedule are never cancelled - those are the ones we act on.
+concurrency:
+  group: crawler-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
