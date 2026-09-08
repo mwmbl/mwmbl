@@ -4,19 +4,26 @@ name: Claude issue automation
 #
 # A run picks up one issue and decides what it needs — write a plan, build the next part,
 # answer a review, fix red checks, rebase, answer a question, ask one, or file what it
-# found and should not fix here — then builds it, reviews it in a fresh context, and opens
-# or updates the pull request. Changing no code is a normal outcome, and one a run says out
-# loud rather than ending in silence. The three Claude steps below are that pipeline;
-# .github/scripts/select-claude-work.sh decides what to point it at and .github/claude/*.md
-# is what each step is told. See docs/plans/README.md for the plan format the queues are
-# derived from.
+# found and should not fix here — then does it, has it reviewed in a fresh context, and
+# leaves a branch for the publish step. Changing no code is a normal outcome, and one a run
+# says out loud rather than ending in silence.
+#
+# There is one Claude step. It spawns the review as a subagent, which starts cold and
+# commits its own findings, so the fresh-context review costs a briefing rather than a
+# second action invocation. What is left in shell is only what a run cannot credibly say
+# about itself: which issues are worth spending a run on at all
+# (.github/scripts/select-claude-work.sh, before any model runs), and whether the gates
+# actually pass and a review actually happened (.github/scripts/publish-branch.sh, which is
+# the only thing that pushes). Everything between those two is the run's to decide, and
+# .github/claude/run.md is what it is told. See docs/plans/README.md for the plan format
+# the queues are derived from.
 #
 # Only one claude/issue-<N>-* pull request is ever open per issue. It no longer blocks the
 # issue, though: while it is open the only thing the automation may do to that issue is
 # answer what is holding the pull request up, which is what a human is actually waiting on.
 #
-# Every step authenticates with the CLAUDE_CODE_OAUTH_TOKEN secret, a one-year token from
-# `claude setup-token`. It runs against a Claude subscription rather than API credit, so
+# The Claude step authenticates with the CLAUDE_CODE_OAUTH_TOKEN secret, a one-year token
+# from `claude setup-token`. It runs against a Claude subscription rather than API credit, so
 # these runs share the usage windows of an interactive session, and the token has to be
 # regenerated when it expires. A run that finds the window spent ends green and stays
 # queued; see .github/scripts/classify-claude-run.sh.
@@ -141,7 +148,7 @@ jobs:
     needs: select
     if: needs.select.outputs.has_items == 'true'
     runs-on: ubuntu-latest
-    # Three Claude steps and up to four runs of a 67-second test suite.
+    # One Claude run, the review subagent inside it, and one run of a 67-second test suite.
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -152,7 +159,7 @@ jobs:
       cancel-in-progress: false
     name: "#${{ matrix.item.issue }} ${{ matrix.item.kind }}"
 
-    # Claude has to get the same gates green before it opens a pull request as CI runs
+    # Claude has to get the same gates green before its branch is published as CI runs
     # afterwards, so it needs the same database and toolchain as ci.yml's test job. The
     # planning run gets it too: a plan is only as good as the facts behind it, and this
     # lets it count lint violations and see what actually breaks rather than estimating.
@@ -172,21 +179,26 @@ jobs:
 
     env:
       ISSUE_NUMBER: ${{ matrix.item.issue }}
+      # The publish step runs the gates itself rather than believing the run's account of
+      # them, so it needs the same environment the run had.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+      DJANGO_SETTINGS_MODULE: mwmbl.settings_test
 
     steps:
-      # Both of these live outside the checkout. The review and finalise steps run git with
-      # an unrestricted Bash tool and are asked to commit; a file sitting untracked in the
-      # working tree is one `git add -A` away from being part of the pull request.
+      # These live outside the checkout. The run holds an unrestricted Bash tool and is
+      # asked to commit; a report file sitting untracked in the working tree is one
+      # `git add -A` away from being part of the pull request.
       #
       # They are set here rather than in the job's `env` above because the `runner` context
       # does not exist at job level: a `${{ runner.temp }}` there is not an empty string but
       # a workflow that fails to validate, which is what broke every run from 2f0de72 on.
-      - name: Point the run log outside the checkout
+      - name: Point the run log and reports outside the checkout
         run: |
           echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl" >>"$GITHUB_ENV"
-          echo "CLAUDE_SUMMARY_DIR=$RUNNER_TEMP/claude-summaries" >>"$GITHUB_ENV"
-      # Full history: every step diffs the branch against main, and the step below
-      # compares HEAD against the branch's own remote tip.
+          echo "CLAUDE_REPORT_DIR=$RUNNER_TEMP/claude-reports" >>"$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/claude-reports"
+      # Full history: the run and the publish step both diff the branch against main, and
+      # the publish step compares HEAD against the branch's own remote tip.
       #
       # The ref is pinned because `pull_request` hands github.ref as refs/pull/<n>/merge:
       # a ref GitHub stops guaranteeing once the pull request closes, and a snapshot of a
@@ -201,19 +213,16 @@ jobs:
       - name: Set up the project
         uses: ./.github/actions/setup-project
 
-      # No github_token input on any Claude step: the action then authenticates as the
-      # Claude GitHub App, which sets GH_TOKEN and the git credentials for Claude and,
-      # unlike the workflow token, lets CI run on the pull requests it pushes.
+      # No github_token input: the action then authenticates as the Claude GitHub App,
+      # which sets GH_TOKEN and the git credentials for Claude and, unlike the workflow
+      # token, lets CI run on the pull requests this pushes.
       #
-      # continue-on-error throughout, so that the last step can classify how the run ended
-      # rather than the job dying at the first red step with no explanation.
-      - name: Decide what the issue needs and do it
-        id: coordinate
+      # continue-on-error, so that the last step can classify how the run ended rather than
+      # the job dying here with no explanation. The publish step guards itself.
+      - name: Work on the issue
+        id: run
         uses: anthropics/claude-code-action@v1
         continue-on-error: true
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
-          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
         with:
           # A subscription token from `claude setup-token`, not a Console API key: these
           # runs draw on the same subscription as an interactive session, so they share
@@ -225,7 +234,7 @@ jobs:
           allowed_bots: claude
           display_report: true
           prompt: |
-            Follow the instructions in .github/claude/coordinate.md exactly.
+            Follow the instructions in .github/claude/run.md exactly.
 
             ISSUE_NUMBER: ${{ matrix.item.issue }}
             ISSUE_TITLE: ${{ matrix.item.title }}
@@ -233,119 +242,50 @@ jobs:
             PULL_REQUEST: ${{ matrix.item.pr }}
             REASON: ${{ matrix.item.reason }}
             REPOSITORY: ${{ github.repository }}
+            REPORT_DIR: ${{ runner.temp }}/claude-reports
+          # Agent is the subagent tool section 4 of run.md needs; Task is what older
+          # releases of the CLI called it, and a name that matches nothing is inert.
           claude_args: |
             --model claude-opus-5
-            --max-turns 120
-            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
-      - name: Record the coordinate step
+            --max-turns 150
+            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash,Agent,Task"
+      - name: Record the run
         if: always()
         env:
-          OUTCOME: ${{ steps.coordinate.outcome }}
-          EXECUTION_FILE: ${{ steps.coordinate.outputs.execution_file }}
-        run: .github/scripts/record-claude-run.sh coordinate
+          OUTCOME: ${{ steps.run.outcome }}
+          EXECUTION_FILE: ${{ steps.run.outputs.execution_file }}
+        run: .github/scripts/record-claude-run.sh run
 
-      # Derived from git state rather than from anything a step has to remember to set, so
-      # a rerun is as harmless as the selector's queues are. A run that committed nothing —
-      # it asked a question, answered one, or found the work already done — skips the rest
-      # of the job.
-      #
-      # Measured against the branch's own published tip rather than against the commit this
-      # job checked out. A `respond` run starts with `gh pr checkout`, which moves HEAD to
-      # commits that are already pushed and already reviewed: comparing against where the
-      # job started would call every one of those runs a build.
-      - name: Did the run commit anything?
-        id: built
-        run: |
-          branch=$(git branch --show-current)
-          if [[ $branch != claude/* ]]; then
-            echo "built=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::Not on a claude/* branch; nothing to review or push."
-            exit 0
-          fi
-          published="origin/$branch"
-          if ! git rev-parse --verify --quiet "$published" >/dev/null; then
-            published=origin/main
-          fi
-          if [[ $(git rev-parse HEAD) == $(git rev-parse "$published") ]]; then
-            echo "built=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::$branch is unchanged from $published; nothing to review or push."
-          else
-            echo "built=true" >>"$GITHUB_OUTPUT"
-          fi
-
-      # A fresh context is the whole point: this step has no memory of the reasoning that
-      # produced the change, so it reads the diff the way a reviewer would. It is also why
-      # the build step above is not simply told to check its own work.
-      - name: Review the change
-        id: review
-        if: steps.built.outputs.built == 'true' && steps.coordinate.outcome == 'success'
-        uses: anthropics/claude-code-action@v1
+      # The only step that pushes, and the only check on the run that is not the run's own
+      # account of itself: it re-runs both gates and refuses a branch with no review report.
+      # Skipped when the run itself failed — a run that died part-way through leaves a tree
+      # nobody has finished with, and republishing that is what this exists to prevent.
+      - name: Publish the branch
+        id: publish
         continue-on-error: true
+        if: steps.run.outcome == 'success'
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
-          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: claude
-          display_report: true
-          prompt: |
-            Follow the instructions in .github/claude/review-changes.md exactly.
+          # The Claude GitHub App's token, not the workflow token: a push made with
+          # GITHUB_TOKEN does not trigger workflows, so the pull request would open with no
+          # checks on it and CI could never go red on a branch the automation owns.
+          GH_TOKEN: ${{ steps.run.outputs.github_token }}
+        run: .github/scripts/publish-branch.sh
 
-            ISSUE_NUMBER: ${{ matrix.item.issue }}
-            ISSUE_TITLE: ${{ matrix.item.title }}
-            REPOSITORY: ${{ github.repository }}
-          claude_args: |
-            --model claude-opus-5
-            --max-turns 40
-            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
-      - name: Record the review step
-        if: always()
-        env:
-          OUTCOME: ${{ steps.review.outcome }}
-          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
-        run: .github/scripts/record-claude-run.sh review
-
-      # The only step allowed to push. It re-runs both gates first, so the pull request
-      # body describes the code as it stands after the review rather than before it.
-      #
-      # The review step is continue-on-error, so a review that ran out of turns part-way
-      # through a fix ends red having left the branch mid-change. Publishing that is the
-      # "opens a pull request nobody reviewed" failure the review step exists to prevent,
-      # so its outcome gates this step exactly as the build's does. When review is skipped
-      # this step is skipped too: both are guarded on the same build.
-      - name: Open or update the pull request
-        id: finalise
+      # A run that changes nothing leaves the repository exactly as the selector found it,
+      # so the same red checks or the same unanswered review would select this pull request
+      # again on the next trigger, and on every scheduled run after that. This comment is
+      # the record that stops it; select-claude-work.sh reads it as "this commit has
+      # already had its turn".
+      - name: Say on the pull request that nothing changed
         if: >-
-          steps.built.outputs.built == 'true'
-          && steps.coordinate.outcome == 'success'
-          && steps.review.outcome == 'success'
-        uses: anthropics/claude-code-action@v1
-        continue-on-error: true
+          matrix.item.kind == 'respond'
+          && steps.run.outcome == 'success'
+          && steps.publish.outputs.published == 'false'
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
-          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: claude
-          display_report: true
-          prompt: |
-            Follow the instructions in .github/claude/finalise-pull-request.md exactly.
-
-            ISSUE_NUMBER: ${{ matrix.item.issue }}
-            ISSUE_TITLE: ${{ matrix.item.title }}
-            REPOSITORY: ${{ github.repository }}
-            BUILD_SUMMARY: ${{ runner.temp }}/claude-summaries/coordinate.md
-            REVIEW_SUMMARY: ${{ runner.temp }}/claude-summaries/review.md
-          claude_args: |
-            --model claude-opus-5
-            --max-turns 30
-            --allowedTools "Read,Glob,Grep,Edit,Write,TodoWrite,Bash"
-      - name: Record the finalise step
-        if: always()
-        env:
-          OUTCOME: ${{ steps.finalise.outcome }}
-          EXECUTION_FILE: ${{ steps.finalise.outputs.execution_file }}
-        run: .github/scripts/record-claude-run.sh finalise
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ matrix.item.pr }}
+          REASON: ${{ matrix.item.reason }}
+        run: .github/scripts/report-no-change.sh
 
       - name: Upload the run log
         if: always()
@@ -355,24 +295,9 @@ jobs:
           path: ${{ runner.temp }}/claude-runs.jsonl
           if-no-files-found: ignore
 
-      # A run that changes nothing leaves the repository exactly as the selector found
-      # it, so the same red checks or the same unanswered review would select this pull
-      # request again on the next trigger, and on every scheduled run after that, at three
-      # Opus steps a time. This comment is the record that stops it; select-claude-work.sh
-      # reads it as "this commit has already had its turn".
-      - name: Say on the pull request that nothing changed
-        if: >-
-          matrix.item.kind == 'respond'
-          && steps.coordinate.outcome == 'success'
-          && steps.built.outputs.built != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PULL_REQUEST: ${{ matrix.item.pr }}
-          REASON: ${{ matrix.item.reason }}
-        run: .github/scripts/report-no-change.sh
-
       - name: Report how the run ended
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
         run: .github/scripts/classify-claude-run.sh

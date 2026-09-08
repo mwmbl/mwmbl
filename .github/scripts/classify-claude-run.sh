@@ -12,6 +12,11 @@
 # Any other failure belongs to this run. Repeating it every hour would spend the budget on
 # the same mistake, so the issue is labelled "claude: stuck" and the selector skips it
 # until a human removes the label or reruns that issue alone with workflow_dispatch.
+#
+# A publish step that refused counts as this run's failure too, and it is the one failure
+# the run log cannot show: publish-branch.sh rejects a branch whose gates fail or that has
+# no review report, both of which are the run's doing however cleanly the Claude step
+# ended. $PUBLISH_OUTCOME carries it in, as steps.publish.outcome.
 
 set -euo pipefail
 
@@ -31,6 +36,10 @@ steps_matching() {
 
 broken=$(steps_matching "($never_reached_model) | not")
 out_of_credit=$(steps_matching "$never_reached_model")
+
+if [[ ${PUBLISH_OUTCOME:-} == failure ]]; then
+    broken="${broken:+$broken }publish"
+fi
 
 if [[ -n $broken ]]; then
     echo "::error::Claude failed in: $broken. Labelling issue #$issue '$stuck_label' so the" \

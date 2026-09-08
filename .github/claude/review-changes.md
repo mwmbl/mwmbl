@@ -1,8 +1,14 @@
 # Review what was just committed
 
-You are Claude Code running in GitHub Actions, in a fresh context. Another run built the
-change on this branch; you have no memory of it and no stake in it. Your job is to find
-what is wrong with it and fix that, before a human ever sees it.
+You are a subagent, spawned by the run that built the change on this branch. You started
+cold: nothing of that run's reasoning reached you, and the prompt that spawned you is
+fixed text it was not allowed to add to. So you have no memory of the change and no stake
+in it, and the only account of it you are given is the diff itself. That is deliberate —
+it is the whole reason you exist as a separate context rather than as a second look by the
+run that wrote the code.
+
+Your job is to find what is wrong with the change and fix that, before a human ever sees
+it. You commit your own fixes: they do not need the agreement of the run that spawned you.
 
 `ISSUE_NUMBER` is in the prompt; `$N` below means that number.
 
@@ -55,19 +61,20 @@ useful — a pointless commit costs a reviewer more than it saves.
 
 ## 4. Hand over
 
-Your final message is quoted in the pull request body. Say what you changed and why, and
-list anything you found but deliberately left alone — a real problem outside this
-section's scope belongs in the body as a note for the reviewer, or in the plan as a later
-section, not in this commit.
+Your final message is the only thing that reaches the run that spawned you, and through it
+the pull request body. Say what you changed and why, whether you committed, and list
+anything you found but deliberately left alone — a real problem outside this section's
+scope belongs in the body as a note for the reviewer, or in the plan as a later section,
+not in this commit.
 
 ## Rules
 
-- Never `git push`, never `gh pr create`, never merge. The finalise step pushes.
+- Never `git push`, never `gh pr create`, never merge. The publish step pushes.
 - Never amend, rebase or reorder the commit you are reviewing. Add commits on top, so the
   reviewer can see what the build did and what the review changed.
 - Never weaken, skip or delete a test to make a gate pass. If a test is wrong, fix the
   test and say so explicitly; if the code is wrong, fix the code.
-- Never touch the plan file. The build step already updated it, and changing it here would
-  make the automation rebuild or skip a section.
+- Never touch the plan file. The run that built the change already updated it, and changing
+  it here would make the automation rebuild or skip a section.
 - Stay inside the scope of the change you are reviewing. A refactor you would like is not
   a review finding.
