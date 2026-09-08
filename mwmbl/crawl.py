@@ -77,6 +77,28 @@ def _fetch_curated_domains() -> set[str]:
     return _curated_domains_cache
 
 
+def is_new_high_score(term: str, new_items: list[Document], remote_items: list[Document]) -> bool:
+    """
+    Decide whether newly crawled items are worth contributing to the main index.
+
+    score_result returns higher values for better matches, so we promote only when the best
+    new local item beats the best item the remote index already holds for the term. Comparing
+    against the best rather than the worst remote item keeps the bar where the docstring of
+    run_indexing says it is: a single weak remote result should not open the gate.
+
+    An empty remote result set scores 0.0, so any local item that matches the term at all is
+    promoted. That is deliberate: the main index has nothing for this term, and a result is
+    better than no result.
+    """
+    terms = tokenize(term)
+    remote_item_scores = [score_result(terms, item, True) for item in remote_items]
+    max_remote_score = max(remote_item_scores, default=0.0)
+    local_scores = [score_result(terms, item, True) for item in new_items]
+    max_local_score = max(local_scores, default=0.0)
+    logger.info(f"Max local score: {max_local_score}, max remote score: {max_remote_score}")
+    return max_local_score > max_remote_score
+
+
 # Validate environment variables when actually needed
 def validate_environment():
     """Validate required environment variables for crawler operation."""
@@ -197,7 +219,8 @@ class Crawler:
         with the latest remote results for better search quality.
 
         Only results that score higher than existing remote results are submitted,
-        preventing low-quality content from polluting the main index.
+        preventing low-quality content from polluting the main index. See is_new_high_score
+        for where that bar sits.
         """
         index_path = data_path / settings.INDEX_NAME
         batch_jsons = self.redis.lpop(BATCH_QUEUE_KEY, 10)
@@ -221,16 +244,7 @@ class Crawler:
                 new_items = [item for item in local_items if item.url not in remote_item_urls]
                 logger.info(f"Found {len(new_items)} new items for term {term}")
 
-                terms = tokenize(term)
-                remote_item_scores = [score_result(terms, item, True) for item in remote_items]
-                min_remote_score = min(remote_item_scores, default=0.0)
-                local_scores = [score_result(terms, item, True) for item in new_items]
-                max_local_score = max(local_scores, default=0.0)
-                logger.info(f"Max local score: {max_local_score}, min remote score: {min_remote_score}")
-
-                new_high_score = max_local_score < min_remote_score
-
-                if new_high_score:
+                if is_new_high_score(term, new_items, remote_items):
                     result_items = [
                         Result(
                             url=doc.url,
