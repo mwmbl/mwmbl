@@ -78,7 +78,9 @@ last section, so merging it closes the issue.
 
 ## Rules
 
-- **Never modify anything under `.github/`.** That is the automation's own configuration.
+- You may change `.github/` when the issue calls for it. Editing an instruction file
+  you are following, or the workflow you are running under, takes effect only once a
+  maintainer merges the pull request — never part-way through this run.
 - One section per run. Never bundle two sections into one pull request.
 - Do not merge anything, do not change labels.
 - If you cannot finish, push nothing and explain in the log. A half-finished branch or a

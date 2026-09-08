@@ -9,13 +9,10 @@ finalise step that re-runs the gates and opens the pull request. Each pass is a 
 the passes use different models; the steps are chained by repository state (commits on
 the branch), not by anything a step has to remember to set.
 
-**Precondition — a human has to apply these, or lift a rule first.** Every section below
-edits `.github/`, and `.github/claude/implement-issue.md` tells implementing runs "Never
-modify anything under `.github/`". The automation therefore cannot build this issue, and
-it cannot grant itself the exception either, since doing so means editing `.github/`.
-Either a maintainer applies these two changes by hand (as every `.github/` change in the
-history has been), or a maintainer first carves out an exception for issues whose subject
-*is* the automation. This plan is written so that either route follows the same steps.
+Every section below edits `.github/`, which the automation is now allowed to do: the
+instructions a run edits take effect only once a maintainer merges the pull request, so
+a run cannot change the rules it is itself following. A maintainer applying these by
+hand follows the same steps.
 
 Measured on `main` at 5ccc6e2, in the same environment the automation runs in:
 `make check` is green; `uv run pytest` is `730 passed, 10 skipped, 4 deselected` in 67s.

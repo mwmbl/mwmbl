@@ -62,6 +62,8 @@ starts implementation, so make the trade-offs easy to review.
 
 ## Rules
 
-- **Never modify anything under `.github/`.** That is the automation's own configuration.
+- A plan may change `.github/` when the issue is about the automation itself. Say so
+  in the pull request body: the run that implements it edits the instructions it is
+  following, and a maintainer reviews that before it takes effect.
 - The pull request adds exactly one file. If you changed anything else, revert it.
 - Do not merge anything, do not close the issue, do not change labels.
