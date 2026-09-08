@@ -56,7 +56,14 @@ def score_result(terms: list[str], result: Document, is_complete: bool):
         + features["match_score_path"]
     )
 
-    if features["match_terms"] <= len(terms) / 2 and result.state is None:
+    # Documents a person or an external source deliberately attached to a query are exempt
+    # from the majority-terms rule: they are here because someone said they belong here, not
+    # because they matched. That exemption was written as "state is not None" when every
+    # state meant exactly that (FROM_USER, FROM_GOOGLE, FROM_WIKI). The negative states are
+    # later bookkeeping - SYNCED_WITH_MAIN_INDEX marks a crawler's local mirror of the main
+    # index - and nobody curated those, so they get the rule like anything else.
+    is_curated = result.state is not None and result.state > 0
+    if features["match_terms"] <= len(terms) / 2 and not is_curated:
         return 0.0
 
     if match_score > MATCH_SCORE_THRESHOLD:
