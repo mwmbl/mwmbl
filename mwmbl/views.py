@@ -1,6 +1,5 @@
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import datetime
 from logging import getLogger
 from typing import Optional
 from urllib.parse import urlencode
@@ -14,6 +13,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.forms import CharField, ModelForm, RadioSelect
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from requests.exceptions import RequestException
@@ -247,7 +247,7 @@ def submit_domain(request):
         if form.is_valid():
             domain_submission = form.save(commit=False)
             domain_submission.submitted_by = request.user
-            domain_submission.submitted_on = datetime.utcnow()
+            domain_submission.submitted_on = timezone.now()
             domain_submission.save()
             return redirect("domain_submissions")
     else:
@@ -382,7 +382,7 @@ def _get_curation(request, query, documents, reranked_documents):
 
         curation = Curation(
             user=user,
-            timestamp=datetime.utcnow(),
+            timestamp=timezone.now(),
             query=query,
             original_index_results=[asdict(d) for d in original_index_results],
             original_results=[asdict(d) for d in documents.values()],
@@ -523,7 +523,7 @@ def flag_curation(request, curation_id):
         if form.is_valid():
             curation = form.save(commit=False)
             curation.user = request.user
-            curation.timestamp = datetime.now()
+            curation.timestamp = timezone.now()
             curation.curation_id = curation_id
             curation.save()
             return render(request, "mwmbl/flag_curation_success.html")
