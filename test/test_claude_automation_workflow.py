@@ -161,6 +161,20 @@ def test_comment_and_review_triggers_require_write_access(workflow: dict) -> Non
         assert '"OWNER","MEMBER","COLLABORATOR"' in clause.split("&& (github.event_name")[0]
 
 
+def test_no_feedback_trigger_can_be_fired_by_a_bot(workflow: dict) -> None:
+    """A run answering a question comments as the Claude app, which — unlike a comment made
+    with GITHUB_TOKEN — does raise an event. author_association does not reliably identify
+    an app, so every clause tests the login too."""
+    guard = workflow["jobs"]["select"]["if"]
+    for event, field in [
+        ("issue_comment", "comment"),
+        ("pull_request_review", "review"),
+        ("pull_request_review_comment", "comment"),
+    ]:
+        clause = guard.split(f"github.event_name != '{event}'")[1].split("&& (github.event_name")[0]
+        assert f"!endsWith(github.event.{field}.user.login, '[bot]')" in clause, event
+
+
 def test_nothing_the_runs_write_lands_inside_the_checkout(workflow: dict) -> None:
     """The review and finalise steps run git with an unrestricted Bash tool and are asked
     to commit; an untracked file in the working tree is one `git add -A` from the diff."""
