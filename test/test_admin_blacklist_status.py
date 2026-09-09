@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from redis import ConnectionError as RedisConnectionError
 
 from mwmbl import admin_views
+from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer import blacklist_snapshot, purge_queue
 from mwmbl.indexer.blacklist_snapshot import (
     HASH_DTYPE,
@@ -168,6 +169,16 @@ def test_removed_counts_covers_the_requested_window(wired_redis):
     assert all(day["count"] == 0 for day in counts)
     # Most recent first, so the page reads today-downwards.
     assert counts[0]["date"] > counts[-1]["date"]
+
+
+def test_removed_counts_reads_back_what_the_purge_recorded(wired_redis):
+    """The page and StatsManager name today's key in different modules, so a disagreement
+    about which day "today" is shows up as a permanent zero rather than as an error."""
+    StatsManager(wired_redis).record_blacklisted_removed(5)
+
+    counts = admin_views._removed_counts(14)
+
+    assert counts[0]["count"] == 5
 
 
 # ---------------------------------------------------------------------------

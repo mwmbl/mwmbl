@@ -1,6 +1,6 @@
 import os
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
 from pathlib import Path
 from random import Random
@@ -11,7 +11,7 @@ from pydistinct.stats_estimators import smoothed_jackknife_estimator
 from redis import Redis
 
 from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
-from mwmbl.utils import parse_url
+from mwmbl.utils import parse_url, utc_today
 
 INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
 INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
@@ -33,9 +33,9 @@ def get_redis():
 
 def count_urls_continuously():
     while True:
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         count_urls()
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         total_time = end_time - start_time
         time_remaining = 60 * 60 * 24 - total_time.total_seconds()
         logger.info(f"Counting took {total_time}. Sleeping for {timedelta(seconds=time_remaining)}.")
@@ -43,7 +43,7 @@ def count_urls_continuously():
 
 
 def count_urls():
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     with TinyIndex(item_factory=Document, index_path=index_path) as index:
@@ -83,12 +83,12 @@ def count_urls():
 
     redis = get_redis()
 
-    today = date.today()
+    today = utc_today()
     _set_count(INDEX_URL_COUNT_KEY, redis, today, int(url_count_estimate))
     _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
     _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results_estimate)
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     logger.info(f"Counting took {end_time - start_time}.")
 
 
@@ -100,7 +100,7 @@ def _set_count(key, redis, today, count):
 def get_counts() -> dict[str, dict[str, int]]:
     redis = get_redis()
 
-    today = date.today()
+    today = utc_today()
 
     urls_in_index_daily = {}
     domains_in_index_daily = {}
@@ -122,7 +122,7 @@ def get_counts() -> dict[str, dict[str, int]]:
 def get_domain_result_count(domain: str) -> int:
     redis = get_redis()
 
-    today = date.today()
+    today = utc_today()
     count = redis.zscore(INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today), domain)
     return 0 if count is None else int(count)
 

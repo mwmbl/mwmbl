@@ -6,12 +6,12 @@ ever removes them, so a broken purge loop is invisible from the search results a
 This counter is the only signal that the removals are actually happening.
 """
 
-from datetime import datetime
 from unittest.mock import patch
 
 import fakeredis
 
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY, LONG_EXPIRE_SECONDS, StatsManager
+from mwmbl.utils import utc_today
 
 NO_INDEX_COUNTS = {
     "urls_in_index_daily": {},
@@ -30,7 +30,7 @@ def test_recorded_removals_appear_in_the_stats_for_today():
     with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
         stats = stats_manager.get_stats()
 
-    today = str(datetime.utcnow().date())
+    today = str(utc_today())
     assert stats.blacklisted_results_removed_daily[today] == 7
 
 
@@ -49,7 +49,7 @@ def test_the_daily_count_expires_so_it_cannot_grow_without_bound():
     redis = fakeredis.FakeRedis(decode_responses=True)
     StatsManager(redis).record_blacklisted_removed(1)
 
-    key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
+    key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
     assert 0 < redis.ttl(key) <= LONG_EXPIRE_SECONDS
 
 
@@ -71,7 +71,7 @@ def test_the_purge_task_records_what_it_removed():
 
         purge_blacklisted_from_queue.now()
 
-    key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
+    key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
     assert redis.get(key) == "5"
 
 
@@ -86,4 +86,4 @@ def test_the_purge_task_records_nothing_when_the_queue_is_empty():
 
         purge_blacklisted_from_queue.now()
 
-    assert redis.get(BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())) is None
+    assert redis.get(BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())) is None
