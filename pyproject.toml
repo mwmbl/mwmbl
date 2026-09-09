@@ -34,7 +34,14 @@ dependencies = [
     "numpy==1.23.2",
     "objgraph>=3.6.1",
     "psutil>=6.0.0",
-    "xgboost>=2.1.0",
+    # xgboost's Linux wheels bundle a CUDA-enabled libxgboost.so and pull in
+    # nvidia-nccl-cu12, together ~600MB installed. Since 3.1.3 that applies to
+    # arm64 as well, which is what doubled the crawler image. Nothing here trains
+    # or predicts on a GPU - serving goes through the Rust extension's own
+    # libxgboost - so take the CPU-only build wherever it is published (Linux and
+    # Windows). The macOS wheel has no CUDA in it to begin with.
+    "xgboost-cpu>=2.1.0; sys_platform != 'darwin'",
+    "xgboost>=2.1.0; sys_platform == 'darwin'",
     "pydistinct>=0.6.4",
     "django-ninja-jwt>=5.3.3",
     "sentry-sdk>=2.13.0",
@@ -85,6 +92,13 @@ dev = [
     "ty>=0.0.78",
     "pre-commit>=4.6.2",
 ]
+
+[tool.uv]
+# pydistinct declares xgboost as a dependency but never imports it - its four modules
+# use numpy, scipy and statsmodels only. On Linux that stale requirement is enough to
+# drag the CUDA wheel and nvidia-nccl-cu12 back in, undoing the xgboost-cpu switch
+# above, so confine every xgboost request to macOS where the wheel is CPU-only anyway.
+override-dependencies = ["xgboost>=2.1.0; sys_platform == 'darwin'"]
 
 [tool.maturin]
 python-source = "."

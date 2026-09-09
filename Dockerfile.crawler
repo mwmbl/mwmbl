@@ -1,12 +1,6 @@
-FROM python:3.11.12-bookworm AS base
-
-ENV PYTHONFAULTHANDLER=1 \
-    PYTHONHASHSEED=random \
-    PYTHONUNBUFFERED=1
+FROM python:3.11.12-bookworm AS builder
 
 WORKDIR /app
-
-FROM base AS builder
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
@@ -42,7 +36,22 @@ RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
     cp /app/mwmbl_rank/target/release/deps/libxgboost.so "$SODIR/" && \
     patchelf --set-rpath '$ORIGIN' "$SODIR"/mwmbl_rank.cpython-311-*.so
 
-FROM base AS final
+# The final stage ships to crawler volunteers, so it runs on the slim base: it needs
+# no compilers, git or headers, only the interpreter and the prebuilt /venv. That is
+# ~330MB less to download than the full python:3.11.12-bookworm image.
+FROM python:3.11.12-slim-bookworm AS final
+
+ENV PYTHONFAULTHANDLER=1 \
+    PYTHONHASHSEED=random \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# libgomp1 is the OpenMP runtime that the bundled libxgboost.so links against. The
+# full base image happens to carry it; the slim one does not.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
