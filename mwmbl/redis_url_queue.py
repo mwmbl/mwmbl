@@ -1,7 +1,7 @@
 import json
 import math
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
 from random import Random
 from typing import Callable
@@ -69,7 +69,7 @@ class RedisURLQueue:
         with DomainLinkDatabase() as link_db:
             for url in found_urls:
                 time_since_crawled = (
-                    datetime.utcnow() - url.last_crawled if url.last_crawled is not None else MAX_TIME_DELTA
+                    datetime.now(timezone.utc) - url.last_crawled if url.last_crawled is not None else MAX_TIME_DELTA
                 )
 
                 # Skip URLs crawled in the last month

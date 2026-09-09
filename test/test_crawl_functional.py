@@ -3,7 +3,7 @@ import os
 import tempfile
 import time
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -81,21 +81,21 @@ def sample_found_urls():
             url="https://example.com/page1",
             user_id_hash="test_user_hash",
             status=URLStatus.NEW,
-            timestamp=datetime.utcnow(),
-            last_crawled=datetime.utcnow() - timedelta(days=60),
+            timestamp=datetime.now(timezone.utc),
+            last_crawled=datetime.now(timezone.utc) - timedelta(days=60),
         ),
         FoundURL(
             url="https://example.com/page2",
             user_id_hash="test_user_hash",
             status=URLStatus.NEW,
-            timestamp=datetime.utcnow(),
-            last_crawled=datetime.utcnow() - timedelta(days=90),
+            timestamp=datetime.now(timezone.utc),
+            last_crawled=datetime.now(timezone.utc) - timedelta(days=90),
         ),
         FoundURL(
             url="https://test.com/article",
             user_id_hash="test_user_hash",
             status=URLStatus.NEW,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             last_crawled=None,
         ),
     ]

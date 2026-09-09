@@ -61,15 +61,17 @@ class URLDatabase:
         self.urls = {}
 
     def __enter__(self):
-        month_date = datetime.utcnow()
+        month_date = datetime.now(timezone.utc)
 
         for i in range(3):
             # Start from current month and go back two months
-            month_date = datetime(month_date.year, month_date.month, 1)
+            month_date = datetime(month_date.year, month_date.month, 1, tzinfo=timezone.utc)
             urls_path = settings.URLS_BLOOM_FILTER_PATH.format(month=month_date.month, year=month_date.year)
             month_date = self._construct_bloom_filter(i, month_date, urls_path)
 
-        self._construct_bloom_filter(3, datetime(2024, 1, 1), settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
+        self._construct_bloom_filter(
+            3, datetime(2024, 1, 1, tzinfo=timezone.utc), settings.URLS_BLOOM_FILTER_FALLBACK_PATH
+        )
         logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
         return self
 
@@ -112,11 +114,10 @@ class URLDatabase:
                 # before this batch), so queue_urls treats it as never-crawled and hands
                 # it out again. The bloom filters only record the month, which is too
                 # coarse to use here: on the 31st, the start of the month is already 30
-                # days ago, which is exactly the re-queue threshold. Crawl timestamps
-                # are timezone-aware, while last_crawled is naive UTC everywhere else
-                # (the bloom filter dates, and the comparison in queue_urls), so convert
-                # it here.
-                found_date = url.timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                # days ago, which is exactly the re-queue threshold. The crawl timestamp
+                # is aware UTC, and so is everything else last_crawled is compared
+                # against (the bloom filter dates, and the clock in queue_urls).
+                found_date = url.timestamp
 
             new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls
