@@ -3,7 +3,7 @@ Index batches that are stored locally.
 """
 
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from logging import getLogger
 from typing import Collection, Iterable, Optional
 from urllib.parse import unquote
@@ -61,7 +61,7 @@ def get_url_score(url):
 
 
 def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     documents = list(get_documents_from_batches(batch_data))
     end_time, new_page_doc_counts = index_documents(documents, index_path)
     logger.info(f"Indexing took {end_time - start_time}")
@@ -85,7 +85,7 @@ def index_documents(documents, index_path):
     documents = filter_blacklisted_documents(documents)
     page_documents = preprocess_documents(documents, index_path)
     new_page_doc_counts = index_pages(index_path, page_documents)
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     return end_time, new_page_doc_counts
 
 

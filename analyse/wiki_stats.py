@@ -5,7 +5,7 @@ Download Wikipedia statistics, aggregate and store in a file.
 import gzip
 import json
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from random import Random
 from typing import Iterable
@@ -27,8 +27,8 @@ memory = Memory()
 
 def get_wiki_stats_urls(n: int = 10):
     # Choose ten random hours from the last month
-    today = date.today()
-    max_date = datetime(today.year, today.month, today.day) - timedelta(days=1)
+    today = datetime.now(timezone.utc).date()
+    max_date = datetime(today.year, today.month, today.day, tzinfo=timezone.utc) - timedelta(days=1)
     seen_hours = set()
     for _ in range(n):
         hours_ago = random.randint(0, 24 * 30)

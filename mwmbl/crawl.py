@@ -3,7 +3,7 @@ import logging
 import os
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from multiprocessing import Process
 from pathlib import Path
 
@@ -375,7 +375,7 @@ class Crawler:
 
         while True:
             if not index_process.is_alive():
-                crash_time = datetime.now()
+                crash_time = datetime.now(timezone.utc)
                 exit_code = index_process.exitcode or -1
                 pid = index_process.pid
 

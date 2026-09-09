@@ -1,6 +1,6 @@
 import os
 import pickle
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 
@@ -15,9 +15,9 @@ def run_update_urls_on_fixed_batches():
 
     queue = Queue()
 
-    start = datetime.now()
+    start = datetime.now(timezone.utc)
     record_urls_in_database(batches, queue)
-    total_time = (datetime.now() - start).total_seconds()
+    total_time = (datetime.now(timezone.utc) - start).total_seconds()
 
     print("Total time:", total_time)
 

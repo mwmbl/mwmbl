@@ -644,7 +644,7 @@ def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
 def test_sync_search_counts_redis_to_postgres(verified_user):
     """sync_search_counts should write live Redis counts into UsageBucket."""
 
-    now = datetime.utcnow()
+    now = datetime.now(stdlib_timezone.utc)
     key = _monthly_key(verified_user.id)
     cache.set(key, 42, timeout=3600)
 
@@ -661,7 +661,7 @@ def test_sync_search_counts_redis_to_postgres(verified_user):
 def test_sync_search_counts_seeds_redis_from_postgres(verified_user):
     """sync_search_counts should restore missing Redis keys from UsageBucket (Redis restart recovery)."""
 
-    now = datetime.utcnow()
+    now = datetime.now(stdlib_timezone.utc)
     key = _monthly_key(verified_user.id)
 
     # Simulate Redis restart: bucket exists in Postgres but key is absent from Redis
@@ -681,7 +681,7 @@ def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
     """After a Redis restart, requests may have incremented from zero before the sync runs.
     The sync should take the max so the Postgres baseline is not lost."""
 
-    now = datetime.utcnow()
+    now = datetime.now(stdlib_timezone.utc)
     key = _monthly_key(verified_user.id)
 
     # Postgres has the pre-restart count; Redis has only post-restart requests
@@ -700,7 +700,7 @@ def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
 def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
     """If Redis is ahead of Postgres (normal operation), the Redis value is kept."""
 
-    now = datetime.utcnow()
+    now = datetime.now(stdlib_timezone.utc)
     key = _monthly_key(verified_user.id)
 
     # Redis is ahead because requests arrived since the last sync
