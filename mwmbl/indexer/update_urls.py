@@ -41,11 +41,11 @@ def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int
 
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
-    start = datetime.utcnow()
+    start = datetime.now(timezone.utc)
     # Take the approved domains from the queue rather than the database: the standalone
     # crawler is the live caller of this, and it fetches them over HTTP.
     blacklist_provider = get_default_blacklist_provider(new_item_queue.get_curated_domains_function)
-    blacklist_retrieval_time = datetime.utcnow() - start
+    blacklist_retrieval_time = datetime.now(timezone.utc) - start
     logger.info(
         f"Recording URLs in database for {len(batches)} batches, blacklist provider ready "
         f"in {blacklist_retrieval_time.total_seconds()} seconds"
@@ -94,7 +94,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
         for source_domain, target_domains in domain_links.items():
             domain_link_db.update_domain_links(source_domain, target_domains)
 
-    end = datetime.utcnow()
+    end = datetime.now(timezone.utc)
     logger.info(f"Recorded URLs in database in {end - start}")
 
 
@@ -117,7 +117,7 @@ def add_hn_links(new_item_queue: RedisURLQueue):
             f"https://news.ycombinator.com/item?id={item_id}"
             for item_id in range(max_item, max_item - num_items_to_add, -1)
         ]
-        found_urls = [FoundURL(url, "hn", URLStatus.NEW, datetime.now()) for url in urls]
+        found_urls = [FoundURL(url, "hn", URLStatus.NEW, datetime.now(timezone.utc)) for url in urls]
         _add_found_urls_to_db_and_queue(found_urls, new_item_queue)
         hn_count = new_item_queue.get_domain_count("news.ycombinator.com")
         max_item -= num_items_to_add
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     redis: Redis = Redis.from_url("redis://127.0.0.1:6379", decode_responses=True)
     batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
     url_queue = RedisURLQueue(redis, lambda: set())
-    start_time = datetime.now()
+    start_time = datetime.now(timezone.utc)
     run(batch_cache, url_queue, num_batches=500)
-    end_time = datetime.now()
+    end_time = datetime.now(timezone.utc)
     logger.info(f"Finished updating URLs in {end_time - start_time}")

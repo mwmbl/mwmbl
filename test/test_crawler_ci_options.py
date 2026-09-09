@@ -5,7 +5,7 @@ and unable to write into the production index. These cover the three knobs that 
 plus the one-shot mode that turns the run into an exit code.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from random import Random
 from unittest.mock import MagicMock, patch
 
@@ -39,7 +39,7 @@ def found_url(url: str) -> FoundURL:
         url=url,
         user_id_hash="test_user_hash",
         status=URLStatus.NEW,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         last_crawled=None,
     )
 

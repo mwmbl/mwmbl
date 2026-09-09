@@ -69,7 +69,7 @@ command-line form does *not* (Python escapes a `-W` message, so the regex never 
   `filterwarnings` gate alone
 - `ruff check --select DTZ` count is 65 → 61
 
-## PR 2: Carry the crawl time as aware UTC through the URL database and queue
+## PR 2: Carry the crawl time as aware UTC through the URL database and queue (Done)
 **Estimated added lines:** ~120 (20 sites across 5 files)
 **Files:** mwmbl/crawler/urls.py, mwmbl/redis_url_queue.py, mwmbl/indexer/update_urls.py,
 test/test_url_database.py, test/test_crawl_functional.py
