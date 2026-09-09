@@ -57,7 +57,7 @@ readonly only_issue="${CLAUDE_ONLY_ISSUE:-}"
 # narrower marker says something stronger: this run had its turn at the current commit and
 # changed nothing. Only a run that commits nothing writes that one, because a run that
 # pushes has not yet had a turn at what it just pushed — CI has not run on it. Kept in step
-# with section 5 of .github/claude/run.md, which writes both.
+# with section 4 of .github/claude/run.md, which writes both.
 #
 # Both are anchored at the end of the body rather than matched anywhere in it, because
 # GitHub's "Quote reply" copies the quoted comment's raw markdown, HTML comments included.

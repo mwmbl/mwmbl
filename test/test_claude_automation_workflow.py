@@ -53,6 +53,14 @@ def claude_steps(work_steps: list[dict]) -> list[dict]:
     return [step for step in work_steps if step.get("uses") == CLAUDE_ACTION]
 
 
+def heading_at(instructions: str, title: str) -> int:
+    """Where a numbered section starts, found by its title. Matching on the number instead
+    is what let the instruction files drift into pointing at the wrong section."""
+    match = re.search(rf"^## \d+\. {re.escape(title)}", instructions, re.MULTILINE)
+    assert match, title
+    return match.start()
+
+
 @pytest.fixture(scope="module")
 def run_instructions() -> str:
     return RUN_INSTRUCTIONS_PATH.read_text()
@@ -113,15 +121,14 @@ def test_instruction_files_only_cross_reference_sections_that_exist() -> None:
 def test_the_run_is_told_to_have_the_change_reviewed_before_it_pushes(run_instructions: str) -> None:
     """Nothing enforces this any more, so the ordering has to be in the instructions and
     has to stay there: a review after the push is a review a human has already seen past."""
-    review_section = run_instructions.index("## 4. Have the change reviewed")
-    push_section = run_instructions.index("## 5. Push it")
-    assert review_section < push_section
+    assert heading_at(run_instructions, "Have the change reviewed") < heading_at(run_instructions, "Push it")
 
 
 def test_the_review_subagent_is_given_nothing_but_the_issue_number(run_instructions: str) -> None:
     """Everything else the run could add is the author reviewing their own work through a
     second context. The prompt it is told to send is fixed text for that reason."""
-    spawn_prompt = run_instructions.split("## 4. Have the change reviewed")[1].split("```")[1]
+    review = run_instructions[heading_at(run_instructions, "Have the change reviewed") :]
+    spawn_prompt = review.split("```")[1]
     assert spawn_prompt.strip().splitlines() == [
         "Follow the instructions in .github/claude/review-changes.md exactly.",
         "",

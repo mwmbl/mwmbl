@@ -263,7 +263,7 @@ jobs:
             PULL_REQUEST: ${{ matrix.item.pr }}
             REASON: ${{ matrix.item.reason }}
             REPOSITORY: ${{ github.repository }}
-          # Agent is the subagent tool section 4 of run.md needs; Task is what older
+          # Agent is the subagent tool section 3 of run.md needs; Task is what older
           # releases of the CLI called it, and a name that matches nothing is inert.
           claude_args: |
             --model claude-opus-5

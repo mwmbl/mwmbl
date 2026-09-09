@@ -5,8 +5,8 @@ project installed and a test database running. Your job is **one** commit: the n
 unbuilt part of one issue, verified green.
 
 `ISSUE_NUMBER` is in the prompt; `$N` below means that number. You are inside the run
-described by `.github/claude/run.md`: come back to its section 4 when you have committed,
-which is where the change is reviewed, and then its section 5, which pushes it and turns
+described by `.github/claude/run.md`: come back to its section 3 when you have committed,
+which is where the change is reviewed, and then its section 4, which pushes it and turns
 it into a pull request. Commit and stop.
 
 ## 1. Decide what to build
@@ -64,8 +64,8 @@ remainder rather than silently dropping the work.
 git commit -m "<section title>"
 ```
 
-Stop there — do not push, do not open a pull request. Return to section 4 of
-`.github/claude/run.md`, which has the change reviewed; its section 5 then writes the pull
+Stop there — do not push, do not open a pull request. Return to section 3 of
+`.github/claude/run.md`, which has the change reviewed; its section 4 then writes the pull
 request body. You need to carry this into them: what changed and why, how you verified it,
 and whether this was the last section of the plan, which decides between `Part of #$N` and
 `Closes #$N`.

@@ -16,93 +16,45 @@ filing what you found but should not fix here are all first-class outcomes.
 The prompt carries:
 
 - `ISSUE_NUMBER` — `$N` below.
-- `ITEM_KIND` — `plan`, `implement` or `respond`. This is what the selector read off
-  repository state. Treat it as the likely answer, not an order: it knows about labels,
-  plan files, reviews and check results, and nothing at all about what the issue says. If
-  the state calls for something else, say so in your final message and do the right thing.
 - `PULL_REQUEST` — the open pull request's number for a `respond` item, `0` otherwise.
-- `REASON` — why the selector woke you.
+- `ITEM_KIND` (`plan`, `implement` or `respond`) and `REASON`. The selector read these off
+  repository state — labels, plan files, reviews, check results — having never read the
+  issue. Treat them as the likely answer, not an order: if the state calls for something
+  else, say so in your final message and do the right thing.
 
-## 1. Read the state before choosing
+## 1. Work out what this issue needs, and do one thing
 
-Always:
+Read the thread before you choose: `gh issue view $N --comments`, `AGENTS.md` for the
+project's conventions, and `docs/plans/issue-$N-*.md` if there is one. For a `respond`
+item read the pull request too — `gh pr view $PULL_REQUEST --comments`, the inline review
+comments at `gh api repos/$REPOSITORY/pulls/$PULL_REQUEST/comments`, which `gh pr view`
+does not show, and the logs of anything red in `gh pr checks $PULL_REQUEST`.
 
-- `gh issue view $N --comments` — the whole thread, including what people have ruled out.
-- `AGENTS.md`, for the project's commands and conventions.
-- `ls docs/plans/issue-$N-*.md`, and `docs/plans/README.md` if a plan is involved.
+Writing a plan and implementing a section have their own instructions:
+`.github/claude/plan-issue.md` and `.github/claude/implement-issue.md`. Everything else is
+an ordinary session on a branch you take with `gh pr checkout $PULL_REQUEST`.
 
-For a `respond` item, also read everything said on the pull request:
+What is particular to this pipeline rather than to the work:
 
-- `gh pr view $PULL_REQUEST --comments`
-- `gh api repos/$REPOSITORY/pulls/$PULL_REQUEST/comments` — the inline review comments,
-  which `gh pr view` does not show.
-- `gh pr checks $PULL_REQUEST`, and the logs of anything red.
+- **Never remove a `(Done)` marker from a plan**, and keep its headings in the format
+  `docs/plans/README.md` describes. Removing one rebuilds work that is already merged.
+- **A red check is not always the branch's.** When it is a flake or a broken environment,
+  say so on the pull request with the evidence and commit nothing, rather than committing
+  a change that pretends to fix it. Never make a check pass by weakening or deleting the
+  test that caught the problem.
+- **A rebase cannot fast-forward**, so section 4 pushes it with `--force-with-lease`.
+- **Feedback outside this part's scope goes into the plan as a later section**, not into
+  this pull request. Where you disagree with a review, say why on the pull request rather
+  than silently skipping it.
+- **These runs have no memory of each other.** Anything the next run or a human needs that
+  the pull request is the wrong place for goes on the issue with `gh issue comment $N`.
+  Never rewrite what someone else wrote.
+- **Something real that this issue is not about becomes a follow-up issue.** Search first
+  with `gh issue list --search "<terms>" --state all`, then `gh issue create`, unlabelled,
+  linking this issue. At most one per run, and never for something you could have fixed
+  here.
 
-## 2. Choose one action
-
-One action per run. Pick the one the state actually calls for.
-
-**Write a plan.** No plan file, and the issue is too big for one pull request. Follow
-`.github/claude/plan-issue.md`.
-
-**Implement the next part.** A plan exists with a section not marked `(Done)`, or the
-issue is small enough to do in one go. Follow `.github/claude/implement-issue.md`.
-
-**Revise the plan.** The issue changed under the plan, or a reviewer asked for a different
-split, or a later section turned out to be wrong given what the last one built. Edit
-`docs/plans/issue-$N-*.md` on a `claude/issue-$N-plan` branch and commit only that. Keep
-the headings in the format `docs/plans/README.md` describes, and never remove a `(Done)`
-marker — that would rebuild work that is already merged.
-
-**Answer feedback on the open pull request.** `gh pr checkout $PULL_REQUEST`, make the
-change, get both gates green, commit. Address every point that was raised: where you
-disagree, say why on the pull request rather than silently skipping it, and where a
-request is outside this part's scope, put it in the plan as a later section instead of
-growing this pull request past its budget.
-
-**Fix the failing checks.** `gh pr checkout $PULL_REQUEST`, reproduce the failure locally,
-fix the cause, commit. Never make a check pass by weakening or deleting the test that
-caught the problem. If the failure is not the branch's — a flake, or something broken in
-the environment — say so on the pull request with the evidence and commit nothing, rather
-than committing a change that pretends to fix it.
-
-**Rebase onto main.** The branch conflicts. `gh pr checkout $PULL_REQUEST`, then
-`git rebase origin/main`, resolve, re-run both gates. A rebase cannot fast-forward, so
-section 5 pushes it with `--force-with-lease`.
-
-**Answer the question, and commit nothing.** The feedback asks about the change rather
-than asking for a change to it: why it was done this way, whether something was
-considered, what a test actually covers. Work the answer out from the code — not from what
-the pull request body claims — and post it on the thread it was asked on. Say what you
-looked at, so the reviewer can check the answer rather than take it. If working it out
-shows the reviewer was right, make the change instead: an articulate explanation of a
-mistake is worth nothing.
-
-**Ask, and commit nothing.** The issue or the feedback is too ambiguous to act on without
-guessing. Post the specific questions that block you with `gh issue comment $N` (or
-`gh pr comment $PULL_REQUEST`), and stop. Guessing wastes a review; a question does not.
-
-Two things can go with any of the above, and neither is an action on its own:
-
-**Record what you found out, on the issue.** `gh issue comment $N` when the run turned up
-something the next run or a human needs and the pull request is the wrong place for it: a
-plan section that cannot be built as written, a constraint the issue does not mention, a
-failure you could not reproduce. These runs have no memory between them, so the thread is
-the only place a finding survives. Correct the issue's own description only when a
-maintainer asked you to (`gh issue edit $N`), and never rewrite what someone else wrote —
-saying in a comment that the description is out of date is honest; quietly replacing it is
-not.
-
-**File a follow-up issue.** Something real turned up that this issue is not about: a bug
-you noticed while reading the code, a request from a reviewer that belongs to a different
-change. Search for it first with `gh issue list --search "<terms>" --state all`, then
-`gh issue create`: say what you saw, where, and how you noticed it, and link this issue
-and the pull request. Leave it unlabelled. An issue reaches these queues only when someone
-with write access labels it, and an automation that could label its own would be feeding
-itself. At most one per run, and never for a style preference, for something a plan
-section already covers, or for anything you could simply have fixed here.
-
-## 3. Both gates must pass, and the change must earn its lines
+## 2. Both gates must pass, and the change must earn its lines
 
 Any action that changes code has to leave the branch green:
 
@@ -134,10 +86,10 @@ A smaller change that does the same thing is a better change. If the honest answ
 the issue did not need this code at all, or needed a tenth of it, act on that: cut it back,
 or commit nothing and say why. Neither is a failed run.
 
-Do this before section 4, so that whatever survives is what gets reviewed, and say what you
+Do this before section 3, so that whatever survives is what gets reviewed, and say what you
 cut and why in your final message.
 
-## 4. Have the change reviewed, in a fresh context
+## 3. Have the change reviewed, in a fresh context
 
 **If you committed anything, do this before you push.** A change reaches a human only
 after somebody other than its author has read it, and in this pipeline that is a subagent
@@ -157,11 +109,11 @@ checked, or what you would like it to conclude. It reads the diff cold, the way 
 does, and everything you add is you reviewing your own work through it. It has `Edit` and
 `Bash`, and it commits its own fixes: its findings do not need your agreement to land.
 
-Its final message is the only thing that comes back. Carry it into section 5: what it
+Its final message is the only thing that comes back. Carry it into section 4: what it
 changed, what it found and left alone, and where you think it was wrong and why. Do not
 quietly drop a finding you disagreed with.
 
-## 5. Push it, and say what you did
+## 4. Push it, and say what you did
 
 **If you committed nothing**, there is nothing to push, and what you say is all a human
 has to go on. On a `respond` item you must comment on the pull request even when the
@@ -184,9 +136,8 @@ selector never sees it. Post the pull request comment as well.
 git push -u origin "$(git branch --show-current)"
 ```
 
-Use `--force-with-lease` if you rebased in section 2, and only then.
-
-Then open or update the pull request:
+Use `--force-with-lease` if you rebased, and only then. Then open or update the pull
+request:
 
 ```
 gh pr list --head "$(git branch --show-current)" --state open --json number
@@ -203,7 +154,7 @@ changed under them.
 The body, or the comment, says:
 
 - What changed and why, and what you deliberately did not do.
-- How it was verified: the results of both gates as *you* ran them in section 3.
+- How it was verified: the results of both gates as *you* ran them in section 2.
 - What the review changed, and what it found and left alone.
 - The added lines outside `uv.lock`, `devdata/`, `front-end/` and `docs/plans/`, from
   `git diff --numstat origin/main...HEAD`. Over 500 is a problem to report here, not to
@@ -227,12 +178,13 @@ whether this pull request wakes another run:
   push. It tells the selector the comment is yours rather than a maintainer's, without
   claiming the new commit has had its turn — CI has not even run on it yet.
 
-Getting these the wrong way round is expensive in both directions: `done` on a push
-silences the failing checks of the commit you just made, and `update` on a run that
+Put the marker on its own line at the end of the body, which is where the selector looks
+for it. Getting the two the wrong way round is expensive in both directions: `done` on a
+push silences the failing checks of the commit you just made, and `update` on a run that
 changed nothing puts this pull request back in the queue on every trigger for as long as
 the reason stands.
 
-## 6. Hand over
+## 5. Hand over
 
 Your final message goes in the job log, not the pull request. Say which action you took
 and why, what changed, what you deliberately did not do, and the results of both gates.
