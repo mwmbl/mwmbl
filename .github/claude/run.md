@@ -102,7 +102,7 @@ with write access labels it, and an automation that could label its own would be
 itself. At most one per run, and never for a style preference, for something a plan
 section already covers, or for anything you could simply have fixed here.
 
-## 3. Both gates must pass
+## 3. Both gates must pass, and the change must earn its lines
 
 Any action that changes code has to leave the branch green:
 
@@ -116,6 +116,26 @@ Nobody re-runs these before you push: CI runs them on the branch minutes afterwa
 red branch wakes another run to fix what this one could have. If something is genuinely
 beyond this change to fix, say exactly what fails and why — never describe a run as green
 when it is not.
+
+Then read the whole change as a stranger would, before anyone else does:
+
+```
+git diff origin/main...HEAD
+```
+
+Green is not the same as worth having. Every line you added has to be worth reading again
+in a year, and lines are the cost a reviewer pays whether or not they were worth it. Cut
+what does not earn its place: a branch defending against something that cannot happen, a
+test that restates the implementation instead of pinning behaviour, a comment narrating
+what the code already says, an abstraction with one caller, a helper this codebase already
+has under another name.
+
+A smaller change that does the same thing is a better change. If the honest answer is that
+the issue did not need this code at all, or needed a tenth of it, act on that: cut it back,
+or commit nothing and say why. Neither is a failed run.
+
+Do this before section 4, so that whatever survives is what gets reviewed, and say what you
+cut and why in your final message.
 
 ## 4. Have the change reviewed, in a fresh context
 
