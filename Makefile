@@ -44,7 +44,7 @@ help:
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
 	@echo ""
-	@echo "  check          Run every check CI runs: format-check, lint, typecheck, locked"
+	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
 	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
 	@echo "  format         Reformat the code with ruff"
 	@echo "  format-check   Check formatting without writing (CI gate)"
@@ -97,7 +97,10 @@ run-background:
 # targets below in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
 # ---------------------------------------------------------------------------
 
-check: format-check lint typecheck locked
+# `locked` comes first on purpose: every other target below shells out to `uv run`,
+# which relocks uv.lock in place when pyproject.toml has moved on, and a lockfile that
+# has just been rewritten always passes `uv lock --check`.
+check: locked format-check lint typecheck
 
 fix: format lint-fix
 
@@ -130,7 +133,7 @@ typecheck-all:
 
 # The Docker images install with `uv sync --frozen`, which takes uv.lock exactly as
 # committed, so a pyproject.toml edited without relocking would leave them building the
-# old dependency set. Nothing else catches that: `uv sync` relocks silently.
+# old dependency set while CI and the tests run the new one.
 locked:
 	uv lock --check
 
