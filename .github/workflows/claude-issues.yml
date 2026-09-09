@@ -5,18 +5,22 @@ name: Claude issue automation
 # A run picks up one issue and decides what it needs — write a plan, build the next part,
 # answer a review, fix red checks, rebase, answer a question, ask one, or file what it
 # found and should not fix here — then does it, has it reviewed in a fresh context, and
-# leaves a branch for the publish step. Changing no code is a normal outcome, and one a run
-# says out loud rather than ending in silence.
+# pushes it. Changing no code is a normal outcome, and one a run says out loud rather than
+# ending in silence.
 #
-# There is one Claude step. It spawns the review as a subagent, which starts cold and
-# commits its own findings, so the fresh-context review costs a briefing rather than a
-# second action invocation. What is left in shell is only what a run cannot credibly say
-# about itself: which issues are worth spending a run on at all
-# (.github/scripts/select-claude-work.sh, before any model runs), and whether the gates
-# actually pass and a review actually happened (.github/scripts/publish-branch.sh, which is
-# the only thing that pushes). Everything between those two is the run's to decide, and
-# .github/claude/run.md is what it is told. See docs/plans/README.md for the plan format
-# the queues are derived from.
+# There is one Claude step, and it is an ordinary Claude Code session with GitHub as its
+# interface rather than a person. It reads the issue, does the work, spawns the review as a
+# subagent that starts cold and commits its own findings, pushes, and opens or comments on
+# the pull request. .github/claude/run.md is the whole of what it is told.
+#
+# The only shell left is what a run cannot do for itself. Choosing which issues are worth
+# spending a run on has to happen before any model starts, so it is
+# .github/scripts/select-claude-work.sh. Saying how the job ended has to happen when the
+# model may not have run at all, so it is .github/scripts/classify-claude-run.sh. Nothing
+# in between: a step that re-ran the gates or re-read the diff would be checking a session
+# that is already reporting on itself, and CI on the pushed branch is what actually catches
+# a change the run got wrong. See docs/plans/README.md for the plan format the queues are
+# derived from.
 #
 # Only one claude/issue-<N>-* pull request is ever open per issue. It no longer blocks the
 # issue, though: while it is open the only thing the automation may do to that issue is
@@ -91,9 +95,11 @@ jobs:
     # access must never be able to start a run on a public repository, so a comment or
     # review only counts from an OWNER, MEMBER or COLLABORATOR, and never from a bot —
     # which is also what stops the automation waking itself with its own comments. The
-    # login test belongs on all three: a run that answers a question posts as the Claude
-    # app rather than with GITHUB_TOKEN, so unlike a GITHUB_TOKEN comment it does raise an
-    # event, and author_association is not a reliable way to recognise an app.
+    # login test belongs on all three, and carries that second job alone: every comment a
+    # run posts is posted as the Claude app, which raises an event the way a person's does,
+    # and author_association is not a reliable way to recognise an app. Webhook payloads
+    # give an app the "[bot]" suffix even though the GraphQL API does not, which is why the
+    # test can live here and not in the selector.
     #
     # A pull request from a fork is out of scope for the same reason, and for a practical
     # one: GitHub gives a fork's pull_request event no secrets and a read-only token
@@ -148,7 +154,8 @@ jobs:
     needs: select
     if: needs.select.outputs.has_items == 'true'
     runs-on: ubuntu-latest
-    # One Claude run, the review subagent inside it, and one run of a 67-second test suite.
+    # One Claude run and the review subagent inside it, both iterating on a 67-second test
+    # suite.
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -159,7 +166,7 @@ jobs:
       cancel-in-progress: false
     name: "#${{ matrix.item.issue }} ${{ matrix.item.kind }}"
 
-    # Claude has to get the same gates green before its branch is published as CI runs
+    # Claude has to get the same gates green before it pushes as CI runs on the branch
     # afterwards, so it needs the same database and toolchain as ci.yml's test job. The
     # planning run gets it too: a plan is only as good as the facts behind it, and this
     # lets it count lint violations and see what actually breaks rather than estimating.
@@ -179,26 +186,20 @@ jobs:
 
     env:
       ISSUE_NUMBER: ${{ matrix.item.issue }}
-      # The publish step runs the gates itself rather than believing the run's account of
-      # them, so it needs the same environment the run had.
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
       DJANGO_SETTINGS_MODULE: mwmbl.settings_test
 
     steps:
-      # These live outside the checkout. The run holds an unrestricted Bash tool and is
-      # asked to commit; a report file sitting untracked in the working tree is one
-      # `git add -A` away from being part of the pull request.
+      # The log lives outside the checkout. The run holds an unrestricted Bash tool and is
+      # asked to commit; a file sitting untracked in the working tree is one `git add -A`
+      # away from being part of the pull request.
       #
-      # They are set here rather than in the job's `env` above because the `runner` context
+      # It is set here rather than in the job's `env` above because the `runner` context
       # does not exist at job level: a `${{ runner.temp }}` there is not an empty string but
       # a workflow that fails to validate, which is what broke every run from 2f0de72 on.
-      - name: Point the run log and reports outside the checkout
-        run: |
-          echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl" >>"$GITHUB_ENV"
-          echo "CLAUDE_REPORT_DIR=$RUNNER_TEMP/claude-reports" >>"$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/claude-reports"
-      # Full history: the run and the publish step both diff the branch against main, and
-      # the publish step compares HEAD against the branch's own remote tip.
+      - name: Point the run log outside the checkout
+        run: echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl" >>"$GITHUB_ENV"
+      # Full history: the run diffs the branch against main and pushes it.
       #
       # The ref is pinned because `pull_request` hands github.ref as refs/pull/<n>/merge:
       # a ref GitHub stops guaranteeing once the pull request closes, and a snapshot of a
@@ -215,10 +216,12 @@ jobs:
 
       # No github_token input: the action then authenticates as the Claude GitHub App,
       # which sets GH_TOKEN and the git credentials for Claude and, unlike the workflow
-      # token, lets CI run on the pull requests this pushes.
+      # token, lets CI run on the pull requests it pushes. That is the whole reason the run
+      # can push for itself — a branch pushed with GITHUB_TOKEN would sit with no checks on
+      # it forever, and CI going red is how the selector learns a change was wrong.
       #
       # continue-on-error, so that the last step can classify how the run ended rather than
-      # the job dying here with no explanation. The publish step guards itself.
+      # the job dying here with no explanation.
       - name: Work on the issue
         id: run
         uses: anthropics/claude-code-action@v1
@@ -242,7 +245,6 @@ jobs:
             PULL_REQUEST: ${{ matrix.item.pr }}
             REASON: ${{ matrix.item.reason }}
             REPOSITORY: ${{ github.repository }}
-            REPORT_DIR: ${{ runner.temp }}/claude-reports
           # Agent is the subagent tool section 4 of run.md needs; Task is what older
           # releases of the CLI called it, and a name that matches nothing is inert.
           claude_args: |
@@ -256,37 +258,6 @@ jobs:
           EXECUTION_FILE: ${{ steps.run.outputs.execution_file }}
         run: .github/scripts/record-claude-run.sh run
 
-      # The only step that pushes, and the only check on the run that is not the run's own
-      # account of itself: it re-runs both gates and refuses a branch with no review report.
-      # Skipped when the run itself failed — a run that died part-way through leaves a tree
-      # nobody has finished with, and republishing that is what this exists to prevent.
-      - name: Publish the branch
-        id: publish
-        continue-on-error: true
-        if: steps.run.outcome == 'success'
-        env:
-          # The Claude GitHub App's token, not the workflow token: a push made with
-          # GITHUB_TOKEN does not trigger workflows, so the pull request would open with no
-          # checks on it and CI could never go red on a branch the automation owns.
-          GH_TOKEN: ${{ steps.run.outputs.github_token }}
-        run: .github/scripts/publish-branch.sh
-
-      # A run that changes nothing leaves the repository exactly as the selector found it,
-      # so the same red checks or the same unanswered review would select this pull request
-      # again on the next trigger, and on every scheduled run after that. This comment is
-      # the record that stops it; select-claude-work.sh reads it as "this commit has
-      # already had its turn".
-      - name: Say on the pull request that nothing changed
-        if: >-
-          matrix.item.kind == 'respond'
-          && steps.run.outcome == 'success'
-          && steps.publish.outputs.published == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PULL_REQUEST: ${{ matrix.item.pr }}
-          REASON: ${{ matrix.item.reason }}
-        run: .github/scripts/report-no-change.sh
-
       - name: Upload the run log
         if: always()
         uses: actions/upload-artifact@v4
@@ -299,5 +270,4 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
         run: .github/scripts/classify-claude-run.sh

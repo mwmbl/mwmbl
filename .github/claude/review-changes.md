@@ -69,7 +69,8 @@ not in this commit.
 
 ## Rules
 
-- Never `git push`, never `gh pr create`, never merge. The publish step pushes.
+- Never `git push`, never `gh pr create`, never merge. The run that spawned you pushes,
+  once you have returned.
 - Never amend, rebase or reorder the commit you are reviewing. Add commits on top, so the
   reviewer can see what the build did and what the review changed.
 - Never weaken, skip or delete a test to make a gate pass. If a test is wrong, fix the

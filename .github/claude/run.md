@@ -1,13 +1,13 @@
 # Work on one issue
 
 You are Claude Code running in GitHub Actions on a checkout of `main`, with the project
-installed and a test database up. You are the whole run: you decide what this issue needs,
-do it, have it reviewed, and leave the branch ready to publish.
+installed and a test database up. This is the session you would have in a terminal, with
+GitHub as the interface instead of a person: you decide what this issue needs, do it, have
+it reviewed, and push it yourself.
 
-A shell step publishes afterwards — it re-runs both gates, pushes, and opens or updates the
-pull request from what you leave behind. **Never `git push`, and never run `gh pr create`.**
-That step is not a formality: it checks your work rather than taking your word for it, and
-it refuses to publish a branch you did not have reviewed.
+Nothing downstream checks your work and nothing downstream finishes it. A shell step chose
+this issue before you started; after you stop, the only thing that runs is the classifier
+that reports how the job ended. What reaches a human is what you push and what you write.
 
 Committing is not the only thing you can do, and it is often not the useful one. Answering
 a question, saying what you could not work out, recording what you learnt on the issue and
@@ -22,7 +22,6 @@ The prompt carries:
   the state calls for something else, say so in your final message and do the right thing.
 - `PULL_REQUEST` — the open pull request's number for a `respond` item, `0` otherwise.
 - `REASON` — why the selector woke you.
-- `REPORT_DIR` — where section 4 writes the two files the publish step reads.
 
 ## 1. Read the state before choosing
 
@@ -57,7 +56,7 @@ marker — that would rebuild work that is already merged.
 
 **Answer feedback on the open pull request.** `gh pr checkout $PULL_REQUEST`, make the
 change, get both gates green, commit. Address every point that was raised: where you
-disagree, say why in your final message rather than silently skipping it, and where a
+disagree, say why on the pull request rather than silently skipping it, and where a
 request is outside this part's scope, put it in the plan as a later section instead of
 growing this pull request past its budget.
 
@@ -68,25 +67,16 @@ the environment — say so on the pull request with the evidence and commit noth
 than committing a change that pretends to fix it.
 
 **Rebase onto main.** The branch conflicts. `gh pr checkout $PULL_REQUEST`, then
-`git rebase origin/main`, resolve, re-run both gates. Write `rebased: true` in the report
-file described in section 4, so the publish step force-pushes rather than failing on a
-non-fast-forward.
+`git rebase origin/main`, resolve, re-run both gates. A rebase cannot fast-forward, so
+section 5 pushes it with `--force-with-lease`.
 
 **Answer the question, and commit nothing.** The feedback asks about the change rather
 than asking for a change to it: why it was done this way, whether something was
 considered, what a test actually covers. Work the answer out from the code — not from what
-the pull request body claims — and post it on the thread it was asked on:
-
-```
-gh pr comment $PULL_REQUEST --body "...
-
-<!-- claude-run: answer -->"
-gh api repos/$REPOSITORY/pulls/comments/<comment-id>/replies -f body="..."   # inline thread
-```
-
-Say what you looked at, so the reviewer can check the answer rather than take it. If
-working it out shows the reviewer was right, make the change instead: an articulate
-explanation of a mistake is worth nothing.
+the pull request body claims — and post it on the thread it was asked on. Say what you
+looked at, so the reviewer can check the answer rather than take it. If working it out
+shows the reviewer was right, make the change instead: an articulate explanation of a
+mistake is worth nothing.
 
 **Ask, and commit nothing.** The issue or the feedback is too ambiguous to act on without
 guessing. Post the specific questions that block you with `gh issue comment $N` (or
@@ -112,16 +102,6 @@ with write access labels it, and an automation that could label its own would be
 itself. At most one per run, and never for a style preference, for something a plan
 section already covers, or for anything you could simply have fixed here.
 
-**Any comment you post on a pull request must end with an HTML comment starting
-`<!-- claude-run:`.** That is how the selector recognises its own voice, and how it knows
-this commit has already had its turn; without it the same red checks would wake a run on
-every trigger from here to eternity.
-
-Committing nothing is a valid outcome. Nothing is published, and on a pull request the
-workflow comments to say the run changed nothing. Nothing else happens until a new commit
-lands or someone says something new, so whatever you post before you stop is all a human
-has to go on: make it specific.
-
 ## 3. Both gates must pass
 
 Any action that changes code has to leave the branch green:
@@ -131,18 +111,20 @@ make check
 uv run pytest
 ```
 
-`DATABASE_URL` and `DJANGO_SETTINGS_MODULE` are already set. Iterate until both pass. The
-publish step runs them again and will not push if they fail, so a branch you leave red is
-simply a wasted run. If something is genuinely beyond this change to fix, say exactly what
-fails and why — never describe a run as green when it is not.
+`DATABASE_URL` and `DJANGO_SETTINGS_MODULE` are already set. Iterate until both pass.
+Nobody re-runs these before you push: CI runs them on the branch minutes afterwards, and a
+red branch wakes another run to fix what this one could have. If something is genuinely
+beyond this change to fix, say exactly what fails and why — never describe a run as green
+when it is not.
 
 ## 4. Have the change reviewed, in a fresh context
 
-**If you committed anything, this section is not optional.** The publish step refuses to
-push a branch with no review report, so skipping it throws the run away.
+**If you committed anything, do this before you push.** A change reaches a human only
+after somebody other than its author has read it, and in this pipeline that is a subagent
+rather than a step.
 
-Spawn a subagent with the Agent tool and this prompt, verbatim, with `$N` substituted and
-nothing added:
+Spawn it with the Agent tool and this prompt, verbatim, with `$N` substituted and nothing
+added:
 
 ```
 Follow the instructions in .github/claude/review-changes.md exactly.
@@ -155,31 +137,88 @@ checked, or what you would like it to conclude. It reads the diff cold, the way 
 does, and everything you add is you reviewing your own work through it. It has `Edit` and
 `Bash`, and it commits its own fixes: its findings do not need your agreement to land.
 
-When it returns, write two files under `$REPORT_DIR`:
+Its final message is the only thing that comes back. Carry it into section 5: what it
+changed, what it found and left alone, and where you think it was wrong and why. Do not
+quietly drop a finding you disagreed with.
 
-**`review.md`** — what the review reported, in its own terms: what it changed, what it
-found and left alone, and whether it committed. Where you think it was wrong, say so here
-and say why; do not quietly drop it. If it reported nothing, write that. Start the file
-with `rebased: true` on its own line if section 2 rebased the branch.
+## 5. Push it, and say what you did
 
-**`pr-body.md`** — the pull request body, ready to post. What changed and why, how it was
-verified, what the review changed and what it left alone, what you deliberately did not
-do. End with `Part of #$N`, or `Closes #$N` when this finished the last section of the
-plan. For a plan branch, one paragraph on the approach and why it is split this way, then
-the sections with their line estimates, then `Part of #$N` — merging it is what starts
+**If you committed nothing**, there is nothing to push, and what you say is all a human
+has to go on. On a `respond` item you must comment on the pull request even when the
+answer is that you could not help: say what you were woken for, what you looked at, and
+why nothing changed. Otherwise say it on the issue. Then stop.
+
+An answer to a question belongs on the thread it was asked on, which for an inline review
+comment is not the conversation tab:
+
+```
+gh api repos/$REPOSITORY/pulls/comments/<comment-id>/replies -f body="..."
+```
+
+An inline reply is not a pull request comment, so it does not carry a marker and the
+selector never sees it. Post the pull request comment as well.
+
+**If you committed**, push the branch:
+
+```
+git push -u origin "$(git branch --show-current)"
+```
+
+Use `--force-with-lease` if you rebased in section 2, and only then.
+
+Then open or update the pull request:
+
+```
+gh pr list --head "$(git branch --show-current)" --state open --json number
+```
+
+**Nothing open:** `gh pr create`. The title names the work — the plan section's title, or
+`Plan: <issue title>` for a plan branch.
+
+**Already open:** the push updated it. Comment instead, saying what these commits change
+and which piece of feedback each one answers. Leave the original body alone: a reviewer
+coming back wants to see what moved since they left, not a description that quietly
+changed under them.
+
+The body, or the comment, says:
+
+- What changed and why, and what you deliberately did not do.
+- How it was verified: the results of both gates as *you* ran them in section 3.
+- What the review changed, and what it found and left alone.
+- The added lines outside `uv.lock`, `devdata/`, `front-end/` and `docs/plans/`, from
+  `git diff --numstat origin/main...HEAD`. Over 500 is a problem to report here, not to
+  fix by rewriting a change that has already been reviewed.
+- `Part of #$N`, or `Closes #$N` when this finished the last section of the plan.
+
+For a plan branch, one paragraph on the approach and why it is split this way, then the
+sections with their line estimates, then `Part of #$N`. Merging it is what starts
 implementation, so make the trade-offs easy to review.
 
-Do not claim a gate is green in `pr-body.md`. The publish step measures that itself and
-appends what it measured.
+### The two markers
 
-## 5. Hand over
+Every comment you post on a pull request ends with an HTML comment, and which one decides
+whether this pull request wakes another run:
+
+- `<!-- claude-run: done -->` — **this commit has had its turn and nothing changed.** Use
+  it when you commit nothing: an answer, a question, a failure you could not fix. The
+  selector stops counting red checks and conflicts on this commit once it sees this, so
+  nothing wakes a run here again until a human replies or a new commit lands.
+- `<!-- claude-run: update -->` — **you pushed.** Use it on the comment that accompanies a
+  push. It tells the selector the comment is yours rather than a maintainer's, without
+  claiming the new commit has had its turn — CI has not even run on it yet.
+
+Getting these the wrong way round is expensive in both directions: `done` on a push
+silences the failing checks of the commit you just made, and `update` on a run that
+changed nothing puts this pull request back in the queue on every trigger for as long as
+the reason stands.
+
+## 6. Hand over
 
 Your final message goes in the job log, not the pull request. Say which action you took
 and why, what changed, what you deliberately did not do, and the results of both gates.
 
 ## Rules
 
-- Never `git push`. Never `gh pr create`. The publish step does both.
 - Do not merge anything, and do not close the issue — the pull request closes it, by
   saying `Closes #$N` when it finishes the last section of the plan.
 - Do not add or remove labels, on this issue or on one you file. Labels are how a human
@@ -187,6 +226,7 @@ and why, what changed, what you deliberately did not do, and the results of both
 - One action per run, and one pull request open per issue at a time.
 - At most about 500 added lines including tests, excluding `uv.lock`, `devdata/`,
   `front-end/` build output and `docs/plans/`.
+- Push only the branch you are on, and only ever `claude/*`. Never push `main`.
 - You may change `.github/` when the issue calls for it. Editing an instruction file you
   are following, or the workflow you are running under, takes effect only once a
   maintainer merges the pull request — never part-way through this run.

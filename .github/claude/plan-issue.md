@@ -6,7 +6,8 @@ to turn one issue into a written plan: one commit adding exactly one file.
 
 `ISSUE_NUMBER` is in the prompt; `$N` below means that number. You are inside the run
 described by `.github/claude/run.md`: come back to its section 4 when you have committed,
-which is where the plan is reviewed and handed to the publish step. Commit and stop.
+which is where the plan is reviewed, pushed and turned into a pull request. Commit and
+stop.
 
 ## 1. Understand the issue
 

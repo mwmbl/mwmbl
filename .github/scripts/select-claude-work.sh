@@ -46,13 +46,20 @@ readonly plan_dir="docs/plans"
 readonly max_items="${CLAUDE_MAX_ITEMS:-3}"
 readonly only_issue="${CLAUDE_ONLY_ISSUE:-}"
 
-# Every comment the automation posts on a pull request carries this, so recognising its
-# own voice is a string test on text it wrote rather than a guess about authorship. That
-# matters: GraphQL hands a Bot actor a login without the "[bot]" suffix, so the obvious
-# test against gh's projection silently matches nothing and the automation reads its own
-# comments as a maintainer's. Kept in step with .github/scripts/report-no-change.sh and
-# .github/claude/run.md, which write it.
+# Every comment the automation posts on a pull request ends with one of these, so
+# recognising its own voice is a string test on text it wrote rather than a guess about
+# authorship. That matters: gh's projection of a comment author carries a login and nothing
+# else — no bot flag, and a Bot actor's login arrives without the "[bot]" suffix — so the
+# obvious authorship test silently matches nothing and the automation reads its own
+# comments as a maintainer's.
+#
+# The prefix says the comment is the automation's, and never counts as feedback. The
+# narrower marker says something stronger: this run had its turn at the current commit and
+# changed nothing. Only a run that commits nothing writes that one, because a run that
+# pushes has not yet had a turn at what it just pushed — CI has not run on it. Kept in step
+# with section 5 of .github/claude/run.md, which writes both.
 readonly marker='<!-- claude-run:'
+readonly turn_taken='<!-- claude-run: done -->'
 
 open_issues=$(gh issue list --state open --limit 200 --json number,title,labels)
 open_pull_requests=$(gh pr list --state open --limit 200 \
@@ -67,22 +74,20 @@ open_pull_requests=$(gh pr list --state open --limit 200 \
 # carrying inline comments and no body still arrives as a review with a timestamp, so
 # inline-only feedback is caught too.
 #
-# The last thing the automation said about the current commit bounds the retries. A run
-# that ends without committing changes nothing the queues are derived from, so failing
-# checks it could not fix, or a question it could not answer without guessing, would
-# select this pull request again on every trigger for as long as they stood. Once it has
-# spoken about a commit, the mechanical reasons stop counting for that commit, and only
-# something said afterwards counts as feedback. A new commit, or a human replying, is what
-# starts it moving again.
+# A run that ends without committing changes nothing the queues are derived from, so
+# failing checks it could not fix, or a question it could not answer without guessing,
+# would select this pull request again on every trigger for as long as they stood. Saying
+# so is what bounds the retries: once a run has had its turn at a commit, the mechanical
+# reasons stop counting for that commit, and only something said afterwards counts as
+# feedback. A new commit, or a human replying, is what starts it moving again.
 readonly wake_filter='
 def ours: (.body // "") | contains($marker);
-def maintainer:
-    (["OWNER", "MEMBER", "COLLABORATOR"] | index(.authorAssociation) != null)
-    and (.author.is_bot != true);
+def had_a_turn: (.body // "") | contains($turn_taken);
+def maintainer: .authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR");
 def failing: [.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name];
 
 (.commits | last | .committedDate) as $commit
-| ([.comments[] | select(ours) | .createdAt] | max) as $spoken
+| ([.comments[] | select(had_a_turn) | .createdAt] | max) as $spoken
 | ([ (.comments[] | select(ours | not) | select(maintainer) | .createdAt),
      (.reviews[] | select(maintainer) | .submittedAt) ] | max) as $feedback
 | if $feedback != null and $feedback > $commit
@@ -96,7 +101,7 @@ def failing: [.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name];
 
 reason_to_wake() {
     gh pr view "$1" --json mergeable,statusCheckRollup,commits,comments,reviews \
-        | jq -r --arg marker "$marker" "$wake_filter"
+        | jq -r --arg marker "$marker" --arg turn_taken "$turn_taken" "$wake_filter"
 }
 
 pull_request_for() {
