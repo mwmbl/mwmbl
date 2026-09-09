@@ -1,5 +1,5 @@
 import gzip
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from glob import glob
 from itertools import islice
 from logging import getLogger
@@ -13,11 +13,15 @@ from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
+from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
 
 URL_DATE_COUNT_KEY = "url-count-{date}"
 URL_HOUR_COUNT_KEY = "url-count-hour-{hour}"
+# The hourly key used to be named after str(datetime(...)) on a naive datetime. Formatting
+# keeps that spelling now the datetimes are aware, so the chart does not lose its history.
+URL_HOUR_FORMAT = "%Y-%m-%d %H:00:00"
 USERS_KEY = "users-{date}"
 USER_COUNT_KEY = "user-count-{date}"
 HOST_COUNT_KEY = "host-count-{date}"
@@ -92,7 +96,7 @@ class StatsManager:
         self.redis.expire(url_count_key, LONG_EXPIRE_SECONDS)
 
         print("Date time", date_time)
-        hour = datetime(date_time.year, date_time.month, date_time.day, date_time.hour)
+        hour = date_time.strftime(URL_HOUR_FORMAT)
         hour_key = URL_HOUR_COUNT_KEY.format(hour=hour)
         self.redis.incrby(hour_key, num_crawled_urls)
         self.redis.expire(hour_key, SHORT_EXPIRE_SECONDS)
@@ -105,7 +109,7 @@ class StatsManager:
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         host_key = HOST_COUNT_KEY.format(date=date)
         host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
         pipeline = self.redis.pipeline()
@@ -135,13 +139,13 @@ class StatsManager:
                         pipeline.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
 
         pipeline.execute()
-        total_time = (datetime.utcnow() - start_time).total_seconds()
+        total_time = (datetime.now(timezone.utc) - start_time).total_seconds()
         logger.info(f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds")
         self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
         self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
-        date_time = datetime.utcnow()
+        date_time = datetime.now(timezone.utc)
         date = date_time.date()
 
         urls_crawled_daily = {}
@@ -188,7 +192,7 @@ class StatsManager:
 
         hour_counts = []
         for i in range(date_time.hour + 1):
-            hour = datetime(date_time.year, date_time.month, date_time.day, i)
+            hour = date_time.replace(hour=i).strftime(URL_HOUR_FORMAT)
             hour_key = URL_HOUR_COUNT_KEY.format(hour=hour)
             hour_count = self.redis.get(hour_key)
             if hour_count is None:
@@ -223,7 +227,7 @@ class StatsManager:
         )
 
     def get_domain_stats(self) -> list[DomainStats]:
-        date_time = datetime.utcnow()
+        date_time = datetime.now(timezone.utc)
         host_all_key = HOST_COUNT_ALL_KEY.format(date=date_time.date())
         host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
         all_domain_stats = []
@@ -244,7 +248,7 @@ class StatsManager:
         return all_domain_stats
 
     def get_stats_for_domain(self, host: str) -> DomainStats:
-        date_time = datetime.utcnow()
+        date_time = datetime.now(timezone.utc)
         num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=date_time.date()), host)
         num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
         num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
@@ -262,11 +266,11 @@ class StatsManager:
 
     def record_results(self, results: Results, username: str) -> None:
         num_results = len(results.results)
-        result_count_key = RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
 
@@ -278,20 +282,17 @@ class StatsManager:
         a count that stays at zero while queries are being filtered means the loop is
         broken.
         """
-        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
+        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(blacklisted_removed_count_key, num_results)
         self.redis.expire(blacklisted_removed_count_key, LONG_EXPIRE_SECONDS)
 
     def record_dataset(self, hashed_dataset) -> None:
         """Record dataset statistics from a dataset submission."""
-        from datetime import datetime
-
-        # Parse the date from the dataset
         try:
-            dataset_date = datetime.strptime(hashed_dataset.date, "%Y-%m-%d").date()
+            dataset_date = date.fromisoformat(hashed_dataset.date)
         except ValueError:
             # If date parsing fails, use current date
-            dataset_date = datetime.utcnow().date()
+            dataset_date = utc_today()
 
         # Count queries
         num_queries = len(hashed_dataset.queryDataset)
@@ -322,7 +323,7 @@ if __name__ == "__main__":
     redis = Redis(host="localhost", port=6379, decode_responses=True)
     stats = StatsManager(redis)
     batches = get_test_batches()
-    start = datetime.now()
+    start = datetime.now(timezone.utc)
     processed = 0
     import logging
 
@@ -332,7 +333,7 @@ if __name__ == "__main__":
             continue
         stats.record_batch(batch)
         processed += 1
-    total_time = (datetime.now() - start).total_seconds()
+    total_time = (datetime.now(timezone.utc) - start).total_seconds()
     print("Processed", processed)
     print("Total time", total_time)
     print("Time per batch", total_time / processed)

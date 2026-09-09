@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Sequence
 
 from django.conf import settings
@@ -11,6 +11,14 @@ from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 DOMAIN_REGEX = re.compile(r".*://([^/]*)")
+
+
+def utc_today() -> date:
+    """The current date in UTC, which is what the daily Redis keys are named after.
+
+    The server's local date would name a different key either side of local midnight.
+    """
+    return datetime.now(timezone.utc).date()
 
 
 def batch(items: Sequence, batch_size):

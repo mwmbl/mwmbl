@@ -13,7 +13,7 @@ SRANDMEMBER so looking at it cannot consume it.
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from logging import getLogger
 
 from background_task.models import CompletedTask, Task
@@ -32,6 +32,7 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
+from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
 
@@ -99,7 +100,7 @@ def _removed_counts(days: int) -> list[dict]:
     broken loop - see StatsManager.record_blacklisted_removed.
     """
     client = purge_queue.get_redis()
-    today = datetime.utcnow().date()
+    today = utc_today()
     dates = [today - timedelta(days=i) for i in range(days)]
     counts = client.mget([BLACKLISTED_REMOVED_COUNT_KEY.format(date=date) for date in dates])
     return [{"date": date, "count": int(count) if count else 0} for date, count in zip(dates, counts)]

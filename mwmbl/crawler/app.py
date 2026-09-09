@@ -2,7 +2,7 @@ import gzip
 import hashlib
 import json
 import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from logging import getLogger
 from queue import Empty
 from typing import Union
@@ -46,6 +46,7 @@ from mwmbl.settings import (
     VERSION,
 )
 from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.utils import utc_today
 
 stats_manager = StatsManager(
     Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
@@ -457,7 +458,7 @@ def get_batches_for_date(date_str):
 
     batches = get_batches_for_prefix(prefix)
     result = {"batch_urls": [f"{PUBLIC_URL_PREFIX}{batch}" for batch in sorted(batches)]}
-    if date_str != str(date.today()):
+    if date_str != str(utc_today()):
         # Don't cache data from today since it may change
         data = gzip.compress(json.dumps(result).encode("utf8"))
         upload(data, cache_filename)
