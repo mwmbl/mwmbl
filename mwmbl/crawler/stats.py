@@ -1,5 +1,5 @@
 import gzip
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from glob import glob
 from itertools import islice
 from logging import getLogger
@@ -13,6 +13,7 @@ from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
+from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
 
@@ -32,6 +33,17 @@ BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
+
+
+def hour_count_key(date_time: datetime) -> str:
+    """Key naming the hour a crawl happened in, e.g. ``url-count-hour-2026-09-08 13:00:00``.
+
+    Formatted rather than built from a truncated datetime so that the key does not depend
+    on whether ``date_time`` is aware: ``str()`` of an aware datetime carries a ``+00:00``
+    suffix, which would split the writer in :meth:`StatsManager.record_batch` from the
+    reader in :meth:`StatsManager.get_stats` and zero the hourly chart.
+    """
+    return URL_HOUR_COUNT_KEY.format(hour=date_time.strftime("%Y-%m-%d %H:00:00"))
 
 
 class DomainStats(BaseModel):
@@ -92,8 +104,7 @@ class StatsManager:
         self.redis.expire(url_count_key, LONG_EXPIRE_SECONDS)
 
         print("Date time", date_time)
-        hour = datetime(date_time.year, date_time.month, date_time.day, date_time.hour)
-        hour_key = URL_HOUR_COUNT_KEY.format(hour=hour)
+        hour_key = hour_count_key(date_time)
         self.redis.incrby(hour_key, num_crawled_urls)
         self.redis.expire(hour_key, SHORT_EXPIRE_SECONDS)
 
@@ -105,7 +116,7 @@ class StatsManager:
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         host_key = HOST_COUNT_KEY.format(date=date)
         host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
         pipeline = self.redis.pipeline()
@@ -135,13 +146,13 @@ class StatsManager:
                         pipeline.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
 
         pipeline.execute()
-        total_time = (datetime.utcnow() - start_time).total_seconds()
+        total_time = (datetime.now(timezone.utc) - start_time).total_seconds()
         logger.info(f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds")
         self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
         self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
-        date_time = datetime.utcnow()
+        date_time = datetime.now(timezone.utc)
         date = date_time.date()
 
         urls_crawled_daily = {}
@@ -188,8 +199,7 @@ class StatsManager:
 
         hour_counts = []
         for i in range(date_time.hour + 1):
-            hour = datetime(date_time.year, date_time.month, date_time.day, i)
-            hour_key = URL_HOUR_COUNT_KEY.format(hour=hour)
+            hour_key = hour_count_key(date_time.replace(hour=i))
             hour_count = self.redis.get(hour_key)
             if hour_count is None:
                 hour_count = 0
@@ -223,14 +233,14 @@ class StatsManager:
         )
 
     def get_domain_stats(self) -> list[DomainStats]:
-        date_time = datetime.utcnow()
-        host_all_key = HOST_COUNT_ALL_KEY.format(date=date_time.date())
+        today = utc_today()
+        host_all_key = HOST_COUNT_ALL_KEY.format(date=today)
         host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
         all_domain_stats = []
         for host, count in host_counts_all:
-            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
-            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
-            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=today), host)
+            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=today), host)
+            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=today), host)
             num_index_results = get_domain_result_count(host)
             domain_stats = DomainStats(
                 domain_name=host,
@@ -244,11 +254,11 @@ class StatsManager:
         return all_domain_stats
 
     def get_stats_for_domain(self, host: str) -> DomainStats:
-        date_time = datetime.utcnow()
-        num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=date_time.date()), host)
-        num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=date_time.date()), host)
-        num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=date_time.date()), host)
-        num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=date_time.date()), host)
+        today = utc_today()
+        num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=today), host)
+        num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=today), host)
+        num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=today), host)
+        num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=today), host)
         num_index_results = get_domain_result_count(host)
         domain_stats = DomainStats(
             domain_name=host,
@@ -262,11 +272,11 @@ class StatsManager:
 
     def record_results(self, results: Results, username: str) -> None:
         num_results = len(results.results)
-        result_count_key = RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=datetime.utcnow().date())
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
 
@@ -278,20 +288,18 @@ class StatsManager:
         a count that stays at zero while queries are being filtered means the loop is
         broken.
         """
-        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=datetime.utcnow().date())
+        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(blacklisted_removed_count_key, num_results)
         self.redis.expire(blacklisted_removed_count_key, LONG_EXPIRE_SECONDS)
 
     def record_dataset(self, hashed_dataset) -> None:
         """Record dataset statistics from a dataset submission."""
-        from datetime import datetime
-
         # Parse the date from the dataset
         try:
-            dataset_date = datetime.strptime(hashed_dataset.date, "%Y-%m-%d").date()
+            dataset_date = date.fromisoformat(hashed_dataset.date)
         except ValueError:
             # If date parsing fails, use current date
-            dataset_date = datetime.utcnow().date()
+            dataset_date = utc_today()
 
         # Count queries
         num_queries = len(hashed_dataset.queryDataset)
@@ -322,7 +330,7 @@ if __name__ == "__main__":
     redis = Redis(host="localhost", port=6379, decode_responses=True)
     stats = StatsManager(redis)
     batches = get_test_batches()
-    start = datetime.now()
+    start = datetime.now(timezone.utc)
     processed = 0
     import logging
 
@@ -332,7 +340,7 @@ if __name__ == "__main__":
             continue
         stats.record_batch(batch)
         processed += 1
-    total_time = (datetime.now() - start).total_seconds()
+    total_time = (datetime.now(timezone.utc) - start).total_seconds()
     print("Processed", processed)
     print("Total time", total_time)
     print("Time per batch", total_time / processed)

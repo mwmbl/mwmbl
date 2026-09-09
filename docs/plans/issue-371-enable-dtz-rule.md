@@ -110,7 +110,7 @@ bloom filter file.
 - No `replace(tzinfo=None)` remains in `mwmbl/crawler/` or `mwmbl/indexer/`
 - `ruff check --select DTZ` count is 61 → 41
 
-## PR 3: Key the Redis daily and hourly counters off aware UTC
+## PR 3: Key the Redis daily and hourly counters off aware UTC (Done)
 **Estimated added lines:** ~130 (27 sites across 5 files, plus one helper and its test)
 **Files:** mwmbl/utils.py, mwmbl/crawler/stats.py, mwmbl/count_urls.py,
 mwmbl/admin_views.py, mwmbl/crawler/app.py, test/test_stats_blacklisted_removed.py
