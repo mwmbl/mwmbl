@@ -18,7 +18,6 @@ deploy. See mwmbl.moderation.model.
 """
 
 import json
-from datetime import date
 
 from django.core.management.base import BaseCommand
 
@@ -27,6 +26,7 @@ from mwmbl.models import DomainSubmission
 from mwmbl.moderation import training_data
 from mwmbl.moderation.model import load_metrics, load_published_model, publish
 from mwmbl.moderation.train import passes_gate, train
+from mwmbl.utils import utc_today
 
 # A reason class with fewer real examples than this is a candidate for blocklist-derived
 # rows, but only when --derived is passed. See mwmbl.moderation.training_data: derived rows
@@ -103,7 +103,7 @@ class Command(BaseCommand):
                     needed, DERIVED_ROWS_PER_REASON, exclude={row.domain for row in rows}
                 )
 
-        version = f"domain-mod-{date.today():%Y-%m-%d}"
+        version = f"domain-mod-{utc_today():%Y-%m-%d}"
         # The model the workers are serving right now, so the gate can score it on the same
         # held-out rows as the candidate. None on a first run, and on an artifact this code can
         # no longer featurise - the gate falls back to the stored metrics and says so.

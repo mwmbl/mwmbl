@@ -18,7 +18,6 @@ import gzip
 import json
 import os
 import sys
-from datetime import date
 from pathlib import Path
 
 import joblib
@@ -38,6 +37,7 @@ from mwmbl.moderation.training_data import (  # noqa: E402
     is_trainable_domain,
     seed_rows,
 )
+from mwmbl.utils import utc_today  # noqa: E402
 
 DEFAULT_EXPORT = Path("devdata/judgments_export/domains.jsonl.gz")
 ARTIFACT_DIR = Path("mwmbl/moderation/artifacts")
@@ -105,7 +105,7 @@ def main() -> int:
     # but suffixed, because it is *not* one. DomainEvidence.model_version records which model
     # scored a row, and a warm start sharing a retrain's version string makes "has the rescore
     # run yet?" unanswerable from the data.
-    version = f"domain-mod-{date.today():%Y-%m-%d}-warmstart" if options.write_artifact else "offline-eval"
+    version = f"domain-mod-{utc_today():%Y-%m-%d}-warmstart" if options.write_artifact else "offline-eval"
     model, metrics = train(rows, version)
     print(json.dumps(metrics, indent=2))
 

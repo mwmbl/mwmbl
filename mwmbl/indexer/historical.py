@@ -1,15 +1,16 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from mwmbl.crawler.app import get_batches_for_date
 from mwmbl.database import Database
 from mwmbl.indexer.indexdb import BatchInfo, BatchStatus, IndexDatabase
+from mwmbl.utils import utc_today
 
 DAYS = 20
 
 
 def run():
     for day in range(DAYS):
-        date_str = str(date.today() - timedelta(days=day))
+        date_str = str(utc_today() - timedelta(days=day))
         with Database() as db:
             index_db = IndexDatabase(db.connection)
             index_db.create_tables()

@@ -16,10 +16,10 @@ make fix            # ruff format + ruff check --fix
 make typecheck-all  # the full ty warning backlog, never fails
 ```
 
-Ruff is configured in `pyproject.toml` with `select = ["E", "F", "I"]` and `E501`
+Ruff is configured in `pyproject.toml` with `select = ["DTZ", "E", "F", "I"]` and `E501`
 ignored globally — the formatter owns line length, so `E501` only ever fires on things
 it cannot split (long string literals, URLs, the markdown tables in the Super Search API
-docs).
+docs). `DTZ` was added by issue #371, which fixed all 65 naive datetime sites.
 
 ty gates on **error-level diagnostics only**. Every rule with a pre-existing baseline is
 downgraded to `warn` in `[tool.ty.rules]`, annotated with its count. The gate is green
@@ -28,8 +28,8 @@ today and a *new* category of type error fails the build.
 To count any rule before enabling it:
 
 ```
-uv run ruff check --no-cache --select DTZ --statistics
-uv run ruff check --no-cache --select DTZ --output-format concise   # the actual sites
+uv run ruff check --no-cache --select S113 --statistics
+uv run ruff check --no-cache --select S113 --output-format concise   # the actual sites
 ```
 
 To promote a ty rule once its count reaches zero, change `"warn"` to `"error"` in
@@ -38,22 +38,9 @@ To promote a ty rule once its count reaches zero, change `"warn"` to `"error"` i
 
 ---
 
-## Tier 1 — do these. ~1 day total, highest yield
+## Tier 1 — do these. ~half a day total, highest yield
 
-These four target failure modes this codebase has actually hit.
-
-### `DTZ` — 65 sites — 3–4h
-
-Naive datetimes. 41 of the 65 are bare `datetime.utcnow()`.
-
-This is the highest-value item on the list: commit `fbb6c87`, immediately before the
-ruff branch, was *fixing a bug in this exact class* ("Record the crawl time as a naive
-UTC datetime"). The rule would have caught it.
-
-Not blindly autofixable. Each site needs a decision: is this genuinely meant to be
-UTC-aware, or intentionally naive because it feeds a naive DB column? Getting that
-backwards introduces bugs rather than removing them, so work through them by hand and
-run the suite after each cluster. Expect the crawler and indexer to hold most of them.
+These target failure modes this codebase has actually hit.
 
 ### `S113` — 13 sites — 1h
 
@@ -171,8 +158,7 @@ a handful of suppressions.
 
 ## Suggested order
 
-1. `DTZ`, then `S113` — half a day, targets the two failure modes this codebase has
-   actually hit.
+1. `S113` — an hour, targets a failure mode this codebase has actually hit.
 2. `SIM115` and `B904` — another half day, cheap.
 3. Tier 2 in one pass.
 4. ty `invalid-argument-type` in `mwmbl/` only, by directory, promoting to `error` when

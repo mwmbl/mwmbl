@@ -129,7 +129,7 @@ target-version = "py311"
 extend-exclude = ["devdata", "front-end", "test_env"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["DTZ", "E", "F", "I"]
 # The formatter owns line length. E501 only ever fires on things it cannot split -
 # long string literals, URLs and markdown tables in API docs - where wrapping hurts.
 ignore = ["E501"]
