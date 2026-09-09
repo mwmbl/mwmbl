@@ -12,6 +12,11 @@
 # Any other failure belongs to this run. Repeating it every hour would spend the budget on
 # the same mistake, so the issue is labelled "claude: stuck" and the selector skips it
 # until a human removes the label or reruns that issue alone with workflow_dispatch.
+#
+# This is the only step after the run, and it deliberately judges nothing about the change
+# itself. A run that pushed something wrong is caught by CI on the branch, which the
+# selector reads as a reason to wake another run — not by a gate here that would be reading
+# the same working tree the run just reported on.
 
 set -euo pipefail
 

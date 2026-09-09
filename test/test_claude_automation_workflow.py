@@ -1,13 +1,23 @@
-"""The issue automation is a pipeline wired together in YAML, and a run costs an hour.
+"""The issue automation is one Claude session wired into GitHub, and a run costs real money.
 
-Nothing else checks that wiring: a renamed instruction file, a review step dropped in a
-merge or a guard left off a pushing step all look fine until a run burns its budget or
-opens a pull request nobody reviewed. These tests are cheap and they run in CI, which is
-where that feedback belongs.
+Almost all of it is prompt: the run decides what the issue needs, has the change reviewed
+by a subagent, pushes, and opens or comments on the pull request itself. Only two pieces of
+shell survive, on either side of it — the selector that decides an issue is worth a run at
+all, and the classifier that says how the job ended.
+
+That leaves very little that can be checked mechanically, and makes the little there is
+worth checking: a renamed instruction file, a marker that drifts out of step with the
+selector, or a guard dropped from the trigger list all look fine until a run burns its
+budget or wakes itself in a loop. These tests are cheap and they run in CI, which is where
+that feedback belongs. What the run does with its instructions is not testable here, and
+deliberately not faked: this file checks the wiring, not the judgement.
 """
 
+import json
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,8 +26,13 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/claude-issues.yml"
 SELECTOR_PATH = REPOSITORY_ROOT / ".github/scripts/select-claude-work.sh"
-REPORTER_PATH = REPOSITORY_ROOT / ".github/scripts/report-no-change.sh"
+RUN_INSTRUCTIONS_PATH = REPOSITORY_ROOT / ".github/claude/run.md"
 CLAUDE_ACTION = "anthropics/claude-code-action@v1"
+
+# The marker that says a run had its turn at the current commit and changed nothing, and
+# the prefix that says a comment is the automation's whatever else it means.
+TURN_TAKEN_MARKER = "<!-- claude-run: done -->"
+MARKER_PREFIX = "<!-- claude-run:"
 
 # yaml.safe_load reads the `on:` key as the boolean True, per YAML 1.1.
 TRIGGERS_KEY = True
@@ -38,9 +53,32 @@ def claude_steps(work_steps: list[dict]) -> list[dict]:
     return [step for step in work_steps if step.get("uses") == CLAUDE_ACTION]
 
 
-def test_the_pipeline_is_build_then_review_then_finalise(claude_steps: list[dict]) -> None:
-    """Reviewing after the push, or not at all, is the failure this ordering prevents."""
-    assert [step["id"] for step in claude_steps] == ["coordinate", "review", "finalise"]
+def heading_at(instructions: str, title: str) -> int:
+    """Where a numbered section starts, found by its title. Matching on the number instead
+    is what let the instruction files drift into pointing at the wrong section."""
+    match = re.search(rf"^## \d+\. {re.escape(title)}", instructions, re.MULTILINE)
+    assert match, title
+    return match.start()
+
+
+@pytest.fixture(scope="module")
+def run_instructions() -> str:
+    return RUN_INSTRUCTIONS_PATH.read_text()
+
+
+def test_the_work_is_one_claude_session(claude_steps: list[dict]) -> None:
+    """A second step would be a second cold context that has to be told what the first one
+    did, and the whole point of this shape is that there is nothing to hand over."""
+    assert [step["id"] for step in claude_steps] == ["run"]
+
+
+def test_the_run_can_spawn_the_review_subagent(claude_steps: list[dict]) -> None:
+    """The review is the only thing standing between a change and a human, and it is a
+    subagent now. A tool name that matches nothing is inert: the run would carry on and
+    push, having reviewed its own work."""
+    allowed = claude_steps[0]["with"]["claude_args"]
+    assert re.search(r"--allowedTools\s+\"[^\"]*\bAgent\b", allowed)
+    assert ".github/claude/review-changes.md" in RUN_INSTRUCTIONS_PATH.read_text()
 
 
 def test_every_instruction_file_a_prompt_names_exists(claude_steps: list[dict]) -> None:
@@ -62,42 +100,40 @@ def test_instruction_files_only_cross_reference_files_that_exist() -> None:
             assert (REPOSITORY_ROOT / path).is_file(), f"{instruction_file.name} -> {path}"
 
 
-def test_review_and_finalise_run_only_on_a_successful_build(claude_steps: list[dict]) -> None:
-    """Without the guard, a build that hit its turn limit part-way through a change still
-    gets pushed and opened for review."""
-    for step in claude_steps[1:]:
-        guard = step["if"]
-        assert "steps.built.outputs.built == 'true'" in guard, step["id"]
-        assert "steps.coordinate.outcome == 'success'" in guard, step["id"]
+def test_instruction_files_only_cross_reference_sections_that_exist() -> None:
+    """The filename guard above does not catch a section that moved. Sending a run back to
+    the section that reviews the change when it wanted the one that pushes is how a push
+    ends up skipping the rules that bound the retries."""
+    for instruction_file in sorted((REPOSITORY_ROOT / ".github/claude").glob("*.md")):
+        for block in re.split(r"\n\s*\n", instruction_file.read_text()):
+            sections = re.findall(r"\bsections? (\d+)(?:\s+and\s+(\d+))?", block)
+            if not sections:
+                continue
+            # A block that names no file is talking about itself.
+            named = set(re.findall(r"\.github/claude/[\w-]+\.md", block))
+            assert len(named) <= 1, f"{instruction_file.name}: ambiguous target {named}"
+            target = REPOSITORY_ROOT / named.pop() if named else instruction_file
+            headings = re.findall(r"^## (\d+)\.", target.read_text(), re.MULTILINE)
+            for number in {n for pair in sections for n in pair if n}:
+                assert number in headings, f"{instruction_file.name} -> {target.name} #{number}"
 
 
-def test_nothing_is_published_over_a_review_that_did_not_finish(claude_steps: list[dict]) -> None:
-    """The review step is continue-on-error, so one that ran out of turns half-way through
-    a fix ends red having left the branch mid-change. Pushing that is exactly the pull
-    request nobody reviewed."""
-    assert "steps.review.outcome == 'success'" in claude_steps[2]["if"]
+def test_the_run_is_told_to_have_the_change_reviewed_before_it_pushes(run_instructions: str) -> None:
+    """Nothing enforces this any more, so the ordering has to be in the instructions and
+    has to stay there: a review after the push is a review a human has already seen past."""
+    assert heading_at(run_instructions, "Have the change reviewed") < heading_at(run_instructions, "Push it")
 
 
-def test_a_build_is_measured_against_the_branch_not_against_the_checkout(
-    work_steps: list[dict],
-) -> None:
-    """A respond run starts with `gh pr checkout`, which moves HEAD to commits that are
-    already pushed: measured against where the job started, every one of those runs would
-    count as a build and be reviewed and pushed again."""
-    built = next(step for step in work_steps if step.get("id") == "built")
-    assert "origin/$branch" in built["run"]
-    assert "steps.start" not in built["run"]
-
-
-def test_the_finalise_step_is_told_what_the_earlier_steps_reported(claude_steps: list[dict]) -> None:
-    """It writes the pull request body from them, and each step is a fresh session that can
-    see nothing of the last one."""
-    prompt = claude_steps[2]["with"]["prompt"]
-    assert "BUILD_SUMMARY" in prompt
-    assert "REVIEW_SUMMARY" in prompt
-    instructions = (REPOSITORY_ROOT / ".github/claude/finalise-pull-request.md").read_text()
-    assert "BUILD_SUMMARY" in instructions
-    assert "REVIEW_SUMMARY" in instructions
+def test_the_review_subagent_is_given_nothing_but_the_issue_number(run_instructions: str) -> None:
+    """Everything else the run could add is the author reviewing their own work through a
+    second context. The prompt it is told to send is fixed text for that reason."""
+    review = run_instructions[heading_at(run_instructions, "Have the change reviewed") :]
+    spawn_prompt = review.split("```")[1]
+    assert spawn_prompt.strip().splitlines() == [
+        "Follow the instructions in .github/claude/review-changes.md exactly.",
+        "",
+        "ISSUE_NUMBER: $N",
+    ]
 
 
 def test_every_claude_step_is_recorded_so_a_failure_can_be_classified(
@@ -129,6 +165,27 @@ def test_the_classifier_has_the_last_word(work_steps: list[dict]) -> None:
     assert last["if"] == "always()"
 
 
+def test_no_step_between_the_run_and_the_classifier_judges_the_change(work_steps: list[dict]) -> None:
+    """A step that re-ran the gates or re-read the diff would be checking a session that is
+    already reporting on itself, and the branch is pushed by then either way. CI on the
+    pushed branch is what catches a change the run got wrong."""
+    run_index = next(index for index, step in enumerate(work_steps) if step.get("id") == "run")
+    after = work_steps[run_index + 1 :]
+    scripts = {step["run"].split()[0] for step in after if step.get("run", "").startswith(".github/")}
+    assert scripts == {
+        ".github/scripts/record-claude-run.sh",
+        ".github/scripts/classify-claude-run.sh",
+    }
+
+
+def test_the_run_pushes_as_the_app_rather_than_with_the_workflow_token(claude_steps: list[dict]) -> None:
+    """A push made with GITHUB_TOKEN triggers no workflows, so the branch would sit with no
+    checks on it forever — and CI going red is the only thing that tells the selector a
+    change was wrong. Passing no github_token is what makes the action authenticate as the
+    Claude GitHub App instead."""
+    assert "github_token" not in claude_steps[0]["with"]
+
+
 def test_triggers_are_events_the_action_accepts(workflow: dict) -> None:
     """claude-code-action fails the job outright on an event outside this set, which is
     what `push` did to every merge to main between a5eb9e3 and 141ae84."""
@@ -147,6 +204,12 @@ def test_triggers_are_events_the_action_accepts(workflow: dict) -> None:
     assert set(workflow[TRIGGERS_KEY]) <= supported
 
 
+def test_ci_going_red_wakes_a_run(workflow: dict) -> None:
+    """It is the only check on a change now that nothing between the run and the classifier
+    reads the diff."""
+    assert workflow[TRIGGERS_KEY]["workflow_run"]["workflows"] == ["CI"]
+
+
 def test_a_scheduled_run_still_exists_to_retry_a_spent_usage_window(workflow: dict) -> None:
     """It is the only thing that picks an item back up after the subscription runs out."""
     assert workflow[TRIGGERS_KEY]["schedule"]
@@ -162,9 +225,9 @@ def test_comment_and_review_triggers_require_write_access(workflow: dict) -> Non
 
 
 def test_no_feedback_trigger_can_be_fired_by_a_bot(workflow: dict) -> None:
-    """A run answering a question comments as the Claude app, which — unlike a comment made
-    with GITHUB_TOKEN — does raise an event. author_association does not reliably identify
-    an app, so every clause tests the login too."""
+    """Every comment a run posts is posted as the Claude app, which raises an event the way
+    a person's comment does. author_association does not reliably identify an app, so this
+    is the clause that stops the automation waking itself in a loop."""
     guard = workflow["jobs"]["select"]["if"]
     for event, field in [
         ("issue_comment", "comment"),
@@ -175,12 +238,14 @@ def test_no_feedback_trigger_can_be_fired_by_a_bot(workflow: dict) -> None:
         assert f"!endsWith(github.event.{field}.user.login, '[bot]')" in clause, event
 
 
-def test_nothing_the_runs_write_lands_inside_the_checkout(workflow: dict) -> None:
-    """The review and finalise steps run git with an unrestricted Bash tool and are asked
-    to commit; an untracked file in the working tree is one `git add -A` from the diff."""
-    for name, value in workflow["jobs"]["work"]["env"].items():
-        if name.startswith("CLAUDE_") and "/" in value:
-            assert value.startswith("${{ runner.temp }}"), name
+def test_nothing_the_run_writes_lands_inside_the_checkout(work_steps: list[dict]) -> None:
+    """The run holds an unrestricted Bash tool and is asked to commit; an untracked file in
+    the working tree is one `git add -A` from the diff."""
+    exported = [step for step in work_steps if "GITHUB_ENV" in step.get("run", "")]
+    assert exported
+    for step in exported:
+        for name, value in re.findall(r'echo "(CLAUDE_\w+)=(\S+)"', step["run"]):
+            assert value.startswith("$RUNNER_TEMP/"), name
 
 
 def test_no_checkout_lands_on_the_pull_request_merge_ref(workflow: dict) -> None:
@@ -207,39 +272,103 @@ def test_only_pull_requests_from_this_repository_start_a_run(workflow: dict) -> 
         assert "head.repo.full_name == github.repository" in clause, event
 
 
-def test_a_run_that_changes_nothing_says_so_on_the_pull_request(work_steps: list[dict]) -> None:
+def test_the_selector_reads_the_markers_the_run_writes() -> None:
+    """Two files, two strings: if they drift apart the retries stop being bounded and
+    nothing says so."""
+    selector = SELECTOR_PATH.read_text()
+    instructions = RUN_INSTRUCTIONS_PATH.read_text()
+    for marker in (TURN_TAKEN_MARKER, MARKER_PREFIX):
+        assert marker in selector, marker
+        assert marker in instructions, marker
+
+
+def test_a_run_that_changes_nothing_says_so_on_the_pull_request(run_instructions: str) -> None:
     """It is the only record such a run leaves. Without it the same red checks select the
     same pull request on every trigger and every scheduled run, for as long as they are
     red."""
-    reporter = next(
-        step for step in work_steps if step.get("run", "").startswith(".github/scripts/report-no-change.sh")
-    )
-    guard = reporter["if"]
-    assert "matrix.item.kind == 'respond'" in guard
-    assert "steps.built.outputs.built != 'true'" in guard
+    committed_nothing = run_instructions.split("**If you committed nothing**")[1].split("**If you committed**")[0]
+    assert "comment on the pull request" in committed_nothing
 
 
-def test_the_selector_looks_for_the_marker_the_reporter_writes() -> None:
-    """Two files, one string: if they drift apart the retries stop being bounded and
-    nothing says so."""
-    marker = "<!-- claude-run: no change -->"
-    assert marker in REPORTER_PATH.read_text()
-    assert marker in SELECTOR_PATH.read_text()
+def test_a_push_is_not_recorded_as_a_turn_taken(run_instructions: str) -> None:
+    """The commit a run just pushed has not had its turn: CI has not run on it. Marking it
+    as spoken for silences the failing checks of exactly the commits the automation made,
+    so the comment that goes with a push carries the other marker."""
+    assert "<!-- claude-run: update -->" in run_instructions
+    assert TURN_TAKEN_MARKER != "<!-- claude-run: update -->"
+    assert "<!-- claude-run: update -->" not in SELECTOR_PATH.read_text()
 
 
-def test_feedback_is_read_from_an_api_that_identifies_bots() -> None:
-    """gh's GraphQL projection gives a Bot author a login without the "[bot]" suffix, so a
-    suffix test there matches nothing and the automation reads its own comments as a
-    maintainer's. REST says user.type."""
+def test_the_selector_recognises_its_own_voice_by_marker_not_by_author() -> None:
+    """gh's projection of a comment author carries a login and nothing else, and a Bot
+    actor's login arrives there without the "[bot]" suffix, so an authorship test in the
+    selector silently matches nothing and the automation reads its own comments as a
+    maintainer's."""
     selector = SELECTOR_PATH.read_text()
-    assert '.user.type != "Bot"' in selector
+    assert "def ours:" in selector
     assert 'endswith("[bot]")' not in selector
+    assert "is_bot" not in selector
 
 
 def test_forks_are_not_the_automations_to_work_on() -> None:
     """A fork's branch may be named claude/issue-N-anything, and is code nobody here has
     reviewed."""
     assert "isCrossRepository" in SELECTOR_PATH.read_text()
+
+
+def test_a_run_cannot_outlive_the_app_token_it_pushes_with(workflow: dict) -> None:
+    """claude-code-action mints a GitHub App installation token when the step starts, and
+    GitHub expires those after an hour. The run pushes at the end of that same step, so a
+    job allowed to run longer than the token lives can spend its whole budget and then fail
+    to publish any of it — and a discarded run looks like a stuck issue, not a dead token.
+    Every work job measured so far finished well inside 20 minutes."""
+    timeout = workflow["jobs"]["work"]["timeout-minutes"]
+    assert timeout < 60, timeout
+
+
+def test_the_gates_environment_reaches_the_cli_and_not_only_the_shell(workflow: dict, work_steps: list[dict]) -> None:
+    """A composite action's steps do not inherit the calling job's env, and
+    claude-code-action forwards only the variables it names — DATABASE_URL is not one of
+    them. Set at job level it reaches every plain step and never the CLI, so the run's own
+    `uv run pytest` fails for want of a database while everything around it looks right."""
+    required = {"DATABASE_URL", "DJANGO_SETTINGS_MODULE"}
+    job_level = set(workflow["jobs"]["work"].get("env", {}))
+    assert not (required & job_level), required & job_level
+    exported = "".join(step.get("run", "") for step in work_steps if "GITHUB_ENV" in step.get("run", ""))
+    for name in required:
+        assert f"{name}=" in exported, name
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq drives the selector's filter")
+@pytest.mark.parametrize(
+    "body,is_ours,is_turn",
+    [
+        ("Nothing changed.\n\n<!-- claude-run: done -->", True, True),
+        ("Pushed a fix.\n\n<!-- claude-run: update -->", True, False),
+        ("> earlier\n> <!-- claude-run: done -->\n\nBut what about X?", False, False),
+        ("What about X?\n\n> earlier\n> <!-- claude-run: done -->", False, False),
+    ],
+)
+def test_a_quoted_marker_is_not_the_automations_own_voice(body: str, is_ours: bool, is_turn: bool) -> None:
+    """GitHub's "Quote reply" copies the quoted comment's raw markdown, HTML comments
+    included. Read as the automation's own voice, a maintainer's reply is dropped from the
+    feedback that wakes a run — the exact case the markers exist to unblock — and counts as
+    a turn taken, silencing the failing checks on that commit."""
+    selector = SELECTOR_PATH.read_text()
+    patterns = dict(re.findall(r"^readonly (marker|turn_taken)='(.+)'$", selector, re.MULTILINE))
+    assert patterns.keys() == {"marker", "turn_taken"}, patterns
+
+    def matches(pattern: str) -> bool:
+        result = subprocess.run(
+            ["jq", "-nr", "--arg", "b", body, "--arg", "rx", pattern, "$b | test($rx)"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
+
+    assert matches(patterns["marker"]) is is_ours
+    assert matches(patterns["turn_taken"]) is is_turn
 
 
 def test_referenced_scripts_are_executable(work_steps: list[dict], workflow: dict) -> None:

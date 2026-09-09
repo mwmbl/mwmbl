@@ -4,9 +4,10 @@ You are Claude Code running in GitHub Actions on a fresh checkout of `main`, wit
 project installed and a test database running. Your job is **one** commit: the next
 unbuilt part of one issue, verified green.
 
-`ISSUE_NUMBER` is in the prompt; `$N` below means that number. Later steps in this job
-review what you commit and open the pull request, so commit and stop — see
-`.github/claude/coordinate.md` for the pipeline.
+`ISSUE_NUMBER` is in the prompt; `$N` below means that number. You are inside the run
+described by `.github/claude/run.md`: come back to its section 3 when you have committed,
+which is where the change is reviewed, and then its section 4, which pushes it and turns
+it into a pull request. Commit and stop.
 
 ## 1. Decide what to build
 
@@ -63,10 +64,11 @@ remainder rather than silently dropping the work.
 git commit -m "<section title>"
 ```
 
-Stop there — do not push, do not open a pull request. Leave the finalise step what it
-needs for the body in your final message: what changed and why, how you verified it (the
-actual `make check` and `uv run pytest` results), and whether this was the last section of
-the plan, which decides between `Part of #$N` and `Closes #$N`.
+Stop there — do not push, do not open a pull request. Return to section 3 of
+`.github/claude/run.md`, which has the change reviewed; its section 4 then writes the pull
+request body. You need to carry this into them: what changed and why, how you verified it,
+and whether this was the last section of the plan, which decides between `Part of #$N` and
+`Closes #$N`.
 
 ## Rules
 
@@ -75,6 +77,6 @@ the plan, which decides between `Part of #$N` and `Closes #$N`.
   maintainer merges the pull request — never part-way through this run.
 - One section per run. Never bundle two sections into one pull request.
 - Never `git push`, never `gh pr create`, do not merge anything, do not change labels.
-- If you cannot finish, commit nothing and explain in your final message. The review and
-  finalise steps are skipped when there is no new commit, and a half-finished branch that
-  reaches a pull request blocks every later part of the issue.
+- If you cannot finish, commit nothing and explain in your final message. Nothing is
+  published when there is no new commit, and a half-finished branch that reaches a pull
+  request blocks every later part of the issue.
