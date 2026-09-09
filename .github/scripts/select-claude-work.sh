@@ -58,8 +58,16 @@ readonly only_issue="${CLAUDE_ONLY_ISSUE:-}"
 # changed nothing. Only a run that commits nothing writes that one, because a run that
 # pushes has not yet had a turn at what it just pushed — CI has not run on it. Kept in step
 # with section 5 of .github/claude/run.md, which writes both.
-readonly marker='<!-- claude-run:'
-readonly turn_taken='<!-- claude-run: done -->'
+#
+# Both are anchored at the end of the body rather than matched anywhere in it, because
+# GitHub's "Quote reply" copies the quoted comment's raw markdown, HTML comments included.
+# A maintainer quote-replying to one of these comments would otherwise be read as the
+# automation's own voice: their reply would be dropped from the feedback that wakes a run,
+# which is the exact case the markers exist to unblock, and it would also count as a turn
+# taken and silence the failing checks on that commit. A quoted marker fails both halves:
+# it carries a "> " in front of it, and there is normally a reply after it.
+readonly marker='(^|\n)<!-- claude-run: [a-z]+ -->[[:space:]]*$'
+readonly turn_taken='(^|\n)<!-- claude-run: done -->[[:space:]]*$'
 
 open_issues=$(gh issue list --state open --limit 200 --json number,title,labels)
 open_pull_requests=$(gh pr list --state open --limit 200 \
@@ -81,8 +89,8 @@ open_pull_requests=$(gh pr list --state open --limit 200 \
 # reasons stop counting for that commit, and only something said afterwards counts as
 # feedback. A new commit, or a human replying, is what starts it moving again.
 readonly wake_filter='
-def ours: (.body // "") | contains($marker);
-def had_a_turn: (.body // "") | contains($turn_taken);
+def ours: (.body // "") | test($marker);
+def had_a_turn: (.body // "") | test($turn_taken);
 def maintainer: .authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR");
 def failing: [.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name];
 

@@ -1,4 +1,4 @@
-"""The issue automation is one Claude session wired into GitHub, and a run costs an hour.
+"""The issue automation is one Claude session wired into GitHub, and a run costs real money.
 
 Almost all of it is prompt: the run decides what the issue needs, has the change reviewed
 by a subagent, pushes, and opens or comments on the pull request itself. Only two pieces of
@@ -13,8 +13,11 @@ that feedback belongs. What the run does with its instructions is not testable h
 deliberately not faked: this file checks the wiring, not the judgement.
 """
 
+import json
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -87,6 +90,24 @@ def test_instruction_files_only_cross_reference_files_that_exist() -> None:
     for instruction_file in instruction_files:
         for path in re.findall(r"\.github/claude/[\w-]+\.md", instruction_file.read_text()):
             assert (REPOSITORY_ROOT / path).is_file(), f"{instruction_file.name} -> {path}"
+
+
+def test_instruction_files_only_cross_reference_sections_that_exist() -> None:
+    """The filename guard above does not catch a section that moved. Sending a run back to
+    the section that reviews the change when it wanted the one that pushes is how a push
+    ends up skipping the rules that bound the retries."""
+    for instruction_file in sorted((REPOSITORY_ROOT / ".github/claude").glob("*.md")):
+        for block in re.split(r"\n\s*\n", instruction_file.read_text()):
+            sections = re.findall(r"\bsections? (\d+)(?:\s+and\s+(\d+))?", block)
+            if not sections:
+                continue
+            # A block that names no file is talking about itself.
+            named = set(re.findall(r"\.github/claude/[\w-]+\.md", block))
+            assert len(named) <= 1, f"{instruction_file.name}: ambiguous target {named}"
+            target = REPOSITORY_ROOT / named.pop() if named else instruction_file
+            headings = re.findall(r"^## (\d+)\.", target.read_text(), re.MULTILINE)
+            for number in {n for pair in sections for n in pair if n}:
+                assert number in headings, f"{instruction_file.name} -> {target.name} #{number}"
 
 
 def test_the_run_is_told_to_have_the_change_reviewed_before_it_pushes(run_instructions: str) -> None:
@@ -286,6 +307,61 @@ def test_forks_are_not_the_automations_to_work_on() -> None:
     """A fork's branch may be named claude/issue-N-anything, and is code nobody here has
     reviewed."""
     assert "isCrossRepository" in SELECTOR_PATH.read_text()
+
+
+def test_a_run_cannot_outlive_the_app_token_it_pushes_with(workflow: dict) -> None:
+    """claude-code-action mints a GitHub App installation token when the step starts, and
+    GitHub expires those after an hour. The run pushes at the end of that same step, so a
+    job allowed to run longer than the token lives can spend its whole budget and then fail
+    to publish any of it — and a discarded run looks like a stuck issue, not a dead token.
+    Every work job measured so far finished well inside 20 minutes."""
+    timeout = workflow["jobs"]["work"]["timeout-minutes"]
+    assert timeout < 60, timeout
+
+
+def test_the_gates_environment_reaches_the_cli_and_not_only_the_shell(workflow: dict, work_steps: list[dict]) -> None:
+    """A composite action's steps do not inherit the calling job's env, and
+    claude-code-action forwards only the variables it names — DATABASE_URL is not one of
+    them. Set at job level it reaches every plain step and never the CLI, so the run's own
+    `uv run pytest` fails for want of a database while everything around it looks right."""
+    required = {"DATABASE_URL", "DJANGO_SETTINGS_MODULE"}
+    job_level = set(workflow["jobs"]["work"].get("env", {}))
+    assert not (required & job_level), required & job_level
+    exported = "".join(step.get("run", "") for step in work_steps if "GITHUB_ENV" in step.get("run", ""))
+    for name in required:
+        assert f"{name}=" in exported, name
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq drives the selector's filter")
+@pytest.mark.parametrize(
+    "body,is_ours,is_turn",
+    [
+        ("Nothing changed.\n\n<!-- claude-run: done -->", True, True),
+        ("Pushed a fix.\n\n<!-- claude-run: update -->", True, False),
+        ("> earlier\n> <!-- claude-run: done -->\n\nBut what about X?", False, False),
+        ("What about X?\n\n> earlier\n> <!-- claude-run: done -->", False, False),
+    ],
+)
+def test_a_quoted_marker_is_not_the_automations_own_voice(body: str, is_ours: bool, is_turn: bool) -> None:
+    """GitHub's "Quote reply" copies the quoted comment's raw markdown, HTML comments
+    included. Read as the automation's own voice, a maintainer's reply is dropped from the
+    feedback that wakes a run — the exact case the markers exist to unblock — and counts as
+    a turn taken, silencing the failing checks on that commit."""
+    selector = SELECTOR_PATH.read_text()
+    patterns = dict(re.findall(r"^readonly (marker|turn_taken)='(.+)'$", selector, re.MULTILINE))
+    assert patterns.keys() == {"marker", "turn_taken"}, patterns
+
+    def matches(pattern: str) -> bool:
+        result = subprocess.run(
+            ["jq", "-nr", "--arg", "b", body, "--arg", "rx", pattern, "$b | test($rx)"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
+
+    assert matches(patterns["marker"]) is is_ours
+    assert matches(patterns["turn_taken"]) is is_turn
 
 
 def test_referenced_scripts_are_executable(work_steps: list[dict], workflow: dict) -> None:

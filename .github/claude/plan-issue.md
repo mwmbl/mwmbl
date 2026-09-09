@@ -6,8 +6,8 @@ to turn one issue into a written plan: one commit adding exactly one file.
 
 `ISSUE_NUMBER` is in the prompt; `$N` below means that number. You are inside the run
 described by `.github/claude/run.md`: come back to its section 4 when you have committed,
-which is where the plan is reviewed, pushed and turned into a pull request. Commit and
-stop.
+which is where the plan is reviewed, and then its section 5, which pushes it and turns it
+into a pull request. Commit and stop.
 
 ## 1. Understand the issue
 
@@ -58,10 +58,10 @@ git commit -m "Plan issue #$N: <issue title>"
 ```
 
 Stop there — do not push, do not open a pull request. Return to section 4 of
-`.github/claude/run.md`, which has the plan reviewed and writes the pull request body. You
-need to carry this into it: one paragraph on the approach and why it is split this way,
-then the sections with their line estimates. Merging that pull request is what starts
-implementation, so make the trade-offs easy to review.
+`.github/claude/run.md`, which has the plan reviewed; its section 5 then writes the pull
+request body. You need to carry this into them: one paragraph on the approach and why it is
+split this way, then the sections with their line estimates. Merging that pull request is
+what starts implementation, so make the trade-offs easy to review.
 
 ## Rules
 

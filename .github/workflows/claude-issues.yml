@@ -155,8 +155,15 @@ jobs:
     if: needs.select.outputs.has_items == 'true'
     runs-on: ubuntu-latest
     # One Claude run and the review subagent inside it, both iterating on a 67-second test
-    # suite.
-    timeout-minutes: 120
+    # suite, on a change capped at about 500 added lines.
+    #
+    # The bound is the App token, not the work. claude-code-action mints an installation
+    # token when the step starts and GitHub expires those after an hour, so a step that
+    # outlives the hour reaches `git push` with dead credentials and throws the whole run
+    # away. Every work job measured so far has finished between 2 and 16 minutes, so 45 is
+    # roughly three times the worst case and still safely inside the token's life. A run
+    # that reaches it is stuck rather than slow, and killing it is the right outcome.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.items_matrix) }}
@@ -186,8 +193,6 @@ jobs:
 
     env:
       ISSUE_NUMBER: ${{ matrix.item.issue }}
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
-      DJANGO_SETTINGS_MODULE: mwmbl.settings_test
 
     steps:
       # The log lives outside the checkout. The run holds an unrestricted Bash tool and is
@@ -197,8 +202,21 @@ jobs:
       # It is set here rather than in the job's `env` above because the `runner` context
       # does not exist at job level: a `${{ runner.temp }}` there is not an empty string but
       # a workflow that fails to validate, which is what broke every run from 2f0de72 on.
-      - name: Point the run log outside the checkout
-        run: echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl" >>"$GITHUB_ENV"
+      #
+      # The gates the run has to get green need the same database and settings as ci.yml,
+      # and they are exported here rather than in the job's `env` above because a composite
+      # action's steps do not inherit the calling job's environment: claude-code-action's
+      # manifest says so itself, and forwards only the variables it lists by name. A
+      # `DATABASE_URL` at job level reaches every plain step and never reaches the CLI, so
+      # `uv run pytest` would fail for want of a database in a way nothing else reports.
+      # $GITHUB_ENV is the route the action's own note recommends.
+      - name: Set up the environment the run works in
+        run: |
+          {
+            echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl"
+            echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_mwmbl"
+            echo "DJANGO_SETTINGS_MODULE=mwmbl.settings_test"
+          } >>"$GITHUB_ENV"
       # Full history: the run diffs the branch against main and pushes it.
       #
       # The ref is pinned because `pull_request` hands github.ref as refs/pull/<n>/merge:
