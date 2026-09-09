@@ -65,7 +65,9 @@ def test_form_stores_bare_domain(client, user):
     response = client.post(reverse("submit_domain"), {"name": "https://www.idolbronze.com/"})
 
     assert response.status_code == 302
-    assert DomainSubmission.objects.get().name == "www.idolbronze.com"
+    submission = DomainSubmission.objects.get()
+    assert submission.name == "www.idolbronze.com"
+    assert submission.submitted_on.tzinfo is not None
 
 
 @pytest.mark.django_db

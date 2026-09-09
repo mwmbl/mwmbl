@@ -81,7 +81,7 @@ def copy_all_indexes(new_index_path):
 
         # Update the start page
         old_index_info.last_page_copied = end_page
-        old_index_info.last_copied_time = datetime.utcnow()
+        old_index_info.last_copied_time = datetime.now(timezone.utc)
         old_index_info.save()
 
         logger.info(f"Copied pages from {old_index_info.index_path} to {new_index_path} up to page {end_page}")

@@ -31,7 +31,7 @@ Do not bulk-autofix. Run `uv run ruff check --no-cache --select DTZ --statistics
 end of each section and check the count has dropped by the number of sites that section
 owns.
 
-## PR 1: Make the Django ORM writes timezone-aware
+## PR 1: Make the Django ORM writes timezone-aware (Done)
 **Estimated added lines:** ~70 (4 call sites, 2 imports, ~40 lines of test)
 **Files:** mwmbl/views.py, mwmbl/background.py, pyproject.toml,
 test/test_domain_submissions.py, test/test_curation_timestamps.py (new)
