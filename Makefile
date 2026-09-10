@@ -33,7 +33,7 @@ SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
 .PHONY: help install install-hooks patch-xgboost migrate test test-file run run-background \
-        check fix format format-check lint lint-fix typecheck typecheck-all
+        check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
 	@echo "Available targets:"
@@ -44,7 +44,7 @@ help:
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
 	@echo ""
-	@echo "  check          Run every check CI runs: format-check, lint, typecheck"
+	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
 	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
 	@echo "  format         Reformat the code with ruff"
 	@echo "  format-check   Check formatting without writing (CI gate)"
@@ -52,6 +52,7 @@ help:
 	@echo "  lint-fix       Run ruff lint checks, applying safe fixes"
 	@echo "  typecheck      Run ty, failing only on error-level diagnostics (CI gate)"
 	@echo "  typecheck-all  Run ty showing the full warning backlog, never fails"
+	@echo "  locked         Check uv.lock is up to date with pyproject.toml (CI gate)"
 	@echo "  install-hooks  Install the pre-commit hooks into .git/hooks"
 
 install:
@@ -96,7 +97,10 @@ run-background:
 # targets below in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
 # ---------------------------------------------------------------------------
 
-check: format-check lint typecheck
+# `locked` comes first on purpose: every other target below shells out to `uv run`,
+# which relocks uv.lock in place when pyproject.toml has moved on, and a lockfile that
+# has just been rewritten always passes `uv lock --check`.
+check: locked format-check lint typecheck
 
 fix: format lint-fix
 
@@ -126,6 +130,12 @@ typecheck:
 # The full backlog, warnings included. Advisory: never fails the build.
 typecheck-all:
 	uv run ty check --exit-zero-on-warning
+
+# The Docker images install with `uv sync --frozen`, which takes uv.lock exactly as
+# committed, so a pyproject.toml edited without relocking would leave them building the
+# old dependency set while CI and the tests run the new one.
+locked:
+	uv lock --check
 
 install-hooks:
 	uv run pre-commit install
