@@ -21,6 +21,8 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 
     index_path = Path(settings.DATA_PATH) / index_name
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    
     try:
         existing_index = TinyIndex(item_factory=Document, index_path=index_path)
     except FileNotFoundError:
