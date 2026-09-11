@@ -1,16 +1,22 @@
 # Mwmbl development Makefile
 #
 # Prerequisites:
-#   - uv (https://github.com/astral-sh/uv)
-#   - PostgreSQL running locally with peer auth for the current user
-#   - Redis running locally on the default port (6379)
+# - uv (https://github.com/astral-sh/uv)
+# - PostgreSQL
+# - Redis running on the configured REDIS_URL (default: 127.0.0.1:6379)
 #
 # Quick start:
-#   createdb mwmbl          # one-time setup for dev DB
-#   createdb mwmbl_test     # one-time setup for test DB
-#   make migrate            # apply all migrations
-#   make test               # run the full test suite
-#   make run                # start the dev server
+#   Set DATABASE_URL to a PostgreSQL database you can use for development.
+#   The PostgreSQL user must have CREATEDB so Django can create the test database.
+#
+#   If PostgreSQL is running in Docker but Mwmbl is running directly on the host,
+#	use 127.0.0.1 (or localhost) and the published port. The Docker container name
+#	is only resolvable from containers on the same Docker network.
+#
+#   make install			# one-time setup for dev/test DBs
+#   make migrate			# apply all migrations
+#   make test				# run the full test suite
+#   make run				# start the dev server
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -23,7 +29,6 @@ DATABASE_URL   ?=
 REDIS_URL      ?= redis://127.0.0.1:6379
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
-TEST_SETTINGS          := mwmbl.settings_test
 
 # ---------------------------------------------------------------------------
 # Targets
@@ -39,7 +44,7 @@ help:
 	@echo "Available targets:"
 	@echo "  install        Install all dependencies with uv"
 	@echo "  migrate        Apply Django migrations"
-	@echo "  test           Run the full test suite (set DATABASE_URL to your test DB)"
+	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
