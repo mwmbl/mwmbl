@@ -9,7 +9,6 @@ from enum import IntEnum
 from io import UnsupportedOperation
 from json import JSONDecodeError
 from logging import getLogger
-from mmap import PROT_READ, PROT_WRITE, mmap
 from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
@@ -248,7 +247,7 @@ class _OpenPage(Generic[T]):
             self.documents: List[T] = index.get_page(page_index)
         except PageError:
             if not locked:
-                # Without the lock this could equally be another writer's memcpy in
+                # Without the lock this could equally be another writer's pwrite in
                 # progress, and merging onto an empty list would store over whatever it
                 # is writing. Refuse; the caller skips this page.
                 raise
@@ -296,16 +295,18 @@ class TinyIndex(Generic[T]):
         self.page_size = metadata.page_size
         logger.info(f"Loaded index with {self.num_pages} pages and {self.page_size} page size")
         self.index_file = None
-        self.mmap = None
 
     def __enter__(self):
+        # Pages are read and written with os.pread/os.pwrite on this descriptor, never
+        # through the buffer. The file object is kept rather than a raw descriptor because
+        # fileno() feeds the OFD locks in _set_page_lock, and closing it closes the
+        # descriptor for us. Mapping the file instead would cost ~800 MiB of unreclaimable
+        # page tables per worker for a 390 GiB index, and buy nothing: reading a page
+        # copies it out of the mapping either way.
         self.index_file = open(self.index_path, "r+b")
-        prot = PROT_READ if self.mode == "r" else PROT_READ | PROT_WRITE
-        self.mmap = mmap(self.index_file.fileno(), 0, prot=prot)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.mmap.close()
         self.index_file.close()
 
     def retrieve(self, key: str) -> List[T]:
@@ -330,7 +331,7 @@ class TinyIndex(Generic[T]):
 
         Storing a page is read -> merge -> write, with no atomicity of its own. Two writers
         on the same page lose one writer's documents, which for a cache is tolerable. The
-        serious case is a *torn* read: _write_page copies ~4 KB into the mmap, and a reader
+        serious case is a *torn* read: _write_page writes ~4 KB over the page, and a reader
         that catches it half-written gets a ZstdError, which _get_page_tuples turns into an
         empty page. A writer that reads empty then merges and stores wipes out everything
         else on that page - permanent loss in a 400 GB index, not a transient blip. Since
@@ -417,7 +418,13 @@ class TinyIndex(Generic[T]):
         over everything that was on the page. Readers that would rather have no results
         than an error catch this - see retrieve.
         """
-        page_data = self.mmap[i * self.page_size + METADATA_SIZE : (i + 1) * self.page_size + METADATA_SIZE]
+        page_data = os.pread(self.index_file.fileno(), self.page_size, i * self.page_size + METADATA_SIZE)
+        if len(page_data) != self.page_size:
+            # pread stops at the end of the file, so a short read means the file is not
+            # the shape the metadata says it is - truncated, or half-written by create.
+            # Decoding the fragment anyway is how a writer comes to merge onto a page it
+            # never actually read.
+            raise PageError(f"Could not read page {i}: got {len(page_data)} bytes, expected {self.page_size}")
         decompressor = ZstdDecompressor()
         try:
             decompressed_data = decompressor.decompress(page_data)
@@ -449,7 +456,11 @@ class TinyIndex(Generic[T]):
 
         page_data, num_stored = _get_page_data(self.page_size, data)
         logger.debug(f"Got page data of length {len(page_data)}")
-        self.mmap[i * self.page_size + METADATA_SIZE : (i + 1) * self.page_size + METADATA_SIZE] = page_data
+        num_written = os.pwrite(self.index_file.fileno(), page_data, i * self.page_size + METADATA_SIZE)
+        if num_written != len(page_data):
+            # A short write leaves the page half old and half new, which is exactly the
+            # torn page every reader and writer here is guarding against. Say so loudly.
+            raise PageError(f"Could not write page {i}: wrote {num_written} bytes of {len(page_data)}")
         return num_stored
 
     @contextmanager
@@ -457,7 +468,7 @@ class TinyIndex(Generic[T]):
         """Open page i for a read-modify-write, holding its lock throughout.
 
         Changing a page is read -> merge -> write, and the three have to be atomic
-        together. _write_page copies ~4 KB into the mmap; a reader catching it half-written
+        together. _write_page writes ~4 KB over the page; a reader catching it half-written
         gets a page that will not decompress, and a writer that took that for an empty page
         would store its result over everything else there.
 

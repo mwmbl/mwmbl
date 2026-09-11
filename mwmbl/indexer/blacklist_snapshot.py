@@ -18,7 +18,7 @@ So the query path never fetches, parses or holds the domain strings. A backgroun
 a 64-bit integer, and publishes the sorted array to Redis as one ~11 MB blob. Workers
 load the blob into a numpy array and answer membership with a vectorised binary search:
 10.7 MB resident, and ~94 us to classify the ~200 distinct domains of a typical query -
-noise next to the mmap page reads and the Wikipedia call the same request already makes.
+noise next to the index page reads and the Wikipedia call the same request already makes.
 
 Hashing rather than storing the domains is what buys the 15x memory saving. It costs
 exactness in principle: two different domains could collide and a clean domain be treated

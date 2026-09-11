@@ -1,13 +1,16 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 from zstandard import ZstdCompressor
 
 from mwmbl.tinysearchengine.indexer import (
+    METADATA_SIZE,
     STATE_INDEX,
     Document,
     DocumentSource,
     DocumentState,
+    PageError,
     TinyIndex,
     _binary_search_fitting_size,
     _get_page_data,
@@ -208,3 +211,41 @@ def test_a_document_with_an_unreadable_state_keeps_its_other_values():
     assert documents[0].state is None
     assert documents[0].source == DocumentSource.WIKIPEDIA
     assert documents[0].last_crawled == 123
+
+
+def test_a_write_through_another_handle_is_visible_without_reopening():
+    """Search and the external cache keep one read handle open for the life of the worker
+    while writers come and go on short-lived 'w' handles, so a read has to see a write made
+    elsewhere with no flush and no reopen. Positioned reads and writes share the page cache,
+    which is what makes that hold."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
+        document = Document("Title", "https://example.com", "Extract", 1.0, "term")
+
+        with TinyIndex(Document, index_path, "r") as reader:
+            page_index = reader.get_key_page_index("term")
+            assert reader.get_page(page_index) == []
+
+            with TinyIndex(Document, index_path, "w") as writer:
+                writer.store_in_page(page_index, [document])
+
+            documents = reader.get_page(page_index)
+
+    assert [item.url for item in documents] == ["https://example.com"]
+
+
+def test_a_truncated_page_raises_rather_than_reading_short():
+    """A read that stops at the end of the file must not pass for a page. Silently
+    decoding whatever came back would let a writer merge onto it and store the result."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
+        page_size = 4096
+        with open(index_path, "r+b") as index_file:
+            index_file.truncate(METADATA_SIZE + 3 * page_size + page_size // 2)
+
+        with TinyIndex(Document, index_path, "r") as index:
+            assert index.get_page(2) == []
+            with pytest.raises(PageError):
+                index.get_page(3)

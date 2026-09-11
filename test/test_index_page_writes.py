@@ -1,6 +1,6 @@
 """Changing an index page is read -> merge -> write, and has to be atomic.
 
-_write_page copies ~4 KB into the mmap, and a reader catching it half-written gets a page
+_write_page writes ~4 KB over the page, and a reader catching it half-written gets a page
 that will not decompress. Every read-modify-write goes through TinyIndex.page(), which
 holds the page's lock for the whole block, so no caller has to know locking exists.
 """
@@ -59,7 +59,7 @@ def test_page_holds_the_lock_across_the_read_and_the_write(index_path):
     """The lock must be held for as long as the block runs, and no longer.
 
     It asserts the exclusion property directly rather than trying to win the race: the
-    window is a single memcpy, so a racing test passes with the lock removed and guards
+    window is a single pwrite, so a racing test passes with the lock removed and guards
     nothing.
     """
     context = multiprocessing.get_context("fork")
@@ -266,7 +266,7 @@ def test_a_corrupt_page_is_reset_by_a_writer_holding_its_lock(index_path):
 
 def test_an_unlocked_writer_refuses_a_page_it_could_not_read(index_path, monkeypatch):
     """Without the lock, a page that will not decode is just as likely to be another
-    writer's memcpy in progress, and resetting it would store over what they are writing.
+    writer's pwrite in progress, and resetting it would store over what they are writing.
     Skip it - and leave it for a writer that can take the lock."""
     _corrupt(index_path, 3)
     _fail_to_lock(monkeypatch, OSError(errno.ENOLCK, "no locks available"))
