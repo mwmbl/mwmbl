@@ -1,8 +1,8 @@
 """Measure what dropping the index memory mapping buys, and what it costs.
 
-Standard library only, so it can be copied to the server and run with the system python
-against the production index - the point of the read-speed half is to measure real disk
-and a real page cache, which a sparse file cannot model.
+Standard library only unless `--decode` is passed, so it can be copied to the server and
+run with the system python against the production index - the point of the read-speed half
+is to measure real disk and a real page cache, which a sparse file cannot model.
 
 Two measurements, chosen separately:
 
@@ -23,6 +23,11 @@ has to win it back, which a mapped read never does, so ten threads doing nothing
 pages lose most of their throughput - far more than the syscall itself costs. Pass
 `--decode` to time what get_page really does, the read plus the zstd decompress and the
 JSON parse; that work dwarfs the handoff and is the number to judge the change on.
+
+`--decode` also times the extension, which does the read, the decompress and the parse in
+Rust with the GIL released. That is what buys the threaded throughput back: Python holds
+the interpreter for the decompress and the parse, so its threads queue behind each other
+whichever way they read the page.
 """
 
 import argparse
@@ -120,14 +125,12 @@ def report_timings(label: str, timings: list[float], elapsed: float):
     )
 
 
-def decode_page(page_data: bytes):
-    """What get_page does with a page once it has it."""
-    # Not at the top of the file: everything else here is standard library so the script
-    # can run on the server with the system python, and only --decode needs zstandard.
-    # A fresh decompressor per page, as _get_page_tuples does - sharing one across threads
-    # corrupts its buffer.
-    import zstandard
+def decode_page(zstandard, page_data: bytes):
+    """What reading a page in Python costs once the bytes are in hand.
 
+    A fresh decompressor per page, as the Python version did - sharing one across threads
+    corrupts its buffer.
+    """
     return json.loads(zstandard.ZstdDecompressor().decompress(page_data).decode("utf8"))
 
 
@@ -150,11 +153,26 @@ def measure_reads(path: str, num_reads: int, num_threads: int, decode: bool):
     def read_pread(page_index: int):
         return os.pread(fileno, PAGE_SIZE, METADATA_SIZE + page_index * PAGE_SIZE)
 
-    def with_decode(read_page):
-        return lambda page_index: decode_page(read_page(page_index))
+    readers = [("mmap", read_mapped), ("pread", read_pread)]
+    if decode:
+        # Not at the top of the file: everything else here is standard library so the
+        # script can run on the server with the system python, and only --decode needs
+        # zstandard and the extension.
+        import zstandard
 
-    for label, read_raw in (("mmap", read_mapped), ("pread", read_pread)):
-        read_page = with_decode(read_raw) if decode else read_raw
+        import mwmbl_rank
+
+        def with_decode(read_page):
+            return lambda page_index: decode_page(zstandard, read_page(page_index))
+
+        def read_rust(page_index: int):
+            return mwmbl_rank.read_index_page(fileno, METADATA_SIZE + page_index * PAGE_SIZE, PAGE_SIZE)
+
+        # There is no raw mode for the extension: the read, the decompress and the parse
+        # are one call with the GIL released, which is the whole point of it.
+        readers = [(label, with_decode(read_page)) for label, read_page in readers] + [("rust", read_rust)]
+
+    for label, read_page in readers:
         # Warm the page cache for this set of pages, so the single-threaded numbers are
         # about the read itself rather than about disk. Cold reads are dominated by the
         # disk either way; measure those on the server with the cache dropped.
