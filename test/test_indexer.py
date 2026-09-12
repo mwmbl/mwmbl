@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from zstandard import ZstdCompressor
+from zstandard import ZstdCompressor, ZstdDecompressor
 
 from mwmbl.tinysearchengine.indexer import (
     METADATA_SIZE,
@@ -12,11 +13,9 @@ from mwmbl.tinysearchengine.indexer import (
     DocumentState,
     PageError,
     TinyIndex,
-    _binary_search_fitting_size,
-    _get_page_data,
     _pad_to_page_size,
-    _trim_items_to_page,
 )
+from mwmbl_rank import pack_index_page
 
 
 def test_create_index():
@@ -31,112 +30,53 @@ def test_create_index():
                 assert page == []
 
 
-def test_binary_search_fitting_size_all_fit():
-    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    compressor = ZstdCompressor()
-    page_size = 4096
-    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
-
-    # We should fit everything
-    assert count_fit == len(items)
+def _documents(count: int) -> list[tuple]:
+    return [Document(title=f"text{i}", url=f"text{i}", extract=f"text{i}", score=i).as_tuple() for i in range(count)]
 
 
-def test_binary_search_fitting_size_subset_fit():
-    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    compressor = ZstdCompressor()
-    page_size = 15
-    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
+def test_pack_page_fits_everything_that_fits():
+    items = _documents(10)
 
-    # We should not fit everything
-    assert count_fit < len(items)
+    page, num_stored = pack_index_page(4096, items)
 
-
-def test_binary_search_fitting_size_none_fit():
-    items = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    compressor = ZstdCompressor()
-    page_size = 5
-    count_fit, data = _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
-
-    # We should not fit anything
-    assert count_fit == -1
-    assert data is None
+    assert num_stored == len(items)
+    assert len(page) == 4096
 
 
-def test_get_page_data_single_doc():
-    document1 = Document(title="title1", url="url1", extract="extract1", score=1.0)
-    items = [document1.as_tuple()]
+def test_pack_page_drops_the_tail_that_does_not_fit():
+    """A page holds a fixed number of bytes, so the count that comes back is what store()
+    reports to its caller and has to be what was actually kept."""
+    items = _documents(5000)
 
-    compressor = ZstdCompressor()
-    page_size = 4096
+    page, num_stored = pack_index_page(4096, items)
 
-    # Trim data
-    num_fitting, trimmed_data = _trim_items_to_page(compressor, 4096, items)
-
-    # We should be able to fit the 1 item into a page
-    assert num_fitting == 1
-
-    # Compare the trimmed data to the actual data we're persisting
-    # We need to pad the trimmmed data, then it should be equal to the data we persist
-    padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-    serialized_data, num_stored = _get_page_data(page_size, items)
-    assert serialized_data == padded_trimmed_data
-    assert num_stored == num_fitting
+    assert 1 < num_stored < len(items)
+    assert json.loads(ZstdDecompressor().decompress(page)) == [list(item) for item in items[:num_stored]]
 
 
-def test_get_page_data_many_docs_all_fit():
-    # Build giant documents item
-    documents = []
-    documents_len = 500
-    page_size = 4096
-    for x in range(documents_len):
-        txt = "text{}".format(x)
-        document = Document(title=txt, url=txt, extract=txt, score=x)
-        documents.append(document)
-    items = [document.as_tuple() for document in documents]
-
-    # Trim the items
-    compressor = ZstdCompressor()
-    num_fitting, trimmed_data = _trim_items_to_page(compressor, page_size, items)
-
-    # We should be able to fit all items
-    assert num_fitting == documents_len
-
-    # Compare the trimmed data to the actual data we're persisting
-    # We need to pad the trimmed data, then it should be equal to the data we persist
-    serialized_data, num_stored = _get_page_data(page_size, items)
-    padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-
-    assert serialized_data == padded_trimmed_data
-    assert num_stored == num_fitting
+def test_pack_page_raises_when_nothing_fits():
+    """Not even an empty page fits in five bytes. Returning a page that is too big would
+    have it written over the start of the next one."""
+    with pytest.raises(PageError):
+        pack_index_page(5, _documents(9))
 
 
-def test_get_page_data_many_docs_subset_fit():
-    # Build giant documents item
-    documents = []
-    documents_len = 5000
-    page_size = 4096
-    for x in range(documents_len):
-        txt = "text{}".format(x)
-        document = Document(title=txt, url=txt, extract=txt, score=x)
-        documents.append(document)
-    items = [document.as_tuple() for document in documents]
+def test_a_written_page_is_readable_by_python_zstandard():
+    """The extension writes the pages, and an older container reading the same index maps
+    it and decompresses with python-zstandard. The frames have to stay interchangeable."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
+        document = Document("Title", "https://example.com", "Extract", 1.0, "term")
 
-    # Trim the items
-    compressor = ZstdCompressor()
-    num_fitting, trimmed_data = _trim_items_to_page(compressor, page_size, items)
+        with TinyIndex(Document, index_path, "w") as index:
+            page_index = index.get_key_page_index("term")
+            index.store_in_page(page_index, [document])
 
-    # We should be able to fit a subset of the items onto the page
-    assert num_fitting > 1
-    assert num_fitting < documents_len
+        with open(index_path, "rb") as index_file:
+            page = index_file.read()[METADATA_SIZE + page_index * 4096 :][:4096]
 
-    # Compare the trimmed data to the actual data we're persisting
-    # We need to pad the trimmed data, then it should be equal to the data we persist
-    serialized_data, num_stored = _get_page_data(page_size, items)
-    padded_trimmed_data = _pad_to_page_size(trimmed_data, page_size)
-
-    assert serialized_data == padded_trimmed_data
-    # The count is what store() reports back, so it has to match what was actually kept.
-    assert num_stored == num_fitting
+    assert json.loads(ZstdDecompressor().decompress(page)) == [list(document.as_tuple())]
 
 
 def test_constructing_document_removes_none():
@@ -233,6 +173,45 @@ def test_a_write_through_another_handle_is_visible_without_reopening():
             documents = reader.get_page(page_index)
 
     assert [item.url for item in documents] == ["https://example.com"]
+
+
+def test_a_page_claiming_more_than_it_could_hold_is_unreadable():
+    """The decompressed size comes out of the page's own header, and the buffer for it is
+    allocated before a byte is read. A page that says it holds megabytes is damage, and
+    reading it would be the allocation that finishes off a worker already short of memory."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
+        # Compresses to a few hundred bytes, and its header says it is 4 MB.
+        overlarge = ZstdCompressor().compress(b"a" * 4 * 1024 * 1024)
+        with open(index_path, "r+b") as index_file:
+            index_file.seek(METADATA_SIZE)
+            index_file.write(_pad_to_page_size(overlarge, 4096))
+
+        with TinyIndex(Document, index_path, "r") as index:
+            with pytest.raises(PageError):
+                index.get_page(0)
+
+
+def test_retrieve_keeps_only_the_documents_for_its_term():
+    """Terms whose hashes collide share a page. The filtering happens in the extension, so
+    the documents another term left there are never built into Document objects at all."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
+        wanted = Document("Wanted", "https://wanted.example.com", "Extract", 1.0, "term")
+        other = Document("Other", "https://other.example.com", "Extract", 1.0, "another term")
+        untermed = Document("Untermed", "https://untermed.example.com", "Extract", 1.0)
+
+        with TinyIndex(Document, index_path, "w") as index:
+            index.store_in_page(index.get_key_page_index("term"), [wanted, other, untermed])
+
+        with TinyIndex(Document, index_path, "r") as index:
+            retrieved = index.retrieve("term")
+            whole_page = index.get_page(index.get_key_page_index("term"))
+
+    assert [item.url for item in retrieved] == [wanted.url, untermed.url]
+    assert [item.url for item in whole_page] == [wanted.url, other.url, untermed.url]
 
 
 def test_a_truncated_page_raises_rather_than_reading_short():

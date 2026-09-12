@@ -7,12 +7,16 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import IntEnum
 from io import UnsupportedOperation
-from json import JSONDecodeError
 from logging import getLogger
 from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
-from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError
+
+# Pages are read, packed and written by the Rust extension, which does the positioned
+# read, the zstd and the JSON with the GIL released - see mwmbl_rank/src/index.rs.
+# PageError is raised from there and imported by the rest of the codebase from here, as
+# it always was: a page that will not decode, or data that will not fit on one.
+from mwmbl_rank import PageError, pack_index_page, read_index_page, write_index_page
 
 VERSION = 1
 METADATA_CONSTANT = b"mwmbl-tiny-search"
@@ -157,10 +161,6 @@ class TokenizedDocument(Document):
 T = TypeVar("T")
 
 
-class PageError(Exception):
-    pass
-
-
 @dataclass
 class TinyIndexMetadata:
     version: int
@@ -182,49 +182,6 @@ class TinyIndexMetadata:
 
         values = json.loads(data[constant_length:].decode("utf8"))
         return TinyIndexMetadata(**values)
-
-
-# Find the optimal amount of data that fits onto a page
-# We do this by leveraging binary search to quickly find the index where:
-#     - index+1 cannot fit onto a page
-#     - <=index can fit on a page
-def _binary_search_fitting_size(compressor: ZstdCompressor, page_size: int, items: list[T], lo: int, hi: int):
-    # Base case: our binary search has gone too far
-    if lo > hi:
-        return -1, None
-    # Check the midpoint to see if it will fit onto a page
-    mid = (lo + hi) // 2
-    compressed_data = compressor.compress(json.dumps(items[:mid]).encode("utf8"))
-    size = len(compressed_data)
-    if size > page_size:
-        # We cannot fit this much data into a page
-        # Reduce the hi boundary, and try again
-        return _binary_search_fitting_size(compressor, page_size, items, lo, mid - 1)
-    else:
-        # We can fit this data into a page, but maybe we can fit more data
-        # Try to see if we have a better match
-        potential_target, potential_data = _binary_search_fitting_size(compressor, page_size, items, mid + 1, hi)
-        if potential_target != -1:
-            # We found a larger index that can still fit onto a page, so use that
-            return potential_target, potential_data
-        else:
-            # No better match, use our index
-            return mid, compressed_data
-
-
-def _trim_items_to_page(compressor: ZstdCompressor, page_size: int, items: list[T]):
-    # Find max number of items that fit on a page
-    return _binary_search_fitting_size(compressor, page_size, items, 0, len(items))
-
-
-def _get_page_data(page_size: int, items: list[T]):
-    """The padded page bytes, and how many of `items` actually fit on it."""
-    compressor = ZstdCompressor()
-    num_fitting, serialised_data = _trim_items_to_page(compressor, page_size, items)
-
-    compressed_data = compressor.compress(json.dumps(items[:num_fitting]).encode("utf8"))
-    assert len(compressed_data) <= page_size, "The data shouldn't get bigger"
-    return _pad_to_page_size(compressed_data, page_size), num_fitting
 
 
 def _pad_to_page_size(data: bytes, page_size: int):
@@ -297,9 +254,9 @@ class TinyIndex(Generic[T]):
         self.index_file = None
 
     def __enter__(self):
-        # Pages are read and written with os.pread/os.pwrite on this descriptor, never
-        # through the buffer. The file object is kept rather than a raw descriptor because
-        # fileno() feeds the OFD locks in _set_page_lock, and closing it closes the
+        # Pages are read and written positionally on this descriptor, in the extension,
+        # never through the buffer. The file object is kept rather than a raw descriptor
+        # because fileno() feeds the OFD locks in _set_page_lock, and closing it closes the
         # descriptor for us. Mapping the file instead would cost ~800 MiB of unreclaimable
         # page tables per worker for a 390 GiB index, and buy nothing: reading a page
         # copies it out of the mapping either way.
@@ -313,13 +270,14 @@ class TinyIndex(Generic[T]):
         index = self.get_key_page_index(key)
         logger.debug(f"Retrieving index {index}")
         try:
-            page = self.get_page(index)
+            # Passing the term drops the documents that another term put on this page
+            # before any of them is built into a Document.
+            return self.get_page(index, term=key)
         except PageError:
             # One unreadable page costs this query the results for one term, and the next
             # read of it will very likely succeed. Writers do not swallow this.
             logger.exception("Could not read index page %d", index)
             return []
-        return [item for item in page if item.term is None or item.term == key]
 
     def get_key_page_index(self, key) -> int:
         key_hash = mmh3.hash(key, signed=False)
@@ -383,11 +341,14 @@ class TinyIndex(Generic[T]):
                     # Dropped on close anyway; failing here would mask the caller's own error.
                     logger.warning("Could not release the lock on index page %d", i)
 
-    def get_page(self, i) -> list[T]:
+    def get_page(self, i, term: Optional[str] = None) -> list[T]:
         """
-        Get the page at index i, decompress and deserialise it using JSON
+        Get the page at index i, decompress and deserialise it using JSON.
+
+        Pass `term` to keep only the documents that belong to it - the ones whose term is
+        that term, or which have none, exactly as retrieve() needs them.
         """
-        results = self._get_page_tuples(i)
+        results = self._get_page_tuples(i, term)
         items = []
         for item in results:
             try:
@@ -409,7 +370,7 @@ class TinyIndex(Generic[T]):
                     logger.error(f"Could not recover item in index page {i}, skipping: {e2}. Item: {item}")
         return items
 
-    def _get_page_tuples(self, i):
+    def _get_page_tuples(self, i, term: Optional[str] = None):
         """The raw tuples on page i. Raises PageError if the page will not decode.
 
         It deliberately does not fall back to an empty page. A page that fails to
@@ -418,22 +379,11 @@ class TinyIndex(Generic[T]):
         over everything that was on the page. Readers that would rather have no results
         than an error catch this - see retrieve.
         """
-        page_data = os.pread(self.index_file.fileno(), self.page_size, i * self.page_size + METADATA_SIZE)
-        if len(page_data) != self.page_size:
-            # pread stops at the end of the file, so a short read means the file is not
-            # the shape the metadata says it is - truncated, or half-written by create.
-            # Decoding the fragment anyway is how a writer comes to merge onto a page it
-            # never actually read.
-            raise PageError(f"Could not read page {i}: got {len(page_data)} bytes, expected {self.page_size}")
-        decompressor = ZstdDecompressor()
+        offset = i * self.page_size + METADATA_SIZE
         try:
-            decompressed_data = decompressor.decompress(page_data)
-            return json.loads(decompressed_data.decode("utf8"))
-        except (ZstdError, UnicodeDecodeError, JSONDecodeError) as e:
-            # Damage that gets past zstd's checksum lands on the decode or the parse
-            # instead, and it is the same kind of unreadable. Callers catch PageError and
-            # nothing else, so anything raised from here that is not one would escape
-            # them - retrieve() would 500 a search rather than degrading to no results.
+            return read_index_page(self.index_file.fileno(), offset, self.page_size, term)
+        except PageError as e:
+            # The extension knows the offset it read, not which page that was.
             raise PageError(f"Could not read page {i}: {e}") from e
 
     def store_in_page(self, page_index: int, values: list[T]) -> int:
@@ -445,7 +395,7 @@ class TinyIndex(Generic[T]):
         value_tuples = [value.as_tuple() for value in values]
         return self._write_page(value_tuples, page_index)
 
-    def _write_page(self, data, i: int) -> int:
+    def _write_page(self, data: list, i: int) -> int:
         """
         Serialise the data using JSON, compress it and store it at index i.
         If the data is too big, it will store the first items in the list and discard the
@@ -454,14 +404,11 @@ class TinyIndex(Generic[T]):
         if self.mode != "w":
             raise UnsupportedOperation("The file is open in read mode, you cannot write")
 
-        page_data, num_stored = _get_page_data(self.page_size, data)
-        logger.debug(f"Got page data of length {len(page_data)}")
-        num_written = os.pwrite(self.index_file.fileno(), page_data, i * self.page_size + METADATA_SIZE)
-        if num_written != len(page_data):
-            # A short write leaves the page half old and half new, which is exactly the
-            # torn page every reader and writer here is guarding against. Say so loudly.
-            raise PageError(f"Could not write page {i}: wrote {num_written} bytes of {len(page_data)}")
-        return num_stored
+        offset = i * self.page_size + METADATA_SIZE
+        try:
+            return write_index_page(self.index_file.fileno(), offset, self.page_size, data)
+        except PageError as e:
+            raise PageError(f"Could not write page {i}: {e}") from e
 
     @contextmanager
     def page(self, i: int):
@@ -501,7 +448,7 @@ class TinyIndex(Generic[T]):
         metadata_bytes = metadata.to_bytes()
         metadata_padded = _pad_to_page_size(metadata_bytes, METADATA_SIZE)
 
-        page_bytes, _ = _get_page_data(page_size, [])
+        page_bytes, _ = pack_index_page(page_size, [])
 
         with open(index_path, "wb") as index_file:
             index_file.write(metadata_padded)
