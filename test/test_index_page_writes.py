@@ -1,6 +1,6 @@
 """Changing an index page is read -> merge -> write, and has to be atomic.
 
-_write_page copies ~4 KB into the mmap, and a reader catching it half-written gets a page
+_write_page writes ~4 KB over the page, and a reader catching it half-written gets a page
 that will not decompress. Every read-modify-write goes through TinyIndex.page(), which
 holds the page's lock for the whole block, so no caller has to know locking exists.
 """
@@ -59,7 +59,7 @@ def test_page_holds_the_lock_across_the_read_and_the_write(index_path):
     """The lock must be held for as long as the block runs, and no longer.
 
     It asserts the exclusion property directly rather than trying to win the race: the
-    window is a single memcpy, so a racing test passes with the lock removed and guards
+    window is a single pwrite, so a racing test passes with the lock removed and guards
     nothing.
     """
     context = multiprocessing.get_context("fork")
@@ -266,7 +266,7 @@ def test_a_corrupt_page_is_reset_by_a_writer_holding_its_lock(index_path):
 
 def test_an_unlocked_writer_refuses_a_page_it_could_not_read(index_path, monkeypatch):
     """Without the lock, a page that will not decode is just as likely to be another
-    writer's memcpy in progress, and resetting it would store over what they are writing.
+    writer's pwrite in progress, and resetting it would store over what they are writing.
     Skip it - and leave it for a writer that can take the lock."""
     _corrupt(index_path, 3)
     _fail_to_lock(monkeypatch, OSError(errno.ENOLCK, "no locks available"))
@@ -316,4 +316,51 @@ def test_damage_that_gets_past_zstd_still_degrades_to_no_results(index_path):
     with TinyIndex(Document, index_path, "r") as indexer:
         with pytest.raises(PageError):
             indexer.get_page(page_index)
+        assert indexer.retrieve("zebra") == []
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param(Document("Title", "https://example.com", "extract", float("nan"), "a"), id="nan-score"),
+        pytest.param(Document("Title \ud800", "https://example.com", "extract", 1.0, "a"), id="lone-surrogate"),
+    ],
+)
+def test_a_document_that_cannot_be_written_costs_its_page_and_no_more(index_path, document):
+    """json.dumps wrote both of these - NaN as a bare word no other reader accepts, and an
+    unpaired surrogate as an escape - so either can reach a write today. They are refused
+    now, and the refusal has to be a PageError: index_pages catches that and skips the one
+    page, where anything else aborts the run and 500s POST /crawler/results."""
+    with TinyIndex(Document, index_path, "w") as indexer:
+        with pytest.raises(PageError):
+            indexer.store_in_page(3, [document])
+
+    counts = index_pages(index_path, {3: [document], 4: [_doc(2, "b")]})
+
+    with TinyIndex(Document, index_path, "r") as indexer:
+        assert indexer.get_page(3) == [], "the page was written with a document it cannot hold"
+        assert len(indexer.get_page(4)) == 1, "a later page was skipped"
+    assert counts["b"] == 1
+
+
+def test_a_page_outside_the_index_is_a_page_error(index_path):
+    """The offset is arithmetic on the page number, so a negative one overflows converting
+    it and one past the end reads nothing. Callers only handle PageError."""
+    with TinyIndex(Document, index_path, "r") as indexer:
+        with pytest.raises(PageError):
+            indexer.get_page(NUM_PAGES)
+        with pytest.raises(PageError):
+            indexer.get_page(-1)
+
+
+def test_a_failed_read_degrades_to_no_results(index_path, monkeypatch):
+    """A read is a syscall now, so a device that fails on one page raises OSError where it
+    used to raise nothing at all. It costs a query that page's term, like an unreadable
+    page does, rather than 500ing the whole search."""
+
+    def fail(*args, **kwargs):
+        raise OSError(errno.EIO, "Input/output error")
+
+    with TinyIndex(Document, index_path, "r") as indexer:
+        monkeypatch.setattr("mwmbl.tinysearchengine.indexer.read_index_page", fail)
         assert indexer.retrieve("zebra") == []

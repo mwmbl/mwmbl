@@ -6,6 +6,7 @@
 mod domain;
 mod features;
 mod idf;
+mod index;
 mod pipeline;
 mod text;
 mod wiki;
@@ -199,6 +200,10 @@ fn get_features_py(
 fn mwmbl_rank(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyXGBPipeline>()?;
     m.add_function(wrap_pyfunction!(get_features_py, m)?)?;
+    m.add_function(wrap_pyfunction!(index::read_index_page, m)?)?;
+    m.add_function(wrap_pyfunction!(index::write_index_page, m)?)?;
+    m.add_function(wrap_pyfunction!(index::pack_index_page, m)?)?;
+    m.add("PageError", m.py().get_type_bound::<index::PageError>())?;
     m.add("NUM_FEATURES", features::NUM_FEATURES)?;
     m.add("FEATURE_NAMES", features::FEATURE_NAMES.to_vec())?;
     Ok(())

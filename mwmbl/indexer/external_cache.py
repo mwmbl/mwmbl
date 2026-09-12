@@ -40,6 +40,7 @@ from typing import Optional
 from django.conf import settings
 
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
+from mwmbl.tokenizer import clean_unicode
 
 logger = getLogger(__name__)
 
@@ -67,7 +68,7 @@ _cache_index_path: Optional[Path] = None
 def get_cache_index() -> TinyIndex:
     """The read handle for this process, opened once and left open.
 
-    Same lifetime as the main index in search_setup - mmap'd read-only for the life of the
+    Same lifetime as the main index in search_setup - open read-only for the life of the
     worker. Writers open their own short-lived 'w' handle instead, as every other writer in
     the codebase does; see store_external_results.
 
@@ -82,9 +83,9 @@ def get_cache_index() -> TinyIndex:
             _cache_index, _cache_index_path = None, None
         # Both globals are assigned only once __enter__ has returned. Assigning the index
         # first and the path after would, if __enter__ raised (the file removed between
-        # __init__ and open, EMFILE, a failed mmap), leave a half-open index behind that
-        # every later call would take the path-mismatch branch on and call __exit__ on -
-        # an AttributeError on its None mmap, swallowed as a cache miss, for the life of
+        # __init__ and open, EMFILE), leave a half-open index behind that every later
+        # call would take the path-mismatch branch on and call __exit__ on - an
+        # AttributeError on its None index_file, swallowed as a cache miss, for the life of
         # the worker. A failed open has to leave this exactly as it found it.
         index = TinyIndex(item_factory=Document, index_path=path)
         index.__enter__()
@@ -292,11 +293,13 @@ def _entries_to_store(source: DocumentSource, term: str, documents: list[Documen
             )
         ]
 
+    # The providers' own text, cleaned: it arrives as JSON from outside, and a title or an
+    # extract holding a character that cannot be stored would cost the whole cache page.
     return [
         Document(
-            title=document.title,
+            title=clean_unicode(document.title),
             url=document.url,
-            extract=document.extract,
+            extract=clean_unicode(document.extract),
             score=float(rank),
             term=term,
             state=document.state,
