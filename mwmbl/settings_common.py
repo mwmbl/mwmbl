@@ -52,6 +52,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "mwmbl.traffic_middleware.SearchTrafficMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -341,6 +342,10 @@ BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS = 600
 # evicts them - #359 measured that as a net NDCG loss - and because a separate file never
 # enters the candidate pool for anyone else's query.
 EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower() != "false"
+
+# Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
+# the request path that reaches for Redis, and the CI test job runs none.
+SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
 # One TTL for every provider. Wikipedia articles move rarely, which is what justifies six
 # months; a provider whose results turn over faster wants its own, and the place to add that
 # is here, keyed by source.

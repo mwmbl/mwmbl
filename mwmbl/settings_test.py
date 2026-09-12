@@ -14,6 +14,11 @@ NUM_PAGES = 10
 EXTERNAL_CACHE_INDEX_NAME = "external-cache.tinysearch"
 EXTERNAL_CACHE_NUM_PAGES = 10
 
+# The traffic counters are the only Redis touch on the request path, and every test that
+# drives the Django test client would hit them. Tests that exercise them turn this on with
+# override_settings and a fakeredis client of their own.
+SEARCH_TRAFFIC_COUNTING = False
+
 # Use fakeredis for cache so tests don't need a real Redis server
 CACHES = {
     "default": {
