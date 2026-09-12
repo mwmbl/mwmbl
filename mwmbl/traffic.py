@@ -7,8 +7,9 @@ it classifies, and nothing acts on the answer. #412 turns a classification into 
 
 Three classes, from the cheapest signals we have:
 
-- DECLARED_BOT - the user agent matches the crawler-user-agents list. The honest majority
-  of bots say so, which is exactly the "requests we *know* are bots" criterion in #410.
+- DECLARED_BOT - the user agent matches the crawler-user-agents list, through the RegexSet
+  in mwmbl_rank/src/user_agents.rs. The honest majority of bots say so, which is exactly
+  the "requests we *know* are bots" criterion in #410.
 - IMPLAUSIBLE - no user agent, a user agent of bare "Mozilla/5.0", or no Accept-Language.
   Deliberately no hand-curated list of HTTP client libraries: the crawler-user-agents list
   already matches curl, Wget, python-requests, httpx, Go-http-client, okhttp, axios,
@@ -29,25 +30,23 @@ mwmbl.org search volume, which is the number this is all for.
 """
 
 import json
-import re
 from enum import StrEnum
-from functools import lru_cache
 from pathlib import Path
 
 from django.http import HttpRequest
 
+from mwmbl_rank import BotUserAgentMatcher
+
 CRAWLER_USER_AGENTS_PATH = Path(__file__).parent / "resources" / "crawler_user_agents.json"
 
-# nginx accepts an 8 KB header. Matching one against 1500 patterns, and worse keeping it in
-# an unbounded cache, is a per-request cost anybody can choose for us; a real user agent is
-# well under this.
+# nginx accepts an 8 KB header, and matching is linear in the length of what it is given, so
+# this bounds a per-request cost the caller would otherwise choose. A real user agent is well
+# under it.
 MAX_USER_AGENT_LENGTH = 512
 
 # A browser that sends nothing but this is not a browser. Every real one appends a platform
 # and an engine.
 BARE_MOZILLA_USER_AGENT = "Mozilla/5.0"
-
-_REGEX_METACHARACTERS = frozenset(".^$*+?{}[]|()")
 
 
 class ClientClass(StrEnum):
@@ -61,87 +60,26 @@ class ClientClass(StrEnum):
     BROWSER = "browser"
 
 
-def _is_literal(pattern: str) -> bool:
-    """Whether a crawler-user-agents pattern is a plain substring match.
-
-    1464 of the 1500 are. A backslash before a non-alphanumeric escapes a literal character
-    (`Googlebot\\/`); before an alphanumeric it starts a character class (`\\d`, `\\b`) and
-    the pattern is a real regex.
-    """
-    position = 0
-    while position < len(pattern):
-        character = pattern[position]
-        if character == "\\":
-            if pattern[position + 1].isalnum():
-                return False
-            position += 2
-            continue
-        if character in _REGEX_METACHARACTERS:
-            return False
-        position += 1
-    return True
-
-
-def _build_trie(literals: list[str]) -> dict:
-    trie: dict = {}
-    for literal in literals:
-        node = trie
-        for character in literal:
-            node = node.setdefault(character, {})
-        node[""] = {}
-    return trie
-
-
-def _trie_pattern(trie: dict) -> str:
-    """A regex matching everything in the trie, with common prefixes shared.
-
-    This is the whole reason the matcher is usable on a request path. Python's re does not
-    build a trie out of an alternation, so `'|'.join(1464 literals)` backtracks through
-    every branch and measures 4.5 ms per *non-matching* user agent - and non-matching is
-    the common case. Sharing the prefixes brings that to 44 us.
-    """
-    if len(trie) == 1 and "" in trie:
-        return ""
-
-    alternatives = []
-    optional = False
-    for character, subtrie in sorted(trie.items()):
-        if character == "":
-            optional = True
-            continue
-        alternatives.append(re.escape(character) + _trie_pattern(subtrie))
-
-    body = alternatives[0] if len(alternatives) == 1 else "(?:" + "|".join(alternatives) + ")"
-    return body + "?" if optional else body
-
-
-def _compile_patterns(patterns: list[str]) -> tuple[re.Pattern, re.Pattern]:
-    literals = sorted({re.sub(r"\\(.)", r"\1", pattern) for pattern in patterns if _is_literal(pattern)})
-    regexes = [pattern for pattern in patterns if not _is_literal(pattern)]
-
-    # Case-sensitive, both halves. Upstream encodes case deliberately - `[wW]get`,
-    # `S[eE][mM]rushBot` - so folding it would both widen the match and slow it down.
-    return re.compile(_trie_pattern(_build_trie(literals))), re.compile("|".join(regexes))
-
-
 def _load_patterns() -> list[str]:
     with open(CRAWLER_USER_AGENTS_PATH) as patterns_file:
         return json.load(patterns_file)["patterns"]
 
 
-_LITERAL_PATTERN, _REGEX_PATTERN = _compile_patterns(_load_patterns())
+# Compiled once at import into a single automaton with a literal prefilter, and shared from
+# there. `'|'.join(...)` of the same patterns through Python's re measures 4.5 ms per
+# *non-matching* user agent - and non-matching is the common case - because re backtracks
+# through every branch. See mwmbl_rank/src/user_agents.rs.
+_MATCHER = BotUserAgentMatcher(_load_patterns())
 
 
-@lru_cache(maxsize=4096)
 def is_declared_bot(user_agent: str) -> bool:
     """Whether the user agent says it is a crawler.
 
-    Cached because the same few thousand user agents repeat all day, which takes the steady
-    state to nothing and removes the amplification a per-request regex scan would otherwise
-    offer. Bounded, so the cache cannot grow on attacker-chosen strings.
+    Measured at 0.5 us a call, so there is no cache in front of it: there is nothing left
+    for one to save, and a cache keyed on a string the caller chooses is a liability rather
+    than a saving.
     """
-    truncated = user_agent[:MAX_USER_AGENT_LENGTH]
-    return _LITERAL_PATTERN.search(truncated) is not None or _REGEX_PATTERN.search(truncated) is not None
+    return _MATCHER.is_match(user_agent[:MAX_USER_AGENT_LENGTH])
 
 
 def classify_client(request: HttpRequest) -> ClientClass:

@@ -18,6 +18,7 @@ from mwmbl.traffic import (
     classify_client,
     is_declared_bot,
 )
+from mwmbl_rank import BotUserAgentMatcher
 
 BROWSER_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -101,6 +102,31 @@ def test_the_front_end_as_it_calls_us_today_is_implausible(get_request):
     assert classify_client(request) == ClientClass.IMPLAUSIBLE
 
 
+def test_matching_is_case_sensitive():
+    """Upstream encodes case itself, so folding it would be both looser and slower."""
+    assert is_declared_bot("Googlebot/2.1")
+    assert not is_declared_bot("googlebot/2.1")
+
+
+def test_each_pattern_is_matched_on_its_own():
+    """Why the matcher is a RegexSet and not one joined pattern.
+
+    A pattern with a top-level alternation means something different once it is joined into
+    a larger one: here the anchors would come to apply to the wrong branch.
+    """
+    matcher = BotUserAgentMatcher(["^curl|wget$"])
+
+    assert matcher.is_match("curl/8.5.0")
+    assert matcher.is_match("something-wget")
+    assert not matcher.is_match("run curl now")
+
+
+def test_a_pattern_that_will_not_compile_is_an_error():
+    """How a bad refresh of the vendored file is meant to be noticed."""
+    with pytest.raises(ValueError, match="Could not compile crawler patterns"):
+        BotUserAgentMatcher(["(unclosed"])
+
+
 def test_a_long_user_agent_is_truncated_before_matching():
     padding = "x" * (MAX_USER_AGENT_LENGTH * 20)
     assert not is_declared_bot(padding + "Googlebot/")
@@ -110,9 +136,12 @@ def test_a_long_user_agent_is_truncated_before_matching():
 def test_classifying_a_browser_is_fast():
     """The regression test for the naive alternation, which took 4.5 ms per browser hit.
 
-    Uncached, because the cache is what makes the steady state free and would hide it.
+    A browser user agent is the case that matters: nothing matches, so a backtracking engine
+    has to try every branch before it can say so. The RegexSet in mwmbl_rank does it in one
+    pass, measured at well under a microsecond, and there is no cache in front of it to hide
+    a regression behind. The bar is loose because this runs on CI hardware.
     """
-    is_declared_bot.cache_clear()
     start = time.perf_counter()
-    is_declared_bot(BROWSER_USER_AGENTS[0])
-    assert time.perf_counter() - start < 0.001
+    for user_agent in BROWSER_USER_AGENTS:
+        is_declared_bot(user_agent)
+    assert (time.perf_counter() - start) / len(BROWSER_USER_AGENTS) < 0.001
