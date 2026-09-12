@@ -9,6 +9,7 @@ mod idf;
 mod index;
 mod pipeline;
 mod text;
+mod user_agents;
 mod wiki;
 
 use pyo3::prelude::*;
@@ -199,6 +200,7 @@ fn get_features_py(
 #[pymodule]
 fn mwmbl_rank(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyXGBPipeline>()?;
+    m.add_class::<user_agents::PyBotUserAgentMatcher>()?;
     m.add_function(wrap_pyfunction!(get_features_py, m)?)?;
     m.add_function(wrap_pyfunction!(index::read_index_page, m)?)?;
     m.add_function(wrap_pyfunction!(index::write_index_page, m)?)?;
