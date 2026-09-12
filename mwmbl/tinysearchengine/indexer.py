@@ -4,13 +4,15 @@ import json
 import os
 import struct
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
 from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
+
+from mwmbl.tokenizer import clean_unicode
 
 # Pages are read, packed and written by the Rust extension, which does the positioned
 # read, the zstd and the JSON with the GIL released - see mwmbl_rank/src/index.rs.
@@ -153,6 +155,21 @@ class Document:
         return tuple(values)
 
 
+def cleaned_document(document: Document) -> Document:
+    """The document with text that cannot be stored on a page taken out of it.
+
+    A lone surrogate is the case that turns up: a title or an extract that a UTF-16 client
+    truncated in the middle of an astral character, which arrives as a \\udXXX escape that
+    json.loads accepts and no UTF-8 encoder will write. It has to go before the document
+    reaches a page, or it costs the whole page the document would be stored on.
+
+    clean_unicode is what tokenize already does to the same text, so the terms a document
+    is indexed under do not change - only the text stored alongside them, which until now
+    kept a character the reader could not render anyway.
+    """
+    return replace(document, title=clean_unicode(document.title), extract=clean_unicode(document.extract))
+
+
 @dataclass
 class TokenizedDocument(Document):
     tokens: List[str] = field(default_factory=list)
@@ -273,9 +290,12 @@ class TinyIndex(Generic[T]):
             # Passing the term drops the documents that another term put on this page
             # before any of them is built into a Document.
             return self.get_page(index, term=key)
-        except PageError:
+        except (PageError, OSError):
             # One unreadable page costs this query the results for one term, and the next
-            # read of it will very likely succeed. Writers do not swallow this.
+            # read of it will very likely succeed. OSError as well as PageError: the read
+            # is a syscall, and a device that failed on one page should cost a query that
+            # page rather than answer the whole search with a 500. Writers do not swallow
+            # either.
             logger.exception("Could not read index page %d", index)
             return []
 
@@ -379,6 +399,11 @@ class TinyIndex(Generic[T]):
         over everything that was on the page. Readers that would rather have no results
         than an error catch this - see retrieve.
         """
+        if not 0 <= i < self.num_pages:
+            # Left to the extension, a negative page index is an OverflowError converting
+            # the offset and one past the end is a short read; both are this, and callers
+            # only handle PageError.
+            raise PageError(f"Page {i} is not in an index of {self.num_pages} pages")
         offset = i * self.page_size + METADATA_SIZE
         try:
             return read_index_page(self.index_file.fileno(), offset, self.page_size, term)

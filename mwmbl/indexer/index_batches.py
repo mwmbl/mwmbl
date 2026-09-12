@@ -15,7 +15,14 @@ from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.indexer.indexdb import BatchStatus
-from mwmbl.tinysearchengine.indexer import CURATED_STATES, Document, DocumentState, PageError, TinyIndex
+from mwmbl.tinysearchengine.indexer import (
+    CURATED_STATES,
+    Document,
+    DocumentState,
+    PageError,
+    TinyIndex,
+    cleaned_document,
+)
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.tokenizer import get_bigrams, tokenize
 from mwmbl.utils import get_domain
@@ -83,7 +90,12 @@ def index_documents(documents, index_path):
     tens of megabytes and hold ~156 MB of domain strings for the process's life - see
     blacklist_snapshot."""
     documents = filter_blacklisted_documents(documents)
-    page_documents = preprocess_documents(documents, index_path)
+    # Cleaned here rather than at each of the paths above, for the same reason the
+    # blacklist is: every one of them takes its text from somewhere outside, and a title or
+    # an extract holding a character that cannot be stored costs the whole page it would be
+    # written to - a page that is shared with documents from everywhere else.
+    cleaned_documents = [cleaned_document(document) for document in documents]
+    page_documents = preprocess_documents(cleaned_documents, index_path)
     new_page_doc_counts = index_pages(index_path, page_documents)
     end_time = datetime.now(timezone.utc)
     return end_time, new_page_doc_counts
@@ -175,17 +187,19 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
             if not (doc.url and doc.title):
                 continue
             doc_tokens = _document_token_set(doc)
+            # This path does not go through index_documents, so it cleans its own text.
+            cleaned = cleaned_document(doc)
             for term, words in query_terms.items():
                 if not (words <= doc_tokens):
                     continue
                 page = indexer.get_key_page_index(term)
                 page_documents[page].append(
                     Document(
-                        doc.title,
-                        doc.url,
-                        doc.extract,
+                        cleaned.title,
+                        cleaned.url,
+                        cleaned.extract,
                         term=term,
-                        last_crawled=doc.last_crawled,
+                        last_crawled=cleaned.last_crawled,
                     )
                 )
                 if page not in existing_keys:

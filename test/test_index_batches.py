@@ -272,3 +272,37 @@ def test_index_documents_keeps_everything_when_nothing_blacklisted(index_path):
         index_documents(documents, index_path)
 
     assert "https://example.com/y" in _all_urls(index_path)
+
+
+def test_index_documents_cleans_text_that_cannot_be_stored(index_path):
+    """A UTF-16 client that truncates a title mid-emoji sends half of one, which arrives as
+    a lone surrogate. Stored on a page it would cost the whole page, so it is dropped at the
+    choke point and the document is indexed like any other."""
+    documents = [
+        Document(title="Half an emoji \ud83d", url="https://example.com/y", extract="also half \udc00"),
+        Document(title="Whole", url="https://example.com/z", extract="a good page"),
+    ]
+
+    with patch(PATCH_TARGET, return_value=snapshot_blacklist(set())):
+        index_documents(documents, index_path)
+
+    stored = []
+    with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
+        for page_index in range(10):
+            stored += [document for document in index.get_page(page_index) if document.url.endswith("/y")]
+
+    assert stored, "the document was not indexed"
+    assert {(document.title, document.extract) for document in stored} == {("Half an emoji ", "also half ")}
+    assert "https://example.com/z" in _all_urls(index_path), "the rest of the page was lost"
+
+
+def test_index_results_against_query_cleans_text_that_cannot_be_stored(index_path):
+    """It builds its own documents rather than going through index_documents, so it has to
+    clean them itself or lose the page."""
+    document = Document(title="Rust \ud83d", url="https://example.com/rust", extract="async \ud83d")
+
+    assert index_results_against_query([document], "rust", index_path) == 1
+
+    with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
+        stored = index.retrieve("rust")
+    assert [d.title for d in stored] == ["Rust "]

@@ -66,19 +66,24 @@ fn borrow_file(fd: i32) -> ManuallyDrop<File> {
     ManuallyDrop::new(unsafe { File::from_raw_fd(fd) })
 }
 
+/// A read that came up short is a page that is not there rather than a failed syscall: a
+/// positioned read stops at the end of the file, so it means the file is not the shape the
+/// metadata says it is - truncated, or half-written by create. Decoding the fragment anyway
+/// is how a writer comes to merge onto a page it never actually read.
+fn read_error(error: std::io::Error) -> PageIoError {
+    if error.kind() == std::io::ErrorKind::UnexpectedEof {
+        return PageIoError::Unreadable(format!("could not read a whole page: {error}"));
+    }
+    PageIoError::Io(error)
+}
+
 fn read_page_bytes(fd: i32, offset: u64, page_size: usize) -> Result<Vec<u8>, PageIoError> {
     let file = borrow_file(fd);
     let mut page = vec![0u8; page_size];
-    let num_read = file.read_at(&mut page, offset).map_err(PageIoError::Io)?;
-    if num_read != page_size {
-        // A positioned read stops at the end of the file, so a short read means the file
-        // is not the shape the metadata says it is - truncated, or half-written by create.
-        // Decoding the fragment anyway is how a writer comes to merge onto a page it never
-        // actually read.
-        return Err(PageIoError::Unreadable(format!(
-            "got {num_read} bytes, expected {page_size}"
-        )));
-    }
+    // read_exact_at rather than read_at: it reads until it has the whole page, and it
+    // retries a read the kernel interrupted with a signal, which is what os.pread does
+    // since PEP 475 and what a bare read_at does not.
+    file.read_exact_at(&mut page, offset).map_err(read_error)?;
     Ok(page)
 }
 
@@ -244,6 +249,22 @@ fn py_to_value(object: &Bound<'_, PyAny>) -> PyResult<Value> {
     )))
 }
 
+/// The items to store, as JSON values.
+///
+/// Anything that will not convert is a PageError rather than the TypeError or ValueError it
+/// arrives as: a score that has come out NaN, a string holding an unpaired surrogate, a
+/// type with no JSON form. json.dumps wrote all three without complaint, so they can reach
+/// here, and a caller that catches PageError loses the one page it could not write. Letting
+/// the raw exception out instead would abort the whole run - see index_pages, which catches
+/// PageError for exactly that reason.
+fn py_items_to_values(items: &Bound<'_, PyList>) -> PyResult<Vec<Value>> {
+    items
+        .iter()
+        .map(|item| py_to_value(&item))
+        .collect::<PyResult<Vec<Value>>>()
+        .map_err(|e| PageError::new_err(format!("Cannot store these documents on a page: {e}")))
+}
+
 fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageIoError> {
     let mut json = String::from("[");
     for (position, item) in serialised[..count].iter().enumerate() {
@@ -330,22 +351,16 @@ pub fn write_index_page(
     page_size: usize,
     items: &Bound<'_, PyList>,
 ) -> PyResult<usize> {
-    let values: Vec<Value> = items
-        .iter()
-        .map(|item| py_to_value(&item))
-        .collect::<PyResult<_>>()?;
+    let values = py_items_to_values(items)?;
     let num_stored = py.allow_threads(|| -> Result<usize, PageIoError> {
         let (page, num_stored) = pack_page(page_size, &values)?;
         let file = borrow_file(fd);
-        let num_written = file.write_at(&page, offset).map_err(PageIoError::Io)?;
-        if num_written != page.len() {
-            // A short write leaves the page half old and half new, which is exactly the
-            // torn page every reader and writer here is guarding against. Say so loudly.
-            return Err(PageIoError::Unreadable(format!(
-                "wrote {num_written} bytes of {}",
-                page.len()
-            )));
-        }
+        // write_all_at rather than write_at: a short write would leave the page half old
+        // and half new, which is the torn page every reader and writer here is guarding
+        // against, so it writes the rest rather than reporting it - and, like the read, it
+        // retries a write a signal interrupted. What is left is a real failure of the
+        // device, which is an OSError as it has always been.
+        file.write_all_at(&page, offset).map_err(PageIoError::Io)?;
         Ok(num_stored)
     })?;
     Ok(num_stored)
@@ -359,10 +374,7 @@ pub fn pack_index_page(
     page_size: usize,
     items: &Bound<'_, PyList>,
 ) -> PyResult<(Py<PyBytes>, usize)> {
-    let values: Vec<Value> = items
-        .iter()
-        .map(|item| py_to_value(&item))
-        .collect::<PyResult<_>>()?;
+    let values = py_items_to_values(items)?;
     let (page, num_stored) = py.allow_threads(|| pack_page(page_size, &values))?;
     Ok((PyBytes::new_bound(py, &page).unbind(), num_stored))
 }

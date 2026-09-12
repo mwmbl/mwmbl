@@ -182,8 +182,9 @@ def test_a_page_claiming_more_than_it_could_hold_is_unreadable():
     with TemporaryDirectory() as temp_dir:
         index_path = str(Path(temp_dir) / "temp-index.tinysearch")
         TinyIndex.create(Document, index_path, num_pages=4, page_size=4096)
-        # Compresses to a few hundred bytes, and its header says it is 4 MB.
-        overlarge = ZstdCompressor().compress(b"a" * 4 * 1024 * 1024)
+        # Compresses to a few hundred bytes, and its header says it is 4 MiB and a byte -
+        # one past the 1024 pages' worth that a page is allowed to claim.
+        overlarge = ZstdCompressor().compress(b"a" * (4 * 1024 * 1024 + 1))
         with open(index_path, "r+b") as index_file:
             index_file.seek(METADATA_SIZE)
             index_file.write(_pad_to_page_size(overlarge, 4096))

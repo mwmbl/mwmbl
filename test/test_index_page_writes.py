@@ -317,3 +317,50 @@ def test_damage_that_gets_past_zstd_still_degrades_to_no_results(index_path):
         with pytest.raises(PageError):
             indexer.get_page(page_index)
         assert indexer.retrieve("zebra") == []
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param(Document("Title", "https://example.com", "extract", float("nan"), "a"), id="nan-score"),
+        pytest.param(Document("Title \ud800", "https://example.com", "extract", 1.0, "a"), id="lone-surrogate"),
+    ],
+)
+def test_a_document_that_cannot_be_written_costs_its_page_and_no_more(index_path, document):
+    """json.dumps wrote both of these - NaN as a bare word no other reader accepts, and an
+    unpaired surrogate as an escape - so either can reach a write today. They are refused
+    now, and the refusal has to be a PageError: index_pages catches that and skips the one
+    page, where anything else aborts the run and 500s POST /crawler/results."""
+    with TinyIndex(Document, index_path, "w") as indexer:
+        with pytest.raises(PageError):
+            indexer.store_in_page(3, [document])
+
+    counts = index_pages(index_path, {3: [document], 4: [_doc(2, "b")]})
+
+    with TinyIndex(Document, index_path, "r") as indexer:
+        assert indexer.get_page(3) == [], "the page was written with a document it cannot hold"
+        assert len(indexer.get_page(4)) == 1, "a later page was skipped"
+    assert counts["b"] == 1
+
+
+def test_a_page_outside_the_index_is_a_page_error(index_path):
+    """The offset is arithmetic on the page number, so a negative one overflows converting
+    it and one past the end reads nothing. Callers only handle PageError."""
+    with TinyIndex(Document, index_path, "r") as indexer:
+        with pytest.raises(PageError):
+            indexer.get_page(NUM_PAGES)
+        with pytest.raises(PageError):
+            indexer.get_page(-1)
+
+
+def test_a_failed_read_degrades_to_no_results(index_path, monkeypatch):
+    """A read is a syscall now, so a device that fails on one page raises OSError where it
+    used to raise nothing at all. It costs a query that page's term, like an unreadable
+    page does, rather than 500ing the whole search."""
+
+    def fail(*args, **kwargs):
+        raise OSError(errno.EIO, "Input/output error")
+
+    with TinyIndex(Document, index_path, "r") as indexer:
+        monkeypatch.setattr("mwmbl.tinysearchengine.indexer.read_index_page", fail)
+        assert indexer.retrieve("zebra") == []

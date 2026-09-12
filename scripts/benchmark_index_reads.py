@@ -69,7 +69,10 @@ def report_memory(label: str):
 def measure_page_tables(path: str, num_pages: int):
     """Touch one page per 2 MiB window through a mapping and through pread."""
     file_size = METADATA_SIZE + num_pages * PAGE_SIZE
-    with open(path, "wb") as index_file:
+    # Exclusive: this file is created, sized and then deleted, so it must be this run's own.
+    # The flag is one letter from `reads --index-path`, and an index passed here by mistake
+    # would be truncated to nothing and then removed.
+    with open(path, "xb") as index_file:
         index_file.truncate(file_size)
     offsets = list(range(METADATA_SIZE, file_size - PAGE_SIZE, PAGE_TABLE_WINDOW))
     print(f"{file_size / 1024**3:.0f} GiB sparse file, {len(offsets)} windows touched")
@@ -198,7 +201,11 @@ def main():
     subparsers = parser.add_subparsers(dest="measurement", required=True)
 
     page_tables_parser = subparsers.add_parser("pagetables", help="page tables for a production-sized mapping")
-    page_tables_parser.add_argument("--path", default="/tmp/benchmark-index-sparse")
+    page_tables_parser.add_argument(
+        "--sparse-file",
+        default="/tmp/benchmark-index-sparse",
+        help="the sparse file to create for the measurement, which must not exist and is deleted afterwards",
+    )
     page_tables_parser.add_argument("--num-pages", type=int, default=PRODUCTION_NUM_PAGES)
 
     reads_parser = subparsers.add_parser("reads", help="read speed against a real index")
@@ -213,7 +220,7 @@ def main():
 
     args = parser.parse_args()
     if args.measurement == "pagetables":
-        measure_page_tables(args.path, args.num_pages)
+        measure_page_tables(args.sparse_file, args.num_pages)
     else:
         measure_reads(args.index_path, args.num_reads, args.num_threads, args.decode)
 

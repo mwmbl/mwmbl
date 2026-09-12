@@ -144,6 +144,17 @@ def test_results_come_back_from_the_index(cache_index):
     assert all(document.state == DocumentState.FROM_WIKI for document in cached)
 
 
+def test_a_providers_text_is_cleaned_before_it_is_stored(cache_index):
+    """The providers answer with JSON from outside, and a lone surrogate in it cannot be
+    stored on a page - it would cost the whole cache page rather than the one entry."""
+    broken = Document(title="Monty \ud83d", url="https://example.com/monty", extract="half \ud83d")
+
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [broken])
+
+    cached = get_cached_external_results(DocumentSource.WIKIPEDIA, "python")
+    assert [(document.title, document.extract) for document in cached] == [("Monty ", "half ")]
+
+
 def test_the_providers_order_is_what_comes_back(cache_index):
     """The cache stores the rank the provider gave, not the score it was handed. Storing
     the score would make an entry mean different things to callers asking for different

@@ -40,6 +40,7 @@ from typing import Optional
 from django.conf import settings
 
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
+from mwmbl.tokenizer import clean_unicode
 
 logger = getLogger(__name__)
 
@@ -292,11 +293,13 @@ def _entries_to_store(source: DocumentSource, term: str, documents: list[Documen
             )
         ]
 
+    # The providers' own text, cleaned: it arrives as JSON from outside, and a title or an
+    # extract holding a character that cannot be stored would cost the whole cache page.
     return [
         Document(
-            title=document.title,
+            title=clean_unicode(document.title),
             url=document.url,
-            extract=document.extract,
+            extract=clean_unicode(document.extract),
             score=float(rank),
             term=term,
             state=document.state,
