@@ -1,0 +1,131 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block title %}Search traffic | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Search traffic
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .search-traffic table { width: 100%; margin-bottom: 10px; }
+    .search-traffic td.num, .search-traffic th.num { text-align: right; white-space: nowrap; }
+    .search-traffic .strong, .search-traffic .bad { font-weight: bold; }
+    .search-traffic .bad { color: #ba2121; }
+    .search-traffic .agent { word-break: break-all; font-family: monospace; }
+    .search-traffic .note { color: #666; font-size: 0.9em; }
+  </style>
+
+  <div id="content-main" class="search-traffic">
+
+    <div class="module">
+      <h2>{{ days|length }} day{{ days|length|pluralize }} to {{ days.0 }} (UTC)</h2>
+      <p class="note">
+        Today is included and still filling. Show
+        {% for choice in window_choices %}
+          <a href="?days={{ choice }}">{{ choice }} day{{ choice|pluralize }}</a>{% if not forloop.last %} &middot;{% endif %}
+        {% endfor %}
+        &mdash; counts expire after {{ max_days }} days and the user agent strings after
+        {{ user_agent_max_days }}, so there is no longer window to ask for. Nothing here
+        records a query or joins a user agent to an address.
+        {% if not counting_enabled %}
+          <span class="bad">SEARCH_TRAFFIC_COUNTING is off on this instance, so nothing is
+          being written; anything below was left in the same Redis by one that counts.</span>
+        {% endif %}
+      </p>
+    </div>
+
+    {% if redis_error %}
+      <div class="module">
+        <h2>Redis unreachable</h2>
+        <p class="bad">{{ redis_error }}</p>
+        <p class="note">
+          Everything here is read from Redis, and counting fails the same way and is dropped
+          rather than retried, so an outage is also a hole in the numbers.
+        </p>
+      </div>
+    {% else %}
+
+      <div class="module">
+        <h2>Requests per day</h2>
+        {% include "admin/_traffic_table.html" with table=by_day column_header="Endpoint" label_date=1 %}
+        <p class="note">
+          Endpoints with no traffic are left out. <code>ui_search</code> and
+          <code>ui_keystroke</code> are the Django UI, split because only the debounced request
+          carries <code>external=1</code> and without that the UI reads about tenfold busier.
+        </p>
+      </div>
+
+      <div class="module">
+        <h2>Requests by header combination</h2>
+        {% include "admin/_traffic_table.html" with table=by_headers column_header="Endpoint" %}
+        <p class="note">
+          Which of <code>User-Agent</code> and <code>Accept-Language</code> arrived, and nothing
+          inferred from it. <code>neither</code> is what our own server-side render sends, so on
+          <code>v1_search</code> it is mostly mwmbl.org rather than anything exotic; a missing
+          <code>Accept-Language</code> is a hint that a client is not a browser, and only a hint.
+        </p>
+      </div>
+
+      <div class="module">
+        <h2>Requests by status class</h2>
+        {% include "admin/_traffic_table.html" with table=by_status column_header="Endpoint" %}
+        <p class="note">
+          What it cost us, roughly: a 4xx bought a URL match and nothing else, a 2xx bought a
+          ranker run. A client sending queries it never gets an answer to lives in the 4xx column.
+        </p>
+      </div>
+
+      <div class="module">
+        <h2>User agents</h2>
+        <p>
+          Over the last {{ user_agents.days|length }} day{{ user_agents.days|length|pluralize }},
+          {{ user_agents.request_total|intcomma }} requests counted and
+          {{ user_agents.tracked_total|intcomma }} attributed to one of
+          {{ user_agents.tracked|intcomma }} tracked user agents
+          ({{ user_agents.tracked_limit|intcomma }} kept per day), leaving a gap of
+          <span class="{% if user_agents.gap %}bad{% endif %}">{{ user_agents.gap|intcomma }}</span>.
+        </p>
+        <p class="note">
+          The gap is the tail the trim dropped, and the one number here that reports on
+          something otherwise invisible: a client randomising its user agent shows up as a
+          growing gap and in no other way.
+        </p>
+
+        <h3>Top {{ top_user_agents }} by requests</h3>
+        {% if user_agents.top %}
+          <table>
+            <thead>
+              <tr><th>#</th><th class="num">Requests</th><th class="num">Share</th><th>User agent</th></tr>
+            </thead>
+            <tbody>
+              {% for agent in user_agents.top %}
+                <tr>
+                  <td class="num">{{ forloop.counter }}</td>
+                  <td class="num">{{ agent.count|intcomma }}</td>
+                  <td class="num">{{ agent.share|floatformat:1 }}%</td>
+                  {% comment %} Caller-supplied strings. Autoescaping is what keeps them inert,
+                     so no |safe here, ever. {% endcomment %}
+                  <td class="agent">{{ agent.user_agent }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="note">
+            Summed across the window, so a client that comes back every day outranks one that
+            came once. <code>(none)</code> sent no <code>User-Agent</code> at all, which is
+            what our own front end does. Strings are truncated at 512 characters on the way in.
+          </p>
+        {% else %}
+          <p class="note">No user agents recorded in this window.</p>
+        {% endif %}
+      </div>
+
+    {% endif %}
+
+  </div>
+{% endblock %}
