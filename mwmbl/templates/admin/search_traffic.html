@@ -65,9 +65,14 @@
         {% include "admin/_traffic_table.html" with table=by_headers column_header="Endpoint" %}
         <p class="note">
           Which of <code>User-Agent</code> and <code>Accept-Language</code> arrived, and nothing
-          inferred from it. <code>neither</code> is what our own server-side render sends, so on
-          <code>v1_search</code> it is mostly mwmbl.org rather than anything exotic; a missing
-          <code>Accept-Language</code> is a hint that a client is not a browser, and only a hint.
+          inferred from it. A missing <code>Accept-Language</code> is a hint that a client is not
+          a browser, and only a hint. <code>neither</code> has stayed empty: the SvelteKit front
+          end's server-side render calls the API through Node's <code>fetch</code>, which sends
+          <code>User-Agent: node</code> and <code>Accept-Language: *</code>, so it lands in
+          <code>user_agent+language</code> alongside every real browser. The front end's other
+          path does not even do that - <code>handleApiProxy</code> forwards the visitor's own
+          headers verbatim - so our own traffic arrives under two different identities depending
+          on which code path made the call, and neither of them is distinguishable here.
         </p>
       </div>
 
@@ -75,8 +80,13 @@
         <h2>Requests by status class</h2>
         {% include "admin/_traffic_table.html" with table=by_status column_header="Endpoint" %}
         <p class="note">
-          What it cost us, roughly: a 4xx bought a URL match and nothing else, a 2xx bought a
-          ranker run. A client sending queries it never gets an answer to lives in the 4xx column.
+          What it cost us, roughly: a 4xx bought a URL match and nothing else. A 2xx on
+          <code>*_search</code> bought a ranker run - retrieval for every term, completion and
+          bigram, then the model. A 2xx on <code>*_raw</code> did not: <code>get_raw_results</code>
+          is one <code>retrieve</code> of the whole query as a single term plus the blacklist
+          filter, so those are the cheapest requests in the table by a wide margin, and reading
+          this column as uniform cost will overstate them. A client sending queries it never gets
+          an answer to lives in the 4xx column.
         </p>
       </div>
 
@@ -91,9 +101,13 @@
           <span class="{% if user_agents.gap %}bad{% endif %}">{{ user_agents.gap|intcomma }}</span>.
         </p>
         <p class="note">
-          The gap is the tail the trim dropped, and the one number here that reports on
-          something otherwise invisible: a client randomising its user agent shows up as a
-          growing gap and in no other way.
+          The gap is the tail the trim dropped. It catches a client that randomises its user
+          agent widely enough to overflow the trim, and nothing narrower: a rotation over a
+          small fixed pool never reaches the limit, so the gap stays at zero while the rotation
+          runs. SearxNG is the worked example - <code>gen_useragent()</code> builds every
+          request's <code>User-Agent</code> from two OS strings and a handful of Firefox
+          versions, which is a pool of a few dozen strings and no gap at all. A gap of zero
+          means nobody overflowed the trim; it does not mean nobody is rotating.
         </p>
 
         <h3>Top {{ top_user_agents }} by requests</h3>
@@ -117,8 +131,9 @@
           </table>
           <p class="note">
             Summed across the window, so a client that comes back every day outranks one that
-            came once. <code>(none)</code> sent no <code>User-Agent</code> at all, which is
-            what our own front end does. Strings are truncated at 512 characters on the way in.
+            came once. <code>(none)</code> sent no <code>User-Agent</code> at all - nothing we run
+            does that, so a row here is worth looking at rather than explaining away. Strings are
+            truncated at 512 characters on the way in.
           </p>
         {% else %}
           <p class="note">No user agents recorded in this window.</p>
