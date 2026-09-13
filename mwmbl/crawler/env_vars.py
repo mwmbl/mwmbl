@@ -42,3 +42,9 @@ SUBMIT_MODES = {SUBMIT_MODE_INDEX, SUBMIT_MODE_DRY_RUN, SUBMIT_MODE_OFF}
 CRAWL_SUBMIT_MODE = os.environ.get("CRAWL_SUBMIT_MODE", SUBMIT_MODE_INDEX)
 if CRAWL_SUBMIT_MODE not in SUBMIT_MODES:
     raise ValueError(f"CRAWL_SUBMIT_MODE must be one of {sorted(SUBMIT_MODES)}, got {CRAWL_SUBMIT_MODE!r}")
+
+# Where the crawler reads the main index from and submits its results to. Hardcoded to
+# production until now, in two places, which is also what every rankeval script gets when it
+# constructs RemoteIndex() with no argument - so an evaluation sweep aimed itself at
+# api.mwmbl.org by default. Beta exists precisely so that it does not have to.
+MWMBL_REMOTE_SERVER = os.environ.get("MWMBL_REMOTE_SERVER", "https://api.mwmbl.org")
