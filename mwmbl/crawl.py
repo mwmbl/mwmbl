@@ -36,6 +36,7 @@ from mwmbl.crawler.env_vars import (
     CRAWLER_WORKERS,
     MWMBL_API_KEY,
     MWMBL_CONTACT_INFO,
+    MWMBL_REMOTE_SERVER,
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
@@ -49,7 +50,10 @@ from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.tokenizer import tokenize
 
 BATCH_QUEUE_KEY = "batch-queue"
-REMOTE_SERVER = "https://api.mwmbl.org"
+# Reads (RemoteIndex) and writes (results, curated domains) have to agree about which
+# deployment they are talking to, or pointing a crawler at beta would send it there for half
+# its traffic and to production for the other half.
+REMOTE_SERVER = MWMBL_REMOTE_SERVER
 
 _curated_domains_cache: set[str] = set()
 _curated_domains_fetched_at: float = 0.0
