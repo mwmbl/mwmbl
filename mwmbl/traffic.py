@@ -87,9 +87,12 @@ def endpoint_label(request: HttpRequest) -> Optional[str]:
 
 
 # The one split on the request counter, and a description rather than a judgement: which of
-# the two headers arrived, not what that means. A request with neither is what our own
-# server-side render sends today, and a missing Accept-Language is the cheapest hint that a
-# client is not a browser, since browsers send one and HTTP clients do not.
+# the two headers arrived, not what that means. A missing Accept-Language is the cheapest hint
+# that a client is not a browser, since browsers send one and HTTP clients do not. Note what it
+# cannot see: SearxNG sets Accept-Language (send_accept_language_header defaults to True) and a
+# browser User-Agent, and our own SvelteKit render reaches us through Node's fetch as
+# User-Agent: node with Accept-Language: *. Both land in user_agent+language, which is where
+# real browsers land too. The split separates clients that do not try from everything else.
 HEADER_LABELS = ["user_agent+language", "user_agent", "language", "neither"]
 
 
@@ -102,11 +105,16 @@ def header_label(request: HttpRequest) -> str:
 
 
 # The status class the client got, and like the header split a description rather than a
-# judgement. A request that 4xx'd cost us a URL match and nothing else; one that 2xx'd cost
-# us a ranker run. Without this dimension a bot sending malformed queries that never reach
-# the index is indistinguishable from a visitor being served, which is the whole question
-# #410 is asking. The class rather than the code, because the codes are the view's business
-# and this counter should not have an opinion about how many of them there are.
+# judgement. A request that 4xx'd cost us a URL match and nothing else. What a 2xx cost
+# depends on the endpoint and this dimension cannot tell them apart: /search retrieves for
+# every term, completion and bigram and then runs the model, while /raw is a single retrieve
+# of the whole query as one term (rank.get_raw_results). Reading a 2xx as one fixed price
+# overstates /raw, which is most of what the crawler's index sync does.
+#
+# Without this dimension a bot sending malformed queries that never reach the index is
+# indistinguishable from a visitor being served, which is the whole question #410 is asking.
+# The class rather than the code, because the codes are the view's business and this counter
+# should not have an opinion about how many of them there are.
 STATUS_LABELS = ["1xx", "2xx", "3xx", "4xx", "5xx"]
 
 
