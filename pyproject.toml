@@ -115,6 +115,7 @@ DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "--reuse-db -m 'not live and not slow'"
 asyncio_mode = "auto"
+testpaths = ["test"]
 # DTZ cannot see this one: at the point of assignment `timezone.now()` and
 # `datetime.utcnow()` look the same to a linter, and only Django knows the column is aware.
 filterwarnings = ["error:.*received a naive datetime:RuntimeWarning"]
