@@ -52,27 +52,7 @@ import {Chart} from "chart.js/auto";
       maintainAspectRatio: false
     }
   });
-
-  const urlsByDomainCanvas = document.getElementById('urls-by-domain');
-  const byDomainChart = new Chart(urlsByDomainCanvas, {
-    type: 'bar',
-    data: {
-      datasets: [{
-        label: "Top domains",
-        borderWidth: 1
-      }]
-    },
-    options: {
-      scales: {
-        x: {
-          beginAtZero: true
-        }
-      },
-      indexAxis: 'y',
-      maintainAspectRatio: false
-    }
-  });
-
+  
 function numberWithCommas(x) {
   // From https://stackoverflow.com/a/2901298/660902
   if (x == null) return "0";
@@ -118,10 +98,6 @@ function numberWithCommas(x) {
         byUserChart.data.labels = stats.top_user_results.map(u => u[0]);
         byUserChart.data.datasets[0].data = stats.top_user_results.map(u => u[1]);
         byUserChart.update();
-
-        byDomainChart.data.labels = stats.top_domains.map(d => d[0]);
-        byDomainChart.data.datasets[0].data = stats.top_domains.map(d => d[1]);
-        byDomainChart.update();
 
         datasetQueriesDailyChart.data.labels = Object.keys(stats.dataset_queries_daily);
         datasetQueriesDailyChart.data.datasets[0].data = Object.values(stats.dataset_queries_daily);
