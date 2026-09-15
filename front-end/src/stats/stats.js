@@ -26,7 +26,6 @@ import {Chart} from "chart.js/auto";
   }
 
   const resultsIndexedDailyChart = createChart('results-indexed-daily', null, "Results indexed by day");
-  const urlsCrawledDailyChart = createChart('urls-by-day', null, "URLs crawled by day");
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day");
   const datasetQueriesDailyChart = createChart('dataset-queries-by-day', null, "Dataset queries by day");
   const datasetResultsDailyChart = createChart('dataset-results-by-day', null, "Dataset results by day");
@@ -63,9 +62,6 @@ function numberWithCommas(x) {
       result.json().then(stats => {
         console.log("Stats", stats);
 
-        const urlCountSpan = document.getElementById("num-urls");
-        urlCountSpan.innerText = numberWithCommas(stats.urls_crawled_today);
-
         const numUsers = Object.values(stats.users_crawled_daily)[Object.keys(stats.users_crawled_daily).length - 1];
         const userCountSpan = document.getElementById("num-users");
         userCountSpan.innerText = numberWithCommas(numUsers);
@@ -85,10 +81,6 @@ function numberWithCommas(x) {
         usersCrawledDailyChart.data.labels = Object.keys(stats.users_crawled_daily);
         usersCrawledDailyChart.data.datasets[0].data = Object.values(stats.users_crawled_daily);
         usersCrawledDailyChart.update();
-
-        urlsCrawledDailyChart.data.labels = Object.keys(stats.urls_crawled_daily);
-        urlsCrawledDailyChart.data.datasets[0].data = Object.values(stats.urls_crawled_daily);
-        urlsCrawledDailyChart.update();
 
         console.log("Top users", stats.top_user_results);
         byUserChart.data.labels = stats.top_user_results.map(u => u[0]);
