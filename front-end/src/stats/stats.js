@@ -27,7 +27,6 @@ import {Chart} from "chart.js/auto";
 
   const resultsIndexedDailyChart = createChart('results-indexed-daily', null, "Results indexed by day");
   const urlsCrawledDailyChart = createChart('urls-by-day', null, "URLs crawled by day");
-  const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour");
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day");
   const datasetQueriesDailyChart = createChart('dataset-queries-by-day', null, "Dataset queries by day");
   const datasetResultsDailyChart = createChart('dataset-results-by-day', null, "Dataset results by day");
@@ -86,9 +85,6 @@ function numberWithCommas(x) {
         usersCrawledDailyChart.data.labels = Object.keys(stats.users_crawled_daily);
         usersCrawledDailyChart.data.datasets[0].data = Object.values(stats.users_crawled_daily);
         usersCrawledDailyChart.update();
-
-        urlsCrawledHourlyChart.data.datasets[0].data = stats.urls_crawled_hourly;
-        urlsCrawledHourlyChart.update();
 
         urlsCrawledDailyChart.data.labels = Object.keys(stats.urls_crawled_daily);
         urlsCrawledDailyChart.data.datasets[0].data = Object.values(stats.urls_crawled_daily);
