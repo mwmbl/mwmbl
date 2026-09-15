@@ -108,6 +108,8 @@ class StatsManager:
         self.redis.incrby(hour_key, num_crawled_urls)
         self.redis.expire(hour_key, SHORT_EXPIRE_SECONDS)
 
+        # TODO: remove this if we don't want the old crawlers to contribute
+        # to the "number of crawlers crawling today" stat.
         users_key = USERS_KEY.format(date=date)
         self.redis.sadd(users_key, hashed_batch.user_id_hash)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
@@ -279,6 +281,13 @@ class StatsManager:
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
+
+        # The new crawler submits via the API-key-authenticated results endpoint rather than
+        # record_batch, so this is the path that sees real crawlers. Add the account so that
+        # users_crawled_daily counts distinct crawlers that contacted us today.
+        users_key = USERS_KEY.format(date=utc_today())
+        self.redis.sadd(users_key, username)
+        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.
