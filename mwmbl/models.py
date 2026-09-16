@@ -173,6 +173,7 @@ class ApiKey(models.Model):
     key = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
     created_on = models.DateTimeField(auto_now_add=True)
     name = models.CharField(max_length=100, blank=True, default="")
+    last_used = models.DateTimeField(null=True, blank=True)
     scopes = ArrayField(
         models.CharField(max_length=20, choices=Scope.choices),
         default=list,
