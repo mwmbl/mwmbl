@@ -1116,7 +1116,7 @@ def delete_api_key(request, key_id: int):
     auth=JWTAuth(),
     response=UserProfileResponse,
     summary="Get current user profile",
-    description="Returns the authenticated user's username, email, plan, and email confirmation status.",
+    description="Returns the authenticated user's username, email, plan, email confirmation status, and join date.",
     tags=["Users"],
 )
 def get_current_user(request):
@@ -1130,6 +1130,7 @@ def get_current_user(request):
         email=user.email,
         plan="free" if spend_cents == 0 else "pay-as-you-go",
         email_confirmed=email_address.verified if email_address else False,
+        date_joined=user.date_joined,
     )
 
 

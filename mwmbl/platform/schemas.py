@@ -12,6 +12,7 @@ class UserProfileResponse(Schema):
     email: str
     plan: str
     email_confirmed: bool
+    date_joined: datetime
 
 
 class UserStatsResponse(Schema):
