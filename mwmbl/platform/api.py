@@ -68,6 +68,7 @@ from mwmbl.platform.schemas import (
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
     UserProfileResponse,
+    UserStatsResponse,
     UserVoteHistory,
     VoteRemoveRequest,
     VoteRequest,
@@ -1130,6 +1131,22 @@ def get_current_user(request):
         plan="free" if spend_cents == 0 else "pay-as-you-go",
         email_confirmed=email_address.verified if email_address else False,
     )
+
+
+@router.get(
+    "/user/stats",
+    auth=JWTAuth(),
+    response=UserStatsResponse,
+    summary="Get current user's contribution stats",
+    description=(
+        "Returns the authenticated user's contribution stats: how many results they "
+        "have indexed, broken down per day for the last 30 days."
+    ),
+    tags=["Users"],
+)
+def get_current_user_stats(request):
+    user = request.user
+    return stats_manager.get_user_stats(user.username)
 
 
 # ---------------------------------------------------------------------------

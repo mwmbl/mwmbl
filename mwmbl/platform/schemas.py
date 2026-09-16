@@ -14,6 +14,14 @@ class UserProfileResponse(Schema):
     email_confirmed: bool
 
 
+class UserStatsResponse(Schema):
+    """Per-user contribution stats for the logged-in user."""
+
+    username: str
+    results_indexed_today: int
+    results_indexed_daily: dict[str, int]
+
+
 class SubscriptionResponse(Schema):
     status: str
     max_monthly_spend_cents: int
