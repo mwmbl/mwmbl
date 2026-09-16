@@ -636,6 +636,45 @@ def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
 
 
 # ---------------------------------------------------------------------------
+# Current user — GET /api/v1/platform/user with a token or an API key
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_current_user_with_token(api_client, verified_user, access_token):
+    response = api_client.get("/api/v1/platform/user", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+    assert response.status_code == 200
+    assert response.json()["username"] == verified_user.username
+
+
+@pytest.mark.django_db
+def test_current_user_with_crawl_key(api_client, verified_user, crawl_api_key):
+    """What the crawler calls to find the username it names itself with."""
+    response = api_client.get("/api/v1/platform/user", **api_key_header(crawl_api_key.raw_key))
+    assert response.status_code == 200
+    assert response.json()["username"] == verified_user.username
+
+
+@pytest.mark.django_db
+def test_current_user_with_search_key(api_client, verified_user, search_api_key):
+    response = api_client.get("/api/v1/platform/user", **api_key_header(search_api_key.raw_key))
+    assert response.status_code == 200
+    assert response.json()["username"] == verified_user.username
+
+
+@pytest.mark.django_db
+def test_current_user_with_unknown_key_returns_401(api_client, verified_user):
+    response = api_client.get("/api/v1/platform/user", **api_key_header("not-a-real-key"))
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_current_user_without_credentials_returns_401(api_client):
+    response = api_client.get("/api/v1/platform/user")
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Background tasks
 # ---------------------------------------------------------------------------
 

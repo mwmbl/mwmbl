@@ -25,15 +25,18 @@ USER_AGENT = f"mwmbl-remote-index/{REMOTE_INDEX_VERSION} (+https://github.com/mw
 
 
 class RemoteIndex:
-    def __init__(self, remote_server: str = MWMBL_REMOTE_SERVER):
+    def __init__(self, remote_server: str = MWMBL_REMOTE_SERVER, user_agent: str = USER_AGENT):
         self.remote_server = remote_server
+        # A caller that knows more about itself than this module does - the crawler, with its
+        # version and its user's name - says so here rather than being lumped in with scripts.
+        self.user_agent = user_agent
         self.url = f"{remote_server}/api/v1/search/raw?s="
 
     def retrieve(self, query: str, refresh: bool = False):
         url = self.url + query
         response = None
         with request_cache() as session:
-            session.headers["User-Agent"] = USER_AGENT
+            session.headers["User-Agent"] = self.user_agent
             for i in range(3):
                 try:
                     response = session.get(url, timeout=15, force_refresh=refresh)

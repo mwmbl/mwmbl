@@ -55,6 +55,28 @@ class SearchApiKeyAuth(APIKeyHeader):
         return api_key
 
 
+class AccountApiKeyAuth(APIKeyHeader):
+    """Identify the account an API key belongs to, whatever the key's scopes.
+
+    Scopes gate what a key may do, and saying whose key it is is not one of those things: a
+    crawler holds a crawl-scoped key and still needs to know its own username. Not cached,
+    unlike SearchApiKeyAuth, because nothing calls this per search. Sets request.user so that
+    a view written for JWTAuth works unchanged under either.
+    """
+
+    param_name = "X-API-Key"
+
+    def authenticate(self, request, key: str | None):
+        if not key:
+            return None
+        key_hash = hashlib.sha256(key.encode()).hexdigest()
+        api_key = ApiKey.objects.select_related("user").filter(key=key_hash).first()
+        if api_key is None:
+            return None
+        request.user = api_key.user
+        return api_key.user
+
+
 async def authenticate_user(request) -> MwmblUser:
     """Resolve the requesting user from either an X-API-Key header or a JWT.
 
