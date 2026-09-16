@@ -232,6 +232,27 @@ class StatsManager:
             **index_stats,
         )
 
+    def get_user_stats(self, username: str) -> dict:
+        """Per-user stats for the last 30 days.
+
+        Reads the per-user results-indexed sorted set for each day. Crawled and
+        blacklisted counts are only tracked per-user on the legacy hash path, not
+        per-username, so this exposes the user's indexed results  only.
+        """
+        date = utc_today()
+        results_indexed_daily = {}
+        for i in range(29, -1, -1):
+            date_i = date - timedelta(days=i)
+            user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=date_i)
+            count = self.redis.zscore(user_result_count_key, username)
+            results_indexed_daily[str(date_i)] = int(count) if count else 0
+
+        return {
+            "username": username,
+            "results_indexed_daily": results_indexed_daily,
+            "results_indexed_today": results_indexed_daily[str(date)],
+        }
+
     def get_domain_stats(self) -> list[DomainStats]:
         today = utc_today()
         host_all_key = HOST_COUNT_ALL_KEY.format(date=today)
