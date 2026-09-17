@@ -30,7 +30,7 @@ from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.indexer.indexdb import BatchInfo, BatchStatus, IndexDatabase
-from mwmbl.models import ApiKey
+from mwmbl.models import ApiKey, Device
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
     APPLICATION_KEY,
@@ -120,6 +120,12 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
                 "status": "ok",
             }
 
+        user = _get_user_from_batch(batch)
+        if user is None:
+            return r.create_response(
+                request, "Invalid API key or insufficient scope (crawl scope required).", status=401
+            )
+
         user_id_hash = _get_user_id_hash(batch)
 
         urls = [item.url for item in batch.items]
@@ -149,11 +155,15 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         batch_cache.store(hashed_batch, batch_url)
 
         # Record the batch as being local so that we don't retrieve it again when the server restarts
-        infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL)]
+        infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL, device_name=batch.device_name)]
 
         with Database() as db:
             index_db = IndexDatabase(db.connection)
             index_db.record_batches(infos)
+
+        # Update or create Device records for this batch
+        if batch.device_name:
+            Device.objects.update_or_create(user=user, hostname=batch.device_name, defaults={})
 
         return {
             "status": "ok",
@@ -390,6 +400,23 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
     _register_routes(api, batch_cache, queued_batches)
     return api
+
+
+def _get_user_from_batch(batch: Union[Batch, NewBatchRequest, DatasetRequest]):
+    """Validate the API key from batch.user_id and return the user."""
+    raw_key = batch.user_id
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    api_key = (
+        ApiKey.objects.filter(
+            key=key_hash,
+            scopes__contains=[ApiKey.Scope.CRAWL],
+        )
+        .select_related("user")
+        .first()
+    )
+    if api_key is None:
+        return None
+    return api_key.user
 
 
 def _get_user_id_hash(batch: Union[Batch, NewBatchRequest, DatasetRequest]):

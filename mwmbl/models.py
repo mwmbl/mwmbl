@@ -272,6 +272,22 @@ class MarketingConsent(models.Model):
         ]
 
 
+class Device(models.Model):
+    """A crawler device linked to a user."""
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="devices")
+    hostname = models.CharField(max_length=255)  # device name from crawler (platform.uname().node)
+    friendly_name = models.CharField(max_length=255, blank=True, default="")  # user-defined name
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "hostname"]),
+        ]
+        unique_together = ("user", "hostname")
+
+
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
         "upvote": "User upvoted this result",

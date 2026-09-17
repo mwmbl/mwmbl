@@ -124,6 +124,10 @@ class Batch(Schema):
     items: list[Item] = Field(
         description="List of crawled URLs and their results. Maximum 100 items per batch.",
     )
+    device_name: str = Field(
+        description="The crawler's device name (platform.uname().node).",
+        example="my-device",
+    )
 
 
 class NewBatchRequest(Schema):

@@ -138,6 +138,22 @@ class MarketingConsentListResponse(Schema):
     )
 
 
+class DeviceResponse(Schema):
+    id: int
+    hostname: str
+    friendly_name: Optional[str] = None
+    first_seen: datetime
+    last_seen: datetime
+
+
+class UpdateDeviceRequest(Schema):
+    friendly_name: str = Field(
+        max_length=255,
+        description="The new friendly name for the device.",
+        example="My Laptop",
+    )
+
+
 class Registration(Schema):
     email: str = Field(description="Email address for the new account. Must be unique.")
     password: str = Field(description="Password for the new account.")

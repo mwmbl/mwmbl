@@ -23,6 +23,7 @@ from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     AgreementType,
     ApiKey,
+    Device,
     DomainEvidence,
     DomainSubmission,
     MarketingConsent,
@@ -52,6 +53,7 @@ from mwmbl.platform.schemas import (
     CheckoutResponse,
     ConfirmEmail,
     CreateApiKeyRequest,
+    DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
     MarketingConsentListResponse,
@@ -65,6 +67,7 @@ from mwmbl.platform.schemas import (
     ResetPasswordRequest,
     SubmissionDetailSchema,
     SubscriptionResponse,
+    UpdateDeviceRequest,
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
     UserProfileResponse,
@@ -1104,6 +1107,58 @@ def delete_api_key(request, key_id: int):
     invalidate_api_key_cache(api_key.key)
     api_key.delete()
     return {"status": "ok", "message": "API key revoked."}
+
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/",
+    auth=JWTAuth(),
+    response=list[DeviceResponse],
+    summary="List devices",
+    description=("List all devices belonging to the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def list_devices(request) -> list[DeviceResponse]:
+    check_email_verified(request)
+    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
+    return [
+        DeviceResponse(
+            id=d.id,
+            hostname=d.hostname,
+            friendly_name=d.friendly_name or None,
+            first_seen=d.first_seen,
+            last_seen=d.last_seen,
+        )
+        for d in devices
+    ]
+
+
+@router.patch(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    response=DeviceResponse,
+    summary="Update device friendly name",
+    description=("Update the friendly name of a device owned by the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def update_device(request, device_id: int, body: UpdateDeviceRequest):
+    check_email_verified(request)
+    device = Device.objects.filter(id=device_id, user=request.user).first()
+    if device is None:
+        raise InvalidRequest("Device not found.", status=404)
+    device.friendly_name = body.friendly_name
+    device.save(update_fields=["friendly_name"])
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
 
 
 # ---------------------------------------------------------------------------

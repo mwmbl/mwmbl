@@ -4,6 +4,7 @@ Database interface for batches of crawled data.
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 from psycopg2.extras import execute_values
 
@@ -20,6 +21,7 @@ class BatchInfo:
     url: str
     user_id_hash: str
     status: BatchStatus
+    device_name: Optional[str] = None
 
 
 class IndexDatabase:
@@ -31,7 +33,8 @@ class IndexDatabase:
         CREATE TABLE IF NOT EXISTS batches (
             url VARCHAR PRIMARY KEY,
             user_id_hash VARCHAR NOT NULL,
-            status INT NOT NULL
+            status INT NOT NULL,
+            device_name VARCHAR
         )
         """
 
@@ -40,11 +43,11 @@ class IndexDatabase:
 
     def record_batches(self, batch_infos: list[BatchInfo]):
         sql = """
-        INSERT INTO batches (url, user_id_hash, status) values %s
+        INSERT INTO batches (url, user_id_hash, status, device_name) values %s
         ON CONFLICT (url) DO NOTHING 
         """
 
-        data = [(info.url, info.user_id_hash, info.status.value) for info in batch_infos]
+        data = [(info.url, info.user_id_hash, info.status.value, info.device_name) for info in batch_infos]
 
         with self.connection.cursor() as cursor:
             execute_values(cursor, sql, data)
