@@ -10,6 +10,14 @@ from mwmbl.models import SearchResultVote
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def index_db():
+    """Create the index database tables for tests that need them."""
+    from mwmbl.apps import create_index_db
+
+    create_index_db()
+
+
 @pytest.fixture
 def verified_user():
     """Create a user with verified email"""

@@ -11,7 +11,12 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             """
-            ALTER TABLE batches ADD COLUMN device_name VARCHAR;
+            CREATE TABLE IF NOT EXISTS batches (
+                url VARCHAR PRIMARY KEY,
+                user_id_hash VARCHAR NOT NULL,
+                status INT NOT NULL,
+                device_name VARCHAR
+            );
             """,
             """
             ALTER TABLE batches DROP COLUMN device_name;

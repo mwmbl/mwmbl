@@ -31,3 +31,11 @@ def async_debug_loop(event_loop):
     event_loop.set_debug(True)
     event_loop.slow_callback_duration = 0.1
     yield event_loop
+
+
+@pytest.fixture
+def index_db():
+    """Create the index database tables (batches, etc.) for tests that need them."""
+    from mwmbl.apps import create_index_db
+
+    create_index_db()
