@@ -3,16 +3,13 @@ from datetime import date, datetime, timedelta, timezone
 from glob import glob
 from itertools import islice
 from logging import getLogger
-from urllib.parse import urlparse
 
 import django
 from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
-from mwmbl.crawler.batch import HashedBatch, Result, Results
-from mwmbl.crawler.urls import URLDatabase
-from mwmbl.indexer.update_urls import get_datetime_from_timestamp
+from mwmbl.crawler.batch import HashedBatch, Results
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
