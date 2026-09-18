@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
-from mwmbl.crawler.batch import HashedBatch, Results
+from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.utils import utc_today
@@ -92,66 +92,6 @@ class MwmblStats(BaseModel):
 class StatsManager:
     def __init__(self, redis: Redis):
         self.redis = redis
-
-    def record_batch(self, hashed_batch: HashedBatch):
-        date_time = get_datetime_from_timestamp(hashed_batch.timestamp)
-
-        num_crawled_urls = sum(1 for item in hashed_batch.items if item.content is not None)
-
-        date = date_time.date()
-        url_count_key = URL_DATE_COUNT_KEY.format(date=date)
-        self.redis.incrby(url_count_key, num_crawled_urls)
-        self.redis.expire(url_count_key, LONG_EXPIRE_SECONDS)
-
-        print("Date time", date_time)
-        hour_key = hour_count_key(date_time)
-        self.redis.incrby(hour_key, num_crawled_urls)
-        self.redis.expire(hour_key, SHORT_EXPIRE_SECONDS)
-
-        # TODO: remove this if we don't want the old crawlers to contribute
-        # to the "number of crawlers crawling today" stat.
-        users_key = USERS_KEY.format(date=date)
-        self.redis.sadd(users_key, hashed_batch.user_id_hash)
-        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
-
-        user_count_key = USER_COUNT_KEY.format(date=date)
-        self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
-        self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
-
-        start_time = datetime.now(timezone.utc)
-        host_key = HOST_COUNT_KEY.format(date=date)
-        host_all_key = HOST_COUNT_ALL_KEY.format(date=date)
-        pipeline = self.redis.pipeline()
-        with URLDatabase() as url_db:
-            for item in hashed_batch.items:
-                host = urlparse(item.url).netloc
-                pipeline.zincrby(host_all_key, 1, host)
-
-                if item.content is None:
-                    continue
-
-                pipeline.zincrby(host_key, 1, host)
-
-                links = []
-                if item.content.links is not None:
-                    links += item.content.links
-                if item.content.extra_links is not None:
-                    links += item.content.extra_links
-                if item.content.link_details is not None:
-                    links += [link.url for link in item.content.link_details]
-
-                for link in links:
-                    link_host = urlparse(link).netloc
-                    pipeline.zincrby(HOST_COUNT_LINK_KEY.format(date=date), 1, link_host)
-
-                    if link not in url_db:
-                        pipeline.zincrby(HOST_COUNT_LINK_NEW_KEY.format(date=date), 1, link_host)
-
-        pipeline.execute()
-        total_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-        logger.info(f"Stored info for {len(hashed_batch.items)} items in Redis in {total_time:.2f} seconds")
-        self.redis.expire(host_key, SHORT_EXPIRE_SECONDS)
-        self.redis.expire(host_all_key, SHORT_EXPIRE_SECONDS)
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.now(timezone.utc)
@@ -294,8 +234,8 @@ class StatsManager:
         return domain_stats
 
     def record_results(self, results: Results, username: str) -> None:
-        num_results = len(results.results)
         result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
+        num_results = len(results.results)
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
