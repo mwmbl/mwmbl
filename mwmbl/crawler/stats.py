@@ -1,15 +1,11 @@
-import gzip
 from datetime import date, datetime, timedelta, timezone
-from glob import glob
-from itertools import islice
 from logging import getLogger
 
-import django
 from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
-from mwmbl.crawler.batch import HashedBatch, Results
+from mwmbl.crawler.batch import Results
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -88,6 +84,7 @@ class MwmblStats(BaseModel):
 class StatsManager:
     def __init__(self, redis: Redis):
         self.redis = redis
+
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.now(timezone.utc)
