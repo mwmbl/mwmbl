@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import fakeredis
 
-from mwmbl.crawler.batch import HashedBatch, Item, ItemContent, Result, Results
+from mwmbl.crawler.batch import Result, Results
 from mwmbl.crawler.stats import StatsManager, hour_count_key
 
 NO_INDEX_COUNTS = {

@@ -26,10 +26,9 @@ from mwmbl.crawler.batch import (
     Results,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
-from mwmbl.database import Database
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index_batches import index_documents
-from mwmbl.indexer.indexdb import BatchInfo, BatchStatus, IndexDatabase
+from mwmbl.indexer.indexdb import BatchInfo, BatchStatus
 from mwmbl.models import ApiKey, Device
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
