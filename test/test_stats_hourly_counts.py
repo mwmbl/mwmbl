@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 import fakeredis
 
-from mwmbl.crawler.batch import HashedBatch, Item, ItemContent
-from mwmbl.crawler.stats import URL_HOUR_COUNT_KEY, StatsManager, hour_count_key
+from mwmbl.crawler.batch import HashedBatch, Item, ItemContent, Result, Results
+from mwmbl.crawler.stats import StatsManager, hour_count_key
 
 NO_INDEX_COUNTS = {
     "urls_in_index_daily": {},
@@ -22,10 +22,14 @@ NO_INDEX_COUNTS = {
 }
 
 
-def make_batch(crawled_at: datetime) -> HashedBatch:
-    content = ItemContent(title="Example", extract="An example page", links=[], extra_links=[])
-    item = Item(url="https://example.com/", status=200, timestamp=crawled_at.timestamp(), content=content)
-    return HashedBatch(user_id_hash="a" * 64, timestamp=crawled_at.timestamp(), items=[item])
+def make_results(crawled_at: datetime) -> Results:
+    content = Result(
+        url="https://fake.url",
+        title="Example",
+        extract="Hello from fake.url!",
+        last_crawled=int(crawled_at.timestamp()),
+    )
+    return Results(results=[content])
 
 
 def test_the_hour_key_has_no_timezone_offset_in_it():
@@ -41,6 +45,7 @@ def test_the_stats_read_back_the_hour_key_the_batch_wrote():
 
     with patch("mwmbl.crawler.urls.URLDatabase"):
         stats_manager = StatsManager(redis)
+        stats_manager.record_results(make_results(now), "fake user name")
         with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
             stats = stats_manager.get_stats()
 
