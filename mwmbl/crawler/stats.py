@@ -37,8 +37,7 @@ def hour_count_key(date_time: datetime) -> str:
 
     Formatted rather than built from a truncated datetime so that the key does not depend
     on whether ``date_time`` is aware: ``str()`` of an aware datetime carries a ``+00:00``
-    suffix, which would split the writer in :meth:`StatsManager.record_batch` from the
-    reader in :meth:`StatsManager.get_stats` and zero the hourly chart.
+    suffix, which would split the reader in :meth:`StatsManager.get_stats` and zero the hourly chart.
     """
     return URL_HOUR_COUNT_KEY.format(hour=date_time.strftime("%Y-%m-%d %H:00:00"))
 
@@ -240,9 +239,6 @@ class StatsManager:
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
 
-        # The new crawler submits via the API-key-authenticated results endpoint rather than
-        # record_batch, so this is the path that sees real crawlers. Add the account so that
-        # users_crawled_daily counts distinct crawlers that contacted us today.
         users_key = USERS_KEY.format(date=utc_today())
         self.redis.sadd(users_key, username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
@@ -283,31 +279,3 @@ class StatsManager:
         dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=dataset_date)
         self.redis.incrby(dataset_results_count_key, num_successful_results)
         self.redis.expire(dataset_results_count_key, LONG_EXPIRE_SECONDS)
-
-
-def get_test_batches():
-    for path in glob("./devdata/batches/**/*.json.gz", recursive=True):
-        print("Processing path", path)
-        with gzip.open(path) as gzip_file:
-            yield HashedBatch.parse_raw(gzip_file.read())
-
-
-if __name__ == "__main__":
-    django.setup()
-    redis = Redis(host="localhost", port=6379, decode_responses=True)
-    stats = StatsManager(redis)
-    batches = get_test_batches()
-    start = datetime.now(timezone.utc)
-    processed = 0
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
-    for batch in islice(batches, 10000):
-        if len(batch.items) <= 2:
-            continue
-        stats.record_batch(batch)
-        processed += 1
-    total_time = (datetime.now(timezone.utc) - start).total_seconds()
-    print("Processed", processed)
-    print("Total time", total_time)
-    print("Time per batch", total_time / processed)

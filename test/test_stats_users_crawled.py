@@ -1,13 +1,11 @@
 """
 Tests for "users crawled today" — the count of distinct crawlers that contacted us.
 
-Both submission paths feed the same users set that `get_stats` reads back with `scard`
+The submission path feeds the same users set that `get_stats` reads back with `scard`
 to build `users_crawled_daily`:
 
-- `record_batch` (the deprecated batch flow) adds the crawler's self-claimed
-  `user_id_hash`.
-- `record_results` (the modern API-key-authenticated results endpoint) adds the
-  account's `username`.
+`record_results` (the modern API-key-authenticated results endpoint) adds the
+account's `username`.
 
 Because writer and reader are in different methods, a change to one side that splits
 the key format would silently zero the chart, so these tests pin the two writers to the
@@ -53,22 +51,6 @@ def test_record_results_counts_each_crawler_once_per_day():
     stats_manager.record_results(make_results("https://example.com/"), "alice")
     stats_manager.record_results(make_results("https://example.com/b", "https://example.com/c"), "alice")
     stats_manager.record_results(make_results("https://other.org/"), "bob")
-
-    with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
-        stats = stats_manager.get_stats()
-
-    today = str(utc_today())
-    assert stats.users_crawled_daily[today] == 2
-
-
-def test_both_submission_paths_feed_the_same_users_set():
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    stats_manager = StatsManager(redis)
-
-    # The old batch flow and the new results endpoint each contribute a distinct crawler.
-    with patch("mwmbl.crawler.stats.URLDatabase"):
-        stats_manager.record_batch(make_batch(user_id_hash="a" * 64))
-    stats_manager.record_results(make_results("https://example.com/"), "alice")
 
     with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
         stats = stats_manager.get_stats()

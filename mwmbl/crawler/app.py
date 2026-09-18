@@ -144,8 +144,6 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
         hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
 
-        stats_manager.record_batch(hashed_batch)
-
         filename = upload_object(hashed_batch, now, user_id_hash, "batch")
 
         global last_batch
@@ -156,10 +154,6 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
 
         # Record the batch as being local so that we don't retrieve it again when the server restarts
         infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL, device_name=batch.device_name)]
-
-        with Database() as db:
-            index_db = IndexDatabase(db.connection)
-            index_db.record_batches(infos)
 
         # Update or create Device records for this batch
         if batch.device_name:
