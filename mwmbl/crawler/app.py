@@ -266,7 +266,10 @@ def _register_routes(r: Router | NinjaAPI):
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
-        filename = upload_object(results, now, api_key.user.username, "results")
+        # Without api_key: the bucket is world-readable (get_batch_from_id fetches from it
+        # with a plain unauthenticated GET), so uploading the object as submitted would
+        # publish the plaintext key of any client still using the deprecated body field.
+        filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
 
         # Update stats for the user
         stats_manager.record_results(results, api_key.user.username)

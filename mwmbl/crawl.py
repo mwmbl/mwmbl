@@ -1,7 +1,6 @@
 import argparse
 import logging
 import os
-import platform
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,6 +30,7 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 django.setup()
 
 from mwmbl.crawler.batch import HashedBatch, Result, Results
+from mwmbl.crawler.device import get_device_name
 from mwmbl.crawler.env_vars import (
     CRAWL_DELAY_SECONDS,
     CRAWL_SUBMIT_MODE,
@@ -294,7 +294,7 @@ class Crawler:
                             api_key=MWMBL_API_KEY,
                             results=result_items,
                             crawler_version=CRAWLER_VERSION,
-                            device_name=platform.uname().node,
+                            device_name=get_device_name(data_path),
                         )
                         results_url = f"{REMOTE_SERVER}/api/v1/crawler/results"
                         if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:

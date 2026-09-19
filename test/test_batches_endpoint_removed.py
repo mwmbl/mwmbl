@@ -198,3 +198,23 @@ def test_devices_per_user_are_capped(crawl_user):
     assert Device.objects.filter(user=crawl_user).count() == MAX_DEVICES_PER_USER
     # The most recent survive; the least recently seen are the ones dropped.
     assert Device.objects.filter(user=crawl_user, hostname=f"device-{MAX_DEVICES_PER_USER + 9}").exists()
+
+
+@pytest.mark.django_db
+def test_the_api_key_is_stripped_from_the_uploaded_object(api_client, crawl_api_key, crawl_user):
+    """The results bucket is world-readable, so a key passed in the deprecated body field
+    must not be uploaded with the rest of the submission."""
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz") as upload_object,
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [], "api_key": crawl_api_key.raw_key},
+        )
+
+    assert response.status_code == 200
+    uploaded = upload_object.call_args.args[0]
+    assert uploaded.api_key is None
