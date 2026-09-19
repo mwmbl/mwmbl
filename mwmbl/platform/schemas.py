@@ -86,6 +86,13 @@ class ApiKeyCreatedResponse(Schema):
     key: str = Field(description="The raw API key token. Shown only on creation.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
@@ -98,6 +105,13 @@ class ApiKeyListItem(Schema):
     id: int = Field(description="Unique ID of the API key.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 

@@ -239,6 +239,7 @@ def _register_routes(r: Router | NinjaAPI):
             return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
 
         now = datetime.now(timezone.utc)
+        ApiKey.objects.filter(pk=api_key.pk).update(last_used=now)
         now_ts = int(now.timestamp())
 
         documents = []

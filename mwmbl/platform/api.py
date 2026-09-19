@@ -1081,6 +1081,7 @@ def list_api_keys(request) -> list[ApiKeyListItem]:
             id=k.id,
             name=k.name,
             created_on=k.created_on,
+            last_used=k.last_used,
             scopes=k.scopes,
         )
         for k in keys

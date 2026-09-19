@@ -218,3 +218,24 @@ def test_the_api_key_is_stripped_from_the_uploaded_object(api_client, crawl_api_
     assert response.status_code == 200
     uploaded = upload_object.call_args.args[0]
     assert uploaded.api_key is None
+
+
+@pytest.mark.django_db
+def test_posting_results_records_when_the_key_was_last_used(api_client, crawl_api_key):
+    assert crawl_api_key.last_used is None
+
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": []},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+
+    assert response.status_code == 200
+    crawl_api_key.refresh_from_db()
+    assert crawl_api_key.last_used is not None
