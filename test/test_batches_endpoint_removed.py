@@ -128,3 +128,29 @@ def test_post_results_is_idempotent_for_a_repeated_device(api_client, crawl_api_
             assert response.status_code == 200
 
     assert Device.objects.filter(user=crawl_user, hostname="my-device").count() == 1
+
+
+@pytest.mark.django_db
+def test_latest_batch_returns_410(api_client):
+    """It only ever returned what POST /batches/ stored in memory."""
+    response = api_client.get("/api/v1/crawler/latest-batch")
+    assert response.status_code == 410
+
+
+@pytest.mark.django_db
+def test_post_dataset_bad_user_id_returns_400_on_the_router_mounted_api(api_client):
+    """This path used to call r.create_response, which a Router does not have, so a
+    wrong-length user ID raised AttributeError and 500 instead of returning 400."""
+    response = api_client.post(
+        "/api/v1/crawler/dataset",
+        content_type="application/json",
+        data={
+            "user_id": "too-short",
+            "date": "2026-01-01",
+            "timestamp": 1704672000000,
+            "extensionVersion": "0.6.1",
+            "queryDataset": [],
+            "searchResults": [],
+        },
+    )
+    assert response.status_code == 400

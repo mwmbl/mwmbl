@@ -18,14 +18,12 @@ from redis import Redis
 from mwmbl.crawler.batch import (
     DatasetRequest,
     Error,
-    HashedBatch,
     HashedDataset,
     NewBatchRequest,
     PostResultsResponse,
     Results,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey, Device
 from mwmbl.redis_url_queue import RedisURLQueue
@@ -68,9 +66,6 @@ def upload(data: bytes, name: str):
     return result
 
 
-last_batch = None
-
-
 def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object_type: str):
     seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
 
@@ -87,7 +82,7 @@ def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object
     return filename
 
 
-def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batches: RedisURLQueue):
+def _register_routes(r: Router | NinjaAPI, queued_batches: RedisURLQueue):
     """Register all crawler routes on the given router or API instance."""
 
     @r.post(
@@ -156,14 +151,14 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
 
     @r.get(
         "/latest-batch",
-        summary="Get the latest batch",
+        summary="Get the latest batch (removed)",
         description=(
-            "Return the most recently submitted crawl batch held in memory. "
-            "Returns an empty list if no batch has been submitted since the server started."
+            "Removed - this returned the most recent submission to the now-removed "
+            "`POST /batches/` endpoint, so it always returns 410 Gone."
         ),
     )
-    def get_latest_batch(request) -> list[HashedBatch]:
-        return [] if last_batch is None else [last_batch]
+    def get_latest_batch(request):
+        raise HttpError(410, "This endpoint has been removed along with POST /batches/.")
 
     @r.get(
         "/batches/{date_str}/users",
@@ -300,7 +295,7 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
     )
     def post_dataset(request, dataset: DatasetRequest):
         if len(dataset.user_id) != USER_ID_LENGTH:
-            return r.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
+            raise HttpError(400, f"Incorrect user ID length, should be {USER_ID_LENGTH}")
 
         user_id_hash = _get_user_id_hash(dataset)
 
@@ -327,15 +322,15 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         }
 
 
-def init_router(batch_cache: BatchCache, queued_batches: RedisURLQueue):
+def init_router(queued_batches: RedisURLQueue):
     """Initialise the module-level router (called from urls.py for the unified v1 API)."""
-    _register_routes(router, batch_cache, queued_batches)
+    _register_routes(router, queued_batches)
 
 
-def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, version: str) -> NinjaAPI:
+def create_router(queued_batches: RedisURLQueue, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
-    _register_routes(api, batch_cache, queued_batches)
+    _register_routes(api, queued_batches)
     return api
 
 

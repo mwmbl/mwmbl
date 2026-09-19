@@ -5,7 +5,6 @@ from django.conf import settings
 from redis import Redis
 
 from mwmbl.curated_domains import get_curated_domains
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.completer import Completer
@@ -41,5 +40,3 @@ ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
 # pool a size it had never been fitted to.
 ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
-
-batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)

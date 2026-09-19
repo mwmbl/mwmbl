@@ -11,10 +11,6 @@ from mwmbl.utils import utc_today
 logger = getLogger(__name__)
 
 USERS_KEY = "users-{date}"
-HOST_COUNT_KEY = "host-count-{date}"
-HOST_COUNT_ALL_KEY = "host-count-all-{date}"
-HOST_COUNT_LINK_KEY = "host-count-link-{date}"
-HOST_COUNT_LINK_NEW_KEY = "host-count-link-new-{date}"
 RESULTS_COUNT_KEY = "results-count-{date}"
 USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
 DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
@@ -27,10 +23,6 @@ LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
 class DomainStats(BaseModel):
     domain_name: str
-    num_crawled: int
-    num_successful: int
-    num_links: int
-    num_links_new: int
     num_index_results: int
 
 
@@ -159,43 +151,8 @@ class StatsManager:
             "results_indexed_today": results_indexed_daily[str(date)],
         }
 
-    def get_domain_stats(self) -> list[DomainStats]:
-        today = utc_today()
-        host_all_key = HOST_COUNT_ALL_KEY.format(date=today)
-        host_counts_all = self.redis.zrevrange(host_all_key, 0, 1000, withscores=True)
-        all_domain_stats = []
-        for host, count in host_counts_all:
-            num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=today), host)
-            num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=today), host)
-            num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=today), host)
-            num_index_results = get_domain_result_count(host)
-            domain_stats = DomainStats(
-                domain_name=host,
-                num_crawled=count,
-                num_successful=num_successful or 0,
-                num_links=num_links or 0,
-                num_links_new=num_links_new or 0,
-                num_index_results=num_index_results,
-            )
-            all_domain_stats.append(domain_stats)
-        return all_domain_stats
-
     def get_stats_for_domain(self, host: str) -> DomainStats:
-        today = utc_today()
-        num_crawled = self.redis.zscore(HOST_COUNT_ALL_KEY.format(date=today), host)
-        num_successful = self.redis.zscore(HOST_COUNT_KEY.format(date=today), host)
-        num_links = self.redis.zscore(HOST_COUNT_LINK_KEY.format(date=today), host)
-        num_links_new = self.redis.zscore(HOST_COUNT_LINK_NEW_KEY.format(date=today), host)
-        num_index_results = get_domain_result_count(host)
-        domain_stats = DomainStats(
-            domain_name=host,
-            num_crawled=num_crawled or 0,
-            num_successful=num_successful or 0,
-            num_links=num_links or 0,
-            num_links_new=num_links_new or 0,
-            num_index_results=num_index_results,
-        )
-        return domain_stats
+        return DomainStats(domain_name=host, num_index_results=get_domain_result_count(host))
 
     def record_results(self, results: Results, username: str) -> None:
         result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
