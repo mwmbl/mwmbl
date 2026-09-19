@@ -27,12 +27,7 @@ class DomainStats(BaseModel):
 
 
 class MwmblStats(BaseModel):
-    urls_crawled_today: int
-    urls_crawled_daily: dict[str, int]
-    urls_crawled_hourly: list[int]
     users_crawled_daily: dict[str, int]
-    top_users: list[tuple[str, int]]
-    top_domains: list[tuple[str, int]]
     results_indexed_daily: dict[str, int]
     top_user_results: list[tuple[str, int]]
     urls_in_index_daily: dict[str, int]
@@ -68,7 +63,6 @@ class StatsManager:
         date_time = datetime.now(timezone.utc)
         date = date_time.date()
 
-        urls_crawled_daily = {}
         users_crawled_daily = {}
         results_indexed_daily = {}
         dataset_queries_daily = {}
@@ -76,7 +70,6 @@ class StatsManager:
         blacklisted_results_removed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
-            urls_crawled_daily[str(date_i)] = 0
 
             user_day_count_key = USERS_KEY.format(date=date_i)
             user_day_count = self.redis.scard(user_day_count_key)
@@ -106,22 +99,13 @@ class StatsManager:
                 blacklisted_removed_count = 0
             blacklisted_results_removed_daily[str(date_i)] = blacklisted_removed_count
 
-        hour_counts = [0] * (date_time.hour + 1)
-        user_counts: list[tuple[str, int]] = []
-        host_counts: list[tuple[str, int]] = []
-        urls_crawled_today = 0
         index_stats = get_counts()
 
         user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
         user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
 
         return MwmblStats(
-            urls_crawled_today=urls_crawled_today,
-            urls_crawled_daily=urls_crawled_daily,
-            urls_crawled_hourly=hour_counts,
             users_crawled_daily=users_crawled_daily,
-            top_users=user_counts,
-            top_domains=host_counts,
             results_indexed_daily=results_indexed_daily,
             top_user_results=user_results_counts,
             dataset_queries_daily=dataset_queries_daily,
