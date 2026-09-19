@@ -21,8 +21,9 @@ from mwmbl.crawler.batch import (
     Results,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
+from mwmbl.devices import record_device
 from mwmbl.indexer.index_batches import index_documents
-from mwmbl.models import ApiKey, Device
+from mwmbl.models import ApiKey
 from mwmbl.settings import (
     APPLICATION_KEY,
     BUCKET_NAME,
@@ -261,7 +262,7 @@ def _register_routes(r: Router | NinjaAPI):
         # Update or create Device records for this submission. This used to happen on the
         # now-removed /batches/ endpoint, which was the only path that saw a device name.
         if results.device_name:
-            Device.objects.update_or_create(user=api_key.user, hostname=results.device_name, defaults={})
+            record_device(api_key.user, results.device_name)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)

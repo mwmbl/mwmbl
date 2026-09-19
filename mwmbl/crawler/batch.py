@@ -196,8 +196,13 @@ class Results(Schema):
     )
     device_name: Optional[str] = Field(
         default=None,
-        description="The crawler's device name (platform.uname().node), used to track the user's devices.",
-        example="my-device",
+        description=(
+            "A name identifying the crawler installation, used to list the user's devices. "
+            "Truncated to 255 characters. Not the machine hostname - submissions are stored "
+            "in public object storage, so the reference crawler reports MWMBL_DEVICE_NAME or "
+            "a random id it generates on first run."
+        ),
+        example="crawler-3f7a1c9e",
     )
 
 

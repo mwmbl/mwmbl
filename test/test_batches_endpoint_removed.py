@@ -13,6 +13,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import Client
 
+from mwmbl.devices import HOSTNAME_MAX_LENGTH, MAX_DEVICES_PER_USER, record_device
 from mwmbl.models import ApiKey, Device, generate_api_key
 
 User = get_user_model()
@@ -165,3 +166,35 @@ def test_request_new_batch_returns_410(api_client):
         data={"user_id": "a" * 64},
     )
     assert response.status_code == 410
+
+
+@pytest.mark.django_db
+def test_an_over_long_device_name_is_truncated_not_fatal(api_client, crawl_api_key, crawl_user):
+    """Device.hostname is varchar(255) and Django does not validate lengths on save(), so
+    an unbounded name used to raise DataError before indexing and lose the whole submission."""
+    with (
+        patch("mwmbl.crawler.app.index_documents") as index_documents,
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [], "device_name": "x" * 500},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+
+    assert response.status_code == 200
+    index_documents.assert_called_once()
+    assert Device.objects.get(user=crawl_user).hostname == "x" * HOSTNAME_MAX_LENGTH
+
+
+@pytest.mark.django_db
+def test_devices_per_user_are_capped(crawl_user):
+    """A client varying the name it reports must not grow the table without bound."""
+    for i in range(MAX_DEVICES_PER_USER + 10):
+        record_device(crawl_user, f"device-{i}")
+
+    assert Device.objects.filter(user=crawl_user).count() == MAX_DEVICES_PER_USER
+    # The most recent survive; the least recently seen are the ones dropped.
+    assert Device.objects.filter(user=crawl_user, hostname=f"device-{MAX_DEVICES_PER_USER + 9}").exists()
