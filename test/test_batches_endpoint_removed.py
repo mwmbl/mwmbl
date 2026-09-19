@@ -154,3 +154,14 @@ def test_post_dataset_bad_user_id_returns_400_on_the_router_mounted_api(api_clie
         },
     )
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_request_new_batch_returns_410(api_client):
+    """It popped URLs off the queue permanently for clients that can no longer submit them."""
+    response = api_client.post(
+        "/api/v1/crawler/batches/new",
+        content_type="application/json",
+        data={"user_id": "a" * 64},
+    )
+    assert response.status_code == 410

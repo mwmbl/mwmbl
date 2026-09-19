@@ -4,8 +4,6 @@ import json
 import os
 from datetime import datetime, timezone
 from logging import getLogger
-from queue import Empty
-from typing import Union
 from uuid import uuid4
 
 import boto3
@@ -19,14 +17,12 @@ from mwmbl.crawler.batch import (
     DatasetRequest,
     Error,
     HashedDataset,
-    NewBatchRequest,
     PostResultsResponse,
     Results,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey, Device
-from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
     APPLICATION_KEY,
     BUCKET_NAME,
@@ -81,7 +77,7 @@ def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object
     return filename
 
 
-def _register_routes(r: Router | NinjaAPI, queued_batches: RedisURLQueue):
+def _register_routes(r: Router | NinjaAPI):
     """Register all crawler routes on the given router or API instance."""
 
     @r.post(
@@ -99,22 +95,19 @@ def _register_routes(r: Router | NinjaAPI, queued_batches: RedisURLQueue):
 
     @r.post(
         "/batches/new",
-        summary="Request URLs to crawl",
+        summary="Request URLs to crawl (removed)",
         description=(
-            "Deprecated - crawlers should now determine their own batches.\n\n"
-            "Request a new batch of URLs assigned to this crawler for crawling. "
-            "Returns a list of URLs that this crawler should fetch and submit back via "
-            "`POST /batches/`. Returns an empty list if no URLs are currently queued. "
-            "The `user_id` must be exactly 64 characters."
+            "Removed - this handed out URLs to be submitted back via the now-removed "
+            "`POST /batches/`, so it always returns 410 Gone.\n\n"
+            "Crawlers now choose their own URLs and submit them via `POST /results/`."
         ),
     )
-    def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
-        user_id_hash = _get_user_id_hash(batch_request)
-        try:
-            urls = queued_batches.get_batch(user_id_hash)
-        except Empty:
-            return []
-        return urls
+    def request_new_batch(request):
+        # Not an empty list: get_batch() pops URLs off the queue permanently, so every
+        # legacy crawler still polling this was draining the crawl frontier into results
+        # it could no longer submit. An error tells its operator the client is dead;
+        # an empty list would have left it polling a queue it can never contribute to.
+        raise HttpError(410, "This endpoint has been removed. Crawlers now choose their own URLs.")
 
     @r.get(
         "/batches/{date_str}/users/{public_user_id}",
@@ -321,19 +314,19 @@ def _register_routes(r: Router | NinjaAPI, queued_batches: RedisURLQueue):
         }
 
 
-def init_router(queued_batches: RedisURLQueue):
+def init_router():
     """Initialise the module-level router (called from urls.py for the unified v1 API)."""
-    _register_routes(router, queued_batches)
+    _register_routes(router)
 
 
-def create_router(queued_batches: RedisURLQueue, version: str) -> NinjaAPI:
+def create_router(version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
-    _register_routes(api, queued_batches)
+    _register_routes(api)
     return api
 
 
-def _get_user_id_hash(batch: Union[NewBatchRequest, DatasetRequest]):
+def _get_user_id_hash(batch: DatasetRequest):
     return hashlib.sha3_256(batch.user_id.encode("utf8")).hexdigest()
 
 
