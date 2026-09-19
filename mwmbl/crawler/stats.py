@@ -10,10 +10,7 @@ from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
 
-URL_DATE_COUNT_KEY = "url-count-{date}"
-URL_HOUR_COUNT_KEY = "url-count-hour-{hour}"
 USERS_KEY = "users-{date}"
-USER_COUNT_KEY = "user-count-{date}"
 HOST_COUNT_KEY = "host-count-{date}"
 HOST_COUNT_ALL_KEY = "host-count-all-{date}"
 HOST_COUNT_LINK_KEY = "host-count-link-{date}"
@@ -26,16 +23,6 @@ BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
 SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
-
-
-def hour_count_key(date_time: datetime) -> str:
-    """Key naming the hour a crawl happened in, e.g. ``url-count-hour-2026-09-08 13:00:00``.
-
-    Formatted rather than built from a truncated datetime so that the key does not depend
-    on whether ``date_time`` is aware: ``str()`` of an aware datetime carries a ``+00:00``
-    suffix, which would split the reader in :meth:`StatsManager.get_stats` and zero the hourly chart.
-    """
-    return URL_HOUR_COUNT_KEY.format(hour=date_time.strftime("%Y-%m-%d %H:00:00"))
 
 
 class DomainStats(BaseModel):
@@ -97,11 +84,7 @@ class StatsManager:
         blacklisted_results_removed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
-            url_count_key = URL_DATE_COUNT_KEY.format(date=date_i)
-            url_count = self.redis.get(url_count_key)
-            if url_count is None:
-                url_count = 0
-            urls_crawled_daily[str(date_i)] = url_count
+            urls_crawled_daily[str(date_i)] = 0
 
             user_day_count_key = USERS_KEY.format(date=date_i)
             user_day_count = self.redis.scard(user_day_count_key)
@@ -131,21 +114,10 @@ class StatsManager:
                 blacklisted_removed_count = 0
             blacklisted_results_removed_daily[str(date_i)] = blacklisted_removed_count
 
-        hour_counts = []
-        for i in range(date_time.hour + 1):
-            hour_key = hour_count_key(date_time.replace(hour=i))
-            hour_count = self.redis.get(hour_key)
-            if hour_count is None:
-                hour_count = 0
-            hour_counts.append(hour_count)
-
-        user_count_key = USER_COUNT_KEY.format(date=date_time.date())
-        user_counts = self.redis.zrevrange(user_count_key, 0, 100, withscores=True)
-
-        host_key = HOST_COUNT_KEY.format(date=date_time.date())
-        host_counts = self.redis.zrevrange(host_key, 0, 100, withscores=True)
-
-        urls_crawled_today = list(urls_crawled_daily.values())[-1]
+        hour_counts = [0] * (date_time.hour + 1)
+        user_counts: list[tuple[str, int]] = []
+        host_counts: list[tuple[str, int]] = []
+        urls_crawled_today = 0
         index_stats = get_counts()
 
         user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())

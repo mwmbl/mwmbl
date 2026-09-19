@@ -213,6 +213,11 @@ class Results(Schema):
         description="Version string of the crawler that produced these results.",
         example="1.2.0",
     )
+    device_name: Optional[str] = Field(
+        default=None,
+        description="The crawler's device name (platform.uname().node), used to track the user's devices.",
+        example="my-device",
+    )
 
 
 class PostResultsResponse(Schema):

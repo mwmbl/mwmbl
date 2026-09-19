@@ -16,7 +16,6 @@ from ninja.errors import HttpError
 from redis import Redis
 
 from mwmbl.crawler.batch import (
-    Batch,
     DatasetRequest,
     Error,
     HashedBatch,
@@ -37,7 +36,6 @@ from mwmbl.settings import (
     ENDPOINT_URL,
     FILE_NAME_SUFFIX,
     KEY_ID,
-    MAX_BATCH_SIZE,
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     USER_ID_LENGTH,
@@ -94,71 +92,16 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
 
     @r.post(
         "/batches/",
-        summary="Submit a crawl batch",
+        summary="Submit a crawl batch (removed)",
         description=(
-            "Deprecated - the new crawler uses the /results/ endpoint.\n\n"
-            "Submit a batch of crawled pages to the Mwmbl index. "
-            "Each batch must contain URLs that were previously assigned to this crawler via "
-            "`POST /batches/new`. Batches are stored in object storage and queued for indexing. "
-            f"Maximum {MAX_BATCH_SIZE} items per batch. "
-            "The `user_id` must be exactly 64 characters."
+            "Removed - this endpoint served the old crawler and now always returns 410 Gone.\n\n"
+            "Crawlers should submit crawled pages via `POST /results/` instead."
         ),
     )
-    def post_batch(request, batch: Batch):
-        if len(batch.items) > MAX_BATCH_SIZE:
-            return r.create_response(
-                request, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}", status=400
-            )
-
-        if len(batch.user_id) != USER_ID_LENGTH:
-            return r.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
-
-        if len(batch.items) == 0:
-            return {
-                "status": "ok",
-            }
-
-        user = _get_user_from_batch(batch)
-        if user is None:
-            return r.create_response(
-                request, "Invalid API key or insufficient scope (crawl scope required).", status=401
-            )
-
-        user_id_hash = _get_user_id_hash(batch)
-
-        urls = [item.url for item in batch.items]
-        invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
-        if invalid_urls:
-            return r.create_response(
-                request,
-                f"The following URLs were not assigned to the user for crawling:"
-                f" {invalid_urls}. To suggest a domain to crawl, please visit "
-                f"https://mwmbl.org/app/domain-submissions/new",
-                status=400,
-            )
-
-        # Using an approach from https://stackoverflow.com/a/30476450
-        now = datetime.now(timezone.utc)
-        epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
-        hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
-
-        filename = upload_object(hashed_batch, now, user_id_hash, "batch")
-
-        global last_batch
-        last_batch = hashed_batch
-
-        batch_url = f"{PUBLIC_URL_PREFIX}{filename}"
-        batch_cache.store(hashed_batch, batch_url)
-
-        # Update or create Device records for this batch
-        if batch.device_name:
-            Device.objects.update_or_create(user=user, hostname=batch.device_name, defaults={})
-
-        return {
-            "status": "ok",
-            "public_user_id": user_id_hash,
-            "url": batch_url,
-        }
+    def post_batch(request):
+        # HttpError rather than r.create_response: `r` may be a Router, which has no
+        # create_response.
+        raise HttpError(410, "This endpoint has been removed. Submit crawled pages via POST /results/ instead.")
 
     @r.post(
         "/batches/new",
@@ -328,6 +271,11 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         if dry_run:
             return {"status": "dry-run", "url": None}
 
+        # Update or create Device records for this submission. This used to happen on the
+        # now-removed /batches/ endpoint, which was the only path that saw a device name.
+        if results.device_name:
+            Device.objects.update_or_create(user=api_key.user, hostname=results.device_name, defaults={})
+
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
         filename = upload_object(results, now, api_key.user.username, "results")
@@ -391,24 +339,7 @@ def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, versio
     return api
 
 
-def _get_user_from_batch(batch: Union[Batch, NewBatchRequest, DatasetRequest]):
-    """Validate the API key from batch.user_id and return the user."""
-    raw_key = batch.user_id
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    api_key = (
-        ApiKey.objects.filter(
-            key=key_hash,
-            scopes__contains=[ApiKey.Scope.CRAWL],
-        )
-        .select_related("user")
-        .first()
-    )
-    if api_key is None:
-        return None
-    return api_key.user
-
-
-def _get_user_id_hash(batch: Union[Batch, NewBatchRequest, DatasetRequest]):
+def _get_user_id_hash(batch: Union[NewBatchRequest, DatasetRequest]):
     return hashlib.sha3_256(batch.user_id.encode("utf8")).hexdigest()
 
 
