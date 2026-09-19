@@ -28,7 +28,6 @@ from mwmbl.crawler.batch import (
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.index_batches import index_documents
-from mwmbl.indexer.indexdb import BatchInfo, BatchStatus
 from mwmbl.models import ApiKey, Device
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
@@ -150,9 +149,6 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
 
         batch_url = f"{PUBLIC_URL_PREFIX}{filename}"
         batch_cache.store(hashed_batch, batch_url)
-
-        # Record the batch as being local so that we don't retrieve it again when the server restarts
-        infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL, device_name=batch.device_name)]
 
         # Update or create Device records for this batch
         if batch.device_name:

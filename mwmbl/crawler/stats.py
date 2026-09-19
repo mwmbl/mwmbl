@@ -85,7 +85,6 @@ class StatsManager:
     def __init__(self, redis: Redis):
         self.redis = redis
 
-
     def get_stats(self) -> MwmblStats:
         date_time = datetime.now(timezone.utc)
         date = date_time.date()
