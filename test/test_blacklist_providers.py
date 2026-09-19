@@ -112,6 +112,7 @@ def test_combined_blacklist_provider_handles_failures():
     assert not combined.is_domain_blacklisted("github.com")
 
 
+@pytest.mark.django_db
 def test_integration_with_blacklist_module():
     """Test integration with the main blacklist module."""
     # Test the default provider factory
