@@ -15,14 +15,6 @@ CONSENT_URL = "/api/v1/platform/marketing-consent"
 UNSUBSCRIBE_URL = "/api/v1/platform/marketing/unsubscribe"
 
 
-@pytest.fixture(autouse=True)
-def index_db():
-    """Create the index database tables for tests that need them."""
-    from mwmbl.apps import create_index_db
-
-    create_index_db()
-
-
 @pytest.fixture
 def verified_user(db):
     user = User.objects.create_user(

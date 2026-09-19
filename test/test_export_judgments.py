@@ -11,14 +11,6 @@ from mwmbl.models import Curation, DomainSubmission, FlagCuration, SearchResultV
 User = get_user_model()
 
 
-@pytest.fixture(autouse=True)
-def index_db():
-    """Create the index database tables for tests that need them."""
-    from mwmbl.apps import create_index_db
-
-    create_index_db()
-
-
 def doc(url, title="title", extract="extract", score=1.0, state=None, user_ids=None):
     return {
         "url": url,

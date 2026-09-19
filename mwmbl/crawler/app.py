@@ -40,7 +40,6 @@ from mwmbl.settings import (
     VERSION,
 )
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.utils import utc_today
 
 stats_manager = StatsManager(
     Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
@@ -384,26 +383,3 @@ def get_subfolders(prefix):
     items = client.list_objects(Bucket=BUCKET_NAME, Prefix=prefix, Delimiter="/")
     item_keys = [item["Prefix"][len(prefix) :].strip("/") for item in items["CommonPrefixes"]]
     return item_keys
-
-
-def get_batches_for_date(date_str):
-    check_date_str(date_str)
-    prefix = f"1/{VERSION}/{date_str}/1/"
-    cache_filename = prefix + "batches.json.gz"
-    cache_url = PUBLIC_URL_PREFIX + cache_filename
-    try:
-        cached_batches = json.loads(gzip.decompress(requests.get(cache_url).content))
-        print(f"Got cached batches for {date_str}")
-        return cached_batches
-    except gzip.BadGzipFile:
-        pass
-
-    batches = get_batches_for_prefix(prefix)
-    result = {"batch_urls": [f"{PUBLIC_URL_PREFIX}{batch}" for batch in sorted(batches)]}
-    if date_str != str(utc_today()):
-        # Don't cache data from today since it may change
-        data = gzip.compress(json.dumps(result).encode("utf8"))
-        upload(data, cache_filename)
-        print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
-    print(f"Returning {len(result['batch_urls'])} batches for {date_str}")
-    return result
