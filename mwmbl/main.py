@@ -6,7 +6,6 @@ from time import sleep
 import django
 from django.core.management import call_command
 from gunicorn.app.base import BaseApplication
-from redis import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -47,28 +46,18 @@ def run():
 
     from mwmbl import background
     from mwmbl.count_urls import count_urls_continuously
-    from mwmbl.curated_domains import get_curated_domains
-    from mwmbl.indexer.update_urls import update_urls_continuously
-    from mwmbl.redis_url_queue import RedisURLQueue
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")
 
     call_command("migrate")
 
-    # DEPRECATED: update_urls, update_batches, copy_indexes and count_urls are no longer
-    # deployed. "server" is the only app that runs, and it now also runs the background
-    # task queue (see below). They are kept here rather than deleted because the code
-    # they call is still reachable from the management commands and the standalone
-    # crawler; treat them as unmaintained.
+    # DEPRECATED: copy_indexes and count_urls are no longer deployed. "server" is the only
+    # app that runs, and it now also runs the background task queue (see below). They are
+    # kept here rather than deleted because the code they call is still reachable from the
+    # management commands and the standalone crawler; treat them as unmaintained.
     mwmbl_app = os.environ["MWMBL_APP"]
-    if mwmbl_app == "update_urls":
-        redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
-        url_queue = RedisURLQueue(redis, get_curated_domains)
-        update_urls_continuously(settings.DATA_PATH, url_queue)
-    elif mwmbl_app == "update_batches":
-        background.run(settings.DATA_PATH)
-    elif mwmbl_app == "copy_indexes":
+    if mwmbl_app == "copy_indexes":
         background.copy_indexes_continuously()
     elif mwmbl_app == "count_urls":
         count_urls_continuously()

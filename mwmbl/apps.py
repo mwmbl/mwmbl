@@ -3,9 +3,6 @@ from pathlib import Path
 from django.apps import AppConfig
 from django.conf import settings
 
-from mwmbl.database import Database
-from mwmbl.indexer.indexdb import IndexDatabase
-
 
 def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     """Create the index file if it is missing, and check an existing one is the right shape.
@@ -81,12 +78,6 @@ def _replace_index_file(index_path, num_pages):
     temp_path.replace(index_path)
 
 
-def create_index_db():
-    with Database() as db:
-        index_db = IndexDatabase(db.connection)
-        index_db.create_tables()
-
-
 class MwmblConfig(AppConfig):
     name = "mwmbl"
     verbose_name = "Mwmbl Application"
@@ -99,7 +90,6 @@ class MwmblConfig(AppConfig):
         # grace in app.json has to cover.
         create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES, rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
-            create_index_db()
             import mwmbl.signals  # noqa: F401 - connects the post_save receivers
 
             self._schedule_background_tasks()

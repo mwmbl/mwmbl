@@ -1,7 +1,7 @@
 """
-Script that updates data in a background process.
+Background work that runs outside the request path.
 
-Also contains Django Background Tasks for periodic maintenance:
+Django Background Tasks for periodic maintenance:
   - sync_search_counts: syncs Redis monthly counters → DB once per hour
   - report_usage_to_polar: reports billable usage overage to Polar once per hour
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
@@ -24,8 +24,6 @@ from redis import Redis
 
 from mwmbl import pricing
 from mwmbl.crawler.stats import StatsManager
-from mwmbl.indexer import historical, index_batches
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
@@ -44,25 +42,6 @@ basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
 
 stats_manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
-
-
-def run(data_path: str):
-    logger.info("Started background process")
-
-    historical.run()
-    index_path = Path(data_path) / settings.INDEX_NAME
-    batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
-
-    while True:
-        try:
-            batch_cache.retrieve_batches(num_batches=10000)
-        except Exception:
-            logger.exception("Error retrieving batches")
-        try:
-            index_batches.run(batch_cache, index_path)
-        except Exception:
-            logger.exception("Error indexing batches")
-        sleep(10)
 
 
 def copy_all_indexes(new_index_path):

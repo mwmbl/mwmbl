@@ -111,21 +111,6 @@ class Item(Schema):
     )
 
 
-class Batch(Schema):
-    """A batch of crawled pages submitted by a crawler client."""
-
-    user_id: str = Field(
-        description=(
-            "The crawler's private user ID (a 64-character hex string). "
-            "This is hashed server-side before storage — the raw ID is never persisted."
-        ),
-        example="a" * 64,
-    )
-    items: list[Item] = Field(
-        description="List of crawled URLs and their results. Maximum 100 items per batch.",
-    )
-
-
 class NewBatchRequest(Schema):
     """Request for a new batch of URLs to crawl."""
 
@@ -208,6 +193,16 @@ class Results(Schema):
         default=None,
         description="Version string of the crawler that produced these results.",
         example="1.2.0",
+    )
+    device_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "A name identifying the crawler installation, used to list the user's devices. "
+            "Truncated to 255 characters. Not the machine hostname - submissions are stored "
+            "in public object storage, so the reference crawler reports MWMBL_DEVICE_NAME or "
+            "a random id it generates on first run."
+        ),
+        example="crawler-3f7a1c9e",
     )
 
 

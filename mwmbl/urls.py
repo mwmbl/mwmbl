@@ -24,7 +24,7 @@ import mwmbl.crawler.app as crawler
 from mwmbl.admin_views import blacklist_status_view
 from mwmbl.api import api as v1_api
 from mwmbl.api import register_routers, v2_api
-from mwmbl.search_setup import batch_cache, queued_batches, ranker
+from mwmbl.search_setup import ranker
 from mwmbl.tinysearchengine import search
 from mwmbl.views import (
     CurationDetailView,
@@ -34,7 +34,6 @@ from mwmbl.views import (
     add_url,
     approve,
     domain_view,
-    domains_view,
     flag_curation,
     flag_curation_update,
     home_fragment,
@@ -46,7 +45,7 @@ from mwmbl.views import (
 
 # Initialise the unified v1 API by registering all sub-routers with their runtime dependencies.
 # This must be called before urlpatterns is evaluated.
-register_routers(ranker=ranker, batch_cache=batch_cache, queued_batches=queued_batches)
+register_routers(ranker=ranker)
 
 
 def trigger_error(request):
@@ -71,11 +70,10 @@ urlpatterns = [
     path("app/curations/<int:curation_id>/flag/", flag_curation, name="flag_curation"),
     path("app/flags/curation", CurationFlagListView.as_view(), name="flag_curation_list"),
     path("app/flags/curation/<int:flag_curation_id>/update", flag_curation_update, name="flag_curation_update"),
-    path("app/domains/", domains_view, name="domains"),
     path("app/domains/<str:domain>/", domain_view, name="domain"),
     # TODO: these are the old APIs, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),
-    path("crawler/", crawler.create_router(batch_cache=batch_cache, queued_batches=queued_batches, version="0.1").urls),
+    path("crawler/", crawler.create_router(version="0.1").urls),
     # Unified v1 API — search returns plain list; single docs page at /api/v1/docs
     path("api/v1/", v1_api.urls),
     # v2 API — search returns object with quota metadata; docs at /api/v2/docs
