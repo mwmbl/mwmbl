@@ -34,6 +34,13 @@ def _super_search_monthly_key(user_id: int, year: int | None = None, month: int 
     return f"super_search:monthly:{user_id}:{y}:{m:02d}"
 
 
+def _combined_search_monthly_key(user_id: int, year: int | None = None, month: int | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    y = year if year is not None else now.year
+    m = month if month is not None else now.month
+    return f"combined_search:monthly:{user_id}:{y}:{m:02d}"
+
+
 def _rate_key(user_id: int) -> str:
     return f"search:rate:{user_id}"
 
@@ -102,6 +109,33 @@ def decrement_monthly_super_search(user_id: int) -> None:
     Never drops below 0. No-op if the counter is missing.
     """
     key = _super_search_monthly_key(user_id)
+    try:
+        if cache.get(key, default=0) > 0:
+            cache.decr(key)
+    except ValueError:
+        # decr() raises if the key vanished between the get and the decr; ignore.
+        pass
+
+
+def get_monthly_combined_search_count(user_id: int) -> int:
+    """Return the current monthly combined-search request count for a user (0 if not set)."""
+    return cache.get(_combined_search_monthly_key(user_id), default=0)
+
+
+def increment_monthly_combined_search(user_id: int) -> int:
+    """Increment the monthly combined-search counter and return the new value."""
+    key = _combined_search_monthly_key(user_id)
+    if cache.add(key, 1, timeout=MONTHLY_TTL):
+        return 1
+    return cache.incr(key)
+
+
+def decrement_monthly_combined_search(user_id: int) -> None:
+    """Refund one combined-search increment (e.g. when the request is rejected over-limit).
+
+    Never drops below 0. No-op if the counter is missing.
+    """
+    key = _combined_search_monthly_key(user_id)
     try:
         if cache.get(key, default=0) > 0:
             cache.decr(key)

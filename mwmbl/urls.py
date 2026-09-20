@@ -24,7 +24,7 @@ import mwmbl.crawler.app as crawler
 from mwmbl.admin_views import blacklist_status_view
 from mwmbl.api import api as v1_api
 from mwmbl.api import register_routers, v2_api
-from mwmbl.search_setup import ranker
+from mwmbl.search_setup import combined_ranker, ranker
 from mwmbl.tinysearchengine import search
 from mwmbl.views import (
     CurationDetailView,
@@ -45,7 +45,7 @@ from mwmbl.views import (
 
 # Initialise the unified v1 API by registering all sub-routers with their runtime dependencies.
 # This must be called before urlpatterns is evaluated.
-register_routers(ranker=ranker)
+register_routers(ranker=ranker, combined_ranker=combined_ranker)
 
 
 def trigger_error(request):

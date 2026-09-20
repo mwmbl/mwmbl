@@ -25,3 +25,17 @@ ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
 # pool a size it had never been fitted to.
 ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
+
+# Combined Search gets its own model and its own ranker, so retraining on the pooled
+# Mwmbl + Staan + Wikipedia candidate set never moves standard search's ranking. Until
+# model-combined.xgb has been trained the endpoint serves the deployed model, which is a
+# working answer rather than a missing endpoint - the artifact ships in Stage 4.
+combined_model_path = Path(settings.COMBINED_MODEL_PATH)
+if not combined_model_path.exists():
+    combined_model_path = Path(settings.RUST_MODEL_PATH)
+combined_ltr_model = RustXGBPipeline.from_model_path(str(combined_model_path))
+
+# include_wiki=False on purpose: the endpoint fetches Wikipedia itself so that call can run
+# concurrently with Staan's, and passes both in as additional_results. Leaving it True would
+# fetch Wikipedia a second time, serially, inside get_results.
+combined_ranker = MMRRanker(LTRRanker(tiny_index, completer, combined_ltr_model, include_wiki=False))
