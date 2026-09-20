@@ -65,8 +65,13 @@ def main():
     df.to_csv(OUT, errors="replace")
     print(f"Wrote {OUT}: {len(df)} rows, {df['query'].nunique()} queries")
     print("\nlabel means by pool membership:")
-    for tag in ("standard", "supersearch", "google"):
-        sub = df[df["pools"].str.contains(tag)]
+    # Derived from the data rather than listed: a hardcoded list silently omits any pool
+    # added later - which is the one whose grade distribution is worth looking at. Matched on
+    # the split rather than with str.contains, so one tag can never be read as a prefix of
+    # another.
+    membership = df["pools"].str.split("|")
+    for tag in sorted({tag for tags in membership for tag in tags if tag}):
+        sub = df[membership.apply(lambda tags, t=tag: t in tags)]
         if len(sub):
             print(
                 f"  {tag:12s} n={len(sub):6d}  relevance={sub.relevance.mean():.2f}  "
