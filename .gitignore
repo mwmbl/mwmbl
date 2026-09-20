@@ -208,7 +208,11 @@ devdata/super_search_xgb/
 
 # Claude Code configuration
 .claude/
+# Pass-3 judging manifests and the Pass-2 per-source collection checkpoints. Both are
+# resumable intermediates: once a checkpoint is merged, pass2_pool.jsonl holds everything it
+# carried, and a manifest is only meaningful while its batch is out being judged.
 devdata/llm_relabel/pass3_manifest_*.jsonl
+devdata/llm_relabel/pass2_staan.jsonl
 
 # Relevance judge artifacts (small results*.json stay tracked via explicit add)
 devdata/judge_bakeoff/*.npy

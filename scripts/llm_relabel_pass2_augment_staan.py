@@ -38,6 +38,8 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
 django.setup()
 
+from mwmbl.indexer.external_cache import get_cached_external_results  # noqa: E402
+from mwmbl.tinysearchengine.indexer import DocumentSource  # noqa: E402
 from mwmbl.tinysearchengine.staan import get_staan_results  # noqa: E402
 from scripts._relabel_pool import add  # noqa: E402
 
@@ -60,16 +62,27 @@ def _collected() -> set[str]:
     return {record["query"] for record in _read_jsonl(CHECKPOINT)}
 
 
-def collect_query(query: str) -> dict:
-    """Staan's results for one query, in the shape the merge step expects."""
+def collect_query(query: str) -> tuple[dict, bool]:
+    """Staan's results for one query, and whether the provider actually answered.
+
+    get_staan_results returns [] both for "Staan has nothing for this" and for "the request
+    failed", and the difference matters here: the checkpoint is the resume marker, so
+    recording a failure as an empty result freezes it in and the query is never retried.
+
+    The cache tells the two apart, because that is exactly the distinction it exists to
+    keep - a well-formed empty answer is stored as the sentinel, a failure is not stored at
+    all. So a miss straight after the call means the fetch failed.
+    """
     results = get_staan_results(query)
-    return {
+    answered = get_cached_external_results(DocumentSource.STAAN, query) is not None
+    record = {
         "query": query,
         "results": [
             {"url": document.url, "title": document.title, "extract": document.extract, "score": document.score}
             for document in results
         ],
     }
+    return record, answered
 
 
 def cmd_collect(limit: int | None):
@@ -78,12 +91,21 @@ def cmd_collect(limit: int | None):
         todo = todo[:limit]
     print(f"Collecting Staan results for {len(todo)} queries")
 
+    failed = 0
     with open(CHECKPOINT, "a") as checkpoint:
         for i, query in enumerate(todo, 1):
-            record = collect_query(query)
+            record, answered = collect_query(query)
+            if not answered:
+                # Left out of the checkpoint on purpose, so re-running picks it up again.
+                failed += 1
+                print(f"[{i}/{len(todo)}] {query!r}: FETCH FAILED, not checkpointed")
+                continue
             checkpoint.write(json.dumps(record) + "\n")
             checkpoint.flush()
             print(f"[{i}/{len(todo)}] {query!r}: {len(record['results'])} results")
+
+    if failed:
+        print(f"\n{failed} queries failed to fetch and were not checkpointed. Re-run to retry them.")
 
 
 def cmd_merge():
