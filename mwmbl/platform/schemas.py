@@ -12,6 +12,15 @@ class UserProfileResponse(Schema):
     email: str
     plan: str
     email_confirmed: bool
+    date_joined: datetime
+
+
+class UserStatsResponse(Schema):
+    """Per-user contribution stats for the logged-in user."""
+
+    username: str
+    results_indexed_today: int
+    results_indexed_daily: dict[str, int]
 
 
 class SubscriptionResponse(Schema):
@@ -77,6 +86,13 @@ class ApiKeyCreatedResponse(Schema):
     key: str = Field(description="The raw API key token. Shown only on creation.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
@@ -89,6 +105,13 @@ class ApiKeyListItem(Schema):
     id: int = Field(description="Unique ID of the API key.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
@@ -126,6 +149,22 @@ class MarketingConsentResponse(Schema):
 class MarketingConsentListResponse(Schema):
     consent: list[MarketingConsentResponse] = Field(
         description="Current marketing consent state per source the user has a record for.",
+    )
+
+
+class DeviceResponse(Schema):
+    id: int
+    hostname: str
+    friendly_name: Optional[str] = None
+    first_seen: datetime
+    last_seen: datetime
+
+
+class UpdateDeviceRequest(Schema):
+    friendly_name: str = Field(
+        max_length=255,
+        description="The new friendly name for the device.",
+        example="My Laptop",
     )
 
 

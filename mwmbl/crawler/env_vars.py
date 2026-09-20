@@ -17,6 +17,11 @@ MWMBL_API_KEY = os.environ.get("MWMBL_API_KEY", "")
 # Contact information configuration - required for responsible crawling
 MWMBL_CONTACT_INFO = os.environ.get("MWMBL_CONTACT_INFO", "CHANGE_ME@example.com")
 
+# Name this crawler reports itself as, so its owner can tell their crawlers apart in the
+# devices list. Left unset, a random id is generated on first run and kept in the data
+# directory - see mwmbl.crawler.device. The machine hostname is deliberately never used.
+MWMBL_DEVICE_NAME = os.environ.get("MWMBL_DEVICE_NAME", "")
+
 # Bounds for running the crawler somewhere that is not a volunteer's machine - CI, mainly.
 # The defaults are the unbounded behaviour a volunteer crawler has always had.
 

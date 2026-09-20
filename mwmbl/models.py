@@ -173,6 +173,7 @@ class ApiKey(models.Model):
     key = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
     created_on = models.DateTimeField(auto_now_add=True)
     name = models.CharField(max_length=100, blank=True, default="")
+    last_used = models.DateTimeField(null=True, blank=True)
     scopes = ArrayField(
         models.CharField(max_length=20, choices=Scope.choices),
         default=list,
@@ -269,6 +270,22 @@ class MarketingConsent(models.Model):
         indexes = [
             models.Index(fields=["user", "source", "-timestamp"]),
         ]
+
+
+class Device(models.Model):
+    """A crawler device linked to a user."""
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="devices")
+    hostname = models.CharField(max_length=255)  # device name from crawler (platform.uname().node)
+    friendly_name = models.CharField(max_length=255, blank=True, default="")  # user-defined name
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "hostname"]),
+        ]
+        unique_together = ("user", "hostname")
 
 
 class SearchResultVote(models.Model):

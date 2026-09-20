@@ -23,6 +23,7 @@ from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     AgreementType,
     ApiKey,
+    Device,
     DomainEvidence,
     DomainSubmission,
     MarketingConsent,
@@ -52,6 +53,7 @@ from mwmbl.platform.schemas import (
     CheckoutResponse,
     ConfirmEmail,
     CreateApiKeyRequest,
+    DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
     MarketingConsentListResponse,
@@ -65,9 +67,11 @@ from mwmbl.platform.schemas import (
     ResetPasswordRequest,
     SubmissionDetailSchema,
     SubscriptionResponse,
+    UpdateDeviceRequest,
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
     UserProfileResponse,
+    UserStatsResponse,
     UserVoteHistory,
     VoteRemoveRequest,
     VoteRequest,
@@ -1077,6 +1081,7 @@ def list_api_keys(request) -> list[ApiKeyListItem]:
             id=k.id,
             name=k.name,
             created_on=k.created_on,
+            last_used=k.last_used,
             scopes=k.scopes,
         )
         for k in keys
@@ -1106,6 +1111,58 @@ def delete_api_key(request, key_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/",
+    auth=JWTAuth(),
+    response=list[DeviceResponse],
+    summary="List devices",
+    description=("List all devices belonging to the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def list_devices(request) -> list[DeviceResponse]:
+    check_email_verified(request)
+    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
+    return [
+        DeviceResponse(
+            id=d.id,
+            hostname=d.hostname,
+            friendly_name=d.friendly_name or None,
+            first_seen=d.first_seen,
+            last_seen=d.last_seen,
+        )
+        for d in devices
+    ]
+
+
+@router.patch(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    response=DeviceResponse,
+    summary="Update device friendly name",
+    description=("Update the friendly name of a device owned by the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def update_device(request, device_id: int, body: UpdateDeviceRequest):
+    check_email_verified(request)
+    device = Device.objects.filter(id=device_id, user=request.user).first()
+    if device is None:
+        raise InvalidRequest("Device not found.", status=404)
+    device.friendly_name = body.friendly_name
+    device.save(update_fields=["friendly_name"])
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
+
+
+# ---------------------------------------------------------------------------
 # User profile
 # ---------------------------------------------------------------------------
 
@@ -1115,7 +1172,7 @@ def delete_api_key(request, key_id: int):
     auth=JWTAuth(),
     response=UserProfileResponse,
     summary="Get current user profile",
-    description="Returns the authenticated user's username, email, plan, and email confirmation status.",
+    description="Returns the authenticated user's username, email, plan, email confirmation status, and join date.",
     tags=["Users"],
 )
 def get_current_user(request):
@@ -1129,7 +1186,24 @@ def get_current_user(request):
         email=user.email,
         plan="free" if spend_cents == 0 else "pay-as-you-go",
         email_confirmed=email_address.verified if email_address else False,
+        date_joined=user.date_joined,
     )
+
+
+@router.get(
+    "/user/stats",
+    auth=JWTAuth(),
+    response=UserStatsResponse,
+    summary="Get current user's contribution stats",
+    description=(
+        "Returns the authenticated user's contribution stats: how many results they "
+        "have indexed, broken down per day for the last 30 days."
+    ),
+    tags=["Users"],
+)
+def get_current_user_stats(request):
+    user = request.user
+    return stats_manager.get_user_stats(user.username)
 
 
 # ---------------------------------------------------------------------------
