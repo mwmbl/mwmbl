@@ -1,5 +1,5 @@
 """
-Index batches that are stored locally.
+Write crawled documents into the index.
 """
 
 from collections import Counter, defaultdict
@@ -10,11 +10,8 @@ from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
-from mwmbl.indexer import process_batch
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
-from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.tinysearchengine.indexer import (
     CURATED_STATES,
     Document,
@@ -53,15 +50,6 @@ def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[Doc
                 )
 
 
-def run(batch_cache: BatchCache, index_path: str):
-
-    def process(batches: Collection[HashedBatch]):
-        index_batches(batches, index_path)
-        logger.info("Indexed pages")
-
-    process_batch.run(batch_cache, BatchStatus.URLS_UPDATED, BatchStatus.INDEXED, process, 10000)
-
-
 def get_url_score(url):
     # TODO: compute a proper score for each document
     return 1 / len(url)
@@ -76,12 +64,11 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Count
 
 
 def index_documents(documents, index_path):
-    """The common choke point every indexing path (offline batch processing, the
-    trusted-crawler POST /results endpoint, the standalone crawl tool) goes through, so
+    """The common choke point every indexing path (the trusted-crawler POST /results
+    endpoint, the standalone crawl tool) goes through, so
     this is where the blacklist is enforced. Crawling/link-discovery also check the
     blacklist (RedisURLQueue, update_urls.process_link) but only to stop *new* crawling -
-    a submitted batch or a direct /results submission can contain a blacklisted domain's
-    pages regardless of whether that domain was ever handed out to be crawled (e.g. a
+    a /results submission can contain a blacklisted domain's pages regardless of whether that domain was ever handed out to be crawled (e.g. a
     browser-extension user organically visiting the site), so indexing needs its own check
     rather than relying on those upstream gates.
 
@@ -137,8 +124,8 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
             except PageError:
                 # One page we cannot safely write costs the documents bound for it, not the
                 # rest of the batch. Letting it propagate would abort every remaining page,
-                # and this runs inside POST /crawler/results and the batch indexer, where
-                # that means a 500 or a batch that is never marked done and retries forever.
+                # and this runs inside POST /crawler/results and the standalone crawler's
+                # indexing loop, where that means a 500 or a batch lost wholesale.
                 logger.exception("Skipping index page %d", page_index)
                 continue
 

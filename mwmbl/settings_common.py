@@ -188,7 +188,6 @@ FOOTER_LINKS = [
     },
 ]
 
-BATCH_DIR_NAME = "batches"
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 

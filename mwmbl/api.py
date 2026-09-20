@@ -131,12 +131,12 @@ def v2_invalid_request_handler(request, exc: InvalidRequest):
 
 # Routers are imported after the api instances are created to avoid circular imports,
 # and after init functions have been called from urls.py.
-def register_routers(ranker, batch_cache, queued_batches):
+def register_routers(ranker):
     """
     Initialise and register all sub-routers on the v1 and v2 APIs.
 
     This is called from urls.py after Django app setup is complete, so that
-    dependencies (ranker, batch_cache, queued_batches) are available.
+    dependencies (ranker) are available.
     """
     import mwmbl.crawler.app as crawler_module
     import mwmbl.tinysearchengine.search as search_module
@@ -147,7 +147,7 @@ def register_routers(ranker, batch_cache, queued_batches):
     search_module.init_router(ranker)
     search_module.init_v2_router(ranker)
     super_search_module.init_router()
-    crawler_module.init_router(batch_cache, queued_batches)
+    crawler_module.init_router()
 
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])

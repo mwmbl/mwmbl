@@ -33,9 +33,6 @@ ALLOWED_EXCEPTIONS = (
     SSLCertVerificationError,
 )
 
-POST_BATCH_URL = "/api/v1/crawler/batches/"
-POST_NEW_BATCH_URL = "/api/v1/crawler/batches/new"
-
 TIMEOUT_SECONDS = 3
 MAX_REDIRECTS = 5
 MAX_FETCH_SIZE = 1024 * 1024
