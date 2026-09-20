@@ -91,17 +91,59 @@ uv run python scripts/llm_relabel_pass3_judge.py --calibration   # what Staan is
 # 3. Rebuild learning-to-rank-llm.csv.gz with the `staan` pool in it.
 uv run python scripts/llm_relabel_build_dataset.py
 
-# 4. Train and gate. Keep --split-seed fixed across arms.
-DATABASE_URL="postgres://daoud@" uv run python -m mwmbl.rankeval.ltr.llm_experiment \
-    --mode baseline --model-path mwmbl/resources/model.xgb --note deployed
+# 4. Gate: the same config and split, trained WITHOUT then WITH the new source.
 DATABASE_URL="postgres://daoud@" uv run python -m mwmbl.rankeval.ltr.llm_experiment \
     --mode mixed --ext-weight 0.25 --overall-threshold 4 --scale-pos-weight 1.0 \
-    --add-curation --curation-weight 0.5 --note combined \
+    --add-curation --curation-weight 0.5 --exclude-pool staan --note no-staan
+DATABASE_URL="postgres://daoud@" uv run python -m mwmbl.rankeval.ltr.llm_experiment \
+    --mode mixed --ext-weight 0.25 --overall-threshold 4 --scale-pos-weight 1.0 \
+    --add-curation --curation-weight 0.5 --note combined
+
+# 5. Once a config wins, retrain it on everything and install it.
+DATABASE_URL="postgres://daoud@" uv run python -m mwmbl.rankeval.ltr.llm_experiment \
+    --mode mixed --ext-weight 0.25 --overall-threshold 4 --scale-pos-weight 1.0 \
+    --add-curation --curation-weight 0.5 --test-size 0 --note combined-final \
     --save-model devdata/rankeval-2026-04/model-combined.xgb
+cp devdata/rankeval-2026-04/model-combined.xgb mwmbl/resources/model-combined.xgb
 ```
 
 `llm_experiment` reports two axes and **both** gate a retrain: NDCG on a held-out
 split of the Haiku grades, and pair accuracy on a held-out split of the human
-curation pairs. The deployed model set the precedent at NDCG@10 0.744 / human
-pair-accuracy 0.818; a regression on the human axis is a blocker even when the
-Haiku axis improves.
+curation pairs. A regression on the human axis is a blocker even when the Haiku
+axis improves.
+
+**Do not gate against `--mode baseline` on `mwmbl/resources/model.xgb`.** That
+artifact was trained on *all* 849 LLM-labelled queries (see `git log` on it), so it
+has seen every query in the held-out split and scores about 0.02 NDCG@10 too high.
+Gate against `--exclude-pool`, which trains both arms on the same split and differs
+only in the source being measured. Once a configuration wins, retrain it with
+`--test-size 0` for shipping, as the deployed model was.
+
+### What the Staan retrain measured
+
+Same config, same split, trained with and without the Staan rows, both scored on the
+same Staan-containing test pool:
+
+| training data | NDCG@10 | human pair-acc |
+|---|---|---|
+| with Staan (`model-combined.xgb`) | 0.7612 | 0.805 |
+| without Staan (`--exclude-pool staan`) | 0.7583 | 0.803 |
+
+Marginal, and expected: the 50-feature model has no source feature, so Staan's prior
+reaches it only through `score`. **The endpoint's value is recall, not the re-ranker.**
+On the same 2% sample of the gold test set:
+
+| arm | NDCG | ±SEM | gold recall | latency |
+|---|---|---|---|---|
+| standard search (index + wiki) | 0.386 | 0.043 | 4.8% | 0.004s |
+| combined search, no Staan | 0.392 | 0.043 | 4.8% | 0.005s |
+| combined search (index + Staan + wiki) | 0.583 | 0.030 | 20.0% | 2.14s |
+
+Read the NDCG gain with its caveat: the gold set is scraped **Google** SERPs, and
+Staan is a commercial web-search API whose results resemble Google's, so this metric
+partly rewards agreeing with Google. The independent check is the blind Haiku judge,
+which never sees Google and rates Staan at relevance 2.25 / overall 6.30 against the
+Mwmbl index's 0.70 / 2.53. Both point the same way.
+
+The latency is the cold Staan call; results are cached in the external results index,
+so repeat queries do not pay it.
