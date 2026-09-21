@@ -49,6 +49,7 @@ from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.tokenizer import tokenize
+from mwmbl.utils import prune_request_cache
 
 BATCH_QUEUE_KEY = "batch-queue"
 REMOTE_SERVER = "https://api.mwmbl.org"
@@ -60,6 +61,13 @@ CURATED_DOMAINS_CACHE_SECONDS = 300.0
 # How many of a term's new items must be expected to survive in the main index before we
 # submit the term at all. See count_new_index_entries for where the expectation comes from.
 MIN_NEW_INDEX_ENTRIES = 1
+
+# How long run_indexing may reuse a cached copy of what the main index holds for a term.
+# Never expiring it, which is what request_cache does by default, is wrong here twice over:
+# the diff below decides what to submit by comparing local items against remote ones, so a
+# stale copy submits what the index already has, and a crawler sees a term it will never see
+# again often enough that the cache grew by around 800MB a day until the disk filled.
+REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
 
 
 def _fetch_curated_domains() -> set[str]:
@@ -264,7 +272,10 @@ class Crawler:
         term_new_doc_count = index_batches(batches, index_path)
         logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
-        remote_index = RemoteIndex()
+        # Once a round is often enough to keep the cache at roughly an hour's worth of terms,
+        # and the rounds are minutes apart, so the sweep costs nothing worth measuring.
+        prune_request_cache()
+        remote_index = RemoteIndex(expire_after=REMOTE_INDEX_CACHE_EXPIRY)
         with TinyIndex(Document, index_path, "w") as local_index:
             for term, count in term_new_doc_count.most_common(100):
                 logger.info(f"Syncing term {term} with {count} new local items")
@@ -324,7 +335,7 @@ class Crawler:
                 logger.info(f"Completed indexing for term {term}")
 
                 new_page_content = local_index.get_page(page_index)
-                logger.info(f"Page content: {new_page_content}")
+                logger.info(f"Page {page_index} now holds {len(new_page_content)} documents")
 
     def process_batch_continuously(self):
         """Continuously process batches with error handling.
