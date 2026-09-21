@@ -11,6 +11,7 @@ import django
 import requests
 from django.conf import settings
 from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
@@ -170,11 +171,16 @@ class Crawler:
         return self._url_queue
 
     def check_redis(self):
-        """Check Redis connection health."""
+        """Check Redis connection health.
+
+        redis.exceptions.ConnectionError is not the builtin of that name - it inherits from
+        RedisError - so catching only the builtin meant the friendly message never appeared
+        for the case it was written for: redis-py wraps a refused socket in its own class.
+        """
         try:
             self.redis.ping()
             logger.debug("Redis ping successful")
-        except ConnectionError:
+        except (ConnectionError, RedisConnectionError):
             raise SystemExit(f"Cannot reach Redis at {self.redis_url}. Make sure your Redis server is running.")
 
     def process_batch(self):
@@ -321,20 +327,35 @@ class Crawler:
                 logger.info(f"Page content: {new_page_content}")
 
     def process_batch_continuously(self):
-        """Continuously process batches with error handling."""
+        """Continuously process batches with error handling.
+
+        The health check runs inside the try for the reason everything else does: a Redis
+        that answers with an error is a condition to wait out, not to die of. Redis refusing
+        every write ("MISCONF ... unable to persist to disk", after a failed background save)
+        took out all four crawl workers and the indexing process this way, because
+        check_redis only converts a ConnectionError and let the rest through into a loop that
+        was not guarding it. An unreachable Redis still ends the process: check_redis raises
+        SystemExit for that, and SystemExit is not an Exception.
+        """
         while True:
-            self.check_redis()
             try:
+                self.check_redis()
                 self.process_batch()
             except Exception as err:
                 logger.exception(f"Error processing batch: '{err}'")
                 time.sleep(10)
 
     def run_indexing_continuously(self):
-        """Continuously run indexing with error handling."""
+        """Continuously run indexing with error handling.
+
+        The health check is inside the try - see process_batch_continuously. This loop is
+        the one that costs the whole crawler: run() gives up and exits once the indexing
+        process has died six times in an hour, so a Redis error escaping here stops
+        crawling, not just indexing.
+        """
         while True:
-            self.check_redis()
             try:
+                self.check_redis()
                 self.run_indexing()
             except Exception as err:
                 logger.exception(f"Error running indexing: '{err}'")

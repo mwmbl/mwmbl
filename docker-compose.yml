@@ -41,7 +41,13 @@ services:
   redis:
     image: redis:alpine
     restart: unless-stopped
-    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    # stop-writes-on-bgsave-error no: a failed snapshot otherwise makes Redis reject
+    # every write until someone intervenes, which stops the crawler dead. What is in
+    # here is a work queue that allkeys-lru is already free to evict, so a snapshot we
+    # could not write is worth losing, and carrying on is worth more than the snapshot.
+    command: >
+      redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+      --stop-writes-on-bgsave-error no
     volumes:
       - redis_data:/data
 
