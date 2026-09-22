@@ -23,31 +23,34 @@ services:
       - REDIS_URL=redis://redis:6379
     volumes:
       - crawler_data:/home/mwmbl/.mwmbl
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 30s
-        max_attempts: 3
+    # Compose applies deploy.restart_policy in swarm mode only, so what was here was no
+    # restart policy at all: a crawler that exited stayed exited. One did, for three days.
+    restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "50m"
         max-file: "3"
-    # CPU restrictions if needed:
-    #     resources:
-    #       limits:
-    #         cpus: '0.50'
+    # CPU restrictions if needed (deploy.resources.limits compose does apply):
+    #     deploy:
+    #       resources:
+    #         limits:
+    #           cpus: '0.50'
 
   redis:
     image: redis:alpine
     restart: unless-stopped
-    # stop-writes-on-bgsave-error no: a failed snapshot otherwise makes Redis reject
-    # every write until someone intervenes, which stops the crawler dead. What is in
-    # here is a work queue that allkeys-lru is already free to evict, so a snapshot we
-    # could not write is worth losing, and carrying on is worth more than the snapshot.
+    # save "": no snapshots at all. What is in here is a work queue that allkeys-lru is
+    # already free to evict, so there is nothing worth the cost of saving it, and the cost
+    # was real - a crawler host was found with 8.5GB of temp-*.rdb next to a 209MB dump.rdb.
+    # A snapshot forks a Redis holding up to maxmemory and writes a second copy of the data
+    # beside the first, and every one of those children that the OOM killer took left its
+    # temp file behind for good. That filled the disk, which failed the next snapshot, which
+    # (before stop-writes-on-bgsave-error no, kept below for a save anyone triggers by hand)
+    # made Redis reject every write and stopped the crawler.
     command: >
       redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
-      --stop-writes-on-bgsave-error no
+      --save "" --stop-writes-on-bgsave-error no
     volumes:
       - redis_data:/data
 
