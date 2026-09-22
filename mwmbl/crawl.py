@@ -47,7 +47,6 @@ from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.rank import score_result
-from mwmbl.tokenizer import tokenize
 
 BATCH_QUEUE_KEY = "batch-queue"
 REMOTE_SERVER = "https://api.mwmbl.org"
@@ -102,8 +101,16 @@ def count_new_index_entries(term: str, new_items: list[Document], remote_items: 
     terms that hash to it, which we cannot see, so the real capacity is lower than
     len(remote_items) suggests and blacklisting can drop items server-side. run_indexing logs
     the estimate next to the number the index actually kept, which is how to calibrate it.
+
+    The term is split, not tokenized, which is what the server does to rank a term's
+    documents (index_batches.sort_documents) and the only thing that works here: tokenize is
+    not a total function on its own output. Index terms come from tokenizing a title, a URL
+    or an extract, and one of those can hold an ellipsis mid-text - "Hello… World" gives
+    the token "hello…", which tokenize() then reads as a truncated extract and drops the
+    last two tokens of, returning []. score_result asserts on an empty term list, so
+    re-tokenizing crashed the indexing loop on every batch that carried such a term.
     """
-    terms = tokenize(term)
+    terms = term.split()
     new_scores = [score_result(terms, item, True) for item in new_items]
     matching_new_scores = [score for score in new_scores if score > 0.0]
     if not remote_items:
