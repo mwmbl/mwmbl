@@ -17,7 +17,6 @@ DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
-SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
 
@@ -146,7 +145,7 @@ class StatsManager:
 
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.zincrby(user_result_count_key, num_results, username)
-        self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
+        self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
 
         users_key = USERS_KEY.format(date=utc_today())
         self.redis.sadd(users_key, username)
