@@ -125,7 +125,7 @@ class StatsManager:
         results_indexed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
-            user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=date_i)
+            user_result_count_key = RESULTS_COUNT_KEY.format(date=date_i)
             count = self.redis.zscore(user_result_count_key, username)
             results_indexed_daily[str(date_i)] = int(count) if count else 0
 
