@@ -270,7 +270,19 @@ def fix_document_state(result: Document):
         fixed_state = DocumentState(result.state)
     except ValueError:
         fixed_state = None
-    fixed_document = Document(result.title, result.url, result.extract, result.score, result.term, fixed_state)
+    # `source` is carried across: it is what tells the formatter a result came from
+    # Wikipedia or Staan rather than our index, and rebuilding without it silently
+    # relabelled every external result as "mwmbl". user_ids and last_crawled are still
+    # dropped on purpose - the formatted path has no business exposing them.
+    fixed_document = Document(
+        result.title,
+        result.url,
+        result.extract,
+        result.score,
+        result.term,
+        fixed_state,
+        source=result.source,
+    )
     return fixed_document
 
 

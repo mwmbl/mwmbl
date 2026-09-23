@@ -188,3 +188,42 @@ def test_schema_examples_in_openapi():
     assert "example" in vote_stats_properties["downvotes"]
     assert isinstance(vote_stats_properties["upvotes"]["example"], int)
     assert isinstance(vote_stats_properties["downvotes"]["example"], int)
+
+
+@pytest.mark.django_db
+def test_v2_openapi_spec_generation():
+    """The v2 spec generates and lists every v2 endpoint.
+
+    The v2 API had no spec test at all, so a router that failed to register - or one whose
+    response schema could not be built - showed up only as a missing endpoint at runtime.
+    """
+    response = Client().get("/api/v2/openapi.json")
+    assert response.status_code == 200
+
+    paths = response.json()["paths"]
+
+    assert set(paths) == {
+        "/api/v2/search/",
+        "/api/v2/search/complete",
+        "/api/v2/search/raw",
+        "/api/v2/super-search/",
+        "/api/v2/combined-search/",
+    }
+
+
+@pytest.mark.django_db
+def test_combined_search_is_documented():
+    """The endpoint is authenticated and quota-limited, so its spec has to say so and has to
+    declare the one parameter a caller needs."""
+    spec = Client().get("/api/v2/openapi.json").json()
+    operation = spec["paths"]["/api/v2/combined-search/"]["get"]
+
+    assert [(p["name"], p["in"], p["required"]) for p in operation["parameters"]] == [("q", "query", True)]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/SearchResponse"
+    }
+    for expected in ("X-API-Key", "monthly_limit", "eusp", "wikipedia"):
+        assert expected in operation["description"]
+    # The provider agreement labels its results EUSP; its own name stays out of the public docs.
+    assert "staan" not in operation["description"].lower()
+    assert "staan" not in operation["summary"].lower()

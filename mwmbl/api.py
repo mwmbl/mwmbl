@@ -10,7 +10,9 @@ Sub-routers (v1):
   /api/v1/platform/  — user accounts, domain submissions, voting
 
 Sub-routers (v2):
-  /api/v2/search/    — full-text search with optional API-key auth and quota info
+  /api/v2/search/          — full-text search with optional API-key auth and quota info
+  /api/v2/super-search/    — multi-source streaming search (SSE), authenticated
+  /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
@@ -160,14 +162,15 @@ def v2_invalid_request_handler(request, exc: InvalidRequest):
 
 # Routers are imported after the api instances are created to avoid circular imports,
 # and after init functions have been called from urls.py.
-def register_routers(ranker):
+def register_routers(ranker, combined_ranker):
     """
     Initialise and register all sub-routers on the v1 and v2 APIs.
 
     This is called from urls.py after Django app setup is complete, so that
-    dependencies (ranker) are available.
+    dependencies (the rankers) are available.
     """
     import mwmbl.crawler.app as crawler_module
+    import mwmbl.tinysearchengine.combined_search as combined_search_module
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.tinysearchengine.super_search as super_search_module
     from mwmbl.platform.api import router as platform_router
@@ -176,6 +179,7 @@ def register_routers(ranker):
     search_module.init_router(ranker)
     search_module.init_v2_router(ranker)
     super_search_module.init_router()
+    combined_search_module.init_router(combined_ranker)
     crawler_module.init_router()
 
     api.add_router("/search/", search_module.router, tags=["Search"])
@@ -184,3 +188,4 @@ def register_routers(ranker):
 
     v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
     v2_api.add_router("/super-search/", super_search_module.router, tags=["Super Search"])
+    v2_api.add_router("/combined-search/", combined_search_module.router, tags=["Combined Search"])

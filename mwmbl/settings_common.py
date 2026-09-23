@@ -285,6 +285,21 @@ CURRENT_AGREEMENT_VERSIONS = {
     "TERMS_OF_SERVICE_API": "v2026-04-A",
 }
 
+# Combined Search - the v2 endpoint that pools the Mwmbl index, Staan and Wikipedia and
+# ranks the union with its own LTR model. Gated behind login at a flat monthly limit, like
+# Super Search, which it is meant to replace.
+COMBINED_SEARCH_MONTHLY_LIMIT = 100
+# Its own model artifact, so Combined Search can be retrained on the pooled candidate set
+# without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
+COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"
+
+# Staan, the external web-search provider Combined Search pools in. Results are cached in
+# the external results index - see mwmbl.tinysearchengine.staan.
+STAAN_SEARCH_API_KEY = os.environ.get("STAAN_SEARCH_API_KEY", "")
+STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/search/web")
+STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-us")
+STAAN_TIMEOUT_SECONDS = 5
+
 # Super Search
 SUPER_SEARCH_MONTHLY_LIMIT = 100
 SUPER_SEARCH_TOP_K = 10  # promote sources in top-K seen so far for crawling
@@ -345,10 +360,15 @@ EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower(
 # Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
 # the request path that reaches for Redis, and the CI test job runs none.
 SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
-# One TTL for every provider. Wikipedia articles move rarely, which is what justifies six
-# months; a provider whose results turn over faster wants its own, and the place to add that
-# is here, keyed by source.
+# The default TTL, for any provider that does not name its own below. Wikipedia articles
+# move rarely, which is what justifies six months.
 EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks
+# A provider that turns over faster gets its own, read by external_cache.is_fresh. A general
+# web-search index moves far faster than an encyclopedia, so six months of Staan results
+# would be six months of stale answers. One scalar per provider rather than a dict keyed by
+# DocumentSource: the settings module must not import the indexer, which would pull the Rust
+# extension in at settings-import time.
+EXTERNAL_CACHE_STAAN_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week
 # A query a provider has nothing for is worth remembering too, or it is re-fetched forever.
 # Shorter, because a result appearing is a likelier change than an existing one moving.
 EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60
