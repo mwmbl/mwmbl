@@ -14,7 +14,7 @@ mod wiki;
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
 
-use pipeline::{DocumentRecord, XGBPipeline};
+use pipeline::{extract_features_batch, DocumentRecord, XGBPipeline};
 
 /// Convert a Python dict (passed as a Bound<PyAny>) to a DocumentRecord.
 fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
@@ -132,6 +132,20 @@ impl PyXGBPipeline {
     fn load_model(&mut self, path: &str) -> PyResult<()> {
         self.inner.load_model(path)
             .map_err(|e| PyValueError::new_err(e))
+    }
+
+    /// The feature matrix `predict` scores, one row of NUM_FEATURES floats per record.
+    ///
+    /// Exposed so experiments can add features of their own alongside these without
+    /// reimplementing the extraction in Python.
+    #[staticmethod]
+    fn extract_features(records: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f32>>> {
+        let list: Vec<Bound<'_, PyAny>> = records.extract()?;
+        let doc_records = list.iter()
+            .map(|item| py_dict_to_record(item))
+            .collect::<PyResult<Vec<DocumentRecord>>>()?;
+        let flat = extract_features_batch(&doc_records);
+        Ok(flat.chunks(features::NUM_FEATURES).map(|row| row.to_vec()).collect())
     }
 
     /// Return the feature names in the canonical order.

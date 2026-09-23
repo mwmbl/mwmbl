@@ -15,6 +15,21 @@ The arms, each scored on the same sampled gold test queries:
 - ``mwmbl``: the production index + Wikipedia under the combined model, no Staan.
 - ``brave``: the Brave Search API's top ten, when ``BRAVE_SEARCH_API_KEY`` is set.
 
+And the experiments on the combined arm, named by what they change:
+
+- ``-nowiki``: Staan only, no Wikipedia - Staan already returns Wikipedia pages when they
+  are relevant, so the separate Wikipedia results may only be adding noise.
+- ``-keep``: Staan results are exempt from the model's majority-terms filter, which zeroes
+  (and so drops) any candidate matching no more than half the query terms. Staan matches
+  semantically, so a low term overlap says less about its results than about the index's.
+- ``control-``: a Python retrain of the combined model on the same rows and parameters -
+  the baseline for ``provider-``, confirming the retrain alone moves nothing.
+- ``provider-``: that retrain with Staan's own ranking as features (``in_staan`` and
+  ``staan_rank``; see ``mwmbl.rankeval.ltr.provider_features``).
+
+The ``-keep`` and model experiments score with the Python booster over the Rust feature
+matrix, which reproduces RustXGBPipeline.predict exactly before its filter.
+
 The Mwmbl side uses RemoteIndex (api.mwmbl.org) rather than the local dev index, which is a
 10 MB sample and would understate what the index contributes.
 
@@ -47,6 +62,7 @@ import django
 import numpy as np
 import pandas as pd
 import requests
+import xgboost as xgb
 from joblib import Memory
 from sklearn.metrics import ndcg_score
 
@@ -58,13 +74,17 @@ from django.conf import settings  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import NUM_RESULTS_FOR_EVAL, gold_scores_for  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter  # noqa: E402
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
+from mwmbl.rankeval.ltr.provider_features import (  # noqa: E402
+    fails_term_filter,
+    feature_matrix,
+)
 from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH  # noqa: E402
 from mwmbl.search_setup import combined_ltr_model  # noqa: E402
-from mwmbl.tinysearchengine.indexer import Document  # noqa: E402
+from mwmbl.tinysearchengine.indexer import Document, DocumentSource  # noqa: E402
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker  # noqa: E402
 from mwmbl.tinysearchengine.mmr_rank import MMRRanker  # noqa: E402
 from mwmbl.tinysearchengine.rank import get_wiki_results  # noqa: E402
-from mwmbl.tinysearchengine.staan import get_staan_results  # noqa: E402
+from mwmbl.tinysearchengine.staan import STAAN_TOP_SCORE, get_staan_results  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.judge import Judge, doc_text  # noqa: E402
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
@@ -73,6 +93,8 @@ BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
 BRAVE_MIN_INTERVAL_SECONDS = 1.1
 
 OUTPUT_DIR = Path("devdata/combined_providers_eval")
+CONTROL_MODEL_PATH = Path("devdata/rankeval-2026-04/model-combined-control.json")
+PROVIDER_MODEL_PATH = Path("devdata/rankeval-2026-04/model-combined-provider.json")
 NUM_BOOTSTRAP = 10_000
 
 memory = Memory(location="devdata/cache")
@@ -83,6 +105,55 @@ class EmptyIndex:
 
     def retrieve(self, term: str) -> list[Document]:
         return []
+
+
+class BoosterRanker(LTRRanker):
+    """LTRRanker scored by a Python XGBoost booster, so the experiments can change what it sees.
+
+    ``provider_features`` adds Staan's ranking as features, for a booster trained with them.
+    ``keep_staan`` exempts Staan's results from the majority-terms filter.
+    """
+
+    def __init__(self, tiny_index, booster: xgb.Booster, provider_features: bool, keep_staan: bool):
+        super().__init__(tiny_index, DummyCompleter(), model=None, include_wiki=False)
+        self.booster = booster
+        self.provider_features = provider_features
+        self.keep_staan = keep_staan
+
+    def order_results(self, terms: list[str], results: list[Document], is_complete: bool) -> list[Document]:
+        if len(results) == 0:
+            return []
+
+        query = " ".join(terms)
+        records = [
+            {
+                "query": query,
+                "url": page.url,
+                "title": page.title if page.title is not None else "",
+                "extract": page.extract if page.extract is not None else "",
+                "score": page.score if page.score is not None else 0.0,
+            }
+            for page in results
+        ]
+        is_staan = np.array([page.source == DocumentSource.STAAN for page in results])
+        staan_ranks = None
+        if self.provider_features:
+            # Each Staan result carries its rank in its score (see staan_score), which
+            # survives the blacklist filter that would throw off counting positions.
+            ranks = {
+                page.url: round(STAAN_TOP_SCORE - page.score) for page in results if page.source == DocumentSource.STAAN
+            }
+            staan_ranks = [ranks] * len(records)
+
+        features = feature_matrix(records, staan_ranks)
+        predictions = self.booster.predict(xgb.DMatrix(features))
+        dropped = fails_term_filter(features)
+        if self.keep_staan:
+            dropped &= ~is_staan
+
+        kept = np.flatnonzero(~dropped)
+        order = kept[np.argsort(predictions[kept])[::-1]]
+        return [results[i] for i in order]
 
 
 def _brave_request(query: str) -> requests.Response:
@@ -112,8 +183,22 @@ def _as_dicts(documents: list[Document]) -> list[dict]:
 
 
 def build_arms(include_brave: bool):
-    remote_ranker = MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), combined_ltr_model, include_wiki=False))
+    remote_index = RemoteIndex()
+    remote_ranker = MMRRanker(LTRRanker(remote_index, DummyCompleter(), combined_ltr_model, include_wiki=False))
     empty_ranker = MMRRanker(LTRRanker(EmptyIndex(), DummyCompleter(), combined_ltr_model, include_wiki=False))
+
+    combined_booster = xgb.Booster(model_file=str(settings.COMBINED_MODEL_PATH))
+    control_booster = xgb.Booster(model_file=str(CONTROL_MODEL_PATH))
+    provider_booster = xgb.Booster(model_file=str(PROVIDER_MODEL_PATH))
+
+    def booster_arm(booster, provider_features, keep_staan, with_wiki):
+        ranker = MMRRanker(BoosterRanker(remote_index, booster, provider_features, keep_staan))
+
+        def arm(query, staan_docs, wiki_docs):
+            additional = staan_docs + wiki_docs if with_wiki else staan_docs
+            return _as_dicts(ranker.search(query, additional, False))
+
+        return arm
 
     def staan(query, staan_docs, wiki_docs):
         return _as_dicts(staan_docs)
@@ -130,7 +215,21 @@ def build_arms(include_brave: bool):
     def brave(query, staan_docs, wiki_docs):
         return brave_results(query)
 
-    arms = {"staan": staan, "staan+wiki": staan_wiki, "combined": combined, "mwmbl": mwmbl}
+    def combined_nowiki(query, staan_docs, wiki_docs):
+        return _as_dicts(remote_ranker.search(query, staan_docs, False))
+
+    arms = {
+        "staan": staan,
+        "staan+wiki": staan_wiki,
+        "combined": combined,
+        "mwmbl": mwmbl,
+        "combined-nowiki": combined_nowiki,
+        "combined-keep": booster_arm(combined_booster, False, keep_staan=True, with_wiki=True),
+        "combined-nowiki-keep": booster_arm(combined_booster, False, keep_staan=True, with_wiki=False),
+        "control-nowiki-keep": booster_arm(control_booster, False, keep_staan=True, with_wiki=False),
+        "provider-nowiki": booster_arm(provider_booster, True, keep_staan=False, with_wiki=False),
+        "provider-nowiki-keep": booster_arm(provider_booster, True, keep_staan=True, with_wiki=False),
+    }
     if include_brave:
         arms["brave"] = brave
     return arms
@@ -260,6 +359,9 @@ def report(rows: list[dict]) -> None:
     wide = {name: metrics.pivot(index="query", columns="arm", values=name) for name in metric_names[:3]}
     arms = metrics["arm"].unique()
     comparisons = [("combined", "staan"), ("combined", "staan+wiki"), ("staan+wiki", "staan"), ("combined", "mwmbl")]
+    experiments = [arm for arm in arms if arm.startswith(("combined-", "control-", "provider-"))]
+    comparisons += [(arm, baseline) for arm in experiments for baseline in ("combined", "staan")]
+    comparisons += [("provider-nowiki-keep", "control-nowiki-keep"), ("control-nowiki-keep", "combined-nowiki-keep")]
     if "brave" in arms:
         comparisons += [("combined", "brave"), ("staan", "brave")]
 
@@ -272,7 +374,7 @@ def report(rows: list[dict]) -> None:
             losses = int(np.sum(differences < -1e-9))
             ties = len(differences) - wins - losses
             print(
-                f"{a:>10} - {b:<10} {name:<10} {differences.mean():+.4f}  [{low:+.4f}, {high:+.4f}]"
+                f"{a:>20} - {b:<20} {name:<10} {differences.mean():+.4f}  [{low:+.4f}, {high:+.4f}]"
                 f"  W/T/L {wins}/{ties}/{losses}"
             )
 
