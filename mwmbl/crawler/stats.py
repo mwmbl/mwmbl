@@ -17,7 +17,6 @@ DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
-SHORT_EXPIRE_SECONDS = 60 * 60 * 24
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
 
@@ -138,6 +137,30 @@ class StatsManager:
     def get_stats_for_domain(self, host: str) -> DomainStats:
         return DomainStats(domain_name=host, num_index_results=get_domain_result_count(host))
 
+    def get_leaderboard_for_date(self, target_date: date) -> list[tuple[str, int]]:
+        """Get leaderboard for a specific date from the per-user results sorted set."""
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=target_date)
+        results = self.redis.zrevrange(user_result_count_key, 0, 100, withscores=True)
+        return [(username, int(score)) for username, score in results]
+
+    def get_all_time_leaderboard(self) -> list[tuple[str, int]]:
+        """Get all-time leaderboard by aggregating across the last 30 days."""
+        from collections import Counter
+
+        date_time = datetime.now(timezone.utc)
+        today = date_time.date()
+
+        aggregated = Counter()
+        for i in range(30):
+            date_i = today - timedelta(days=i)
+            user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=date_i)
+            results = self.redis.zrevrange(user_result_count_key, 0, -1, withscores=True)
+            for username, score in results:
+                aggregated[username] += int(score)
+
+        # Return top 100 sorted by score descending
+        return aggregated.most_common(100)
+
     def record_results(self, results: Results, username: str) -> None:
         result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
         num_results = len(results.results)
@@ -146,7 +169,7 @@ class StatsManager:
 
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.zincrby(user_result_count_key, num_results, username)
-        self.redis.expire(user_result_count_key, SHORT_EXPIRE_SECONDS)
+        self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
 
         users_key = USERS_KEY.format(date=utc_today())
         self.redis.sadd(users_key, username)
