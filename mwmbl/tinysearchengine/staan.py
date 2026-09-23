@@ -49,16 +49,17 @@ def staan_score(rank: int) -> float:
 
 
 def _documents(payload: dict, query: str) -> list[Document]:
-    results = payload["web"]["results"][:NUM_STAAN_RESULTS]
+    # Drop what the external cache would drop (no url or no title) *before* ranking, so the
+    # rank a result is scored by here is the rank it is stored at and rescored by on a cache
+    # hit. Ranking over the raw list meant a first fetch and every later one disagreed on
+    # `score` - a trained-on feature - whenever an unusable result came ahead of a usable one.
+    results = [result for result in payload["web"]["results"] if result.get("url") and result.get("title")]
     documents = []
-    for rank, result in enumerate(results):
-        url = result.get("url")
-        if not url:
-            continue
+    for rank, result in enumerate(results[:NUM_STAAN_RESULTS]):
         documents.append(
             Document(
-                title=result.get("title", ""),
-                url=url,
+                title=result["title"],
+                url=result["url"],
                 extract=result.get("snippet") or result.get("description", ""),
                 score=staan_score(rank),
                 term=query,

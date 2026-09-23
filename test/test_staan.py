@@ -122,6 +122,51 @@ def test_a_result_with_no_url_is_dropped(cache_index):
     assert len(results) == 2
 
 
+def test_a_result_with_no_title_is_dropped(cache_index):
+    """The cache drops untitled results, so keeping one here would serve it once only."""
+    untitled = {"web": {"results": [{"url": "https://untitled.example/"}, *API_RESPONSE["web"]["results"]]}}
+    mock, _ = _patched_staan(untitled)
+    try:
+        results = get_staan_results("rust async")
+    finally:
+        mock.stop()
+
+    assert [document.url for document in results] == ["https://tokio.rs/", "https://docs.rs/tokio"]
+
+
+def test_a_fetch_and_a_cache_hit_score_alike(cache_index):
+    """`score` is a trained-on feature: the first request for a query and every later one
+    must agree on it, even when unusable results come ahead of usable ones."""
+    unusable_first = {
+        "web": {
+            "results": [
+                {"title": "No URL here"},
+                {"url": "https://untitled.example/"},
+                *API_RESPONSE["web"]["results"],
+            ]
+        }
+    }
+    mock, requested = _patched_staan(unusable_first)
+    try:
+        fetched = get_staan_results("rust async")
+        cached = get_staan_results("rust async")
+    finally:
+        mock.stop()
+
+    assert requested.call_count == 1
+    assert [(d.url, d.score) for d in fetched] == [(d.url, d.score) for d in cached]
+    assert [d.score for d in fetched] == [staan_score(0), staan_score(1)]
+
+
+def test_a_response_with_no_titled_results_is_empty_on_first_fetch_too(cache_index):
+    mock, _ = _patched_staan({"web": {"results": [{"url": "https://untitled.example/"}]}})
+    try:
+        assert get_staan_results("rust async") == []
+        assert get_staan_results("rust async") == []
+    finally:
+        mock.stop()
+
+
 def test_no_more_than_num_staan_results_are_kept(cache_index):
     many = {"web": {"results": [{"url": f"https://example.com/{i}", "title": str(i)} for i in range(50)]}}
     mock, _ = _patched_staan(many)
