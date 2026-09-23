@@ -217,7 +217,7 @@ def test_each_result_names_the_provider_it_came_from(client, api_key, fresh_quot
 
     results = _get(client, api_key).json()["results"]
 
-    assert [result["engine"] for result in results] == ["mwmbl", "staan", "wikipedia"]
+    assert [result["engine"] for result in results] == ["mwmbl", "eusp", "wikipedia"]
 
 
 @pytest.mark.django_db

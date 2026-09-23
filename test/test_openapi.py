@@ -222,5 +222,8 @@ def test_combined_search_is_documented():
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/SearchResponse"
     }
-    for expected in ("X-API-Key", "monthly_limit", "staan", "wikipedia"):
+    for expected in ("X-API-Key", "monthly_limit", "eusp", "wikipedia"):
         assert expected in operation["description"]
+    # The provider agreement labels its results EUSP; its own name stays out of the public docs.
+    assert "staan" not in operation["description"].lower()
+    assert "staan" not in operation["summary"].lower()

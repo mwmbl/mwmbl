@@ -28,9 +28,9 @@ def test_an_external_provider_names_itself():
     because it never enters the index."""
     result = Document("Tokio", "https://tokio.rs/", "An async runtime.", source=DocumentSource.STAAN)
 
-    assert get_result_source(result) == "staan"
-    assert format_result(result, "tokio")["source"] == "staan"
-    assert format_result_v2(result, 1, "tokio")["engine"] == "staan"
+    assert get_result_source(result) == "eusp"
+    assert format_result(result, "tokio")["source"] == "eusp"
+    assert format_result_v2(result, 1, "tokio")["engine"] == "eusp"
 
 
 def test_a_document_with_no_source_still_answers_from_its_state():

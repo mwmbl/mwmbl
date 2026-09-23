@@ -12,7 +12,7 @@ Sub-routers (v1):
 Sub-routers (v2):
   /api/v2/search/          — full-text search with optional API-key auth and quota info
   /api/v2/super-search/    — multi-source streaming search (SSE), authenticated
-  /api/v2/combined-search/ — Mwmbl + Staan + Wikipedia in one ranked response, authenticated
+  /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.

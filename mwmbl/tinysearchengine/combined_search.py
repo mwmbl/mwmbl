@@ -44,15 +44,15 @@ router = Router(tags=["Combined Search"])
 
 
 DESCRIPTION = (
-    "Search the Mwmbl index, Staan and Wikipedia in one request and return the ranked "
+    "Search the Mwmbl index, EUSP (European Search Perspective) and Wikipedia in one request and return the ranked "
     "union.\n\n"
-    "Every candidate - crawled by Mwmbl, returned by Staan, or fetched from Wikipedia - is "
+    "Every candidate - crawled by Mwmbl, returned by EUSP, or fetched from Wikipedia - is "
     "scored by one learning-to-rank model trained on the pooled candidate set, then "
     "diversified so a single domain cannot take the whole page. The response is the same "
     "SearXNG-compatible shape as `/api/v2/search/`.\n\n"
     "The `engine` field names the provider a result came from:\n"
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
-    "- `staan` - returned by the Staan web-search API\n"
+    "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - fetched from Wikipedia\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
@@ -94,7 +94,7 @@ def init_router(ranker) -> None:
         # Handled manually in the view so both an API key and a JWT work under an async
         # view - the same reason Super Search does it this way.
         auth=None,
-        summary="Combined Search (Mwmbl + Staan + Wikipedia)",
+        summary="Combined Search (Mwmbl + EUSP + Wikipedia)",
         description=DESCRIPTION,
         openapi_extra=OPENAPI_EXTRA,
     )
