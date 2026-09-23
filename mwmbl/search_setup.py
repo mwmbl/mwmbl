@@ -6,7 +6,7 @@ from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
-from mwmbl.tinysearchengine.ltr_rank import LTRRanker
+from mwmbl.tinysearchengine.ltr_rank import CombinedLTRRanker, LTRRanker
 from mwmbl.tinysearchengine.mmr_rank import MMRRanker
 
 # Pull the blacklist snapshot in at worker startup rather than letting the first query
@@ -27,15 +27,7 @@ ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
 
 # Combined Search gets its own model and its own ranker, so retraining on the pooled
-# Mwmbl + Staan + Wikipedia candidate set never moves standard search's ranking. Until
-# model-combined.xgb has been trained the endpoint serves the deployed model, which is a
-# working answer rather than a missing endpoint - the artifact ships in Stage 4.
-combined_model_path = Path(settings.COMBINED_MODEL_PATH)
-if not combined_model_path.exists():
-    combined_model_path = Path(settings.RUST_MODEL_PATH)
-combined_ltr_model = RustXGBPipeline.from_model_path(str(combined_model_path))
-
-# include_wiki=False on purpose: the endpoint fetches Wikipedia itself so that call can run
-# concurrently with Staan's, and passes both in as additional_results. Leaving it True would
-# fetch Wikipedia a second time, serially, inside get_results.
-combined_ranker = MMRRanker(LTRRanker(tiny_index, completer, combined_ltr_model, include_wiki=False))
+# Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
+# Staan's ranking as features, which only CombinedLTRRanker supplies.
+combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
+combined_ranker = MMRRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))

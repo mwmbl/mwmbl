@@ -1,15 +1,14 @@
 """Evaluate the Combined Search ranking core as a RankingModel against the gold dataset.
 
-Runs what /api/v2/combined-search/ runs, minus the HTTP layer: pool the Mwmbl index, Staan
-and Wikipedia, rank the union with the combined LTR model, diversify. Only auth, quota and
+Runs what /api/v2/combined-search/ runs, minus the HTTP layer: pool the Mwmbl index and
+Staan, rank the union with the combined LTR model, diversify. Only auth, quota and
 response formatting are skipped, so the ranking measured here is the ranking served.
 
 Not to be confused with evaluate_combined.py, which combines two ranking *models* (Wikipedia
 and Mwmbl) and predates this endpoint.
 
-Staan and Wikipedia are both network calls, so both are cached: Wikipedia through its own
-external results cache, and Staan through the same. A gold-set run therefore pays for each
-provider once per query and is cheap to repeat while iterating on the ranking. Pass
+Staan is a network call, cached through the external results cache, so a gold-set run pays
+for it once per query and is cheap to repeat while iterating on the ranking. Pass
 ``--no-staan`` to measure what Staan is actually contributing.
 
 Usage::
@@ -29,12 +28,11 @@ django.setup()
 # Imported after django.setup(): search_setup opens the index and loads the models.
 from mwmbl.rankeval.evaluation.evaluate import RankingModel, evaluate  # noqa: E402
 from mwmbl.search_setup import combined_ranker  # noqa: E402
-from mwmbl.tinysearchengine.rank import get_wiki_results  # noqa: E402
 from mwmbl.tinysearchengine.staan import get_staan_results  # noqa: E402
 
 
 class CombinedSearchRankingModel(RankingModel):
-    """The endpoint's ranking core: three sources pooled, one model, MMR.
+    """The endpoint's ranking core: the index and Staan pooled, one model, MMR.
 
     include_staan=False is the ablation arm - the same pool minus Staan, so the difference
     between the two arms is what Staan contributes and nothing else.
@@ -46,9 +44,6 @@ class CombinedSearchRankingModel(RankingModel):
 
     def predict(self, query: str) -> list[str]:
         additional = get_staan_results(query) if self.include_staan else []
-        additional = additional + get_wiki_results(query)
-        # use_external_search=False: Wikipedia is already in `additional`, exactly as the
-        # endpoint arranges it.
         results = self.ranker.search(query, additional, False)
         return [result.url for result in results]
 
@@ -57,7 +52,7 @@ def run():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--fraction", type=float, default=0.05, help="Fraction of gold queries to sample.")
     parser.add_argument("--train", action="store_true", help="Evaluate on the train split instead of test.")
-    parser.add_argument("--no-staan", action="store_true", help="Ablation: pool the index and Wikipedia only.")
+    parser.add_argument("--no-staan", action="store_true", help="Ablation: the index only.")
     args = parser.parse_args()
 
     model = CombinedSearchRankingModel(include_staan=not args.no_staan)

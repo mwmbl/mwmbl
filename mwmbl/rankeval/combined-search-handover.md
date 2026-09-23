@@ -22,6 +22,46 @@ Brave is still ahead on both measures (0.757 gold, 0.859 judge).
 The previous handover, with the method and the Brave and latency findings, is at
 https://claude.ai/code/artifact/9931df9a-ebd1-4f18-b751-a23b48904fc9.
 
+## Status: shipped (2026-09-23, branch `combined-search-provider-features`)
+
+The plan below was carried out as **Option B**, with the ranking logic in Rust:
+
+- **`mwmbl_rank`:** `DocumentRecord` carries a `StaanRank` (not asked / not returned /
+  rank) and a `from_staan` flag.
+  - A pipeline with `provider_features` appends `in_staan` and `staan_rank` to the 50
+    shared features. `predict` exempts `from_staan` records from the term filter.
+  - A model saved with provider features records that in a booster attribute, so
+    `load_model` switches them on. Standard search's `model.xgb` has no such attribute and
+    is unchanged.
+- **Serving:** `CombinedLTRRanker` (`mwmbl/tinysearchengine/ltr_rank.py`) supplies Staan's
+  rank from each Staan result's score. The endpoint no longer fetches Wikipedia.
+  - Staan counts as "asked" when any of its results reached the pool. So a Staan outage and
+    an empty Staan answer both score as "not asked", like the index-only training rows.
+- **Model:** retrained in Rust (`mwmbl.rankeval.ltr.provider_features`) and installed as
+  `mwmbl/resources/model-combined.xgb`.
+- **Eval:** `compare_combined_providers` now runs `staan`, `combined` (shipped),
+  `previous` (the old endpoint), `reference` (this handover's Python booster) and
+  `brave`. The experiment arms below are in `f53ec73`. The log is
+  `devdata/combined_providers_eval/verify-shipped.log`.
+
+Re-verified on the same 298 queries:
+
+| Arm | Gold NDCG | Judge NDCG@10 |
+|---|---|---|
+| brave | 0.757 | 0.865 |
+| **combined (shipped, Rust)** | **0.682** | **0.774** |
+| reference (Python `provider-nowiki-keep`) | 0.664 | 0.770 |
+| staan | 0.734 | 0.756 |
+| previous (old endpoint) | 0.596 | 0.698 |
+
+- **Combined − staan:** judge +0.018 [+0.008, +0.028], W/T/L 187/0/111. Gold −0.052
+  [−0.076, −0.028].
+- **Combined − reference:** gold +0.019 [−0.001, +0.038], judge +0.003 [−0.001, +0.008]. The
+  Rust retrain lands on the Python one or slightly above it.
+
+The reference arm reproduces this handover's gold number exactly. The judge numbers shift
+slightly because the judged pool has different arms in it.
+
 ---
 
 ## Results (absolute)
