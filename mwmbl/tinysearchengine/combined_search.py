@@ -9,9 +9,9 @@ crawls promoted pages and follows their outbound links, which takes seconds; Sta
 only network call here, and it is cached, so there is nothing to stream and a plain response
 is what a client actually wants.
 
-The ranking core is two calls, because Ranker.get_results already pools
-``pages + additional_results`` and blacklist-filters the lot. Staan goes in as
-additional_results; the index side and the ranking are the ranker's own job.
+The ranking core is three calls. Ranker.retrieve looks the query up in the index while
+Staan is fetched, so the two overlap. Ranker.search_retrieved then pools the index pages
+with Staan's results as additional_results, blacklist-filters the lot and ranks it.
 
 There is no separate Wikipedia fetch: Staan already returns Wikipedia pages when they are
 relevant, and evaluation found the extra fetch roughly neutral on quality (see
@@ -107,14 +107,13 @@ def init_router(ranker) -> None:
                 f"and you have used {monthly_usage - 1}.",
             )
 
-        # get_staan_results returns [] on failure by itself.
-        staan_results = await asyncio.to_thread(get_staan_results, q)
-        results = await asyncio.to_thread(
-            ranker.search,
-            q,
-            staan_results,
-            False,  # use_external_search=False
+        # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
+        # rather than after it. get_staan_results returns [] on failure by itself.
+        retrieval, staan_results = await asyncio.gather(
+            asyncio.to_thread(ranker.retrieve, q),
+            asyncio.to_thread(get_staan_results, q),
         )
+        results = await asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results)
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return SearchResponse(

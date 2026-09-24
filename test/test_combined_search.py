@@ -1,12 +1,14 @@
 """Integration tests for the Combined Search endpoint (/api/v2/combined-search/).
 
-The endpoint's own job is auth, quota, fetching Staan and handing it to one ranker alongside
-the index. The ranking itself belongs to CombinedLTRRanker and is tested there, so these
+The endpoint's own job is auth, quota, fetching Staan while the index is searched, and
+handing both to one ranker. The ranking itself belongs to CombinedLTRRanker and is tested there, so these
 tests stub the ranker and Staan: what is checked here
 is that each source reaches the pool, that provenance survives as far as the wire, that a
 provider being down costs recall rather than the request, and that the quota is enforced
 atomically.
 """
+
+import threading
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -90,17 +92,21 @@ def stub_sources(monkeypatch):
                 raise staan
             return list(staan)
 
-        def fake_search(query, additional_results, use_external_search=True):
+        def fake_retrieve(query):
+            calls["retrieve_query"] = query
+            return list(index)
+
+        def fake_search_retrieved(retrieval, additional_results):
             calls["additional_results"] = additional_results
-            calls["use_external_search"] = use_external_search
-            return list(index) + list(additional_results)
+            return retrieval + list(additional_results)
 
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
         # The router closed over the ranker at registration time, so the ranker instance
         # itself is what has to be patched, not the name in search_setup.
         from mwmbl.search_setup import combined_ranker
 
-        monkeypatch.setattr(combined_ranker, "search", fake_search)
+        monkeypatch.setattr(combined_ranker, "retrieve", fake_retrieve)
+        monkeypatch.setattr(combined_ranker, "search_retrieved", fake_search_retrieved)
         return calls
 
     return configure
@@ -222,14 +228,33 @@ def test_the_external_results_are_passed_in_as_additional_results(client, api_ke
 
 
 @pytest.mark.django_db
-def test_the_ranker_is_told_not_to_fetch_wikipedia(client, api_key, fresh_quota, stub_sources):
-    """External search is standard search's Wikipedia fetch, which Combined Search drops:
-    Staan already returns Wikipedia pages when they are relevant."""
-    calls = stub_sources()
+def test_the_index_is_searched_while_staan_is_in_flight(client, api_key, fresh_quota, stub_sources, monkeypatch):
+    """Staan is the slow call, so the index lookup must overlap it, not wait for it. Each
+    stub waits for the other to start: run one after the other, the first would time out."""
+    stub_sources()
+    staan_started = threading.Event()
+    retrieve_started = threading.Event()
+    from mwmbl.search_setup import combined_ranker
 
-    _get(client, api_key)
+    fake_retrieve = combined_ranker.retrieve
+    fake_staan = combined_search.get_staan_results
 
-    assert calls["use_external_search"] is False
+    def overlapping_retrieve(query):
+        retrieve_started.set()
+        assert staan_started.wait(timeout=5)
+        return fake_retrieve(query)
+
+    def overlapping_staan(query, *args, **kwargs):
+        staan_started.set()
+        assert retrieve_started.wait(timeout=5)
+        return fake_staan(query, *args, **kwargs)
+
+    monkeypatch.setattr(combined_ranker, "retrieve", overlapping_retrieve)
+    monkeypatch.setattr(combined_search, "get_staan_results", overlapping_staan)
+
+    results = _get(client, api_key).json()["results"]
+
+    assert [result["url"] for result in results] == [INDEX_RESULT.url, STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
@@ -239,6 +264,7 @@ def test_the_query_reaches_staan(client, api_key, fresh_quota, stub_sources):
     _get(client, api_key, query="rust")
 
     assert calls["staan_query"] == "rust"
+    assert calls["retrieve_query"] == "rust"
 
 
 @pytest.mark.django_db

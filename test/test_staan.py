@@ -60,7 +60,7 @@ def cache_index(tmp_path):
 
 def _patched_staan(response):
     """Stand in for the Staan API, returning `response` (or raising, if it is an error)."""
-    mock = patch.object(staan.requests, "get")
+    mock = patch.object(staan.session, "get")
     started = mock.start()
     if isinstance(response, Exception):
         started.side_effect = response
