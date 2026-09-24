@@ -1,18 +1,21 @@
-"""Combined Search - one request over the Mwmbl index, Staan and Wikipedia.
+"""Combined Search - one request over the Mwmbl index and Staan.
 
-Pools three sources, ranks the union with a model of its own, and answers with the same
+Pools both sources, ranks the union with a model of its own, and answers with the same
 SearXNG-shaped JSON as /api/v2/search/. Authentication is required and a flat monthly quota
 applies, exactly as for Super Search, which this endpoint is meant to replace.
 
 There is deliberately no streaming and no crawling here. Super Search streams because it
-crawls promoted pages and follows their outbound links, which takes seconds; all three
-sources here answer in well under a second, and two of the three are cached, so there is
-nothing to stream and a plain response is what a client actually wants.
+crawls promoted pages and follows their outbound links, which takes seconds; Staan is the
+only network call here, and it is cached, so there is nothing to stream and a plain response
+is what a client actually wants.
 
-The ranking core is three calls, because Ranker.get_results already pools
-``pages + additional_results + external_search_items`` and blacklist-filters the lot. Staan
-and Wikipedia go in as additional_results, fetched concurrently; the index side and the
-ranking are the ranker's own job.
+The ranking core is two calls, because Ranker.get_results already pools
+``pages + additional_results`` and blacklist-filters the lot. Staan goes in as
+additional_results; the index side and the ranking are the ranker's own job.
+
+There is no separate Wikipedia fetch: Staan already returns Wikipedia pages when they are
+relevant, and evaluation found the extra fetch roughly neutral on quality (see
+mwmbl/rankeval/combined-search-handover.md).
 
 Nothing found here is written back to the search index. Super Search indexes what it finds;
 whether third-party SERP results belong in our index is a separate question with its own
@@ -34,7 +37,6 @@ from mwmbl.quota import (
     increment_monthly_combined_search,
 )
 from mwmbl.search_auth import authenticate_user
-from mwmbl.tinysearchengine.rank import get_wiki_results
 from mwmbl.tinysearchengine.search import SearchResponse
 from mwmbl.tinysearchengine.staan import get_staan_results
 
@@ -44,22 +46,22 @@ router = Router(tags=["Combined Search"])
 
 
 DESCRIPTION = (
-    "Search the Mwmbl index, EUSP (European Search Perspective) and Wikipedia in one request and return the ranked "
-    "union.\n\n"
-    "Every candidate - crawled by Mwmbl, returned by EUSP, or fetched from Wikipedia - is "
-    "scored by one learning-to-rank model trained on the pooled candidate set, then "
+    "Search the Mwmbl index and EUSP (European Search Perspective) in one request and "
+    "return the ranked union.\n\n"
+    "Every candidate - crawled by Mwmbl or returned by EUSP - is scored by one "
+    "learning-to-rank model trained on the pooled candidate set, then "
     "diversified so a single domain cannot take the whole page. The response is the same "
     "SearXNG-compatible shape as `/api/v2/search/`.\n\n"
     "The `engine` field names the provider a result came from:\n"
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
-    "- `wikipedia` - fetched from Wikipedia\n"
+    "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. Obtain a key via `POST /api/v1/platform/api-keys/`. A per-user monthly quota "
     "applies; `monthly_usage` and `monthly_limit` report it on every response.\n\n"
-    "A source that is down or unconfigured costs the request its extra recall, not its "
-    "results: the remaining sources are ranked and returned as usual.\n\n"
+    "If EUSP is down or unconfigured, the request loses its extra recall, not its "
+    "results: the index's results are ranked and returned as usual.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
 )
 
@@ -75,18 +77,6 @@ OPENAPI_EXTRA = {
 }
 
 
-async def _gather_external(query: str):
-    """Staan's and Wikipedia's results, fetched concurrently.
-
-    Both are synchronous, network-bound and independent, so they run on threads and the
-    request waits once rather than twice. Each returns [] on failure by itself.
-    """
-    return await asyncio.gather(
-        asyncio.to_thread(get_staan_results, query),
-        asyncio.to_thread(get_wiki_results, query),
-    )
-
-
 def init_router(ranker) -> None:
     @router.get(
         "",
@@ -94,7 +84,7 @@ def init_router(ranker) -> None:
         # Handled manually in the view so both an API key and a JWT work under an async
         # view - the same reason Super Search does it this way.
         auth=None,
-        summary="Combined Search (Mwmbl + EUSP + Wikipedia)",
+        summary="Combined Search (Mwmbl + EUSP)",
         description=DESCRIPTION,
         openapi_extra=OPENAPI_EXTRA,
     )
@@ -117,11 +107,12 @@ def init_router(ranker) -> None:
                 f"and you have used {monthly_usage - 1}.",
             )
 
-        staan_results, wiki_results = await _gather_external(q)
+        # get_staan_results returns [] on failure by itself.
+        staan_results = await asyncio.to_thread(get_staan_results, q)
         results = await asyncio.to_thread(
             ranker.search,
             q,
-            staan_results + wiki_results,
+            staan_results,
             False,  # use_external_search=False
         )
 

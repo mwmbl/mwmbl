@@ -1,8 +1,8 @@
 """Integration tests for the Combined Search endpoint (/api/v2/combined-search/).
 
-The endpoint's own job is auth, quota, fanning out to three sources concurrently and
-handing the union to one ranker. The ranking itself belongs to LTRRanker and is tested
-there, so these tests stub the ranker and the two external providers: what is checked here
+The endpoint's own job is auth, quota, fetching Staan and handing it to one ranker alongside
+the index. The ranking itself belongs to CombinedLTRRanker and is tested there, so these
+tests stub the ranker and Staan: what is checked here
 is that each source reaches the pool, that provenance survives as far as the wire, that a
 provider being down costs recall rather than the request, and that the quota is enforced
 atomically.
@@ -28,13 +28,12 @@ INDEX_RESULT = Document("Tokio internals", "https://blog.example.com/tokio", "A 
 STAAN_RESULT = Document(
     "Tokio", "https://tokio.rs/", "An asynchronous runtime for Rust.", 6.0, source=DocumentSource.STAAN
 )
-WIKI_RESULT = Document(
+# There is no Wikipedia fetch, but the index holds Wikipedia pages of its own.
+WIKI_INDEX_RESULT = Document(
     "Tokio (software)",
     "https://en.wikipedia.org/wiki/Tokio",
     "A Rust runtime.",
-    6.0,
     state=DocumentState.FROM_WIKI,
-    source=DocumentSource.WIKIPEDIA,
 )
 
 
@@ -77,23 +76,19 @@ def fresh_quota(api_key):
 
 @pytest.fixture
 def stub_sources(monkeypatch):
-    """Stub the two external providers and the ranker, recording what the ranker was given.
+    """Stub Staan and the ranker, recording what the ranker was given.
 
     The stub ranker returns the pool unchanged, so the response is the pool: that is what
     lets these tests assert on which sources reached it.
     """
     calls = {}
 
-    def configure(staan=(STAAN_RESULT,), wiki=(WIKI_RESULT,), index=(INDEX_RESULT,)):
+    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,)):
         def fake_staan(query, *args, **kwargs):
             calls["staan_query"] = query
             if isinstance(staan, Exception):
                 raise staan
             return list(staan)
-
-        def fake_wiki(query, *args, **kwargs):
-            calls["wiki_query"] = query
-            return list(wiki)
 
         def fake_search(query, additional_results, use_external_search=True):
             calls["additional_results"] = additional_results
@@ -101,7 +96,6 @@ def stub_sources(monkeypatch):
             return list(index) + list(additional_results)
 
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
-        monkeypatch.setattr(combined_search, "get_wiki_results", fake_wiki)
         # The router closed over the ranker at registration time, so the ranker instance
         # itself is what has to be patched, not the name in search_setup.
         from mwmbl.search_setup import combined_ranker
@@ -199,42 +193,38 @@ def test_the_quota_counter_is_its_own(client, api_key, fresh_quota, stub_sources
 
 
 @pytest.mark.django_db
-def test_all_three_sources_reach_the_response(client, api_key, fresh_quota, stub_sources):
+def test_both_sources_reach_the_response(client, api_key, fresh_quota, stub_sources):
     stub_sources()
 
     results = _get(client, api_key).json()["results"]
 
-    assert [result["url"] for result in results] == [
-        INDEX_RESULT.url,
-        STAAN_RESULT.url,
-        WIKI_RESULT.url,
-    ]
+    assert [result["url"] for result in results] == [INDEX_RESULT.url, STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
 def test_each_result_names_the_provider_it_came_from(client, api_key, fresh_quota, stub_sources):
-    stub_sources()
+    stub_sources(index=(INDEX_RESULT, WIKI_INDEX_RESULT))
 
     results = _get(client, api_key).json()["results"]
 
-    assert [result["engine"] for result in results] == ["mwmbl", "eusp", "wikipedia"]
+    assert [result["engine"] for result in results] == ["mwmbl", "wikipedia", "eusp"]
 
 
 @pytest.mark.django_db
 def test_the_external_results_are_passed_in_as_additional_results(client, api_key, fresh_quota, stub_sources):
-    """Staan and Wikipedia go in through Ranker.get_results' additional_results hook, which
-    is what gets them blacklist-filtered and ranked alongside the index candidates."""
+    """Staan goes in through Ranker.get_results' additional_results hook, which is what gets
+    it blacklist-filtered and ranked alongside the index candidates."""
     calls = stub_sources()
 
     _get(client, api_key)
 
-    assert [document.url for document in calls["additional_results"]] == [STAAN_RESULT.url, WIKI_RESULT.url]
+    assert [document.url for document in calls["additional_results"]] == [STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_the_ranker_is_told_not_to_fetch_wikipedia_again(client, api_key, fresh_quota, stub_sources):
-    """The endpoint fetches Wikipedia itself so that call runs concurrently with Staan's.
-    Leaving external search on would fetch it a second time, serially."""
+def test_the_ranker_is_told_not_to_fetch_wikipedia(client, api_key, fresh_quota, stub_sources):
+    """External search is standard search's Wikipedia fetch, which Combined Search drops:
+    Staan already returns Wikipedia pages when they are relevant."""
     calls = stub_sources()
 
     _get(client, api_key)
@@ -243,13 +233,12 @@ def test_the_ranker_is_told_not_to_fetch_wikipedia_again(client, api_key, fresh_
 
 
 @pytest.mark.django_db
-def test_the_query_reaches_every_source(client, api_key, fresh_quota, stub_sources):
+def test_the_query_reaches_staan(client, api_key, fresh_quota, stub_sources):
     calls = stub_sources()
 
     _get(client, api_key, query="rust")
 
     assert calls["staan_query"] == "rust"
-    assert calls["wiki_query"] == "rust"
 
 
 @pytest.mark.django_db
@@ -267,26 +256,17 @@ def test_the_result_count_matches_the_results(client, api_key, fresh_quota, stub
 
 
 @pytest.mark.django_db
-def test_staan_returning_nothing_still_serves_the_other_sources(client, api_key, fresh_quota, stub_sources):
+def test_staan_returning_nothing_still_serves_the_index(client, api_key, fresh_quota, stub_sources):
     stub_sources(staan=())
 
     results = _get(client, api_key).json()["results"]
 
-    assert [result["url"] for result in results] == [INDEX_RESULT.url, WIKI_RESULT.url]
-
-
-@pytest.mark.django_db
-def test_wikipedia_returning_nothing_still_serves_the_other_sources(client, api_key, fresh_quota, stub_sources):
-    stub_sources(wiki=())
-
-    results = _get(client, api_key).json()["results"]
-
-    assert [result["url"] for result in results] == [INDEX_RESULT.url, STAAN_RESULT.url]
+    assert [result["url"] for result in results] == [INDEX_RESULT.url]
 
 
 @pytest.mark.django_db
 def test_an_empty_pool_is_an_empty_response_not_an_error(client, api_key, fresh_quota, stub_sources):
-    stub_sources(staan=(), wiki=(), index=())
+    stub_sources(staan=(), index=())
 
     body = _get(client, api_key).json()
 
