@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import fakeredis
+import pytest
 
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent, Result, Results
 from mwmbl.crawler.stats import StatsManager
@@ -43,9 +44,16 @@ def make_batch(user_id_hash: str) -> HashedBatch:
     return HashedBatch(user_id_hash=user_id_hash, timestamp=item.timestamp, items=[item])
 
 
+@pytest.mark.django_db
 def test_record_results_counts_each_crawler_once_per_day():
+    from mwmbl.models import MwmblUser
+
     redis = fakeredis.FakeRedis(decode_responses=True)
     stats_manager = StatsManager(redis)
+
+    # Create users in the database
+    MwmblUser.objects.create_user(username="alice", password="testpass")
+    MwmblUser.objects.create_user(username="bob", password="testpass")
 
     # A crawler submits twice in the same day with the same API-key user.
     stats_manager.record_results(make_results("https://example.com/"), "alice")

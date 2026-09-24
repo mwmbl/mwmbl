@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import fakeredis
+import pytest
 
 from mwmbl.crawler.stats import LONG_EXPIRE_SECONDS, USER_RESULTS_COUNT_KEY, StatsManager
 
@@ -15,9 +16,15 @@ def _record(stats_manager: StatsManager, day: date, num_results: int, username: 
         stats_manager.record_results(results, username)
 
 
+@pytest.mark.django_db
 def test_user_results_count_is_kept_for_the_whole_stats_window():
+    from mwmbl.models import MwmblUser
+
     redis = fakeredis.FakeRedis()
     stats_manager = StatsManager(redis)
+
+    # Create user in the database
+    MwmblUser.objects.create_user(username="alice", password="testpass")
 
     _record(stats_manager, TODAY, 5, "alice")
 
@@ -25,9 +32,15 @@ def test_user_results_count_is_kept_for_the_whole_stats_window():
     assert redis.ttl(user_results_count_key) == LONG_EXPIRE_SECONDS
 
 
+@pytest.mark.django_db
 def test_user_stats_include_earlier_days():
+    from mwmbl.models import MwmblUser
+
     stats_manager = StatsManager(fakeredis.FakeRedis())
     ten_days_ago = TODAY - timedelta(days=10)
+
+    # Create user in the database
+    MwmblUser.objects.create_user(username="alice", password="testpass")
 
     _record(stats_manager, ten_days_ago, 3, "alice")
     _record(stats_manager, TODAY, 5, "alice")
