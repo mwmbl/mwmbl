@@ -18,7 +18,9 @@ DOCUMENT_SOURCES = {
 # asserts the map is complete rather than leaving that to a KeyError in a response.
 DOCUMENT_PROVIDERS = {
     DocumentSource.WIKIPEDIA: "wikipedia",
-    DocumentSource.STAAN: "staan",
+    # Staan's results go out as "eusp" (European Search Perspective): the label our
+    # agreement with the provider requires, so it deliberately differs from the enum name.
+    DocumentSource.STAAN: "eusp",
 }
 
 

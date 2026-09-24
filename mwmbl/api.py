@@ -12,14 +12,16 @@ Sub-routers (v1):
 Sub-routers (v2):
   /api/v2/search/          — full-text search with optional API-key auth and quota info
   /api/v2/super-search/    — multi-source streaming search (SSE), authenticated
-  /api/v2/combined-search/ — Mwmbl + Staan + Wikipedia in one ranked response, authenticated
+  /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
+from datetime import timedelta
+
 from ninja import Field
-from ninja_extra import NinjaExtraAPI, api_controller, http_post
+from ninja_extra import NinjaExtraAPI, api_controller, http_get, http_post
 from ninja_extra.permissions import AllowAny
 from ninja_jwt.controller import TokenObtainPairController, TokenVerificationController
 from ninja_jwt.schema import TokenObtainPairInputSchema
@@ -28,7 +30,9 @@ from ninja_jwt.settings import api_settings
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
+from mwmbl.crawler.app import stats_manager
 from mwmbl.exceptions import InvalidRequest
+from mwmbl.utils import utc_today
 
 _schema = SchemaControl(api_settings)
 
@@ -100,6 +104,31 @@ def invalid_request_handler(request, exc: InvalidRequest):
         {"status": "error", "message": exc.message},
         status=exc.status,
     )
+
+
+@api_controller("/leaderboard", tags=["Platform"])
+class LeaderboardController:
+    """Leaderboard API endpoints."""
+
+    @http_get("/{period}", response={200: list})
+    def get_leaderboard(self, request, period: str):
+        """
+        Get leaderboard data for a given period.
+        Supported periods: 'yesterday', 'all'
+        Returns list of [username, score] pairs sorted by score descending.
+        """
+        if period == "yesterday":
+            yesterday = utc_today() - timedelta(days=1)
+            results = stats_manager.get_leaderboard_for_date(yesterday)
+            return [[username, score] for username, score in results]
+        elif period == "all":
+            results = stats_manager.get_all_time_leaderboard()
+            return [[username, score] for username, score in results]
+        else:
+            return []
+
+
+api.register_controllers(LeaderboardController)
 
 
 v2_api = NinjaExtraAPI(

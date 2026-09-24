@@ -46,20 +46,21 @@ router = Router(tags=["Combined Search"])
 
 
 DESCRIPTION = (
-    "Search the Mwmbl index and Staan in one request and return the ranked union.\n\n"
-    "Every candidate - crawled by Mwmbl or returned by Staan - is scored by one "
+    "Search the Mwmbl index and EUSP (European Search Perspective) in one request and "
+    "return the ranked union.\n\n"
+    "Every candidate - crawled by Mwmbl or returned by EUSP - is scored by one "
     "learning-to-rank model trained on the pooled candidate set, then "
     "diversified so a single domain cannot take the whole page. The response is the same "
     "SearXNG-compatible shape as `/api/v2/search/`.\n\n"
     "The `engine` field names the provider a result came from:\n"
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
-    "- `staan` - returned by the Staan web-search API\n"
+    "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. Obtain a key via `POST /api/v1/platform/api-keys/`. A per-user monthly quota "
     "applies; `monthly_usage` and `monthly_limit` report it on every response.\n\n"
-    "If Staan is down or unconfigured, the request loses its extra recall, not its "
+    "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
 )
@@ -83,7 +84,7 @@ def init_router(ranker) -> None:
         # Handled manually in the view so both an API key and a JWT work under an async
         # view - the same reason Super Search does it this way.
         auth=None,
-        summary="Combined Search (Mwmbl + Staan)",
+        summary="Combined Search (Mwmbl + EUSP)",
         description=DESCRIPTION,
         openapi_extra=OPENAPI_EXTRA,
     )

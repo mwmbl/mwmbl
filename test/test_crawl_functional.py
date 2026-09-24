@@ -11,7 +11,7 @@ import fakeredis
 import pytest
 from django.test import override_settings
 
-from mwmbl.crawl import Crawler, crawl_url
+from mwmbl.crawl import REMOTE_INDEX_CACHE_EXPIRY, Crawler, crawl_url
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
@@ -213,6 +213,10 @@ class TestCrawlFunctional:
                             # Verify batch was consumed from Redis
                             remaining_batches = fake_redis.llen("batch-queue")
                             assert remaining_batches == 0
+
+                            # A never-expiring cache of the index's answers fills the disk:
+                            # see test_request_cache.py
+                            mock_remote_index.assert_called_once_with(expire_after=REMOTE_INDEX_CACHE_EXPIRY)
 
     def test_crawl_url_functionality(self, mock_environment):
         """Test individual URL crawling functionality"""
