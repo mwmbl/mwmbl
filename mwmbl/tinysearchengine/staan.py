@@ -42,6 +42,11 @@ NUM_STAAN_RESULTS = 10
 # scale so the two providers' priors are comparable. Changing it means retraining.
 STAAN_TOP_SCORE = 6.0
 
+# One session for the process, so its pooled connections are reused: a fresh connection per
+# request pays a TCP and TLS handshake to Staan every time, and Staan is on Combined
+# Search's critical path.
+session = requests.Session()
+
 
 def staan_score(rank: int) -> float:
     """The `score` feature for a Staan result at 0-based `rank`. See STAAN_TOP_SCORE."""
@@ -93,7 +98,7 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
         return []
 
     try:
-        response = requests.get(
+        response = session.get(
             settings.STAAN_SEARCH_URL,
             params={"q": query, "market": settings.STAAN_MARKET},
             headers={"Authorization": f"Bearer {settings.STAAN_SEARCH_API_KEY}"},

@@ -64,6 +64,26 @@ def test_search_still_triggers_external_search():
     assert ranker.external_search_calls == ["some query"]
 
 
+def test_search_retrieved_ranks_like_search_without_external_search():
+    """Combined Search retrieves from the index while Staan is in flight, then ranks the two
+    together. That split must rank exactly as a single search() call would."""
+    index_pages = [
+        Document("Bananas", "https://a.com/", "Bananas and apples", 1.0),
+        Document("Apples", "https://b.com/", "Only apples", 2.0),
+        Document("Bananas again", "https://a.com/", "A repeat of the first URL", 0.5),
+    ]
+    additional = [Document("Banana bread", "https://c.com/", "Bananas, baked", 3.0)]
+    ranker = _TrackingRanker()
+    ranker.tiny_index.retrieve.return_value = index_pages
+
+    retrieved = ranker.search_retrieved(ranker.retrieve("bananas "), additional)
+    searched = ranker.search("bananas ", additional, use_external_search=False)
+
+    assert [d.url for d in retrieved] == [d.url for d in searched]
+    assert sorted(d.url for d in retrieved) == ["https://a.com/", "https://c.com/"]
+    assert ranker.external_search_calls == []
+
+
 def _make_retry_error(status_code: int) -> RetryError:
     reason = ResponseError(f"too many {status_code} error responses")
     max_retry_error = MaxRetryError(
