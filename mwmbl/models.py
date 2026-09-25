@@ -217,6 +217,25 @@ class UsageBucket(models.Model):
         ]
 
 
+class UserStats(models.Model):
+    """Records a user's crawl results for a specific calendar day.
+
+    This persists the per-user result counts that were previously only stored
+    in Redis (with a 30-day TTL). Having them in Postgres enables all-time
+    leaderboards and historical analysis.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="user_stats")
+    date = models.DateField()
+    num_results = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [("user", "date")]
+        indexes = [
+            models.Index(fields=["user", "date"]),
+        ]
+
+
 class UserBilling(models.Model):
     user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="billing")
     polar_customer_id = models.CharField(max_length=100, blank=True, default="")
