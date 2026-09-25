@@ -4,9 +4,12 @@ Write crawled documents into the index.
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from functools import cache
 from logging import getLogger
 from typing import Collection, Iterable, Optional
 from urllib.parse import unquote
+
+from django.conf import settings
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
@@ -20,6 +23,8 @@ from mwmbl.tinysearchengine.indexer import (
     TinyIndex,
     cleaned_document,
 )
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline
+from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.tokenizer import get_bigrams, tokenize
 from mwmbl.utils import get_domain
@@ -108,10 +113,40 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
     return kept
 
 
+class LTRPageRanker:
+    """Orders the documents filed under a term by the LTR model, with the term as the query.
+
+    The order decides which documents stay when a term's page is full. The heuristic ranker
+    multiplies its score by a list of Hacker News domains, so on a common term the page
+    fills with short tag pages from those domains and evicts better pages from any other
+    host. Nothing is dropped here: a full page trims from the end, as before.
+    """
+
+    def __init__(self, model):
+        self.model = model
+
+    def order_results(self, terms: list[str], documents: list[Document], is_complete: bool) -> list[Document]:
+        scores = score_documents(self.model, " ".join(terms), documents)
+        order = sorted(range(len(documents)), key=lambda i: scores[i], reverse=True)
+        return [documents[i] for i in order]
+
+
+@cache
+def _page_ltr_model() -> RustXGBPipeline:
+    # Combined Search's model, which scores an index-only pool as "Staan not asked".
+    return RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
+
+
+def get_page_ranker(indexer: TinyIndex):
+    if settings.INDEX_PAGE_RANKER == "ltr":
+        return LTRPageRanker(_page_ltr_model())
+    return HeuristicRanker(indexer, None, score_threshold=float("-inf"))
+
+
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
     with TinyIndex(Document, index_path, "w") as indexer:
-        ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
+        ranker = get_page_ranker(indexer)
         for page_index, documents in page_documents.items():
             try:
                 with indexer.page(page_index) as page:

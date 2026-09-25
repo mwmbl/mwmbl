@@ -144,6 +144,7 @@ ignore = ["E501"]
 "mwmbl/rankeval/evaluation/compare_ltr_models.py" = ["E402"]
 "test/test_rust_features.py" = ["E402"]
 "scripts/combined_search_haiku/*.py" = ["E402"]
+"scripts/index_write_order/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mwmbl", "mwmbl_rank"]
