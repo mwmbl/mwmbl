@@ -169,9 +169,7 @@ class StatsManager:
         updated = UserStats.objects.filter(
             user=user,
             date=today,
-        ).update(
-            num_results=models.F("num_results") + num_results
-        )
+        ).update(num_results=models.F("num_results") + num_results)
 
         if updated == 0:
             UserStats.objects.create(
@@ -179,7 +177,7 @@ class StatsManager:
                 date=today,
                 num_results=num_results,
             )
-        
+
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.
 
