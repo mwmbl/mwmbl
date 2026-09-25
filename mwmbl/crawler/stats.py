@@ -149,8 +149,7 @@ class StatsManager:
         )
         return [(row["user__username"], row["total_results"]) for row in results]
 
-    def record_results(self, results: Results, username: str) -> None:
-        user = MwmblUser.objects.get(username=username)
+    def record_results(self, results: Results, user: MwmblUser) -> None:
         today = utc_today()
         num_results = len(results.results)
 
@@ -159,11 +158,11 @@ class StatsManager:
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
-        self.redis.zincrby(user_result_count_key, num_results, username)
+        self.redis.zincrby(user_result_count_key, num_results, user.username)
         self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
 
         users_key = USERS_KEY.format(date=today)
-        self.redis.sadd(users_key, username)
+        self.redis.sadd(users_key, user.username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
         # Persist to Postgres for all-time leaderboard.

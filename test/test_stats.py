@@ -6,14 +6,15 @@ import fakeredis
 import pytest
 
 from mwmbl.crawler.stats import LONG_EXPIRE_SECONDS, USER_RESULTS_COUNT_KEY, StatsManager
+from mwmbl.models import MwmblUser
 
 TODAY = date(2026, 9, 22)
 
 
-def _record(stats_manager: StatsManager, day: date, num_results: int, username: str) -> None:
+def _record(stats_manager: StatsManager, day: date, num_results: int, user: MwmblUser) -> None:
     results = SimpleNamespace(results=[object()] * num_results)
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
-        stats_manager.record_results(results, username)
+        stats_manager.record_results(results, user)
 
 
 @pytest.mark.django_db
@@ -24,9 +25,9 @@ def test_user_results_count_is_kept_for_the_whole_stats_window():
     stats_manager = StatsManager(redis)
 
     # Create user in the database
-    MwmblUser.objects.create_user(username="alice", password="testpass")
+    alice = MwmblUser.objects.create_user(username="alice", password="testpass")
 
-    _record(stats_manager, TODAY, 5, "alice")
+    _record(stats_manager, TODAY, 5, alice)
 
     user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=TODAY)
     assert redis.ttl(user_results_count_key) == LONG_EXPIRE_SECONDS
@@ -39,12 +40,13 @@ def test_user_stats_include_earlier_days():
     stats_manager = StatsManager(fakeredis.FakeRedis())
     ten_days_ago = TODAY - timedelta(days=10)
 
-    # Create user in the database
-    MwmblUser.objects.create_user(username="alice", password="testpass")
+    # Create users in the database
+    alice = MwmblUser.objects.create_user(username="alice", password="testpass")
+    bob = MwmblUser.objects.create_user(username="bob", password="testpass")
 
-    _record(stats_manager, ten_days_ago, 3, "alice")
-    _record(stats_manager, TODAY, 5, "alice")
-    _record(stats_manager, TODAY, 7, "bob")
+    _record(stats_manager, ten_days_ago, 3, alice)
+    _record(stats_manager, TODAY, 5, alice)
+    _record(stats_manager, TODAY, 7, bob)
 
     with patch("mwmbl.crawler.stats.utc_today", return_value=TODAY):
         user_stats = stats_manager.get_user_stats("alice")
