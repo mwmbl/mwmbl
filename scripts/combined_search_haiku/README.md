@@ -59,3 +59,20 @@ Behind `mwmbl/rankeval/combined-search-wikidata-fill.md`, reproduced by
    Haiku 4.5 subagents.
 5. `consolidate_wikidata.py`: the judge output into `haiku/relevance_engb_wikidata.jsonl` and
    `haiku/pass3_engb_wikidata.jsonl`.
+
+## Where the index loses Brave's good results
+
+Behind `mwmbl/rankeval/combined-search-miss-attribution.md`, reproduced by
+`python -m mwmbl.rankeval.evaluation.miss_attribution_report`.
+
+1. `miss_probe.py`: for every graded Brave URL of the en-gb rows, reads the index pages it
+   would be filed under (its title, snippet and URL terms) and the query's candidate set and
+   LTR scores, through `RemoteIndex` (~54k terms, cached), into `engb/miss_probe.json`.
+
+   ```sh
+   DJANGO_SETTINGS_MODULE=mwmbl.settings_dev DATABASE_URL="postgres://daoud@" PYTHONPATH=. \
+       uv run python scripts/combined_search_haiku/miss_probe.py
+   ```
+2. `make_batches_miss.py`: UK-relevance batches of the index's stored text for the Brave URLs
+   it holds, plus two anchors per query, judged by Claude Haiku 4.5 subagents.
+3. `consolidate_miss.py`: the judge output into `haiku/relevance_engb_indextext.jsonl`.
