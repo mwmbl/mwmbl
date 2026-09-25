@@ -110,7 +110,7 @@ def invalid_request_handler(request, exc: InvalidRequest):
 class LeaderboardController:
     """Leaderboard API endpoints."""
 
-    @http_get("/{period}", response={200: list})
+    @http_get("/{period}/", response={200: list})
     def get_leaderboard(self, request, period: str):
         """
         Get leaderboard data for a given period.
