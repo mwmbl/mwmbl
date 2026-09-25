@@ -336,6 +336,11 @@ SUPER_SEARCH_XGB_MIN_TRAIN_ROWS = 2000  # (source, reward) pairs required before
 SUPER_SEARCH_XGB_TRAIN_WINDOW_DAYS = 90  # impression window for online retrains
 SOURCE_PROVENANCE_MAX_DEPTH = 3  # max crawl hops a Super Search source propagates to descendant pages
 
+# What orders a term's documents when its index page is written, and so which ones a full
+# page evicts: "heuristic" (HeuristicRanker, weighted by the Hacker News domain list) or
+# "ltr" (Combined Search's model with the term as the query). See index_batches.
+INDEX_PAGE_RANKER = os.environ.get("INDEX_PAGE_RANKER", "heuristic")
+
 # Blacklisted-domain filtering on the search path. Set BLACKLIST_FILTER_AT_RETRIEVAL to
 # False to turn retrieval-time filtering off without a rollback; the index-time filter in
 # index_documents() is unaffected.

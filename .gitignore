@@ -226,3 +226,7 @@ devdata/external-cache-engb.tinysearch
 !devdata/judge_train/RESULTS.md
 !devdata/judge_train/eval_manifest.json
 devdata/moderation_bakeoff/
+
+# Index write-order A/B intermediates (corpus + indexes, ~1.2 GB); results are under
+# devdata/combined_providers_eval/index_write_order/.
+devdata/index_write_order/

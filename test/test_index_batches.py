@@ -8,9 +8,11 @@ import pytest
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import (
+    LTRPageRanker,
     _merge_user_ids,
     combine_documents,
     index_documents,
+    index_pages,
     index_results_against_query,
     sort_documents,
 )
@@ -306,3 +308,44 @@ def test_index_results_against_query_cleans_text_that_cannot_be_stored(index_pat
     with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
         stored = index.retrieve("rust")
     assert [d.title for d in stored] == ["Rust "]
+
+
+class ExtractLengthModel:
+    """Scores a record by the length of its extract, and records the queries it was asked."""
+
+    def __init__(self):
+        self.queries = []
+
+    def predict(self, records):
+        self.queries += [record["query"] for record in records]
+        return [float(len(record["extract"])) for record in records]
+
+
+def test_ltr_page_ranker_orders_by_model_score_and_drops_nothing():
+    model = ExtractLengthModel()
+    documents = [
+        Document(title="a", url="https://a.com/", extract="xx"),
+        Document(title="b", url="https://b.com/", extract=""),
+        Document(title="c", url="https://c.com/", extract="xxxx"),
+    ]
+
+    ordered = LTRPageRanker(model).order_results(["hyundai", "tucson"], documents, True)
+
+    assert [document.url for document in ordered] == ["https://c.com/", "https://a.com/", "https://b.com/"]
+    assert set(model.queries) == {"hyundai tucson"}
+
+
+def test_index_pages_uses_the_ltr_ranker_when_configured(index_path, settings):
+    """With the heuristic, the Hacker News-listed domain would come first."""
+    settings.INDEX_PAGE_RANKER = "ltr"
+    documents = [
+        Document(title="Tucson on GitHub", url="https://github.com/tucson", extract="tucson", term="tucson"),
+        Document(title="Tucson", url="https://example.com/tucson", extract="tucson " * 20, term="tucson"),
+    ]
+
+    with patch("mwmbl.indexer.index_batches._page_ltr_model", return_value=ExtractLengthModel()):
+        index_pages(index_path, {0: documents})
+
+    with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
+        stored = [document.url for document in index.get_page(0)]
+    assert stored == ["https://example.com/tucson", "https://github.com/tucson"]
