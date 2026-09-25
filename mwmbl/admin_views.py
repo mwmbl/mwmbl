@@ -1,6 +1,6 @@
-"""Admin-only visibility on the blacklist filtering state that lives in Redis.
+"""Admin-only visibility on state that lives in Redis, which nothing else can show.
 
-Retrieval filtering, the snapshot refresh and the index purge are three processes talking
+Blacklist status: retrieval filtering, the snapshot refresh and the index purge are three processes talking
 to each other through Redis keys, and none of that state is reachable from the Django
 admin: a snapshot that never publishes and a purge queue that never drains look exactly
 like everything working, because retrieval quietly falls back to the built-in rules either
@@ -10,18 +10,27 @@ the queue waiting to be purged, and the background tasks that maintain both - on
 The page is read-only, and deliberately cheap: the snapshot's size comes from STRLEN so a
 page load never pulls the ~11 MB blob out of Redis, and the queue is sampled with
 SRANDMEMBER so looking at it cannot consume it.
+
+Search traffic: #425 counts every search request into Redis, and being read is the whole of
+what those counters are for - #411 asks how many searches a day, how much of that is one
+client at volume, and how much of it is our own server-side render. The page describes rather
+than judges, for the same reason the classification stayed out of the keys: any rule about
+what a bot looks like belongs to whoever is reading, and can be a different rule next week.
 """
 
 import os
-from datetime import timedelta
+from collections import Counter, defaultdict
+from datetime import date, timedelta
 from logging import getLogger
 
 from background_task.models import CompletedTask, Task
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
+from django.http import HttpRequest
 from django.shortcuts import render
 from redis import RedisError
 
+from mwmbl import traffic
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -32,6 +41,15 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
+from mwmbl.traffic import (
+    HEADER_LABELS,
+    STATUS_LABELS,
+    TRACKED_USER_AGENTS,
+    TRAFFIC_EXPIRE_SECONDS,
+    USER_AGENT_EXPIRE_SECONDS,
+    read_request_counts,
+    read_user_agent_counts,
+)
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -171,3 +189,120 @@ def blacklist_status_view(request):
 
     context["tasks"] = _task_status()
     return render(request, "admin/blacklist_status.html", context)
+
+
+SECONDS_PER_DAY = 60 * 60 * 24
+
+# Both windows come from the expiries rather than from taste: a window wider than what Redis
+# keeps shows zeros for days that were never retained, which reads as no traffic rather than
+# as no data, and the two keys are not kept for the same length of time.
+TRAFFIC_MAX_DAYS = TRAFFIC_EXPIRE_SECONDS // SECONDS_PER_DAY
+TRAFFIC_DEFAULT_DAYS = 7
+TRAFFIC_WINDOW_CHOICES = [1, 7, TRAFFIC_MAX_DAYS]
+USER_AGENT_MAX_DAYS = USER_AGENT_EXPIRE_SECONDS // SECONDS_PER_DAY
+
+# Enough to see the shape of the tail without putting two thousand caller-supplied strings
+# through the template.
+TOP_USER_AGENTS = 100
+
+# Positions in the read_request_counts coordinate, which is (day, endpoint, headers, status).
+DAY, ENDPOINT, HEADERS, STATUS = 0, 1, 2, 3
+
+
+def _traffic_days(request: HttpRequest) -> list[date]:
+    """The days to report on, most recent first, matching _removed_counts above."""
+    try:
+        requested = int(request.GET.get("days", TRAFFIC_DEFAULT_DAYS))
+    except ValueError:
+        requested = TRAFFIC_DEFAULT_DAYS
+    days = min(max(requested, 1), TRAFFIC_MAX_DAYS)
+    today = utc_today()
+    return [today - timedelta(days=offset) for offset in range(days)]
+
+
+def _requests_by_label(counts: dict, dimension: int, labels: list) -> dict:
+    """Requests as endpoints against one dimension of the counter key.
+
+    The three tables on this page - per day, per header combination, per status class - are
+    the same table with a different column, so they are one function called three times.
+    Endpoints with no traffic are left out rather than padding each table with a dozen zero
+    rows, and the busiest comes first.
+    """
+    per_endpoint: dict[str, Counter] = defaultdict(Counter)
+    for coordinate, count in counts.items():
+        per_endpoint[coordinate[ENDPOINT]][coordinate[dimension]] += count
+
+    rows = [
+        {
+            "endpoint": endpoint,
+            "counts": [by_label[label] for label in labels],
+            "total": sum(by_label.values()),
+        }
+        for endpoint, by_label in per_endpoint.items()
+    ]
+    rows.sort(key=lambda row: (-row["total"], row["endpoint"]))
+
+    totals = [sum(by_label[label] for by_label in per_endpoint.values()) for label in labels]
+    return {"labels": labels, "rows": rows, "totals": totals, "total": sum(totals)}
+
+
+def _user_agents(redis_client, days: list[date], counts: dict) -> dict:
+    """The most-seen user agent strings, and how much traffic they do not account for.
+
+    The gap between the requests counted over these days and the sum of the tracked agents is
+    the tail the trim dropped, and the only place a client that randomises its user agent
+    shows up at all.
+    """
+    agent_days = days[:USER_AGENT_MAX_DAYS]
+    tracked = read_user_agent_counts(redis_client, agent_days, TRACKED_USER_AGENTS)
+    tracked_total = sum(count for _, count in tracked)
+    request_total = sum(count for coordinate, count in counts.items() if coordinate[DAY] in set(agent_days))
+
+    top = [
+        {
+            "user_agent": user_agent,
+            "count": count,
+            "share": 100 * count / tracked_total if tracked_total else 0,
+        }
+        for user_agent, count in tracked[:TOP_USER_AGENTS]
+    ]
+    return {
+        "days": agent_days,
+        "top": top,
+        "tracked": len(tracked),
+        "tracked_limit": TRACKED_USER_AGENTS,
+        "tracked_total": tracked_total,
+        "request_total": request_total,
+        "gap": request_total - tracked_total,
+    }
+
+
+@staff_member_required
+def search_traffic_view(request):
+    days = _traffic_days(request)
+    context = {
+        "title": "Search traffic",
+        "days": days,
+        "window_choices": TRAFFIC_WINDOW_CHOICES,
+        "max_days": TRAFFIC_MAX_DAYS,
+        "user_agent_max_days": USER_AGENT_MAX_DAYS,
+        "top_user_agents": TOP_USER_AGENTS,
+        # Off means the page is telling the truth about Redis and nothing about the traffic,
+        # which is not something a reader should have to infer from empty rows.
+        "counting_enabled": settings.SEARCH_TRAFFIC_COUNTING,
+    }
+
+    # As on the blacklist page: everything below this line comes from Redis, and a page about
+    # what Redis holds has to render when Redis is down.
+    try:
+        redis_client = traffic.get_redis()
+        counts = read_request_counts(redis_client, days)
+        context["by_day"] = _requests_by_label(counts, DAY, days)
+        context["by_headers"] = _requests_by_label(counts, HEADERS, HEADER_LABELS)
+        context["by_status"] = _requests_by_label(counts, STATUS, STATUS_LABELS)
+        context["user_agents"] = _user_agents(redis_client, days, counts)
+    except RedisError as e:
+        logger.exception("Could not read search traffic from Redis")
+        context["redis_error"] = str(e)
+
+    return render(request, "admin/search_traffic.html", context)
