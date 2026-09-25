@@ -43,3 +43,19 @@ in `devdata/combined_providers_eval/haiku/`.
 
 `filter_count.py` measures how many retrieved candidates the LTR's majority-terms filter
 drops.
+
+## Filling Staan's gaps: page 2 and Wikidata
+
+Behind `mwmbl/rankeval/combined-search-wikidata-fill.md`, reproduced by
+`python -m mwmbl.rankeval.evaluation.wikidata_fill_report`.
+
+1. `staan_page2.py`: Staan pages 1 and 2 for 20 short en-gb queries (40 paid calls) into
+   `engb/staan_page2_sample.json`.
+2. `wikidata_pool.py`: `wbsearchentities` + `wbgetentities` for every en-gb query into
+   `engb/wikidata_raw.json`. Serial on purpose: Wikidata answers parallel clients with 429s.
+3. `wikidata_arms.py`: the Wikidata arms' URLs no earlier judgment covers, plus graded
+   anchors, into `engb/wikidata_to_judge.json`.
+4. `make_batches_wikidata.py`: UK-relevance and pass-3 batches (3 of each), judged by Claude
+   Haiku 4.5 subagents.
+5. `consolidate_wikidata.py`: the judge output into `haiku/relevance_engb_wikidata.jsonl` and
+   `haiku/pass3_engb_wikidata.jsonl`.
