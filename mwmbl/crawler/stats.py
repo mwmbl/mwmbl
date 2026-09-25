@@ -150,28 +150,37 @@ class StatsManager:
         return [(row["user__username"], row["total_results"]) for row in results]
 
     def record_results(self, results: Results, username: str) -> None:
-        result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
+        user = MwmblUser.objects.get(username=username)
+        today = utc_today()
         num_results = len(results.results)
+
+        result_count_key = RESULTS_COUNT_KEY.format(date=today)
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
         self.redis.zincrby(user_result_count_key, num_results, username)
         self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
 
-        users_key = USERS_KEY.format(date=utc_today())
+        users_key = USERS_KEY.format(date=today)
         self.redis.sadd(users_key, username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
-        # Also persist to Postgres for all-time leaderboard
-        today = utc_today()
-        user = MwmblUser.objects.filter(username=username).first()
-        if user:
-            UserStats.objects.filter(user=user, date=today).update(num_results=models.F("num_results") + num_results)
-            # If no row was updated, create it
-            if not UserStats.objects.filter(user=user, date=today).exists():
-                UserStats.objects.create(user=user, date=today, num_results=num_results)
+        # Persist to Postgres for all-time leaderboard.
+        updated = UserStats.objects.filter(
+            user=user,
+            date=today,
+        ).update(
+            num_results=models.F("num_results") + num_results
+        )
 
+        if updated == 0:
+            UserStats.objects.create(
+                user=user,
+                date=today,
+                num_results=num_results,
+            )
+        
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.
 
