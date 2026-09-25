@@ -219,6 +219,10 @@ devdata/judge_bakeoff/*.npy
 devdata/judge_bakeoff/*.npz
 devdata/judgments_export/
 devdata/judge_train/*
+# Combined Search Haiku judging: batch files and raw judge outputs. The consolidated
+# judgments are tracked under devdata/combined_providers_eval/haiku/.
+devdata/combined_providers_eval/haiku_work/
+devdata/external-cache-engb.tinysearch
 !devdata/judge_train/RESULTS.md
 !devdata/judge_train/eval_manifest.json
 devdata/moderation_bakeoff/
