@@ -26,7 +26,7 @@ from mwmbl.indexer.external_cache import get_cached_external_results, store_exte
 from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
-from mwmbl.tokenizer import get_bigrams, get_compounds, tokenize
+from mwmbl.tokenizer import get_bigrams, tokenize
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -308,6 +308,12 @@ class Retrieval:
     pages: list[Document]
 
 
+def get_site_name(url: str) -> str:
+    """The first label of a URL's host, ignoring www: "britishmuseum" for www.britishmuseum.org."""
+    host = urlparse(url).netloc.lower().removeprefix("www.")
+    return host.split(".")[0]
+
+
 class Ranker:
     def __init__(self, tiny_index: TinyIndex, completer: Completer):
         self.tiny_index = tiny_index
@@ -393,10 +399,16 @@ class Ranker:
         curated_items = [d for d in curation_items if d.state is not None and d.term == curation_term]
 
         bigrams = set(get_bigrams(len(terms), terms))
-        compounds = get_compounds(terms)
+
+        # A query that names a site ("british museum", "jet 2 holidays") finds its homepage on
+        # the page for the joined domain token, long after it has been evicted from the pages
+        # for the separate words. That page also holds every tag and slug page using the
+        # token, which crowd out better results, so only the site's own pages are kept.
+        site_term = "".join(terms)
+        site_terms = {site_term} if len(terms) > 1 else set()
 
         pages = []
-        for term in retrieval_terms | bigrams | compounds:
+        for term in retrieval_terms | bigrams | site_terms:
             # An optimisation - we have already retrieved this, so make use of it
             if term == curation_term:
                 items = curation_items
@@ -414,6 +426,8 @@ class Ranker:
                     )
                     for result in items_wrong_state
                 ]
+                if term in site_terms:
+                    items = [item for item in items if get_site_name(item.url) == site_term]
 
             if items is not None:
                 pages += items

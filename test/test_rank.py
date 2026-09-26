@@ -14,10 +14,10 @@ from mwmbl.tinysearchengine.rank import (
     NUM_WIKI_RESULTS,
     HeuristicAndWikiRanker,
     HeuristicRanker,
+    get_site_name,
     get_wiki_results,
     wiki_score,
 )
-from mwmbl.tokenizer import get_compounds
 
 
 def test_order_result():
@@ -65,32 +65,33 @@ def test_search_still_triggers_external_search():
     assert ranker.external_search_calls == ["some query"]
 
 
-def test_compounds_join_adjacent_pairs_and_the_whole_query():
-    assert get_compounds(["bananas"]) == set()
-    assert get_compounds(["british", "museum"]) == {"british-museum", "britishmuseum"}
-    assert get_compounds(["stocks", "and", "shares", "isa"]) == {
-        "stocks-and",
-        "stocksand",
-        "and-shares",
-        "andshares",
-        "shares-isa",
-        "sharesisa",
-        "stocks-and-shares-isa",
-        "stocksandsharesisa",
-    }
+def test_site_name_is_the_first_label_of_the_host_without_www():
+    assert get_site_name("https://www.britishmuseum.org/collection") == "britishmuseum"
+    assert get_site_name("https://blog.britishmuseum.org/") == "blog"
+    assert get_site_name("http://JET2HOLIDAYS.com") == "jet2holidays"
 
 
-def test_retrieve_finds_a_page_filed_only_under_a_compound():
-    """A page pushed off the pages for "british" and "museum" can still be on the page for
-    the domain token "britishmuseum"."""
+def test_retrieve_finds_a_site_on_its_joined_domain_token():
+    """A homepage evicted from the pages for "british" and "museum" can still be on the page
+    for the domain token "britishmuseum". Other sites using that token are left out."""
     museum = Document("The British Museum", "https://www.britishmuseum.org/", "Visit us", 1.0)
+    tag_page = Document("britishmuseum", "https://example.com/tag/britishmuseum/", "Posts tagged", 1.0)
     ranker = _TrackingRanker()
-    ranker.tiny_index.retrieve.side_effect = lambda term: [museum] if term == "britishmuseum" else []
+    ranker.tiny_index.retrieve.side_effect = lambda term: [museum, tag_page] if term == "britishmuseum" else []
 
     retrieval = ranker.retrieve("british museum ")
 
     assert retrieval.pages == [museum]
     assert retrieval.terms == ["british", "museum"]
+
+
+def test_retrieve_skips_the_site_lookup_for_a_single_term():
+    ranker = _TrackingRanker()
+
+    ranker.retrieve("museum ")
+
+    looked_up = {call.args[0] for call in ranker.tiny_index.retrieve.call_args_list}
+    assert looked_up == {"museum"}
 
 
 def test_search_retrieved_ranks_like_search_without_external_search():

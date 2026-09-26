@@ -13,19 +13,5 @@ def get_bigrams(num_bigrams, tokens):
     return bigrams
 
 
-def get_compounds(tokens):
-    """The forms a run of query terms takes when a page writes it as one word.
-
-    URL slugs and domains are tokenized whole, so a page can be filed under
-    "stocks-and-shares-isa" or "britishmuseum" long after it has been pushed off the
-    pages for "stocks" or "british". Adjacent pairs and the whole query cover nearly all
-    of these while keeping the lookups linear in the query length.
-    """
-    runs = [tokens[i : i + 2] for i in range(len(tokens) - 1)]
-    if len(tokens) > 2:
-        runs.append(tokens)
-    return {separator.join(run) for run in runs for separator in ("-", "")}
-
-
 def clean_unicode(s: str) -> str:
     return s.encode("utf-8", errors="ignore").decode("utf-8")
