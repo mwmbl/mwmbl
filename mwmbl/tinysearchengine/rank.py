@@ -26,7 +26,7 @@ from mwmbl.indexer.external_cache import get_cached_external_results, store_exte
 from mwmbl.indexer.purge_queue import enqueue_for_purge
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
-from mwmbl.tokenizer import get_bigrams, tokenize
+from mwmbl.tokenizer import get_bigrams, get_compounds, tokenize
 from mwmbl.utils import get_domain
 
 logger = getLogger(__name__)
@@ -393,9 +393,10 @@ class Ranker:
         curated_items = [d for d in curation_items if d.state is not None and d.term == curation_term]
 
         bigrams = set(get_bigrams(len(terms), terms))
+        compounds = get_compounds(terms)
 
         pages = []
-        for term in retrieval_terms | bigrams:
+        for term in retrieval_terms | bigrams | compounds:
             # An optimisation - we have already retrieved this, so make use of it
             if term == curation_term:
                 items = curation_items

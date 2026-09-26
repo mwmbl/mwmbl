@@ -17,6 +17,7 @@ from mwmbl.tinysearchengine.rank import (
     get_wiki_results,
     wiki_score,
 )
+from mwmbl.tokenizer import get_compounds
 
 
 def test_order_result():
@@ -62,6 +63,34 @@ def test_search_still_triggers_external_search():
     ranker = _TrackingRanker()
     ranker.search("some query", [])
     assert ranker.external_search_calls == ["some query"]
+
+
+def test_compounds_join_adjacent_pairs_and_the_whole_query():
+    assert get_compounds(["bananas"]) == set()
+    assert get_compounds(["british", "museum"]) == {"british-museum", "britishmuseum"}
+    assert get_compounds(["stocks", "and", "shares", "isa"]) == {
+        "stocks-and",
+        "stocksand",
+        "and-shares",
+        "andshares",
+        "shares-isa",
+        "sharesisa",
+        "stocks-and-shares-isa",
+        "stocksandsharesisa",
+    }
+
+
+def test_retrieve_finds_a_page_filed_only_under_a_compound():
+    """A page pushed off the pages for "british" and "museum" can still be on the page for
+    the domain token "britishmuseum"."""
+    museum = Document("The British Museum", "https://www.britishmuseum.org/", "Visit us", 1.0)
+    ranker = _TrackingRanker()
+    ranker.tiny_index.retrieve.side_effect = lambda term: [museum] if term == "britishmuseum" else []
+
+    retrieval = ranker.retrieve("british museum ")
+
+    assert retrieval.pages == [museum]
+    assert retrieval.terms == ["british", "museum"]
 
 
 def test_search_retrieved_ranks_like_search_without_external_search():
