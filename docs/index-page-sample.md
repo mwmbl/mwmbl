@@ -61,7 +61,8 @@ documents:
    - Drop documents with an empty or error-page title.
    - Replace GitHub's chrome with no extract.
    - Don't file documents under URL tokens that hold a query string or ID-like token.
-   - Together these free about 15–20% of entries on the pages they share.
+   - Together these free about 15–20% of entries on a typical page. On the full pages of
+     popular terms, where evictions happen, they free only about 4%.
 2. **A trained zstd dictionary.** About 19% more documents per full page. Needs a
    versioned dictionary, stored in the index metadata, and a migration.
 3. **Round the score and strip the URL scheme.** About 10% together, and trivial, but
@@ -72,6 +73,68 @@ documents:
      document once and put IDs on the term pages.
    - Either is a larger design change, but it's what would actually fix the #454
      evictions.
+
+## Estimated effect on NDCG
+
+This uses #454's en-gb set (295 queries, UK-relevance Haiku grades, `miss_probe.json`).
+The 435 targets in bucket 2a ("evicted") are the only ones these fixes can bring back.
+
+**Result: only the structural fix moves NDCG.**
+
+| Fix | Index-only NDCG@10 | Staan-first + index fill (production, 0.768) |
+|---|---|---|
+| Junk removal | +0.001 | +0.0001 |
+| zstd dictionary | +0.004 to +0.006 | +0.0003 |
+| Score and scheme | +0.001 | +0.0001 |
+| All three | +0.005 to +0.008 | +0.0004 [+0.0000, +0.0007] |
+| Structural (no evictions) | **+0.06 to +0.10** | **+0.004 to +0.006** |
+| Junk filtered out of results | +0.000 [−0.002, +0.002] | +0.000 to +0.001 |
+
+The index-only baseline is 0.149 to 0.356, depending on the treatment of unjudged
+results.
+
+### Why the per-page fixes do so little
+
+- **They free less space where it matters.** 367 of the 370 query-term pages that evicted
+  a target are full. On those pages, the extra capacity is:
+  - junk removal: +4% (popular terms' pages carry little junk);
+  - dictionary: +15%;
+  - score and scheme: +3%;
+  - all three: +19.5%.
+- **The queue behind a full page is long.** Among Brave's good results that the index
+  holds and that should be filed under a query term, evicted ones outnumber kept ones by
+  15:1 for unigram terms and 2.2:1 for bigram terms.
+  - So +19.5% capacity brings back only about 1.3% of evicted relevant pages on a unigram
+    term, and about 9% on a bigram term.
+
+### Method
+
+- **Index-only ranking:** `CombinedLTRRanker` + MMR through `RemoteIndex`, re-run on
+  2026-09-27.
+  - 100 of #454's 101 controls are still in the top ten.
+  - The Staan-first arm reproduces the published 0.768.
+- **Structural fix (upper bound):** every 2a target is injected, with the text the index
+  stored for it, into its query-term pages, and all queries are re-ranked.
+- **Per-page fixes:**
+  - Each target is injected alone to get its NDCG gain.
+  - That gain is weighted by the chance the fix brings the target back: 1 − Π(1 − x/R)
+    over its eviction terms, where:
+    - x is the measured extra capacity of that term's page;
+    - R is the evicted:kept ratio for the term's type.
+  - This assumes relevant pages are spread evenly just past a page's cut-off.
+- **Junk filtered out of results:** junk documents are removed at retrieval and the
+  queries are re-ranked.
+
+### Caveats for the estimates
+
+- **Unjudged results:** only 36% of the index-only top ten is judged. Each range runs from
+  unjudged = 0 to unjudged = the mean judged gain.
+- **Target grades:** targets are graded on Brave's text. The index's own text lowers the
+  structural gain by about 0.013.
+- **Estimated recovery rate:** the evicted:kept ratio comes from 1,288 (page, term) pairs.
+  It is noisy, and it probably flatters recovery, because relevant pages are likely
+  denser at the top of a page than just past its cut-off.
+- **Excluded benefits:** none of this counts a smaller index or faster reads.
 
 ## Caveats
 
