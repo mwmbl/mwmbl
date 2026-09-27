@@ -10,6 +10,7 @@ from mwmbl.format import format_result, format_result_v2
 from mwmbl.models import MwmblUser
 from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
 from mwmbl.search_auth import SearchApiKeyAuth
+from mwmbl.tinysearchengine.indexer import TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logger = getLogger(__name__)
@@ -441,6 +442,28 @@ def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         return {"query": s, "results": [dataclasses.asdict(result) for result in results]}
 
 
+def _register_page_route(r: Router | NinjaAPI, tiny_index: TinyIndex):
+    """Register the /page/{n} endpoint that exposes the index one page at a time."""
+
+    @r.get(
+        "/page/{n}",
+        response=list[list],
+        auth=None,
+        summary="Raw index page",
+        description=(
+            "Return the decompressed contents of page `n` of the index.\n\n"
+            "Each page is a list of documents, and each document is the tuple it is stored "
+            "as: `[title, url, extract, score, term, state, ...]`. Pages are numbered from 0; "
+            "`GET /page/{n}` for every `n` below the index's page count retrieves the whole "
+            "index. Useful for analysing how well the index is packed, or for taking a copy."
+        ),
+    )
+    def page(request, n: int):
+        if not 0 <= n < tiny_index.num_pages:
+            raise HttpError(404, f"Page {n} is not in an index of {tiny_index.num_pages} pages")
+        return tiny_index._get_page_tuples(n)
+
+
 def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"search-{version}")
@@ -449,13 +472,15 @@ def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     return api
 
 
-def init_router(ranker: HeuristicRanker):
+def init_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
     """Initialise the v1 module-level router (called from urls.py)."""
     _register_search_v1(router, ranker)
     _register_common_routes(router, ranker)
+    _register_page_route(router, tiny_index)
 
 
-def init_v2_router(ranker: HeuristicRanker):
+def init_v2_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
     """Initialise the v2 module-level router (called from urls.py)."""
     _register_search_v2(v2_router, ranker)
     _register_common_routes(v2_router, ranker)
+    _register_page_route(v2_router, tiny_index)

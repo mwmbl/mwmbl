@@ -206,6 +206,7 @@ def test_v2_openapi_spec_generation():
         "/api/v2/search/",
         "/api/v2/search/complete",
         "/api/v2/search/raw",
+        "/api/v2/search/page/{n}",
         "/api/v2/super-search/",
         "/api/v2/combined-search/",
     }
