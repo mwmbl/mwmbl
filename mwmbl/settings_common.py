@@ -51,8 +51,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "mwmbl.traffic_middleware.SearchTrafficMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -131,10 +131,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTHENTICATION_BACKENDS = [
     # Accepts username or email in the username field — used by the JWT token endpoint
     "mwmbl.auth.UsernameOrEmailBackend",
+    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
+    # Also enforces ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+    "allauth.account.auth_backends.AuthenticationBackend",
     # Needed for Django's permission system (has_perm, has_module_perms) used by the admin
     "django.contrib.auth.backends.ModelBackend",
-    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
-    "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 
@@ -145,6 +146,11 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+
+# ninja-jwt setting: enforce email verification for token authentication
+NINJA_JWT = {
+    "USER_AUTHENTICATION_RULE": "mwmbl.auth.require_email_confirmation",
+}
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 
