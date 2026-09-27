@@ -1,4 +1,4 @@
-"""Compare the heuristic and LTR write-time rankers on the en-gb eval queries.
+"""Compare the write-time rankers (heuristic, LTR, and the crawl models) on the en-gb eval queries.
 
     rank         the index-only ranking (Combined Search with nothing from Staan, as in
                  miss_probe.py) over each arm's index: the top ten, the candidate count, and
@@ -7,12 +7,14 @@
                  top ten, with the text that arm's index stored, for Claude Haiku 4.5 judges.
     pages        what each arm's pages for the lookup terms hold: documents per term, Hacker
                  News-listed share, repeated hosts. Needs the local indexes (build_index.py).
+    attribution  whether each arm's missing good results were evicted or outranked. Needs the
+                 local indexes.
     consolidate  the judge output into haiku/relevance_engb_index_write_order.jsonl.
     report       recovery of Brave's good results, and Haiku NDCG@10 per arm. Reads only
                  committed data under devdata/combined_providers_eval/.
 
     PYTHONHASHSEED=0 DJANGO_SETTINGS_MODULE=mwmbl.settings_dev DATABASE_URL="postgres://daoud@" PYTHONPATH=. \
-        uv run python scripts/index_write_order/evaluate.py rank|batches|consolidate|report
+        uv run python scripts/index_write_order/evaluate.py rank [ARM...]|batches|consolidate|report
 
 Ranker.retrieve walks a set of terms, so the order of equally scored results (two language
 editions of one Wikipedia page, say) follows Python's string hashing: pin PYTHONHASHSEED or a
@@ -20,6 +22,7 @@ re-rank can swap a few of them. The committed results are the run that was judge
 """
 
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -27,17 +30,19 @@ from pathlib import Path
 import numpy as np
 
 EVAL_DIR = Path("devdata/combined_providers_eval")
-OUT_DIR = Path("devdata/index_write_order")
+# INDEX_WRITE_ORDER_RUN=fresh is the rerun on today's crawl, with the crawl model's arms.
+RUN = os.environ.get("INDEX_WRITE_ORDER_RUN", "")
+OUT_DIR = Path("devdata/index_write_order") / RUN
 WORK_DIR = OUT_DIR / "judge"
-RESULTS_DIR = EVAL_DIR / "index_write_order"
-JUDGMENTS_PATH = EVAL_DIR / "haiku/relevance_engb_index_write_order.jsonl"
-ARMS = ["heuristic", "ltr"]
+RESULTS_DIR = EVAL_DIR / "index_write_order" / RUN
+JUDGMENTS_PATH = EVAL_DIR / f"haiku/relevance_engb_index_write_order{'_' + RUN if RUN else ''}.jsonl"
+ARMS = ["heuristic", "ltr", "crawl", "crawl-domain"]
 NUM_RESULTS = 10
 NUM_BATCHES = 16
 GOOD_GRADE = 2
 
 
-def rank():
+def rank(arms: list[str]):
     import django
 
     django.setup()
@@ -51,8 +56,8 @@ def rank():
     rows = json.loads((EVAL_DIR / "engb/rows-0.05.json").read_text())
     probe = json.loads((EVAL_DIR / "engb/miss_probe.json").read_text())
     brave_urls = {normalise_url(record["url"]) for record in probe}
-    RESULTS_DIR.mkdir(exist_ok=True)
-    for arm in ARMS:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    for arm in arms or ARMS:
         results = {}
         with TinyIndex(item_factory=Document, index_path=str(OUT_DIR / f"{arm}.tinysearch")) as index:
             inner = CombinedLTRRanker(index, DummyCompleter(), combined_ltr_model)
@@ -95,12 +100,49 @@ def pages():
         )
 
 
+def attribution():
+    """For the good results (Haiku grade >= 2) one arm puts in its top ten and the heuristic
+    does not, or the other way round: did the arm without them evict them from the lookup
+    terms' pages, or keep them and have the query-time ranking put others first?"""
+    import django
+
+    django.setup()
+    from build_corpus import lookup_terms
+
+    from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+
+    results = load_results()
+    grades = load_grades()
+    print("| Good results in the top ten of | missing from the top ten of | evicted there | kept there, outranked |")
+    print("|---|---|---|---|")
+    for arm in ARMS[1:]:
+        for has, lacks in [("heuristic", arm), (arm, "heuristic")]:
+            evicted = outranked = 0
+            with TinyIndex(item_factory=Document, index_path=str(OUT_DIR / f"{lacks}.tinysearch")) as index:
+                for query, result in results[has].items():
+                    lacks_top = {url for url, _, _ in results[lacks][query]["top"]}
+                    missing = [
+                        url
+                        for url, _, _ in result["top"]
+                        if grades.get(query, {}).get(url, 0) >= GOOD_GRADE and url not in lacks_top
+                    ]
+                    if not missing:
+                        continue
+                    held = {document.url for term in lookup_terms(query) for document in index.retrieve(term)}
+                    kept = sum(url in held for url in missing)
+                    outranked += kept
+                    evicted += len(missing) - kept
+            print(f"| {has} | {lacks} | {evicted} | {outranked} |")
+
+
 def load_results() -> dict[str, dict]:
     return {arm: json.loads((RESULTS_DIR / f"{arm}.results.json").read_text()) for arm in ARMS}
 
 
 def batches():
     results = load_results()
+    # Arms added to a run that has been judged need only the URLs nobody has graded yet.
+    graded = load_grades() if JUDGMENTS_PATH.exists() else {}
     prompt = (EVAL_DIR / "haiku/prompts/relevance_engb.txt").read_text()
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     manifest, lines = {}, [[] for _ in range(NUM_BATCHES)]
@@ -109,7 +151,8 @@ def batches():
         candidates = {}
         for arm in ARMS:
             for url, title, extract in results[arm][query]["top"]:
-                candidates.setdefault(url, (title, extract))
+                if url not in graded.get(query, {}):
+                    candidates.setdefault(url, (title, extract))
         if not candidates:
             continue
         shown = sorted(candidates)
@@ -128,7 +171,8 @@ def batches():
 
 def consolidate():
     manifest = json.loads((WORK_DIR / "manifest.json").read_text())
-    records = []
+    earlier = JUDGMENTS_PATH.read_text().splitlines() if JUDGMENTS_PATH.exists() else []
+    records = [json.loads(line) for line in earlier]
     for path in sorted(WORK_DIR.glob("uk_*.out.jsonl")):
         for line in path.read_text().splitlines():
             if not line.strip().startswith("{"):
@@ -199,14 +243,15 @@ def report():
         print(
             f"{arm}: median {np.median(sizes):.0f} candidates, {sum(len(results[arm][q]['top']) for q in queries)} results"
         )
-    overlap = np.mean(
-        [
-            len({u for u, _, _ in results["heuristic"][q]["top"]} & {u for u, _, _ in results["ltr"][q]["top"]})
-            / max(1, len(results["ltr"][q]["top"]))
-            for q in queries
-        ]
-    )
-    print(f"top-ten overlap between arms: {overlap:.0%}")
+    for arm in ARMS[1:]:
+        overlap = np.mean(
+            [
+                len({u for u, _, _ in results["heuristic"][q]["top"]} & {u for u, _, _ in results[arm][q]["top"]})
+                / max(1, len(results[arm][q]["top"]))
+                for q in queries
+            ]
+        )
+        print(f"top-ten overlap, {arm} with heuristic: {overlap:.0%}")
 
     grades = load_grades()
     brave_grades: dict[str, dict[str, int]] = {}
@@ -226,7 +271,7 @@ def report():
             gains = [2 ** grades[query][url] - 1 for url, _, _ in results[arm][query]["top"]]
             scores[arm].append(ndcg(gains, all_gains))
             dcgs[arm].append(dcg(gains))
-    print(f"\n## Haiku UK relevance, {len(scores['ltr'])} queries\n")
+    print(f"\n## Haiku UK relevance, {len(scores['heuristic'])} queries\n")
     print("| Arm | NDCG@10 | Good results (>=2) per query |")
     print("|---|---|---|")
     for arm in ARMS:
@@ -234,8 +279,15 @@ def report():
             [sum(grades[q][u] >= GOOD_GRADE for u, _, _ in results[arm][q]["top"]) for q in queries if q in grades]
         )
         print(f"| {arm} | {np.mean(scores[arm]):.4f} | {good:.2f} |")
-    print(f"\nltr - heuristic NDCG@10: {bootstrap(np.array(scores['ltr']) - np.array(scores['heuristic']))}")
+    print()
+    for arm in ARMS[1:]:
+        print(f"{arm} - heuristic NDCG@10: {bootstrap(np.array(scores[arm]) - np.array(scores['heuristic']))}")
 
 
 if __name__ == "__main__":
-    {"rank": rank, "batches": batches, "pages": pages, "consolidate": consolidate, "report": report}[sys.argv[1]]()
+    if sys.argv[1] == "rank":
+        rank(sys.argv[2:])
+    else:
+        commands = {"batches": batches, "pages": pages, "attribution": attribution}
+        commands |= {"consolidate": consolidate, "report": report}
+        commands[sys.argv[1]]()

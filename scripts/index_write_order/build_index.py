@@ -10,6 +10,7 @@ full index. The corpus goes through index_pages in chunks, the way crawl batches
 
 import gzip
 import json
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -20,10 +21,11 @@ django.setup()
 
 from django.conf import settings
 
+import mwmbl.indexer.index_batches as index_batches
 from mwmbl.indexer.index_batches import filter_blacklisted_documents, index_pages
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex, cleaned_document
 
-OUT_DIR = Path("devdata/index_write_order")
+OUT_DIR = Path("devdata/index_write_order") / os.environ.get("INDEX_WRITE_ORDER_RUN", "")
 # About 1,100 lookup terms: collisions are rare, and identical in both arms.
 NUM_PAGES = 65536
 CHUNK_SIZE = 100_000
@@ -63,7 +65,17 @@ def write_chunk(path: Path, index: TinyIndex, records: list[dict]) -> int:
     return len(kept)
 
 
+def use_crawl_ranker() -> None:
+    """The crawl arms' ranker is an experiment in scripts/, so it is swapped in here."""
+    from crawl_ranker import CrawlPageRanker
+
+    ranker = CrawlPageRanker(settings.INDEX_PAGE_RANKER)
+    index_batches.get_page_ranker = lambda indexer: ranker
+
+
 def main():
+    if settings.INDEX_PAGE_RANKER.startswith("crawl"):
+        use_crawl_ranker()
     path = index_path()
     path.unlink(missing_ok=True)
     TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=NUM_PAGES, page_size=PAGE_SIZE)
