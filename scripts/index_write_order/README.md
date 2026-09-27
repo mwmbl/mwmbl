@@ -20,6 +20,25 @@ and `uv run python`:
    `devdata/combined_providers_eval/haiku/relevance_engb_index_write_order.jsonl`.
 6. `evaluate.py report` and `evaluate.py pages`.
 
+The crawl model (`mwmbl/rankeval/index-write-order-crawl-model.md`) adds two write-time arms,
+`INDEX_PAGE_RANKER=crawl` and `crawl-domain`, which `build_index.py` swaps in from
+`crawl_ranker.py`:
+
+1. `run_crawl.py --export-queue`, then `run_crawl.py` with `CRAWL_SUBMIT_MODE=off`: crawled
+   batches, saved before anything ranks them, into `devdata/index_write_order/crawl/`.
+2. `crawl_model.py serp`: each host's Google SERP appearances in `scripts/downloads`.
+3. `crawl_model.py negatives`, then `crawl_model.py train [--no-domain]`: the offline gate and
+   the models.
+4. `build_index.py` for each crawl arm, then steps 3-6 above. `batches` writes only the URLs
+   not yet graded. `evaluate.py attribution` shows whether missing good results were evicted
+   or outranked.
+
+`INDEX_WRITE_ORDER_RUN=fresh` points every script at `devdata/index_write_order/fresh/`, for a
+rerun on crawl captured from 2026-09-25 on.
+
+Cap memory for the long runs, for example with `systemd-run --user -p MemoryMax=6G`. The crawler
+and feature extraction together can exhaust a 16 GB machine.
+
 Separately:
 
 - `benchmark_rebuild.py N`: the per-document cost of re-filing documents under all their terms,

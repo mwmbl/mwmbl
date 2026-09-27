@@ -16,6 +16,7 @@ from two places:
 
 import gzip
 import json
+import os
 from argparse import ArgumentParser
 from multiprocessing import Pool
 from pathlib import Path
@@ -29,8 +30,11 @@ from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.tokenizer import get_bigrams, tokenize
 
 EVAL_DIR = Path("devdata/combined_providers_eval")
-BATCH_DIR = Path("devdata/batches")
-OUT_DIR = Path("devdata/index_write_order")
+# The first A/B read the 2023-24 batches. The "fresh" run reads run_crawl.py's crawl from the
+# day the crawl model's negatives stop (crawl_model.TRAIN_BEFORE), so the two never share one.
+RUN = os.environ.get("INDEX_WRITE_ORDER_RUN", "")
+OUT_DIR = Path("devdata/index_write_order") / RUN
+FRESH_SINCE = "2026-09-25"
 PROCESSES = 8
 
 
@@ -106,8 +110,13 @@ def main():
     parser.add_argument("--limit", type=int, help="read only this many batch files, to time a run")
     args = parser.parse_args()
 
-    OUT_DIR.mkdir(exist_ok=True)
-    paths = sorted(BATCH_DIR.rglob("*.json.gz"))[: args.limit]
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if RUN == "fresh":
+        crawl_dir = Path("devdata/index_write_order/crawl")
+        days = [day for day in sorted(crawl_dir.iterdir()) if day.name >= FRESH_SINCE]
+        paths = sorted(path for day in days for path in day.glob("*.json.gz"))[: args.limit]
+    else:
+        paths = sorted(Path("devdata/batches").rglob("*.json.gz"))[: args.limit]
     print(f"{len(LOOKUP)} lookup terms, {len(paths)} batch files", flush=True)
 
     live = live_documents()
