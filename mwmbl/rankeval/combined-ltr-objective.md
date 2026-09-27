@@ -76,6 +76,48 @@ graded blind by Claude Haiku 4.5 subagents with the UK pass-3 prompt: 591 new ju
 - **Newly judged URLs:** they make up 1.5% of the shipped model's top tens and 6–7% of each
   retrained arm's.
 
+## MiniLM judges as features (5 folds over the 424 judge-eval queries)
+
+Each fine-tuned MiniLM judge in `devdata/judge_train/models/` adds its score as one feature
+to `ndcg+new`: `both` (the served judge), `pointwise` (LLM grades only) and `pairs` (human
+curation pairs only). `minilm_scores.py` scores the pairs and `minilm_experiment.py` runs
+the arms.
+
+- **Leakage.** The judges were trained on 340 of the 849 queries and checkpoint-selected on
+  85 more. So the test folds are drawn only from the other 424, and none of the judges'
+  training or validation files, pointwise or pairs, contains any of those 424 queries.
+- **Two training sets.** `clean` trains on the other eval folds only. `all` also trains on
+  the 425 judge-train/val queries, where the scores are in-sample: `both` has Spearman
+  0.71 with `overall` there, against 0.65 on eval queries.
+- **Extension rows.** They aren't scored (252k pairs at 76 a second), so their MiniLM
+  features are missing.
+
+| Arm | Serving pool NDCG@10 | vs same-training base | Original pool NDCG@10 | vs same-training base |
+|---|---|---|---|---|
+| clean/base | 0.8699 | — | 0.8193 | — |
+| clean/both | 0.8771 | +0.0072 [+0.0025, +0.0119] | 0.8233 | +0.0040 [−0.0012, +0.0094] |
+| clean/pointwise | 0.8782 | +0.0083 [+0.0034, +0.0129] | 0.8277 | +0.0084 [+0.0028, +0.0140] |
+| clean/pairs | 0.8718 | +0.0019 [−0.0019, +0.0057] | 0.8177 | −0.0016 [−0.0062, +0.0029] |
+| clean/all3 | 0.8798 | +0.0099 [+0.0052, +0.0147] | 0.8271 | +0.0079 [+0.0019, +0.0137] |
+| all/base | 0.8763 | — | 0.8246 | — |
+| all/both | 0.8821 | +0.0058 [+0.0009, +0.0106] | 0.8316 | +0.0070 [+0.0014, +0.0123] |
+| all/pointwise | 0.8821 | +0.0058 [+0.0011, +0.0105] | 0.8326 | +0.0080 [+0.0019, +0.0141] |
+| all/pairs | 0.8789 | +0.0025 [−0.0007, +0.0059] | 0.8277 | +0.0030 [−0.0011, +0.0068] |
+| **all/all3** | **0.8822** | **+0.0058 [+0.0010, +0.0107]** | **0.8325** | **+0.0079 [+0.0021, +0.0135]** |
+| MiniLM `both` alone | 0.8246 | −0.0453 vs clean/base | 0.7785 | −0.0408 vs clean/base |
+
+- **The judges help, modestly.** They add +0.006 to +0.010 NDCG@10, about as much again as
+  the switch to rank:ndcg gained.
+- **The LLM-grade signal carries it.** `pointwise` does as well as `both`, and `pairs`
+  alone is not significant. All three together match the best single judge, so one
+  feature (`pointwise` or `both`) would do.
+- **The in-sample scores don't hurt.** The `all` arms stay best in absolute terms: 425 more
+  training queries are worth more than the in-sample optimism costs.
+- **MiniLM doesn't replace the LTR.** Ordering by `both` alone is 0.04 worse, and it lets
+  far more index results into the top ten.
+- **Not yet measured:** the en-gb end-to-end run (it needs fresh Haiku judgments of new
+  top-ten URLs), and the serving cost of scoring every candidate the LTR keeps.
+
 ## Caveats
 
 - **The human gate hasn't run.** The curation export (`devdata/judgments_export/`) wasn't

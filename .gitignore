@@ -230,3 +230,4 @@ devdata/external-cache-engb.tinysearch
 devdata/moderation_bakeoff/
 
 vendor/
+devdata/combined_ltr_labels/minilm_scores.json

@@ -53,27 +53,59 @@ the 849, so they stay a clean held-out test for a model trained on these labels.
 Haiku-judged) compare `binary:logistic`, `rank:ndcg` and `rank:pairwise`. The results are in
 `mwmbl/rankeval/combined-ltr-objective.md`.
 
-## Handover: testing MiniLM as a feature
+## MiniLM judges as features
 
-The next step is adding the fine-tuned MiniLM judge's score
-(`super_search_select.judge.Judge`) as a feature to the rank:ndcg arm.
+`minilm_scores.py` scores every LLM-dataset row and serving-pool pair with the three
+fine-tuned MiniLM judges (`devdata/judge_train/models/minilm-{both,pointwise,pairs}-v1`,
+gitignored, so they have to be supplied). It caches the scores in `minilm_scores.json`,
+which is 13 MB and uncommitted, so rerun it to reproduce. `minilm_experiment.py`
+cross-validates `ndcg+new` with those features on the 424 queries no judge saw. The
+results are in `mwmbl/rankeval/combined-ltr-objective.md`.
 
-- **The model isn't in the repo.** It lives in `devdata/judge_train/models/minilm-both-v1/onnx`
-  (`SUPER_SEARCH_JUDGE_MODEL_DIR`), which is gitignored, so it has to be supplied.
-- **Leakage.** The judge was fine-tuned on the `overall` grades of 340 of the 849 queries,
-  with 85 more for validation (`devdata/judge_train/eval_manifest.json`). A MiniLM feature
-  would look far too good on those queries, so:
-  - cross-validate only on the 424 `llm_eval_queries`, and train the downstream model
-    on those alone, or on everything but test only on them;
-  - the en-gb queries are clean (none are among the 849).
-- **Cost.** Scoring the serving pool (25k pairs) and the en-gb pools is a one-off. Cache
-  the scores next to `pool.json`. At serving, MiniLM would run on every candidate the LTR
-  keeps. `deep_pool.py` in `scripts/combined_search_haiku/` times it.
-- **Environment workarounds in a fresh container:**
-  - The xgb crate downloads libxgboost from GitHub, which the proxy blocks. Put
-    `xgboost/lib/libxgboost.so` from the PyPI `xgboost==3.0.5` manylinux wheel into
-    `mwmbl_rank/target/release/deps/` before `uv sync`.
-  - Run with `LD_LIBRARY_PATH` pointing at that wheel's `xgboost.libs/`, for its libgomp.
-  - Django startup needs a local Redis (`redis-server --daemonize yes --save ""`).
-- **Serving path.** A rank:ndcg model needs the filter treated as an exclusion, not as
-  score 0. See `engb_eval.BoosterModel` and "What shipping would take" in the write-up.
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_scores.py      # about 35 minutes on CPU
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_experiment.py
+```
+
+## Handover: en-gb end to end with MiniLM features
+
+The cross-validation says adding the MiniLM judges to `ndcg+new` gains +0.006 to +0.010
+NDCG@10. The next step is `engb_eval.py`'s end-to-end run on the 289 held-out en-gb
+queries, with Haiku judging the top-ten URLs that no judgment covers yet.
+
+- **Models.** Put the judges at `devdata/judge_train/models/minilm-{both,pointwise,pairs}-v1/onnx`
+  (gitignored; locally a symlink to `../mwmbl/devdata/judge_train/models`). Then run
+  `minilm_scores.py` to rebuild `minilm_scores.json`, which is gitignored.
+- **Arms.**
+  - Train on all 849 queries plus the new labels, with extension rows at weight 0.25.
+    That is the `all` setting, the best in CV.
+  - Suggested arms: `shipped`, `ndcg+new` (no MiniLM), `ndcg+new+pointwise`,
+    `ndcg+new+both` and `ndcg+new+all3`.
+  - Build the training features with `minilm_experiment.minilm_columns` and
+    `objective_experiment.features`. The extension rows' MiniLM columns stay NaN.
+- **Serving the features.** `LTRRanker` passes the model records with `query`, `title` and
+  `extract`. So subclass `engb_eval.BoosterModel`: score each record with
+  `Judge(model_dir).score(query, [doc_text(title, extract)])` for each judge, append those
+  columns in `minilm_scores.MINILM_MODELS` order, then apply the same sigmoid and
+  filter-as-exclusion.
+  - Each candidate the ranker scores costs about 1/76 s per judge on CPU.
+  - Retrieval is live against api.mwmbl.org, so rerun `shipped` and `ndcg+new` in the same
+    pass. Arms are only comparable within one retrieval.
+- **Don't overwrite the previous run.**
+  - `engb_eval.py` hardcodes `ARMS` (`engb_arms.json`), `NEW_JUDGMENTS`
+    (`pass3_engb_arms.jsonl`) and `WORK`. Write the MiniLM run to new files, e.g.
+    `engb_minilm_arms.json` and `pass3_engb_minilm.jsonl`.
+  - Make `judged()` read all three judgment files, so only URLs that are genuinely new
+    get batched.
+- **Judging.** `batches` → Claude Haiku 4.5 subagents, one per batch, each writing
+  `out_NN.txt` → `consolidate` → `report`. Check the anchors' drift as in the objective
+  run.
+- **Leakage.** None of the en-gb queries are among the 849. Two of them ("bitcoin price",
+  "microsoft teams") appear in the curation pairs export, which the judges' pairs task may
+  have trained on. That's negligible, but they can be dropped from the report to be strict.
+- **Environment (this machine):**
+  - Redis must be running.
+  - Use `.venv/bin/python` with `PYTHONPATH=.` and
+    `DJANGO_SETTINGS_MODULE=mwmbl.settings_dev`.
+  - The "Failed to schedule background tasks" traceback at startup is harmless: there's no
+    database.
