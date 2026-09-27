@@ -1,4 +1,4 @@
-"""GET /api/v{1,2}/search/page/{n}: the raw, decompressed contents of one index page."""
+"""GET /api/v1/search/page/{n}: the raw, decompressed contents of one index page."""
 
 import pytest
 from django.test import Client
@@ -23,9 +23,8 @@ def stored_page():
         writer.store_in_page(page_index, original)
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
-def test_page_returns_stored_tuples(stored_page, version):
-    response = Client().get(f"/api/{version}/search/page/{stored_page}")
+def test_page_returns_stored_tuples(stored_page):
+    response = Client().get(f"/api/v1/search/page/{stored_page}")
 
     assert response.status_code == 200
     expected_tuples = [list(document.as_tuple()) for document in PAGE_DOCUMENTS]

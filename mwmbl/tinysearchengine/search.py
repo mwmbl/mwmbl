@@ -479,8 +479,7 @@ def init_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
     _register_page_route(router, tiny_index)
 
 
-def init_v2_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
+def init_v2_router(ranker: HeuristicRanker):
     """Initialise the v2 module-level router (called from urls.py)."""
     _register_search_v2(v2_router, ranker)
     _register_common_routes(v2_router, ranker)
-    _register_page_route(v2_router, tiny_index)
