@@ -223,6 +223,7 @@ devdata/judge_train/*
 # judgments are tracked under devdata/combined_providers_eval/haiku/.
 devdata/combined_providers_eval/haiku_work/
 devdata/combined_ltr_labels/haiku_work/
+devdata/combined_ltr_labels/engb_work/
 devdata/external-cache-engb.tinysearch
 !devdata/judge_train/RESULTS.md
 !devdata/judge_train/eval_manifest.json
