@@ -46,3 +46,34 @@ the 849, so they stay a clean held-out test for a model trained on these labels.
   judge, so their order within the query is consistent, but setting them beside the query's
   original grades should first remove that judge's offset, using its anchors (`judge` in
   each row).
+
+## Objective experiment
+
+`objective_experiment.py` (cross-validation) and `engb_eval.py` (end to end on en-gb,
+Haiku-judged) compare `binary:logistic`, `rank:ndcg` and `rank:pairwise`. The results are in
+`mwmbl/rankeval/combined-ltr-objective.md`.
+
+## Handover: testing MiniLM as a feature
+
+The next step is adding the fine-tuned MiniLM judge's score
+(`super_search_select.judge.Judge`) as a feature to the rank:ndcg arm.
+
+- **The model isn't in the repo.** It lives in `devdata/judge_train/models/minilm-both-v1/onnx`
+  (`SUPER_SEARCH_JUDGE_MODEL_DIR`), which is gitignored, so it has to be supplied.
+- **Leakage.** The judge was fine-tuned on the `overall` grades of 340 of the 849 queries,
+  with 85 more for validation (`devdata/judge_train/eval_manifest.json`). A MiniLM feature
+  would look far too good on those queries, so:
+  - cross-validate only on the 424 `llm_eval_queries`, and train the downstream model
+    on those alone, or on everything but test only on them;
+  - the en-gb queries are clean (none are among the 849).
+- **Cost.** Scoring the serving pool (25k pairs) and the en-gb pools is a one-off. Cache
+  the scores next to `pool.json`. At serving, MiniLM would run on every candidate the LTR
+  keeps. `deep_pool.py` in `scripts/combined_search_haiku/` times it.
+- **Environment workarounds in a fresh container:**
+  - The xgb crate downloads libxgboost from GitHub, which the proxy blocks. Put
+    `xgboost/lib/libxgboost.so` from the PyPI `xgboost==3.0.5` manylinux wheel into
+    `mwmbl_rank/target/release/deps/` before `uv sync`.
+  - Run with `LD_LIBRARY_PATH` pointing at that wheel's `xgboost.libs/`, for its libgomp.
+  - Django startup needs a local Redis (`redis-server --daemonize yes --save ""`).
+- **Serving path.** A rank:ndcg model needs the filter treated as an exclusion, not as
+  score 0. See `engb_eval.BoosterModel` and "What shipping would take" in the write-up.
