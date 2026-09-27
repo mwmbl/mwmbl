@@ -136,6 +136,67 @@ results.
   denser at the top of a page than just past its cut-off.
 - **Excluded benefits:** none of this counts a smaller index or faster reads.
 
+## Other ideas for the spare space
+
+### LSH buckets of embeddings: no
+
+- **The bucket size forces a very selective hash.** There are about 430M distinct
+  documents: 2.4B entries divided by 5.5 copies each. The spare space on a page holds
+  about 14 documents, a full page about 34. That needs 12–31M buckets per table, which
+  means about 24 bits of SimHash per table.
+- **Queries sit far from their good results.** With all-MiniLM-L6-v2, the similarity
+  between a query and a good Brave result has a median of 0.66 (10th–90th percentile:
+  0.49–0.79). Evicted targets are the same, 0.66. A random indexed document scores 0.06.
+- **So recall is tiny.** At 0.66 similarity, each bit agrees only 73% of the time, and
+  all 24 have to.
+
+  | Bits | Tables | Recall of good results | With neighbouring buckets also read | Page reads per query |
+  |---|---|---|---|---|
+  | 24 | 1 | 0.14% | 1.0% | 1 / 25 |
+  | 24 | 3 | 0.4% | 3.0% | 3 / 75 |
+  | 24 | 10 | 1.3% | 9.0% | 10 / 250 |
+  | 16 | 10 | 9.1% | 40% | 10 / 170 |
+
+  "Neighbouring buckets" means every bucket one bit away from the query's.
+
+  - The 16-bit rows need buckets of thousands of documents, and a page holds at most 34.
+  - Each table is another full copy of every document, about 52 GB. The spare space pays
+    for about three.
+  - At three tables, the gain is about +0.002–0.003 index-only NDCG, for 75 extra random
+    reads per query.
+- **Buckets would also compete with terms.** They hash onto the same shared pages, and
+  real embeddings cluster, so popular buckets would overflow the way popular terms do.
+- **Where embeddings would fit:** after the structural fix, a separate approximate
+  nearest-neighbour index (clustered, with compressed vectors) over document IDs. That
+  costs about 12–20 bytes per document, roughly 5–9 GB, and has none of these limits.
+
+### Word trigrams: only as filler
+
+- **The benefit is small.**
+  - 121 of the 295 queries have three or more terms.
+  - Only 29 of the 465 evicted targets share a query trigram with the first ten words of
+    their stored title, URL or extract. They carry 1.3% of the lost gain; the evicted
+    bucket as a whole carries 21.8%.
+  - Injecting those 29 gives an upper bound of +0.007 to +0.012 index-only NDCG@10, and
+    +0.0004 to +0.0006 for Staan-first.
+- **Filed like bigrams, they make eviction worse.**
+  - A document has 0.87 trigrams for every bigram, so trigrams would add about 72% more
+    entries.
+  - A full page keeps each term's first-ranked document before any term's second
+    (`sort_documents`). Trigram terms almost always have one or two documents, so their
+    entries would be kept ahead of the deep documents of popular terms.
+  - Simulated on the 1,000 sampled pages:
+
+    | Variant | Existing entries evicted | Pages overflowing (today 12%) |
+    |---|---|---|
+    | Trigrams from all fields | 30% | 50% |
+    | Trigrams from the title only (+25% entries) | 14% | 22% |
+
+  - Those evicted entries are the kind #454 blames for 20% of the lost gain.
+- **The version worth trying:** title-only trigrams that are never kept ahead of existing
+  entries on a full page. That costs nothing in eviction and keeps most of the small
+  gain above, since 88% of pages aren't full. It does add page writes.
+
 ## Caveats
 
 - The replication probe only recognises the crawl indexer's terms. Copies filed under
