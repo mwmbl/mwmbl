@@ -17,8 +17,6 @@ from urllib.parse import urlparse
 import dj_database_url
 import sentry_sdk
 
-from mwmbl.auth import require_email_confirmation
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -47,11 +45,13 @@ INSTALLED_APPS = [
     "ninja_extra",
     "debug_toolbar",
     "background_task",
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "mwmbl.traffic_middleware.SearchTrafficMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -237,10 +237,15 @@ def strip_query_string(event):
     return event
 
 
-# Django ninja-jwt settings
-NINJA_JWT = {
-    "USER_AUTHENTICATION_RULE": require_email_confirmation,
-}
+# CORS settings
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
 # Apply PostgreSQL's default: if no database name is given in the URL, fall back to

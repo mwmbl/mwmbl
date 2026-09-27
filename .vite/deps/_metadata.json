@@ -1,0 +1,15 @@
+{
+  "hash": "b7fdcecd",
+  "configHash": "b6518847",
+  "lockfileHash": "e3b0c442",
+  "browserHash": "4e0d2428",
+  "optimized": {
+    "chart.js/auto": {
+      "src": "../../front-end/node_modules/chart.js/auto/auto.js",
+      "file": "chart__js_auto.js",
+      "fileHash": "475e7021",
+      "needsInterop": false
+    }
+  },
+  "chunks": {}
+}

@@ -28,6 +28,7 @@ dependencies = [
     "dj-database-url>=2.1.0",
     "django-htmx>=1.17.0",
     "django-vite>=2.1.3",
+    "django-cors-headers>=4.3.0",
     "pybloomfiltermmap3>=0.6.0",
     "lxml-html-clean>=0.1.0",
     "lxml>=5.2.0",
