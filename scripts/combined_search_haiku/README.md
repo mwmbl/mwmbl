@@ -76,3 +76,21 @@ Behind `mwmbl/rankeval/combined-search-miss-attribution.md`, reproduced by
 2. `make_batches_miss.py`: UK-relevance batches of the index's stored text for the Brave URLs
    it holds, plus two anchors per query, judged by Claude Haiku 4.5 subagents.
 3. `consolidate_miss.py`: the judge output into `haiku/relevance_engb_indextext.jsonl`.
+
+## Structural fixes for index-page evictions
+
+Behind `docs/index-structural-fixes.md`. Caches and intermediate files go in
+`devdata/combined_providers_eval/structural_work/` (gitignored). The live index moves, so
+a run from an empty cache gives slightly different numbers. Run from the repository root
+with `PYTHONPATH=scripts/combined_search_haiku:.`; `settings_structural.py` needs no
+database, Redis or keys.
+
+1. `structural_probe.py`: every query term's list and whole 4 KB page, the evicted targets
+   and the evicted:kept ratios, a sample of each hot term's evicted list, and 1,000 random
+   pages for sizing.
+2. `structural_simulate.py`: each design's top tens, over several Monte Carlo draws, with
+   only the evicted targets added back and with the deep documents too (~10 minutes).
+3. `structural_grade.py dump` / `load`: a blind sample of unjudged results to grade. The
+   committed grades, `structural/grades_unjudged.jsonl`, were written by Claude with the
+   UK-relevance prompt and sampled from an earlier run of step 2.
+4. `structural_report.py`: the calibration and the tables.

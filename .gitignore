@@ -228,3 +228,5 @@ devdata/external-cache-engb.tinysearch
 devdata/moderation_bakeoff/
 
 vendor/
+# Caches and intermediate files of scripts/combined_search_haiku/structural_*.py.
+devdata/combined_providers_eval/structural_work/

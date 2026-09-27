@@ -6,32 +6,33 @@ that were evicted. This estimates what concrete structural designs would add onc
 also bring back everything else that was evicted, which is almost all of it.
 
 Uses #454's en-gb set: 295 queries, UK-relevance Haiku grades, `miss_probe.json`. The
-live index was read on 2026-09-27.
+live index was read on 2026-09-27. The scripts are `scripts/combined_search_haiku/structural_*.py`
+(see that directory's README), and `structural_report.py` prints the tables below.
 
 ## Summary
 
 - **Every design lands at about +0.02 index-only NDCG@10, or less.** For production
   (Staan-first + index fill) that is about +0.001, which isn't significant.
-  - The best designs give +0.024 [+0.010, +0.037]: a 16 KB overflow extent for hot terms,
+  - The best designs give +0.024 to +0.025 [+0.010, +0.039]: a 16 KB overflow extent for hot terms,
     or document IDs on the term pages with up to 300 fetched per term.
   - The cheapest of these is the 16 KB extent.
-- **Capacity past about 6× hurts.** Removing evictions entirely scores +0.015, below the
+- **Capacity past about 6× hurts.** Removing evictions entirely scores +0.016, below the
   16 KB extent.
   - The ranker lets the deep documents that come back push good results out of the top
     ten.
-  - Recovering only the good evicted pages would be worth +0.083. With the rest of the
-    evicted documents added back, the recovered good pages holding a top-ten slot fall
-    from 279 to 166.
+  - Recovering only the good evicted pages would be worth +0.084. With the rest of the
+    evicted documents added back, only about 60% of the recovered good pages that reached
+    the top ten still do (279 to 166, in the first run of the simulation).
 - **Conjunctive (AND) retrieval doesn't avoid this.** Adding deep documents only when
-  they match every query word scores +0.017 to +0.018.
+  they match every query word scores +0.018.
 - **So the case for a structural change is storage, not evictions.**
   - Storing each document once, with an inverted index of IDs, would shrink the index
     from 419 GB to about 65 GB.
   - Coverage is the larger loss: #454 found 76% of the lost gain is pages that aren't in
     the index at all.
 - **The ranker is the other half.** Any capacity change should come with an LTR model
-  retrained on the larger candidate pools. The headroom is the gap between +0.024 and
-  +0.083.
+  retrained on the larger candidate pools. The headroom is the gap between +0.025 and
+  +0.084.
 
 ## Estimates
 
@@ -40,21 +41,21 @@ below). 95% bootstrap CIs over queries. Baseline: index-only 0.224, Staan-first 
 
 | Design | Capacity for a hot term | Evicted targets recovered | Targets only: index-only | **With deep documents: index-only** | **With deep documents: Staan-first** |
 |---|---|---|---|---|---|
-| #459 per-page fixes (junk, dictionary, score) | ×1.2 | 6% | +0.007 | +0.004 [−0.000, +0.009] | +0.000 |
-| Hot term gets its page to itself | ×1.3 | 15% | +0.017 | +0.005 [−0.002, +0.013] | −0.001 |
-| 8 KB pages | ×2.3 | 35% | +0.036 | +0.017 [+0.007, +0.028] | +0.001 |
-| Document IDs on 4 KB pages, fetch ≤100 per term | ×2.6 | 41% | +0.043 | +0.018 [+0.007, +0.029] | +0.000 |
-| **16 KB overflow extent for hot terms** | ×6 | 69% | +0.065 | **+0.024 [+0.010, +0.037]** | +0.001 [−0.002, +0.003] |
-| **Document IDs on 4 KB pages, fetch ≤300 per term** | ×8 | 77% | +0.070 | **+0.024 [+0.010, +0.038]** | +0.001 [−0.001, +0.003] |
-| Inverted index, AND + ≤300 per term | ×8, plus AND matches | 79% | +0.072 | +0.023 [+0.008, +0.038] | +0.001 |
-| Inverted index, AND only for multi-word queries, ≤100 per term for one word | AND matches | — | — | +0.018 [+0.006, +0.031] | +0.000 |
-| 64 KB overflow extent for hot terms | ×21 | 100% | +0.083 | +0.016 [+0.002, +0.032] | +0.000 |
-| No evictions | ∞ | 100% | +0.083 | +0.015 [+0.001, +0.031] | +0.001 |
+| #459 per-page fixes (junk, dictionary, score) | ×1.2 | 6% | +0.007 | +0.003 [−0.001, +0.008] | +0.000 |
+| Hot term gets its page to itself | ×1.3 | 15% | +0.016 | +0.007 [−0.001, +0.014] | −0.001 |
+| 8 KB pages | ×2.3 | 35% | +0.037 | +0.016 [+0.005, +0.026] | +0.000 |
+| Document IDs on 4 KB pages, fetch ≤100 per term | ×2.6 | 41% | +0.043 | +0.020 [+0.009, +0.031] | +0.001 |
+| **16 KB overflow extent for hot terms** | ×6 | 69% | +0.065 | **+0.025 [+0.011, +0.039]** | +0.001 [−0.001, +0.003] |
+| **Document IDs on 4 KB pages, fetch ≤300 per term** | ×8 | 77% | +0.070 | **+0.024 [+0.010, +0.039]** | +0.001 [−0.001, +0.003] |
+| Inverted index, AND + ≤300 per term | ×8, plus AND matches | 79% | +0.073 | +0.023 [+0.009, +0.038] | +0.001 |
+| Inverted index, AND only for multi-word queries, ≤100 per term for one word | AND matches | 44% | +0.047 | +0.018 [+0.006, +0.030] | +0.000 |
+| 64 KB overflow extent for hot terms | ×21 | 100% | +0.084 | +0.017 [+0.002, +0.032] | +0.000 |
+| No evictions | ∞ | 100% | +0.084 | +0.016 [+0.001, +0.031] | +0.001 |
 
 - "Capacity" is the median multiple of the documents a hot query term keeps today.
 - "Targets only" adds back just the evicted good pages, which is what #459's "+0.06 to
   +0.10" measured.
-- With an unjudged gain of 0.8 or 1.2, the best designs give +0.020 or +0.027 index-only,
+- With an unjudged gain of 0.8 or 1.2, the best designs give +0.020 to +0.021 or +0.027 to +0.028 index-only,
   and the order doesn't change.
 
 ## What each design costs
@@ -157,7 +158,7 @@ below). 95% bootstrap CIs over queries. Baseline: index-only 0.224, Staan-first 
   Haiku's on 60 items, not from Haiku itself.
   - "No evictions" only catches up with the 16 KB design at an unjudged gain of about 2,
     twice the measured value.
-  - Even at 2.5, no design passes +0.054 index-only or +0.007 Staan-first.
+  - Even there, no design passes +0.043 index-only or +0.005 Staan-first.
 - **Small set.** 295 queries and 381 targets, from one eval set. Production effects are
   within noise for every design.
 - **Benefits not counted:**
