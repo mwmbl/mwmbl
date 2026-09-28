@@ -25,10 +25,14 @@ serves help?
 - **The MiniLM judges add a little more, end to end.** With the served judge (`both`) as a
   feature, `ndcg+new` gains +0.005 [+0.000, +0.011] on en-gb, +0.018 over shipped in all.
   That agrees with cross-validation (+0.006), and `both` is as good as any other judge.
-- **Domain-quality features don't help end to end.** The crawl model's domain features
-  (curated, Google SERP host counts, host shape, crawl inlinks) gain +0.006 to +0.008 in
-  cross-validation and stack with MiniLM there. On en-gb they add +0.001 [−0.004, +0.006],
-  and nothing beside `both`. A learned host-quality model does no better. Keep MiniLM.
+- **Common Crawl's web-graph ranks are the domain signal that carries over.** Harmonic
+  centrality and PageRank, host and domain level, gain +0.005 on en-gb [+0.000, +0.009],
+  matching cross-validation. The crawl model's features (SERP counts, curated, crawl
+  inlinks) gain +0.007 in cross-validation, but only +0.001 on en-gb.
+  - Beside MiniLM, `both` plus the SERP features plus Common Crawl is the best arm: 0.813,
+    +0.008 over `ndcg+new` [+0.003, +0.014] and +0.004 over `both` [−0.001, +0.009].
+  - Target encoding of the registered domain's `ethos` alone doesn't overfit, where the
+    host-level encoding did, but it isn't significant end to end.
 - **The gain is modest against the gap.** The best arm reaches 0.809. Brave scores 0.892,
   and the ordering ceiling is about 0.90. A better objective alone doesn't close it.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
@@ -242,12 +246,77 @@ anchors (overall drift −0.21).
   says "Google likes this host", which the training labels reward more than fresh
   retrieval does. This is plausible but untested.
 
+### Common Crawl ranks and a stricter target encoding
+
+The crawl inlinks come from a small, skewed local crawl: 458k pages from about 9.5k source
+hosts, counted without weighting. So a second run swaps in Common Crawl's Jul–Sep 2026 web
+graph (`cc-main-2026-jul-aug-sep`, 246M hosts and 2.7B edges).
+
+- **`cc`:** harmonic centrality and PageRank positions, host and domain level. Each graph is
+  cut to its top 5M by either measure, and anything below that is missing. 96% of the
+  serving pool's index hosts are ranked, and 98% of their domains.
+- **`te-ethos`:** the registered domain's mean `ethos` alone, smoothed with a prior of 20
+  rows, cross-fitted as before.
+
+Cross-validation (Δ against each table's base):
+
+| Arm | Serving pool Δ | Original pool Δ |
+|---|---|---|
+| raw | +0.0066 [+0.0037, +0.0094] | +0.0061 [+0.0028, +0.0094] |
+| cc | +0.0043 [+0.0017, +0.0069] | +0.0048 [+0.0019, +0.0079] |
+| raw+cc | +0.0057 [+0.0029, +0.0086] | +0.0070 [+0.0038, +0.0105] |
+| te-ethos | +0.0068 [+0.0039, +0.0095] | +0.0030 [+0.0002, +0.0057] |
+
+| Arm (424 queries) | Serving pool Δ | Original pool Δ |
+|---|---|---|
+| both | +0.0058 [+0.0011, +0.0104] | +0.0070 [+0.0012, +0.0125] |
+| both+raw | +0.0090 [+0.0035, +0.0145] | +0.0109 [+0.0051, +0.0169] |
+| both+cc | +0.0079 [+0.0026, +0.0133] | +0.0095 [+0.0036, +0.0153] |
+| both+raw+cc | +0.0110 [+0.0060, +0.0167] | +0.0129 [+0.0071, +0.0191] |
+| both+te-ethos | +0.0087 [+0.0041, +0.0137] | +0.0094 [+0.0042, +0.0152] |
+
+End to end on en-gb (`engb_domain_eval.py --cc`). Haiku graded 130 new URLs, with 162
+anchors (overall drift +0.23: +0.14 and +0.68 for the two judges).
+
+| Arm | NDCG@10 | vs ndcg+new | vs ndcg+new+both | Weak (≤ 3) in top 10 |
+|---|---|---|---|---|
+| shipped | 0.792 | −0.013 [−0.018, −0.008] | −0.017 [−0.024, −0.011] | 21.0% |
+| ndcg+new | 0.805 | — | −0.005 [−0.010, +0.001] | 20.1% |
+| ndcg+new+raw | 0.806 | +0.002 [−0.003, +0.006] | −0.003 [−0.009, +0.003] | 19.2% |
+| ndcg+new+cc | 0.809 | +0.005 [+0.000, +0.009] | −0.000 [−0.006, +0.005] | 19.3% |
+| ndcg+new+raw+cc | 0.807 | +0.002 [−0.003, +0.006] | −0.003 [−0.009, +0.003] | 19.4% |
+| ndcg+new+te-ethos | 0.808 | +0.003 [−0.000, +0.007] | −0.001 [−0.007, +0.005] | 19.7% |
+| ndcg+new+both | 0.810 | +0.005 [−0.000, +0.010] | — | 18.7% |
+| **ndcg+new+both+raw+cc** | **0.813** | **+0.008 [+0.003, +0.014]** | **+0.004 [−0.001, +0.009]** | **18.3%** |
+| brave | 0.889 | +0.084 | +0.079 | 9.8% |
+
+- **Common Crawl is the one domain signal whose cross-validation gain survives en-gb:**
+  +0.005, as MiniLM's does.
+- **The SERP features still don't survive on their own.** `raw` gains +0.002. With `cc`
+  they add nothing alone, but beside `both` they help.
+- **`both+raw+cc` is the best arm in both evaluations.** Its gain over `both` is borderline
+  on en-gb (+0.004, CI touching zero) and +0.011 in cross-validation.
+- **Robustness:** removing each judge's mean anchor drift from its new judgments leaves
+  `both+raw+cc` at +0.008 [+0.003, +0.014] over `ndcg+new` and +0.004 [−0.001, +0.008]
+  over `both`. `cc` stays at +0.004 [−0.000, +0.008].
+- **Serving `cc`** needs a lookup table: about 8M hosts and 8M domains, which could be cut
+  much further, since hosts past the top million or so rarely reach a top ten.
+- **Serving `raw`** needs the SERP table and the curated list. The SERP table is a snapshot
+  of extension scrapes, so it goes stale, and it covers only the 43.6k hosts seen.
+
 To reproduce:
 
 ```sh
+# Common Crawl ranks, top 5M by either measure (about 7 GB streamed)
+B=https://data.commoncrawl.org/projects/hyperlinkgraph/cc-main-2026-jul-aug-sep
+for l in domain host; do
+    curl -sS $B/$l/cc-main-2026-jul-aug-sep-$l-ranks.txt.gz | zcat \
+        | awk -F'\t' 'NR>1 && ($1<=5000000 || $3<=5000000) {print $1"\t"$2"\t"$3"\t"$4"\t"$5}' \
+        > devdata/combined_ltr_labels/cc_${l}_ranks.tsv
+done
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/domain_features.py   # crawl host table
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/domain_experiment.py [--minilm]
-PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_domain_eval.py report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_domain_eval.py report [--cc]
 ```
 
 `serp_domains.json` and `curated_domains.json` come from `crawl_model.py serp` on the

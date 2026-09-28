@@ -12,7 +12,14 @@ Each arm adds one set of columns to `ndcg+new`'s features:
 - `te`: target encoding. The smoothed mean `ethos` and `overall` of the host's and the
   registered domain's labelled rows, and how many there are. It remembers hosts but can't
   generalise;
-- `all`: `raw+crawl`, `hq` and `te` together.
+- `all`: `raw+crawl`, `hq` and `te` together;
+- `cc`: Common Crawl's harmonic centrality and PageRank positions, host and domain level;
+- `raw+cc`: `raw` plus `cc`;
+- `te-ethos`: a stricter target encoding, the registered domain's mean `ethos` alone, more
+  heavily smoothed. `ethos` is the one grade meant not to depend on the query.
+
+`hq` takes every `domain_features` column, so since the Common Crawl columns were added it
+uses those too.
 
 `hq` and `te` are learned from labels, so they are cross-fitted: a training row's values come
 from the other inner folds of its outer training set, and a test row's from the whole outer
@@ -22,7 +29,8 @@ With `--minilm`, the arms instead add the domain features beside the served Mini
 (`both`), cross-validated over the 424 queries no judge saw, as `minilm_experiment.py`'s
 `all` setting.
 
-Writes `devdata/combined_ltr_labels/domain_experiment[_minilm].json` with per-query scores.
+Writes `devdata/combined_ltr_labels/domain_experiment_cc[_minilm].json` (the first run, before
+the Common Crawl and `te-ethos` arms, is `domain_experiment[_minilm].json`) with per-query scores.
 """
 
 import json
@@ -35,6 +43,8 @@ import xgboost as xgb
 
 from scripts.combined_ltr_labels.domain_features import (
     ALL_NAMES,
+    CC_NAMES,
+    CRAWL_NAMES,
     RAW_NAMES,
     SERP_NAMES,
     apex_of,
@@ -56,6 +66,7 @@ LABELS = Path("devdata/combined_ltr_labels")
 OBJECTIVE = "ndcg"
 INNER_FOLDS = 5
 TE_PRIOR = 5
+TE_ETHOS_PRIOR = 20
 TE_NAMES = ["te_host_ethos", "te_host_overall", "te_host_rows", "te_apex_ethos", "te_apex_overall", "te_apex_rows"]
 HQ_PARAMS = {"objective": "reg:squarederror", "eta": 0.1, "max_depth": 4, "lambda": 2.0, "nthread": 4}
 HQ_ROUNDS = 200
@@ -63,26 +74,28 @@ DOMAIN_SCORE = FEATURE_NAMES.index("domain_score")
 
 ARMS = {
     "base": [],
-    "serp": ["serp"],
     "raw": ["raw"],
     "raw+crawl": ["raw+crawl"],
+    "cc": ["cc"],
+    "raw+cc": ["raw+cc"],
     "hq": ["hq"],
     "te": ["te"],
-    "all": ["raw+crawl", "hq", "te"],
+    "te-ethos": ["te-ethos"],
 }
 MINILM_ARMS = {
     "base": [],
     "both": ["minilm"],
-    "raw+crawl": ["raw+crawl"],
-    "hq": ["hq"],
-    "both+raw+crawl": ["minilm", "raw+crawl"],
-    "both+hq": ["minilm", "hq"],
-    "both+all": ["minilm", "raw+crawl", "hq", "te"],
+    "both+raw": ["minilm", "raw"],
+    "both+cc": ["minilm", "cc"],
+    "both+raw+cc": ["minilm", "raw+cc"],
+    "both+te-ethos": ["minilm", "te-ethos"],
 }
 STATIC_COLUMNS = {
     "serp": [ALL_NAMES.index(name) for name in SERP_NAMES],
     "raw": [ALL_NAMES.index(name) for name in RAW_NAMES],
-    "raw+crawl": list(range(len(ALL_NAMES))),
+    "raw+crawl": [ALL_NAMES.index(name) for name in RAW_NAMES + CRAWL_NAMES],
+    "cc": [ALL_NAMES.index(name) for name in CC_NAMES],
+    "raw+cc": [ALL_NAMES.index(name) for name in RAW_NAMES + CC_NAMES],
 }
 
 
@@ -94,7 +107,7 @@ def with_ethos(llm: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
 
 
 class Learned:
-    """The label-derived domain columns (`hq`, `te`), fitted on one set of labelled rows."""
+    """The label-derived domain columns (`hq`, `te`, `te-ethos`), fitted on one set of labelled rows."""
 
     def __init__(self, labelled: pd.DataFrame, domain: np.ndarray):
         self.te = {
@@ -118,8 +131,13 @@ class Learned:
                 (stats["overall_sum"].to_numpy() + TE_PRIOR * self.mean_overall) / (rows + TE_PRIOR),
                 rows,
             ]
+        apex = self.te["apex"].reindex(frame["apex"].to_numpy()).fillna(0.0)
+        te_ethos = (apex["ethos_sum"].to_numpy() + TE_ETHOS_PRIOR * self.mean_ethos) / (
+            apex["rows"].to_numpy() + TE_ETHOS_PRIOR
+        )
         return {
             "te": np.stack(te, axis=1).astype(np.float32),
+            "te-ethos": te_ethos[:, None].astype(np.float32),
             "hq": self.hq.predict(xgb.DMatrix(domain))[:, None].astype(np.float32),
         }
 
@@ -139,6 +157,7 @@ def learned_columns(
     fitted = {
         "te": np.zeros((len(labelled), len(TE_NAMES)), np.float32),
         "hq": np.zeros((len(labelled), 1), np.float32),
+        "te-ethos": np.zeros((len(labelled), 1), np.float32),
     }
     for fold_queries in inner:
         held = labelled["query"].isin(set(fold_queries)).to_numpy()
@@ -181,11 +200,11 @@ def run(minilm: bool):
         judge = {name: minilm_columns(frame, scores)[:, [both]] for name, frame in frames.items()}
         eval_queries = {normalize(q) for q in json.loads(MANIFEST.read_text())["llm_eval_queries"]}
         test_pool = np.array(sorted(q for q in llm["query"].unique() if normalize(q) in eval_queries))
-        arms, out = MINILM_ARMS, LABELS / "domain_experiment_minilm.json"
+        arms, out = MINILM_ARMS, LABELS / "domain_experiment_cc_minilm.json"
     else:
         judge = {name: None for name in frames}
         test_pool = np.array(sorted(llm["query"].unique()))
-        arms, out = ARMS, LABELS / "domain_experiment.json"
+        arms, out = ARMS, LABELS / "domain_experiment_cc.json"
     np.random.default_rng(0).shuffle(test_pool)
     folds = np.array_split(test_pool, FOLDS)
     results = {arm: {"original": {}, "serving": {}} for arm in arms}
@@ -264,6 +283,6 @@ def report(results: dict[str, dict[str, dict]]):
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["report"]:
-        report(json.loads((LABELS / "domain_experiment.json").read_text()))
+        report(json.loads((LABELS / "domain_experiment_cc.json").read_text()))
     else:
         run(minilm="--minilm" in sys.argv)

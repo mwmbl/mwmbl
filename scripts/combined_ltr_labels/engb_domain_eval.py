@@ -12,6 +12,9 @@ on every labelled row, and cross-fitted for the training rows.
     consolidate  judge output -> pass3_engb_domain.jsonl
     report       NDCG@10 of every arm against the union of all en-gb pass-3 judgments
 
+With `--cc`, the second run's arms and files: Common Crawl's ranks, the stricter target
+encoding, and the SERP features without the crawl's (`CC_ARMS`).
+
 Run from the repository root with DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and PYTHONPATH=.
 """
 
@@ -56,6 +59,13 @@ DOMAIN_RUN = Run(
     work=LABELS / "engb_domain_work",
     baselines=("ndcg+new", "ndcg+new+both"),
 )
+# The second run: Common Crawl's web-graph ranks and the stricter target encoding.
+CC_RUN = Run(
+    arms=LABELS / "engb_domain_cc_arms.json",
+    judgments=LABELS / "pass3_engb_domain_cc.jsonl",
+    work=LABELS / "engb_domain_cc_work",
+    baselines=("ndcg+new", "ndcg+new+both"),
+)
 OBJECTIVE = "ndcg"
 BOTH = "minilm-both-v1"
 ARMS = {
@@ -64,6 +74,15 @@ ARMS = {
     "ndcg+new+hq": ["hq"],
     "ndcg+new+both": ["minilm"],
     "ndcg+new+both+domain": ["minilm", "raw+crawl"],
+}
+CC_ARMS = {
+    "ndcg+new": [],
+    "ndcg+new+raw": ["raw"],
+    "ndcg+new+cc": ["cc"],
+    "ndcg+new+raw+cc": ["raw+cc"],
+    "ndcg+new+te-ethos": ["te-ethos"],
+    "ndcg+new+both": ["minilm"],
+    "ndcg+new+both+raw+cc": ["minilm", "raw+cc"],
 }
 
 
@@ -91,7 +110,7 @@ class DomainBoosterModel(BoosterModel):
         return np.concatenate(parts, axis=1)
 
 
-def rank():
+def rank(run: Run, arms: dict[str, list[str]]):
     llm, ext, new, _ = load()
     new = with_ethos(llm, new)
     frames = {"llm": llm, "ext": ext, "new": new}
@@ -113,7 +132,10 @@ def rank():
     num_llm = len(llm)
     train_frame = pd.concat([llm, ext, new], ignore_index=True)
     columns = {
-        "raw+crawl": np.concatenate([static["llm"], static["ext"], static["new"]]),
+        **{
+            name: np.concatenate([static["llm"], static["ext"], static["new"]])[:, indices]
+            for name, indices in STATIC_COLUMNS.items()
+        },
         "minilm": np.concatenate([judge["llm"], judge["ext"], judge["new"]]),
         **{
             name: np.concatenate([fitted[name][:num_llm], ext_learned[name], fitted[name][num_llm:]]) for name in fitted
@@ -123,16 +145,17 @@ def rank():
 
     judge_scores = JudgeScores()
     models = {SHIPPED: RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))}
-    for arm, groups in ARMS.items():
+    for arm, groups in arms.items():
         booster = train(OBJECTIVE, train_frame, np.concatenate([base_train] + [columns[g] for g in groups], axis=1))
         models[arm] = DomainBoosterModel(booster, groups, whole, judge_scores)
         print("trained", arm, flush=True)
-    rank_all(models, DOMAIN_RUN.arms)
+    rank_all(models, run.arms)
 
 
 if __name__ == "__main__":
     command = sys.argv[1]
+    run, arms = (CC_RUN, CC_ARMS) if "--cc" in sys.argv else (DOMAIN_RUN, ARMS)
     if command == "rank":
-        rank()
+        rank(run, arms)
     else:
-        {"batches": batches, "consolidate": consolidate, "report": report}[command](DOMAIN_RUN)
+        {"batches": batches, "consolidate": consolidate, "report": report}[command](run)

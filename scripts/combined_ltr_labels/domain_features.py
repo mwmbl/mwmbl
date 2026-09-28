@@ -16,7 +16,15 @@ and two from the raw crawl (`devdata/index_write_order/crawl/`, `run_crawl.py`'s
 
 - `crawl_pages`: how many pages of the host were crawled;
 - `crawl_inlink_hosts`: how many other registered domains link to the host from the pages
-  crawled.
+  crawled. The crawl is small and skewed (about 9.5k source hosts), so this is a weak signal;
+
+and four from Common Crawl's Jul–Sep 2026 web graph (`cc-main-2026-jul-aug-sep`), each graph
+cut to its top 5M nodes by either measure (`cc_*_ranks.tsv`), missing (NaN) below that:
+
+- `cc_host_hc_pos`, `cc_host_pr_pos`: the host's harmonic centrality and PageRank positions
+  in the host-level graph;
+- `cc_domain_hc_pos`, `cc_domain_pr_pos`: the same for its registered domain in the
+  domain-level graph.
 
 The SERP and curated tables come from the crawl-page-model branch's `crawl_model.py serp`
 and the public curated-domains endpoint, in `devdata/index_write_order/`.
@@ -41,6 +49,7 @@ CURATED_PATH = WRITE_ORDER / "curated_domains.json"
 SERP_DOMAINS_PATH = WRITE_ORDER / "serp_domains.json"
 CRAWL_DIR = WRITE_ORDER / "crawl"
 CRAWL_HOSTS_PATH = Path("devdata/combined_ltr_labels/crawl_hosts.json")
+CC_RANKS_PATH = "devdata/combined_ltr_labels/cc_{level}_ranks.tsv"
 PROCESSES = 8
 
 # Registered domains one level below these public suffixes, e.g. bbc.co.uk.
@@ -60,7 +69,8 @@ SHAPE_NAMES = [
 ]
 CRAWL_NAMES = ["crawl_pages", "crawl_inlink_hosts"]
 RAW_NAMES = SERP_NAMES + SHAPE_NAMES
-ALL_NAMES = RAW_NAMES + CRAWL_NAMES
+CC_NAMES = ["cc_host_hc_pos", "cc_host_pr_pos", "cc_domain_hc_pos", "cc_domain_pr_pos"]
+ALL_NAMES = RAW_NAMES + CRAWL_NAMES + CC_NAMES
 
 
 def host_of(url: str) -> str:
@@ -134,6 +144,22 @@ def crawl_hosts() -> tuple[dict[str, int], dict[str, int]]:
     return table["pages"], table["inlink_hosts"]
 
 
+@cache
+def cc_ranks(level: str) -> dict[str, tuple[float, float]]:
+    """Name -> (harmonic centrality position, PageRank position), names un-reversed."""
+    ranks = pd.read_csv(
+        CC_RANKS_PATH.format(level=level),
+        sep="\t",
+        header=None,
+        usecols=[0, 2, 4],
+        names=["hc_pos", "pr_pos", "name"],
+        dtype={"hc_pos": np.float32, "pr_pos": np.float32, "name": str},
+        keep_default_na=False,
+    )
+    names = [".".join(reversed(name.split("."))) for name in ranks["name"]]
+    return dict(zip(names, zip(ranks["hc_pos"].tolist(), ranks["pr_pos"].tolist())))
+
+
 def row_features(url: str, query: str | None) -> list[float]:
     """`query` is the row's own query, left out of the SERP counts."""
     host = host_of(url)
@@ -147,6 +173,8 @@ def row_features(url: str, query: str | None) -> list[float]:
     labels = host.split(".")
     first_label = labels[1] if labels[0] == "www" and len(labels) > 2 else labels[0]
     pages, inlink_hosts = crawl_hosts()
+    host_cc = cc_ranks("host").get(host, (np.nan, np.nan))
+    domain_cc = cc_ranks("domain").get(apex, (np.nan, np.nan))
     return [
         float(host in curated or apex in curated or host.removeprefix("www.") in curated),
         float(len(host_queries)),
@@ -161,6 +189,8 @@ def row_features(url: str, query: str | None) -> list[float]:
         float(TLDS.index(labels[-1]) if labels[-1] in TLDS else len(TLDS)),
         float(pages.get(host, 0)),
         float(inlink_hosts.get(apex, 0)),
+        *host_cc,
+        *domain_cc,
     ]
 
 
