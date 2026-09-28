@@ -77,7 +77,11 @@ OBJECTIVE_RUN = Run(
     baselines=(SHIPPED, "binary"),
 )
 # Every run's new judgments, so that no run asks Haiku about a URL another run had judged.
-RUN_JUDGMENTS = [LABELS / "pass3_engb_arms.jsonl", LABELS / "pass3_engb_minilm.jsonl"]
+RUN_JUDGMENTS = [
+    LABELS / "pass3_engb_arms.jsonl",
+    LABELS / "pass3_engb_minilm.jsonl",
+    LABELS / "pass3_engb_domain.jsonl",
+]
 
 
 class BoosterModel:

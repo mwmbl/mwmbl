@@ -25,6 +25,10 @@ serves help?
 - **The MiniLM judges add a little more, end to end.** With the served judge (`both`) as a
   feature, `ndcg+new` gains +0.005 [+0.000, +0.011] on en-gb, +0.018 over shipped in all.
   That agrees with cross-validation (+0.006), and `both` is as good as any other judge.
+- **Domain-quality features don't help end to end.** The crawl model's domain features
+  (curated, Google SERP host counts, host shape, crawl inlinks) gain +0.006 to +0.008 in
+  cross-validation and stack with MiniLM there. On en-gb they add +0.001 [−0.004, +0.006],
+  and nothing beside `both`. A learned host-quality model does no better. Keep MiniLM.
 - **The gain is modest against the gap.** The best arm reaches 0.809. Brave scores 0.892,
   and the ordering ceiling is about 0.90. A better objective alone doesn't close it.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
@@ -155,6 +159,100 @@ judgments and 198 anchors.
 - **Leakage.** Dropping "bitcoin price" and "microsoft teams", which the pairs task may
   have seen, leaves `both` at +0.019 over shipped and +0.006 [+0.000, +0.011] over
   `ndcg+new`.
+
+## Domain-quality features (2026-09-28)
+
+Before adding MiniLM, does a richer domain signal do the same job? The shared features have
+one, `domain_score` (HN top-domains rank). `domain_features.py` adds what the write-time
+crawl model uses (PR #463, `index-write-order-crawl-model.md`):
+
+- `curated`;
+- Google SERP counts: `serp_queries_host`, `serp_top3_host`, `serp_queries_apex`. The table
+  leaves out every en-gb query, and each training row's own query;
+- host shape, and a TLD code;
+- `crawl_pages` and `crawl_inlink_hosts`, from the raw crawl's 458k pages and their links.
+
+`domain_experiment.py` compares these with two learned signals. Both are cross-fitted
+within each training set:
+
+- `hq`, a host-quality model: an XGBoost regressor from those columns plus `domain_score`
+  to the Pass-3 `ethos` grade;
+- `te`, target encoding: the smoothed mean `ethos` and `overall` of the host and of its
+  registered domain.
+
+### Cross-validation
+
+The first table uses the objective experiment's 5 folds over 849 queries. The second is
+beside MiniLM `both`, over the 424 judge-eval queries in the `all` setting. Deltas are
+against each table's `ndcg+new` base, which reproduces 0.8761 / 0.8235.
+
+| Arm | Serving pool Δ | Original pool Δ |
+|---|---|---|
+| serp | +0.0053 [+0.0025, +0.0079] | +0.0054 [+0.0023, +0.0087] |
+| raw (serp + shape) | +0.0066 [+0.0038, +0.0096] | +0.0061 [+0.0028, +0.0094] |
+| raw+crawl | +0.0064 [+0.0036, +0.0091] | +0.0080 [+0.0051, +0.0111] |
+| hq | +0.0058 [+0.0029, +0.0086] | +0.0042 [+0.0011, +0.0075] |
+| te | +0.0035 [+0.0007, +0.0062] | −0.0041 [−0.0080, −0.0004] |
+| all (raw+crawl, hq, te) | +0.0050 [+0.0022, +0.0080] | +0.0009 [−0.0031, +0.0051] |
+
+| Arm (424 queries) | Serving pool Δ | Original pool Δ |
+|---|---|---|
+| both | +0.0058 [+0.0011, +0.0104] | +0.0070 [+0.0015, +0.0128] |
+| raw+crawl | +0.0078 [+0.0037, +0.0117] | +0.0053 [+0.0002, +0.0102] |
+| hq | +0.0060 [+0.0021, +0.0098] | +0.0035 [−0.0007, +0.0074] |
+| both+raw+crawl | +0.0111 [+0.0061, +0.0166] | +0.0117 [+0.0063, +0.0175] |
+| both+hq | +0.0090 [+0.0042, +0.0144] | +0.0082 [+0.0026, +0.0139] |
+| both+all | +0.0105 [+0.0049, +0.0157] | +0.0127 [+0.0067, +0.0189] |
+
+- In cross-validation, the plain features are as good as the learned ones.
+- Target encoding overfits: it memorises hosts.
+
+### End to end on en-gb (289 queries)
+
+`engb_domain_eval.py` follows `engb_minilm_eval.py`. Haiku graded 147 new URLs, with 188
+anchors (overall drift −0.21).
+
+| Arm | NDCG@10 | vs ndcg+new | vs ndcg+new+both | Weak (≤ 3) in top 10 |
+|---|---|---|---|---|
+| shipped | 0.792 | −0.013 [−0.018, −0.008] | −0.018 [−0.024, −0.011] | 21.0% |
+| ndcg+new | 0.805 | — | −0.005 [−0.010, +0.001] | 20.1% |
+| ndcg+new+domain | 0.806 | +0.001 [−0.004, +0.006] | −0.004 [−0.010, +0.002] | 19.5% |
+| ndcg+new+hq | 0.805 | −0.000 [−0.005, +0.005] | −0.005 [−0.011, +0.001] | 19.3% |
+| **ndcg+new+both** | **0.810** | **+0.005 [−0.000, +0.010]** | — | **18.7%** |
+| ndcg+new+both+domain | 0.810 | +0.005 [−0.001, +0.011] | +0.000 [−0.004, +0.005] | 18.3% |
+| brave | 0.889 | +0.084 | +0.079 | 9.8% |
+
+- **The cross-validation gain doesn't carry over.** MiniLM's does: +0.005 here against
+  +0.006 in cross-validation.
+- **Leakage through similar queries doesn't explain the gap.** A query in the SERP table
+  that contains, or is contained in, the row's query can still count. But 53% of the 849
+  training queries have such a near-duplicate, and so do 56% of the en-gb queries.
+- **The domain features reshuffle reputable hosts.**
+  - `+domain` changes the top ten of 170 queries, swapping 272 URLs each way.
+  - The URLs it brings in grade only 0.2 higher on average (3.81 against 3.59).
+  - The hosts on both sides are the same: Wikipedia, the Guardian, the BBC, YouTube.
+- **The weak results are mostly on known hosts.**
+  - 65% of the weak results in `ndcg+new`'s top ten are on curated or SERP-listed hosts,
+    against 75% of the good ones.
+  - What remains is a relevance problem (off-topic pages on good sites), not spam, and
+    MiniLM addresses it. The spam these features fixed at write time (#463) mostly never
+    reaches this top ten.
+- **A likely reason for the cross-validation gain:** the pools are graded with Google SERP
+  presence, and the extension rows' labels are Google SERPs. A host's SERP count mostly
+  says "Google likes this host", which the training labels reward more than fresh
+  retrieval does. This is plausible but untested.
+
+To reproduce:
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/domain_features.py   # crawl host table
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/domain_experiment.py [--minilm]
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_domain_eval.py report
+```
+
+`serp_domains.json` and `curated_domains.json` come from `crawl_model.py serp` on the
+crawl-page-model branch. They, and the raw crawl, live in `devdata/index_write_order/`
+and are not committed.
 
 ## Caveats
 

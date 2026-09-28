@@ -231,3 +231,7 @@ devdata/moderation_bakeoff/
 
 vendor/
 devdata/combined_ltr_labels/minilm_scores.json
+devdata/combined_ltr_labels/crawl_hosts.json
+devdata/combined_ltr_labels/engb_minilm_work/
+devdata/combined_ltr_labels/engb_domain_work/
+devdata/combined_ltr_labels/*.log
