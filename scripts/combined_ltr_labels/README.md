@@ -67,43 +67,26 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_scores.py      # a
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_experiment.py
 ```
 
-## Handover: en-gb end to end with MiniLM features
+## en-gb end to end with MiniLM features
 
-The cross-validation says adding the MiniLM judges to `ndcg+new` gains +0.006 to +0.010
-NDCG@10. The next step is `engb_eval.py`'s end-to-end run on the 289 held-out en-gb
-queries, with Haiku judging the top-ten URLs that no judgment covers yet.
+`engb_minilm_eval.py` runs `engb_eval.py`'s pipeline for `shipped`, `ndcg+new` and
+`ndcg+new` with each judge set as features, trained on all 849 queries plus the new
+labels. It writes `engb_minilm_arms.json` and `pass3_engb_minilm.jsonl`, and
+`engb_eval.judged()` reads every run's judgments, so each run batches only URLs no run
+has judged. The results are in `mwmbl/rankeval/combined-ltr-objective.md`.
 
-- **Models.** Put the judges at `devdata/judge_train/models/minilm-{both,pointwise,pairs}-v1/onnx`
-  (gitignored; locally a symlink to `../mwmbl/devdata/judge_train/models`). Then run
-  `minilm_scores.py` to rebuild `minilm_scores.json`, which is gitignored.
-- **Arms.**
-  - Train on all 849 queries plus the new labels, with extension rows at weight 0.25.
-    That is the `all` setting, the best in CV.
-  - Suggested arms: `shipped`, `ndcg+new` (no MiniLM), `ndcg+new+pointwise`,
-    `ndcg+new+both` and `ndcg+new+all3`.
-  - Build the training features with `minilm_experiment.minilm_columns` and
-    `objective_experiment.features`. The extension rows' MiniLM columns stay NaN.
-- **Serving the features.** `LTRRanker` passes the model records with `query`, `title` and
-  `extract`. So subclass `engb_eval.BoosterModel`: score each record with
-  `Judge(model_dir).score(query, [doc_text(title, extract)])` for each judge, append those
-  columns in `minilm_scores.MINILM_MODELS` order, then apply the same sigmoid and
-  filter-as-exclusion.
-  - Each candidate the ranker scores costs about 1/76 s per judge on CPU.
-  - Retrieval is live against api.mwmbl.org, so rerun `shipped` and `ndcg+new` in the same
-    pass. Arms are only comparable within one retrieval.
-- **Don't overwrite the previous run.**
-  - `engb_eval.py` hardcodes `ARMS` (`engb_arms.json`), `NEW_JUDGMENTS`
-    (`pass3_engb_arms.jsonl`) and `WORK`. Write the MiniLM run to new files, e.g.
-    `engb_minilm_arms.json` and `pass3_engb_minilm.jsonl`.
-  - Make `judged()` read all three judgment files, so only URLs that are genuinely new
-    get batched.
-- **Judging.** `batches` → Claude Haiku 4.5 subagents, one per batch, each writing
-  `out_NN.txt` → `consolidate` → `report`. Check the anchors' drift as in the objective
-  run.
-- **Leakage.** None of the en-gb queries are among the 849. Two of them ("bitcoin price",
-  "microsoft teams") appear in the curation pairs export, which the judges' pairs task may
-  have trained on. That's negligible, but they can be dropped from the report to be strict.
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py rank         # about 30 minutes
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py batches
+# One Claude Haiku 4.5 subagent per engb_minilm_work/batch_NN.txt, writing out_NN.txt
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py consolidate
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py report
+```
+
 - **Environment (this machine):**
+  - The judges must be at `devdata/judge_train/models/minilm-{both,pointwise,pairs}-v1/onnx`
+    (gitignored; locally a symlink to `../mwmbl/devdata/judge_train/models`), and
+    `minilm_scores.json` built by `minilm_scores.py`.
   - Redis must be running.
   - Use `.venv/bin/python` with `PYTHONPATH=.` and
     `DJANGO_SETTINGS_MODULE=mwmbl.settings_dev`.

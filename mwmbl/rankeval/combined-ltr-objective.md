@@ -22,6 +22,9 @@ serves help?
   - `rank:ndcg` with them is the best arm: +0.013 over shipped [+0.008, +0.018].
 - **The binary retrain reproduces the shipped model**, 0.798 against 0.796. That holds even
   without curation data and with approximate Staan ranks, so the harness is sound.
+- **The MiniLM judges add a little more, end to end.** With the served judge (`both`) as a
+  feature, `ndcg+new` gains +0.005 [+0.000, +0.011] on en-gb, +0.018 over shipped in all.
+  That agrees with cross-validation (+0.006), and `both` is as good as any other judge.
 - **The gain is modest against the gap.** The best arm reaches 0.809. Brave scores 0.892,
   and the ordering ceiling is about 0.90. A better objective alone doesn't close it.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
@@ -115,8 +118,43 @@ the arms.
   training queries are worth more than the in-sample optimism costs.
 - **MiniLM doesn't replace the LTR.** Ordering by `both` alone is 0.04 worse, and it lets
   far more index results into the top ten.
-- **Not yet measured:** the en-gb end-to-end run (it needs fresh Haiku judgments of new
-  top-ten URLs), and the serving cost of scoring every candidate the LTR keeps.
+- **Not yet measured:** the serving cost of scoring every candidate the LTR keeps.
+
+## End to end on en-gb with MiniLM features (289 queries)
+
+`engb_minilm_eval.py` trains `ndcg+new` with each judge set on all 849 queries plus the
+serving-pool labels (the `all` setting), and ranks one fresh retrieval as `engb_eval.py`
+does. At serving each judge scores every candidate the ranker scores, on its title and
+extract. `shipped` and `ndcg+new` rank the same retrieval again, since arms are only
+comparable within one. Haiku graded the top-ten URLs no earlier judgment covered: 154 new
+judgments and 198 anchors.
+
+| Arm | NDCG@10 | vs shipped | vs ndcg+new | Weak (≤ 3) in top 10 |
+|---|---|---|---|---|
+| shipped | 0.794 | — | −0.013 [−0.018, −0.008] | 21.0% |
+| ndcg+new | 0.807 | +0.013 [+0.008, +0.018] | — | 20.0% |
+| ndcg+new+pointwise | 0.814 | +0.020 [+0.013, +0.027] | +0.007 [+0.001, +0.013] | 18.3% |
+| **ndcg+new+both** | **0.812** | **+0.018 [+0.012, +0.024]** | **+0.005 [+0.000, +0.011]** | **18.5%** |
+| ndcg+new+all3 | 0.812 | +0.019 [+0.012, +0.025] | +0.006 [+0.000, +0.011] | 18.6% |
+| brave | 0.891 | +0.097 | +0.084 | 9.8% |
+
+- **The retrieval reproduces the previous run.** `shipped` and `ndcg+new` score 0.794 and
+  0.807 here, against 0.796 and 0.809 in the objective run.
+- **Use `both`.** It is within 0.002 of `pointwise`, well inside the noise, as in
+  cross-validation. It is the judge Super Search already serves
+  (`SUPER_SEARCH_JUDGE_MODEL_DIR`), and it was trained on the human curation pairs too.
+- **The gain over `ndcg+new` is borderline on its own.** It fits the cross-validation in
+  sign and size, and it cuts weak results in the top ten by 1.5 points.
+- **Judge offsets.** The anchors run +0.63 generous, but unevenly: +0.92 for the judge of
+  the 249-candidate batch, −0.03 for the other. Removing each judge's mean drift from its
+  new judgments leaves `both` at +0.017 [+0.011, +0.023] over shipped and +0.004
+  [−0.001, +0.010] over `ndcg+new`. Anchor relevance drift is +0.24, 67% of overall grades
+  are within one of the original, and Spearman is 0.79.
+- **Newly judged URLs** make up 2–3% of the MiniLM arms' top tens, and 0.2% of
+  `ndcg+new`'s.
+- **Leakage.** Dropping "bitcoin price" and "microsoft teams", which the pairs task may
+  have seen, leaves `both` at +0.019 over shipped and +0.006 [+0.000, +0.011] over
+  `ndcg+new`.
 
 ## Caveats
 
@@ -140,10 +178,14 @@ the arms.
    `LTRRanker.order_results`, or apply a sigmoid. Either way, a negative score must stop
    meaning "drop".
 3. **Human gate.** Run the curation pair-accuracy gate with curation data included.
+4. **MiniLM feature.** To add `both`, score every candidate the ranker keeps with the
+   Super Search judge before the LTR, and measure what that costs in latency: about 1/76 s
+   a candidate on CPU.
 
 To reproduce:
 
 ```sh
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/objective_experiment.py
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_eval.py report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py report
 ```

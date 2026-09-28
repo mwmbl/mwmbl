@@ -24,6 +24,7 @@ import os
 import random
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import django
@@ -53,21 +54,41 @@ from mwmbl.tinysearchengine.staan import staan_score
 ENGB = Path("devdata/combined_providers_eval/engb")
 JUDGMENTS = Path("devdata/combined_providers_eval/haiku/pass3_engb.jsonl")
 LABELS = Path("devdata/combined_ltr_labels")
-ARMS = LABELS / "engb_arms.json"
-NEW_JUDGMENTS = LABELS / "pass3_engb_arms.jsonl"
-WORK = Path(os.environ.get("HAIKU_WORK_DIR", "devdata/combined_ltr_labels/engb_work"))
 SHIPPED = "shipped"
 ANCHORS = 2
 CANDIDATES_PER_BATCH = 250
 LINE = re.compile(r"^\s*(\d+)\s*\|\|\s*(\d+)\s*\|\|\s*(\d+)\s*\|\|\s*(\d+)\s*$")
 
 
+@dataclass(frozen=True)
+class Run:
+    """One end-to-end run's files, and the arms its report compares every arm against."""
+
+    arms: Path
+    judgments: Path
+    work: Path
+    baselines: tuple[str, ...]
+
+
+OBJECTIVE_RUN = Run(
+    arms=LABELS / "engb_arms.json",
+    judgments=LABELS / "pass3_engb_arms.jsonl",
+    work=Path(os.environ.get("HAIKU_WORK_DIR", "devdata/combined_ltr_labels/engb_work")),
+    baselines=(SHIPPED, "binary"),
+)
+# Every run's new judgments, so that no run asks Haiku about a URL another run had judged.
+RUN_JUDGMENTS = [LABELS / "pass3_engb_arms.jsonl", LABELS / "pass3_engb_minilm.jsonl"]
+
+
 class BoosterModel:
     def __init__(self, booster: xgb.Booster):
         self.booster = booster
 
+    def features(self, records: list[dict]) -> np.ndarray:
+        return np.array(mwmbl_rank.RustXGBPipeline.extract_features(records, True), dtype=np.float32)
+
     def predict(self, records: list[dict]) -> np.ndarray:
-        feats = np.array(mwmbl_rank.RustXGBPipeline.extract_features(records, True), dtype=np.float32)
+        feats = self.features(records)
         margins = self.booster.predict(xgb.DMatrix(feats), output_margin=True)
         from_staan = np.array([record["from_staan"] for record in records])
         kept = from_staan | (feats[:, MATCH_TERMS] > feats[:, NUM_TERMS] / 2)
@@ -100,7 +121,11 @@ def rank():
             booster = train(objective, frame, np.concatenate([feats[n] for n in names]))
             models[f"{objective}{'+new' if with_new else ''}"] = BoosterModel(booster)
             print("trained", objective, with_new, flush=True)
+    rank_all(models, OBJECTIVE_RUN.arms)
 
+
+def rank_all(models: dict, path: Path):
+    """Ranks one fresh retrieval per en-gb query with every model, and writes the top tens."""
     index = RemoteIndex()
     rankers = {arm: MMRRanker(CombinedLTRRanker(index, DummyCompleter(), model)) for arm, model in models.items()}
     retriever = rankers[SHIPPED]
@@ -118,12 +143,12 @@ def rank():
         out[query] = {"lists": lists, "pages": pages}
         if i % 25 == 0:
             print(i, query, flush=True)
-    ARMS.write_text(json.dumps(out))
+    path.write_text(json.dumps(out))
 
 
-def judged() -> dict[str, dict[str, dict]]:
+def judged(exclude: Path | None = None) -> dict[str, dict[str, dict]]:
     grades: dict[str, dict[str, dict]] = {}
-    paths = [JUDGMENTS] + ([NEW_JUDGMENTS] if NEW_JUDGMENTS.exists() else [])
+    paths = [JUDGMENTS] + [path for path in RUN_JUDGMENTS if path.exists() and path != exclude]
     for path in paths:
         for line in open(path):
             record = json.loads(line)
@@ -132,8 +157,8 @@ def judged() -> dict[str, dict[str, dict]]:
     return grades
 
 
-def batches():
-    arms = json.loads(ARMS.read_text())
+def batches(run: Run):
+    arms = json.loads(run.arms.read_text())
     grades = judged()
     prompt = JUDGE_PROMPT.replace(
         "You are a careful search-quality judge for Mwmbl, an independent non-profit\nsearch engine.",
@@ -161,7 +186,7 @@ def batches():
             next_id += 1
         blocks.append((len(chosen), "\n".join(lines)))
 
-    WORK.mkdir(parents=True, exist_ok=True)
+    run.work.mkdir(parents=True, exist_ok=True)
     groups: list[list[str]] = [[]]
     size = 0
     for count, block in blocks:
@@ -171,15 +196,15 @@ def batches():
         groups[-1].append(block)
         size += count
     for b, group in enumerate(groups):
-        (WORK / f"batch_{b:02d}.txt").write_text(prompt + "\n".join(group) + "\n")
-    (WORK / "manifest.json").write_text(json.dumps(manifest))
+        (run.work / f"batch_{b:02d}.txt").write_text(prompt + "\n".join(group) + "\n")
+    (run.work / "manifest.json").write_text(json.dumps(manifest))
     print(f"{len(blocks)} queries, {len(manifest)} candidates in {len(groups)} batches")
 
 
-def consolidate():
-    manifest = {int(k): v for k, v in json.loads((WORK / "manifest.json").read_text()).items()}
+def consolidate(run: Run):
+    manifest = {int(k): v for k, v in json.loads((run.work / "manifest.json").read_text()).items()}
     grades, judges = {}, {}
-    for path in sorted(WORK.glob("out_*.txt")):
+    for path in sorted(run.work.glob("out_*.txt")):
         for line in path.read_text().splitlines():
             match = LINE.match(line)
             if not match:
@@ -191,9 +216,9 @@ def consolidate():
             judges[cid] = path.stem.removeprefix("out_")
     missing = sorted(set(manifest) - set(grades))
     assert not missing, f"{len(missing)} ids ungraded, first {missing[:10]}"
-    original = {(j["query"], j["url"]): j for j in map(json.loads, open(JUDGMENTS))}
+    original = judged(exclude=run.judgments)
     drift = []
-    with open(NEW_JUDGMENTS, "w") as f:
+    with open(run.judgments, "w") as f:
         for cid in sorted(manifest):
             query, url, is_anchor = manifest[cid]
             relevance, ethos, overall = grades[cid]
@@ -201,13 +226,13 @@ def consolidate():
             record["judge"] = judges[cid]
             if is_anchor:
                 record["anchor"] = True
-                drift.append(overall - original[(query, url)]["overall"])
+                drift.append(overall - original[query][url]["overall"])
             f.write(json.dumps(record) + "\n")
     print(f"{len(grades) - len(drift)} new, {len(drift)} anchors; anchor overall drift {np.mean(drift):+.2f}")
 
 
-def report():
-    arms = json.loads(ARMS.read_text())
+def report(run: Run):
+    arms = json.loads(run.arms.read_text())
     rows = {row["query"]: row for row in json.loads((ENGB / "rows-0.05.json").read_text())}
     grades = judged()
     discounts = 1 / np.log2(np.arange(2, 12))
@@ -228,12 +253,12 @@ def report():
 
     rng = np.random.default_rng(0)
     print(f"\n## en-gb, pass-3 overall NDCG@10 ({len(scores[SHIPPED])} queries)\n")
-    print("| Arm | NDCG@10 | vs shipped, 95% CI | vs binary, 95% CI | weak in top 10 |")
-    print("|---|---|---|---|---|")
+    print("| Arm | NDCG@10 | " + " | ".join(f"vs {base}, 95% CI" for base in run.baselines) + " | weak in top 10 |")
+    print("|---|---|" + "---|" * len(run.baselines) + "---|")
     for arm, values in scores.items():
         values = np.array(values)
         cells = []
-        for base in (SHIPPED, "binary"):
+        for base in run.baselines:
             diff = values - np.array(scores[base])
             means = [diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(2000)]
             cells.append(f"{diff.mean():+.3f} [{np.percentile(means, 2.5):+.3f}, {np.percentile(means, 97.5):+.3f}]")
@@ -241,4 +266,8 @@ def report():
 
 
 if __name__ == "__main__":
-    {"rank": rank, "batches": batches, "consolidate": consolidate, "report": report}[sys.argv[1]]()
+    command = sys.argv[1]
+    if command == "rank":
+        rank()
+    else:
+        {"batches": batches, "consolidate": consolidate, "report": report}[command](OBJECTIVE_RUN)
