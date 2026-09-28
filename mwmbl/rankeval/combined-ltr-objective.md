@@ -25,6 +25,9 @@ serves help?
 - **The MiniLM judges add a little more, end to end.** With the served judge (`both`) as a
   feature, `ndcg+new` gains +0.005 [+0.000, +0.011] on en-gb, +0.018 over shipped in all.
   That agrees with cross-validation (+0.006), and `both` is as good as any other judge.
+  - **But scoring every candidate costs about a second a query.** The ranker scores 138
+    candidates a query on average. The judge takes 1.0 s mean and 1.7 s p90 on 4 threads,
+    and 2.5 s mean on 1 thread, against 5 ms for the whole shipped ranking.
 - **Common Crawl's web-graph ranks are the domain signal that carries over.** Harmonic
   centrality and PageRank, host and domain level, gain +0.005 on en-gb [+0.000, +0.009],
   matching cross-validation. The crawl model's features (SERP counts, curated, crawl
@@ -126,7 +129,7 @@ the arms.
   training queries are worth more than the in-sample optimism costs.
 - **MiniLM doesn't replace the LTR.** Ordering by `both` alone is 0.04 worse, and it lets
   far more index results into the top ten.
-- **Not yet measured:** the serving cost of scoring every candidate the LTR keeps.
+- **Serving cost:** about a second a query; see the latency section below.
 
 ## End to end on en-gb with MiniLM features (289 queries)
 
@@ -163,6 +166,49 @@ judgments and 198 anchors.
 - **Leakage.** Dropping "bitcoin price" and "microsoft teams", which the pairs task may
   have seen, leaves `both` at +0.019 over shipped and +0.006 [+0.000, +0.011] over
   `ndcg+new`.
+
+## Latency of the MiniLM feature (295 en-gb queries)
+
+`minilm_latency.py` replays the en-gb retrieval through the shipped `CombinedLTRRanker`. It
+captures the records each query passes to the model: every candidate the served arm's judge
+would score. It then times `Judge.score` on them, best of 3 runs, on a laptop i7-8665U
+(4 cores, 8 threads).
+
+- **Candidates a query:** 138 on average, median 122, p90 230, max 391. That's many more
+  than the ranker returns, because the model scores the whole pool before the `> 0` filter.
+- **Pairs are short:** 40 tokens on average, and none reach the 256-token cap, so there's
+  little to gain from truncating.
+
+| What is timed | Mean | p50 | p90 | p99 |
+|---|---|---|---|---|
+| Shipped LTR `predict` | 2 ms | 2 ms | 2 ms | 4 ms |
+| Shipped `search_retrieved` (whole ranking + MMR) | 5 ms | 4 ms | 7 ms | 9 ms |
+| Judge, all candidates, 1 thread | 2,460 ms | 2,135 ms | 3,983 ms | 7,237 ms |
+| Judge, all candidates, 2 threads | 1,514 ms | 1,337 ms | 2,444 ms | 4,451 ms |
+| Judge, all candidates, 4 threads | 1,028 ms | 909 ms | 1,681 ms | 3,030 ms |
+| Judge, all candidates, onnxruntime default | 1,152 ms | 1,035 ms | 2,017 ms | 3,232 ms |
+| Judge, LTR top 10, 1 thread | 162 ms | 157 ms | 188 ms | 232 ms |
+| Judge, LTR top 20, 1 thread | 338 ms | 328 ms | 384 ms | 556 ms |
+| Judge, LTR top 30, 1 thread | 521 ms | 509 ms | 587 ms | 847 ms |
+
+- **Per candidate:** 17.8 ms on 1 thread (56 a second), 11.0 ms on 2 and 7.5 ms on 4. The
+  1/76 s estimate above was optimistic. Threads scale sublinearly, and more threads per
+  request would take cores from concurrent requests under load.
+- **200–500× the ranking it would feed.** Scoring every candidate turns a 5 ms ranking
+  into 1–2.5 s. That is as much again as the whole request: 1.2–1.3 s end to end on beta
+  and production, mostly Staan.
+- **The judge can't overlap Staan.** It scores the pooled candidates, which include Staan's
+  results, so it runs after the fetch. It could score the index candidates while Staan is
+  in flight, leaving only Staan's ~10 results after it: about 160–180 ms on 1 thread. But
+  the index lookup finishes much sooner than Staan's fetch, and Staan-cache hits leave no
+  fetch to hide behind.
+- **A two-stage judge is affordable but untested.** Scoring only the LTR's top 10–30 costs
+  0.16–0.5 s on 1 thread. The +0.005 was measured with every candidate scored, so this
+  needs its own arm: train on judge scores that are missing below the cut, and evaluate
+  end to end.
+- **Production hardware isn't measured here.** These are laptop timings. The ratio to the
+  LTR should carry over. The absolute numbers depend on the server's cores and on how
+  many requests share them.
 
 ## Domain-quality features (2026-09-28)
 
@@ -346,8 +392,9 @@ and are not committed.
    meaning "drop".
 3. **Human gate.** Run the curation pair-accuracy gate with curation data included.
 4. **MiniLM feature.** To add `both`, score every candidate the ranker keeps with the
-   Super Search judge before the LTR, and measure what that costs in latency: about 1/76 s
-   a candidate on CPU.
+   Super Search judge before the LTR. That costs about 1 s a query on 4 threads, 2.5 s on
+   1 (see the latency section), against a +0.005 gain. It's probably only worth it as a
+   top-k second stage, and that needs its own end-to-end evaluation first.
 
 To reproduce:
 
@@ -355,4 +402,5 @@ To reproduce:
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/objective_experiment.py
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_eval.py report
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_latency.py capture  # then: time
 ```
