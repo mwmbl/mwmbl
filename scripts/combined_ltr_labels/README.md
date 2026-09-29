@@ -116,3 +116,17 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_cascade_eval.py repo
     `DJANGO_SETTINGS_MODULE=mwmbl.settings_dev`.
   - The "Failed to schedule background tasks" traceback at startup is harmless: there's no
     database.
+
+## Holistic evaluation
+
+`holistic_eval.py` has a Claude Haiku 4.5 judge compare two whole top-ten lists side by side,
+in both orders, for an overall verdict with reasons (top result, relevance, junk, redundancy,
+coverage, extracts, ethos). It is validated against Brave and against NDCG on en-gb. The
+results are in `mwmbl/rankeval/combined-holistic-eval.md`.
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py batches
+# One Claude Haiku 4.5 subagent per holistic_work/batch_NN.txt, writing out_NN.txt
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py consolidate
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py report
+```
