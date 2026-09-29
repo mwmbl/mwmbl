@@ -649,6 +649,13 @@ query's Staan results, instead of by the ranking score.
   order held-out pairs at similar AUCs (0.74–0.77), so better features, not a better merge
   rule, are what's left. Part of the oracle's headroom is likely grade noise: it picks the
   maximum of many noisily graded index results.
+- **More pairs from outside the serving pool hurt.** `pool` trains `diff` on the whole
+  LLM-labelled pool for the same queries: the same Staan results against about twice as
+  many index results. Its AUC on the model's top index result falls to 0.729, below the
+  ranker's 0.739, and its best arm gains only +0.0013 [+0.0003, +0.0024]. The extra index
+  results are pages serving never retrieves, and its context features (the index result's
+  rank and count) mean something different in the larger pool, so it learns the wrong
+  distribution.
 - **Not yet run with MiniLM.** `merge-rest` with MiniLM as a feature gained +0.0046 on the
   424 judge-eval queries. The next step is `diff` with the MiniLM scores of both results as
   pair features, on those queries; `minilm_scores.json` wasn't available for this run.
