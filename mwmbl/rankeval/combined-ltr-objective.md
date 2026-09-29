@@ -202,10 +202,9 @@ would score. It then times `Judge.score` on them, best of 3 runs, on a laptop i7
   in flight, leaving only Staan's ~10 results after it: about 160–180 ms on 1 thread. But
   the index lookup finishes much sooner than Staan's fetch, and Staan-cache hits leave no
   fetch to hide behind.
-- **A two-stage judge is affordable but untested.** Scoring only the LTR's top 10–30 costs
-  0.16–0.5 s on 1 thread. The +0.005 was measured with every candidate scored, so this
-  needs its own arm: train on judge scores that are missing below the cut, and evaluate
-  end to end.
+- **A two-stage judge is affordable.** Scoring only the LTR's top 10–30 costs 0.16–0.5 s on
+  1 thread. The cascade sections below test it: the top 20 keeps the whole gain, in
+  cross-validation and end to end.
 - **Production hardware isn't measured here.** These are laptop timings. The ratio to the
   LTR should carry over. The absolute numbers depend on the server's cores and on how
   many requests share them.
@@ -369,6 +368,86 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_domain_eval.py repor
 crawl-page-model branch. They, and the raw crawl, live in `devdata/index_write_order/`
 and are not committed.
 
+## MiniLM on the top K only: a cascade (5 folds over the 424 judge-eval queries)
+
+The judge costs about 17 ms a candidate on one thread. That is 2.5 s for all ~150 candidates
+of a query, 0.35 s for the LTR's top 20 and 0.52 s for its top 30, against 5 ms for the
+shipped ranking. `minilm_cascade_experiment.py` tests a two-stage ranker:
+
+1. `ndcg+new` without MiniLM ranks every candidate.
+2. The judge scores that ranking's top K, and a model with `both` as a feature re-orders
+   them. Everything below K keeps its stage-1 order.
+
+This isn't the MiniLM re-rank of `combined-search-haiku-eval.md`, which ordered the top K by
+the judge's score alone and lost. Here the judge is one feature beside the others.
+
+- **`masked`:** stage 2 is trained with the judge's score present only on its training rows'
+  stage-1 top K, as serving would give it. Those rows' stage-1 ranking is out of fold.
+- **`full`:** the model trained with the judge on every candidate re-orders the top K.
+
+The setting is `all`, and `base` and `all candidates` reproduce `all/base` and `all/both`.
+
+| Arm | Serving pool NDCG@10 | vs base | vs all candidates | Original pool NDCG@10 | vs base |
+|---|---|---|---|---|---|
+| base | 0.8763 | — | −0.0058 | 0.8246 | — |
+| all candidates | 0.8821 | +0.0058 [+0.0012, +0.0106] | — | 0.8316 | +0.0070 |
+| top 10, masked | 0.8799 | +0.0036 [+0.0008, +0.0065] | −0.0022 [−0.0065, +0.0020] | 0.8276 | +0.0030 |
+| top 10, full | 0.8805 | +0.0042 | −0.0016 | 0.8292 | +0.0046 |
+| top 20, masked | 0.8840 | +0.0076 [+0.0032, +0.0123] | +0.0019 [−0.0012, +0.0049] | 0.8310 | +0.0064 |
+| top 20, full | 0.8828 | +0.0064 | +0.0007 | 0.8310 | +0.0064 |
+| top 30, masked | 0.8847 | +0.0084 [+0.0038, +0.0129] | +0.0026 [−0.0001, +0.0055] | 0.8334 | +0.0088 |
+| top 30, full | 0.8830 | +0.0067 | +0.0009 [+0.0000, +0.0019] | 0.8321 | +0.0074 |
+
+- **Scoring the top 20 or 30 keeps the whole gain.** Every top-20 and top-30 arm is at least
+  level with scoring every candidate, and `top 30, masked` is the best arm on both pools.
+- **The top 10 keeps about two thirds of it,** at 160 ms.
+- **Training on the cascade's own view (`masked`) is as good as reusing the full model or
+  better.** Its lead over `all candidates` isn't significant. A plausible reason is that
+  stage 1 has already dropped the weak index pages the judge can over-promote.
+- **Not yet measured:** the cascade end to end on en-gb.
+
+## The cascade end to end on en-gb, and Staan-first (289 queries, 2026-09-29)
+
+`engb_cascade_eval.py` trains `ndcg+new` and the top-20 cascade (`masked`) on all 849
+queries plus the serving-pool labels, each also with Staan-monotone constraints, and ranks
+one fresh retrieval. Two arms put Staan's results first in Staan's order and fill the
+remaining slots from our candidates: by the cascade's order, or by the judge alone over
+`ndcg+new`'s top 30. The `earlier:` arms are the lists of `combined-search-haiku-eval.md`'s
+retrieval, scored against the same judgments. Haiku graded 37 new URLs, with 62 anchors
+(overall drift −0.11).
+
+**A bug in the earlier en-gb runs.** `engb_eval.staan_documents` took Staan's ranks from
+`rows-0.05.json`'s `staan_urls`, which holds Staan's URLs sorted alphabetically. So every en-gb
+run above gave the models scrambled Staan ranks: the right results were Staan's, but in the
+wrong order. It now reads `lists["staan"]`, Staan's real order. The fix barely moves
+`ndcg+new` (0.810 here against 0.807–0.809), so the conclusions above stand.
+
+| Arm | NDCG@10 | vs ndcg+new | vs Staan-first, fill MiniLM | Weak (≤ 3) in top 10 |
+|---|---|---|---|---|
+| shipped | 0.795 | −0.015 | −0.037 | 21.0% |
+| ndcg+new | 0.810 | — | −0.023 | 19.5% |
+| ndcg+new, Staan-monotone | 0.809 | −0.001 [−0.004, +0.002] | −0.023 | 19.5% |
+| cascade top 20 | 0.816 | +0.006 [+0.001, +0.011] | −0.017 | 18.6% |
+| cascade top 20, Staan-monotone | 0.815 | +0.005 [+0.000, +0.010] | −0.018 | 18.8% |
+| Staan-first, fill cascade top 20 | 0.829 | +0.020 | −0.003 [−0.005, −0.001] | 16.1% |
+| **Staan-first, fill MiniLM(ndcg+new top 30)** | **0.833** | **+0.023 [+0.015, +0.030]** | — | **15.5%** |
+| earlier: Staan | 0.794 | −0.016 | −0.039 | 11.2% |
+| earlier: Staan-first + fill (shipped) | 0.824 | +0.014 | −0.009 | 17.2% |
+| earlier: Staan-first, fill MiniLM(LTR top 30 + Wikipedia) | 0.835 | +0.026 | +0.003 [+0.001, +0.005] | 16.3% |
+| brave | 0.889 | +0.079 | +0.056 | 9.8% |
+
+- **The cascade's gain carries over:** +0.006 over `ndcg+new`, the same as cross-validation.
+- **Staan-first still beats every learned ordering,** by 0.013–0.017 over the cascade. The
+  LTR still lets index pages displace Staan's, even with exact Staan ranks.
+- **Filling after Staan, the judge alone beats the cascade** by a small but significant 0.003.
+  The fill slots hold our own candidates, mostly index pages, and there the judge orders
+  better than the LTR with the judge as a feature.
+- **Wikipedia adds a little:** the earlier arm with it is 0.003 above the same fill without it.
+  It also ran on a different retrieval, with the shipped LTR's top 30.
+- **Staan-monotone constraints do nothing,** here as in cross-validation
+  (`minilm_cascade_experiment.py staan-rank|staan`: every arm within ±0.003, and the share of
+  the top ten's Staan pairs out of Staan's order stays about 32%).
+
 ## Caveats
 
 - **The human gate hasn't run.** The curation export (`devdata/judgments_export/`) wasn't
@@ -376,7 +455,8 @@ and are not committed.
   held-out human curation pairs) wasn't run. Run it before shipping.
 - **Approximate Staan ranks.** Where another pool had already added a URL, its Staan rank
   in the LLM training rows is reconstructed, since `pass2_staan.jsonl` wasn't available
-  (`objective_experiment.staan_ranks`). The en-gb Staan ranks are exact.
+  (`objective_experiment.staan_ranks`). The en-gb Staan ranks are exact from the cascade run
+  on; the runs before it had them scrambled (see that section).
 - **Tuning.** Every arm uses the shipped tree parameters. rank:ndcg wasn't tuned, and the
   extension rows' gold grade of 7 is a guess.
 - **Judge offsets.** The serving-pool labels are corrected by each judge's shrunk mean
@@ -391,10 +471,9 @@ and are not committed.
    `LTRRanker.order_results`, or apply a sigmoid. Either way, a negative score must stop
    meaning "drop".
 3. **Human gate.** Run the curation pair-accuracy gate with curation data included.
-4. **MiniLM feature.** To add `both`, score every candidate the ranker keeps with the
-   Super Search judge before the LTR. That costs about 1 s a query on 4 threads, 2.5 s on
-   1 (see the latency section), against a +0.005 gain. It's probably only worth it as a
-   top-k second stage, and that needs its own end-to-end evaluation first.
+4. **MiniLM.** The best measured ordering is Staan-first, then our other candidates in the
+   judge's order over `ndcg+new`'s top 30 (0.52 s on one thread). Without Staan first, a
+   top-20 cascade keeps the whole gain of the judge as a feature at 0.35 s.
 
 To reproduce:
 

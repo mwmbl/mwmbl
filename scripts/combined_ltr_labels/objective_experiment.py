@@ -162,8 +162,14 @@ def features(frame: pd.DataFrame) -> np.ndarray:
     return np.array(mwmbl_rank.RustXGBPipeline.extract_features(records.to_dict("records"), True), dtype=np.float32)
 
 
-def train(objective: str, frame: pd.DataFrame, feats: np.ndarray) -> xgb.Booster:
+def train(
+    objective: str, frame: pd.DataFrame, feats: np.ndarray, monotone: dict[int, int] | None = None
+) -> xgb.Booster:
+    """`monotone` maps a feature column to +1 or -1: the score may only rise, or only fall, with it."""
     params = {**TREE_PARAMS, **OBJECTIVES[objective]}
+    if monotone:
+        signs = [monotone.get(column, 0) for column in range(feats.shape[1])]
+        params["monotone_constraints"] = "(" + ",".join(map(str, signs)) + ")"
     if objective == "binary":
         labels = (frame["overall"] >= OVERALL_THRESHOLD).astype(float)
         weights = np.where(frame["source"] == "ext", EXT_WEIGHT, 1.0)

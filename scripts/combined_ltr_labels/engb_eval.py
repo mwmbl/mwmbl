@@ -82,6 +82,7 @@ RUN_JUDGMENTS = [
     LABELS / "pass3_engb_minilm.jsonl",
     LABELS / "pass3_engb_domain.jsonl",
     LABELS / "pass3_engb_domain_cc.jsonl",
+    LABELS / "pass3_engb_cascade.jsonl",
 ]
 
 
@@ -101,6 +102,8 @@ class BoosterModel:
 
 
 def staan_documents(row: dict, text: dict) -> list[Document]:
+    """Staan's results at Staan's ranks. `row["staan_urls"]` holds the same URLs sorted
+    alphabetically; runs before 2026-09-28 took their ranks from it by mistake."""
     return [
         Document(
             title=text[url][0],
@@ -110,7 +113,7 @@ def staan_documents(row: dict, text: dict) -> list[Document]:
             term=row["query"],
             source=DocumentSource.STAAN,
         )
-        for rank, url in enumerate(row["staan_urls"][:10])
+        for rank, url in enumerate(row["lists"]["staan"][:10])
     ]
 
 

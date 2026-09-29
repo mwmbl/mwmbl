@@ -83,6 +83,30 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py conso
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_minilm_eval.py report
 ```
 
+## MiniLM on the top K only
+
+`minilm_cascade_experiment.py` runs the MiniLM feature as a cascade: the judge scores only
+the stage-1 top 10, 20 or 30. It reads `minilm_scores.json` and writes
+`minilm_cascade_experiment.json`. The results are in
+`mwmbl/rankeval/combined-ltr-objective.md`.
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_cascade_experiment.py   # about 35 minutes
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_cascade_experiment.py staan   # Staan-monotone
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/minilm_cascade_experiment.py compare staan
+```
+
+`engb_cascade_eval.py` runs the cascade and the Staan-first fills end to end on en-gb, the
+same way as `engb_minilm_eval.py`.
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_cascade_eval.py rank   # about 40 minutes
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_cascade_eval.py batches
+# One Claude Haiku 4.5 subagent per engb_cascade_work/batch_NN.txt, writing out_NN.txt
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_cascade_eval.py consolidate
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_cascade_eval.py report
+```
+
 - **Environment (this machine):**
   - The judges must be at `devdata/judge_train/models/minilm-{both,pointwise,pairs}-v1/onnx`
     (gitignored; locally a symlink to `../mwmbl/devdata/judge_train/models`), and
