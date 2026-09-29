@@ -81,6 +81,7 @@ years. Here's a very incomplete list of some that have interested me:
    search engine
  - [YaCy](https://yacy.net/) - an open source distributed search engine
  - [Stract](https://stract.com/) - an open source, private search engine with a focus on privacy and customizability
+ - [GronnFalk](https://LiamProsser77.github.io/gronnfalk) - an open source, private search engine that's easy and free to host on Render or Railway
  - [Brave](https://search.brave.com/)
  - [DuckDuckGo](https://duckduckgo.com/)
  - [Kagi](https://kagi.com/)
