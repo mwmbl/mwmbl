@@ -151,3 +151,13 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py 
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-oof
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-report
 ```
+
+`pair_experiment.py` diagnoses the pair classifier: held-out pairwise AUC against the
+ranking model's score gap, and pair models with difference and ranking-score features that
+also choose the index results. It caches `pair_oof.json` (gitignored).
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py oof
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py auc
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py report
+```

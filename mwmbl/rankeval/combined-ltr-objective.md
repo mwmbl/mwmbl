@@ -46,6 +46,8 @@ serves help?
   index result in only when it outscores every remaining Staan result) gains +0.005 over
   Staan-first, half of it from a better fill order. An index-vs-Staan pair classifier does no
   better. An oracle merge would gain +0.07, so choosing the index results is the bottleneck.
+  A pair classifier with difference and ranking-score features, calibrated and ordering the
+  index results by win rate, gains +0.004 without MiniLM, over twice `merge-rest`'s +0.0016.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
   mostly negative (60–70% of kept candidates here).
   - `LTRRanker` keeps only `predictions > 0`, so serving such a model as-is would silently
@@ -578,7 +580,8 @@ en-gb Staan):
   its gain is the fill order: Staan-first filled by the MiniLM model gets +0.0026 [+0.0003,
   +0.0048]. The insertions add +0.0028 [+0.0009, +0.0048] on top (merge-rest 0.25, untuned).
 - **The pair classifier learns nothing the ranking model didn't.** It tunes to p > 0.9,
-  where it inserts 0.12 extra index results a query, grading 6.5, about Staan's tail.
+  where it inserts 0.12 extra index results a query, grading 6.5, about Staan's tail. The
+  next section finds that this was the classifier's design, not a limit of pair models.
 - **The `all` setting beats `clean` everywhere,** so the judge's in-sample scores on its
   training queries don't mislead these models.
 - These gains, +0.005 at best, are too small for the holistic judge to see without many
@@ -590,6 +593,70 @@ To reproduce (`minilm-engb` adds the 3,676 en-gb Staan pairs to `minilm_scores.j
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py oof       # then report
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py minilm-engb
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-oof  # then judge-report
+```
+
+## A better pair classifier (2026-09-29, cross-validation only, no MiniLM)
+
+The pair classifier above did no better than the ranking model because of how it was built,
+not because pairs carry no extra signal (`pair_experiment.py`, the same 5 folds over the 848
+en-gb serving-pool queries).
+
+- `concat` is the classifier above: the two feature rows side by side, every pair, 100
+  rounds at depth 6 and eta 0.3.
+- `diff` adds their difference, both ranking-model scores, the index result's rank by that
+  score, how far it trails the model's best Staan score, and the query's Staan and index
+  counts. The ranking scores on the training queries are out of fold too. 300 rounds at
+  depth 4 and eta 0.1.
+- `top` is `diff` trained only on pairs whose index result is in the model's top three.
+
+**Held-out pairwise AUC** on untied pairs (weighted by the grade gap in brackets):
+
+| Pairs | n | Index wins | Ranker score gap | concat | diff | top |
+|---|---|---|---|---|---|---|
+| all | 145,974 | 0.12 | 0.759 (0.813) | 0.740 (0.791) | **0.766 (0.820)** | 0.739 (0.787) |
+| index top 3 | 17,434 | 0.25 | 0.733 (0.788) | 0.713 (0.763) | **0.749 (0.809)** | 0.737 (0.791) |
+| index top 1 | 5,898 | 0.34 | 0.739 (0.794) | 0.731 (0.783) | **0.765 (0.825)** | 0.762 (0.818) |
+| index top 1, Staan #6 on | 2,668 | 0.38 | 0.716 (0.768) | 0.712 (0.766) | **0.750 (0.811)** | 0.743 (0.798) |
+
+- **`concat` was worse than the ranker's own score gap and overconfident.** Its p > 0.9
+  pairs won 74% of the time, so tuning pushed its threshold up to where it barely inserts.
+  `diff`'s p > 0.9 pairs win 92%; it is calibrated within about 0.1 in every bin.
+- **`diff` beats the ranker on exactly the pairs a merge decides:** +0.026 AUC for the
+  model's top index result, +0.034 against Staan's tail.
+- **Training only on the top three (`top`) doesn't help;** the extra pairs are useful data.
+
+**NDCG@10** (thresholds tuned by nested cross-validation). `pair` inserts the next index
+result when it beats the next Staan result with probability above the threshold;
+`by win rate` orders the index results by their mean probability of beating each of the
+query's Staan results, instead of by the ranking score.
+
+| Arm | NDCG@10 | vs Staan-first, 95% CI |
+|---|---|---|
+| Staan-first | 0.8718 | — |
+| merge-rest (tuned), the best arm above | 0.8733 | +0.0016 [+0.0006, +0.0026] |
+| pair concat (tuned) | 0.8718 | +0.0000 [−0.0011, +0.0012] |
+| Staan-first, fill by `diff` win rate | 0.8736 | +0.0018 [+0.0007, +0.0030] |
+| pair diff (tuned: 0.8) | 0.8743 | +0.0025 [+0.0011, +0.0041] |
+| pair top (tuned: 0.8) | 0.8747 | +0.0029 [+0.0017, +0.0043] |
+| pair diff, by win rate (tuned: 0.8) | 0.8754 | +0.0036 [+0.0013, +0.0058] |
+| **pair top, by win rate (tuned: 0.8)** | **0.8755** | **+0.0038 [+0.0016, +0.0061]** |
+| oracle merge | 0.9483 | +0.0765 [+0.0704, +0.0826] |
+
+- **A better pair model more than doubles the best order-preserving gain without MiniLM,**
+  from +0.0016 to +0.0038. About half of it is choosing and ordering the index results by
+  win rate; the fill order alone gives +0.0018.
+- **It is still a small fraction of the oracle's +0.077.** The ranker and the pair models
+  order held-out pairs at similar AUCs (0.74–0.77), so better features, not a better merge
+  rule, are what's left. Part of the oracle's headroom is likely grade noise: it picks the
+  maximum of many noisily graded index results.
+- **Not yet run with MiniLM.** `merge-rest` with MiniLM as a feature gained +0.0046 on the
+  424 judge-eval queries. The next step is `diff` with the MiniLM scores of both results as
+  pair features, on those queries; `minilm_scores.json` wasn't available for this run.
+
+To reproduce:
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py oof   # then auc, report
 ```
 
 ## Caveats
