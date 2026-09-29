@@ -134,3 +134,20 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py report
 The `mmr` experiment (`batches mmr`, `consolidate mmr`, `report mmr`) compares
 `ndcg+new (en-gb Staan)` with and without MMR, each against Staan-first, fill `ndcg+new`,
 no MMR. Its work directory is `holistic_mmr_work/`.
+
+## Interleaving with Staan's order kept
+
+`interleave_experiment.py` cross-validates arms that let index results into Staan's list
+without reordering Staan: score merges, fixed slots, an index-vs-Staan pair classifier and
+an oracle. `judge-oof` repeats it over the 424 judge-eval queries with the `minilm-both-v1`
+judge as a feature. It caches out-of-fold scores in `interleave_oof.json` and
+`interleave_judge_oof.json` (gitignored). The results are in
+`mwmbl/rankeval/combined-ltr-objective.md`.
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py oof
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py minilm-engb   # scores en-gb Staan pairs
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-oof
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-report
+```

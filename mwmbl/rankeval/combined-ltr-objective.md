@@ -41,6 +41,11 @@ serves help?
 - **MMR is why no learned ordering beat Staan-first.** Without MMR, `ndcg+new` gains 0.018
   on en-gb and ties Staan-first. Trained on en-gb Staan results as well, it reaches 0.830,
   +0.004 [−0.001, +0.010] over Staan-first. See the MMR section below.
+- **Interleaving index results while keeping Staan's order gains little.** In
+  cross-validation, the best arm (the `ndcg+new` model with MiniLM as a feature, letting an
+  index result in only when it outscores every remaining Staan result) gains +0.005 over
+  Staan-first, half of it from a better fill order. An index-vs-Staan pair classifier does no
+  better. An oracle merge would gain +0.07, so choosing the index results is the bottleneck.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
   mostly negative (60–70% of kept candidates here).
   - `LTRRanker` keeps only `predictions > 0`, so serving such a model as-is would silently
@@ -517,6 +522,74 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan.py batches   #
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/judge_shift.py batches  # then Haiku judges -> report
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan_experiment.py cv
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan_experiment.py rank   # then batches / consolidate / report
+```
+
+## Interleaving index results into Staan's order (2026-09-29, cross-validation only)
+
+Staan-first wins the holistic comparison against every learned ordering, so these arms keep
+its property: Staan's results always appear in Staan's order, and the index's in the model's
+order. They differ only in where index results are let in (`interleave_experiment.py`).
+
+- `merge-rest d`: the next index result goes in when it outscores every Staan result still
+  to come by more than d. A plain two-list merge against the next Staan result only, fixed
+  slots, protecting Staan's top k and capping insertions all did no better.
+- `pair t`: a classifier on (index result, Staan result) pairs, the two feature rows side
+  by side, trained on the serving pool with grade-gap weights. The next index result goes in
+  when it beats the next Staan result with probability above t.
+- `oracle merge`: the order-preserving merge that maximises DCG on the true grades.
+
+Every parameter is picked by nested cross-validation on the other four folds.
+
+**Without MiniLM** (5 folds over the 848 en-gb serving-pool queries, `ndcg+new` trained on
+en-gb Staan):
+
+| Arm | NDCG@10 | vs Staan-first, 95% CI | Index results in top 10 |
+|---|---|---|---|
+| Staan-first | 0.8718 | — | 0.92 |
+| **merge-rest (tuned: 0.5)** | **0.8733** | **+0.0016 [+0.0006, +0.0026]** | 1.01 |
+| merge (tuned) | 0.8725 | +0.0007 [−0.0005, +0.0019] | ~1.1 |
+| slot (tuned: 10) | 0.8669 | −0.0049 [−0.0063, −0.0035] | 1.30 |
+| DCG-optimal merge on a regression model's grades (tuned) | 0.8705 | −0.0013 [−0.0033, +0.0006] | ~1.0 |
+| learned (reorders Staan) | 0.8789 | +0.0071 [+0.0040, +0.0104] | 1.38 |
+| oracle merge | 0.9483 | +0.0765 [+0.0704, +0.0826] | 2.91 |
+
+**With MiniLM** (5 folds over the 424 queries no judge saw, as `minilm_experiment.py`;
+`minilm-both-v1` as an `ndcg+new` feature, and in the pair classifier). Staan-first scores
+0.8771 here.
+
+| Arm (tuned) | clean | all |
+|---|---|---|
+| merge-rest, no MiniLM | +0.0003 | +0.0014 |
+| pair, no MiniLM | +0.0007 | +0.0000 |
+| **merge-rest, MiniLM feature** | +0.0036 [+0.0007, +0.0065] | **+0.0046 [+0.0016, +0.0079]** |
+| pair, MiniLM feature | +0.0035 [+0.0011, +0.0061] | +0.0045 [+0.0018, +0.0070] |
+| merge on the MiniLM score alone | — | +0.0009 [−0.0011, +0.0032] |
+| learned (reorders Staan) | +0.0065 | +0.0135 [+0.0080, +0.0185] |
+| oracle merge | +0.071 | +0.071 |
+
+- **The headroom is large, but the model can't reach it.** The oracle merge gains +0.071 to
+  +0.077: +0.017 from ordering the fill, the rest from placing index results among Staan's.
+  The best index result in a query's pool grades 6.3 on average, above Staan's #10 (5.85),
+  but the model's top index pick grades 4.9.
+- **Loose merges lose.** Any setting that lets in more than about 0.1 extra index results a
+  query brings in weak pages. Staan returns fewer than ten results for 56% of queries, so
+  the fill already adds 0.9 index results a query.
+- **MiniLM as a feature is what helps.** It roughly triples the interleaving gain. Half of
+  its gain is the fill order: Staan-first filled by the MiniLM model gets +0.0026 [+0.0003,
+  +0.0048]. The insertions add +0.0028 [+0.0009, +0.0048] on top (merge-rest 0.25, untuned).
+- **The pair classifier learns nothing the ranking model didn't.** It tunes to p > 0.9,
+  where it inserts 0.12 extra index results a query, grading 6.5, about Staan's tail.
+- **The `all` setting beats `clean` everywhere,** so the judge's in-sample scores on its
+  training queries don't mislead these models.
+- These gains, +0.005 at best, are too small for the holistic judge to see without many
+  queries. At serving, the judge would only need Staan's ~10 results and the index's top few.
+
+To reproduce (`minilm-engb` adds the 3,676 en-gb Staan pairs to `minilm_scores.json`):
+
+```sh
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py oof       # then report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py minilm-engb
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/interleave_experiment.py judge-oof  # then judge-report
 ```
 
 ## Caveats

@@ -89,7 +89,9 @@ def staan_engb_grades() -> dict[tuple[str, str], int]:
     }
 
 
-def load_engb() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_engb() -> tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
+]:
     """The en-us `load()` frames and their en-gb Staan counterparts: llm, ext, new, serving,
     llm_gb, new_gb, serving_gb (ext is shared, so returned once)."""
     llm, ext, new, serving = load()
