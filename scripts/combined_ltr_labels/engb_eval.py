@@ -83,6 +83,7 @@ RUN_JUDGMENTS = [
     LABELS / "pass3_engb_domain.jsonl",
     LABELS / "pass3_engb_domain_cc.jsonl",
     LABELS / "pass3_engb_cascade.jsonl",
+    LABELS / "pass3_engb_staan.jsonl",
 ]
 
 
@@ -132,10 +133,14 @@ def rank():
     rank_all(models, OBJECTIVE_RUN.arms)
 
 
-def rank_all(models: dict, path: Path):
-    """Ranks one fresh retrieval per en-gb query with every model, and writes the top tens."""
+def rank_all(models: dict, path: Path, keep: int = 10, no_mmr: tuple[str, ...] = ()):
+    """Ranks one fresh retrieval per en-gb query with every model, and writes the top `keep`.
+
+    Each arm in `no_mmr` is also ranked without MMR's diversity re-ranking, as "<arm>, no MMR".
+    """
     index = RemoteIndex()
     rankers = {arm: MMRRanker(CombinedLTRRanker(index, DummyCompleter(), model)) for arm, model in models.items()}
+    rankers.update({f"{arm}, no MMR": CombinedLTRRanker(index, DummyCompleter(), models[arm]) for arm in no_mmr})
     retriever = rankers[SHIPPED]
     rows = json.loads((ENGB / "rows-0.05.json").read_text())
     text = json.loads((ENGB / "pool_text.json").read_text())
@@ -145,7 +150,7 @@ def rank_all(models: dict, path: Path):
         retrieval = retriever.retrieve(query)
         lists, pages = {}, {}
         for arm, ranker in rankers.items():
-            results = ranker.search_retrieved(retrieval, staan_documents(row, text[query]))[:10]
+            results = ranker.search_retrieved(retrieval, staan_documents(row, text[query]))[:keep]
             lists[arm] = [page.url for page in results]
             pages.update({page.url: [page.title, page.extract] for page in results})
         out[query] = {"lists": lists, "pages": pages}
@@ -165,15 +170,21 @@ def judged(exclude: Path | None = None) -> dict[str, dict[str, dict]]:
     return grades
 
 
-def batches(run: Run):
-    arms = json.loads(run.arms.read_text())
-    grades = judged()
+def uk_prompt() -> str:
+    """Pass 3's prompt, told the searcher is in the UK."""
     prompt = JUDGE_PROMPT.replace(
         "You are a careful search-quality judge for Mwmbl, an independent non-profit\nsearch engine.",
         "You are a careful search-quality judge for Mwmbl, an independent non-profit\nsearch engine. "
         "The searcher is in the United Kingdom.",
     )
     assert prompt != JUDGE_PROMPT
+    return prompt
+
+
+def batches(run: Run):
+    arms = json.loads(run.arms.read_text())
+    grades = judged()
+    prompt = uk_prompt()
     manifest, blocks, next_id = {}, [], 1
     for i, (query, entry) in enumerate(sorted(arms.items())):
         shown = list(dict.fromkeys(url for urls in entry["lists"].values() for url in urls))

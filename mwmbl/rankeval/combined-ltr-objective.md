@@ -38,6 +38,9 @@ serves help?
     host-level encoding did, but it isn't significant end to end.
 - **The gain is modest against the gap.** The best arm reaches 0.809. Brave scores 0.892,
   and the ordering ceiling is about 0.90. A better objective alone doesn't close it.
+- **MMR is why no learned ordering beat Staan-first.** Without MMR, `ndcg+new` gains 0.018
+  on en-gb and ties Staan-first. Trained on en-gb Staan results as well, it reaches 0.830,
+  +0.004 [−0.001, +0.010] over Staan-first. See the MMR section below.
 - **Why rank:ndcg may have looked worse before:** a ranking objective's scores are margins,
   mostly negative (60–70% of kept candidates here).
   - `LTRRanker` keeps only `predictions > 0`, so serving such a model as-is would silently
@@ -448,6 +451,74 @@ wrong order. It now reads `lists["staan"]`, Staan's real order. The fix barely m
   (`minilm_cascade_experiment.py staan-rank|staan`: every arm within ±0.003, and the share of
   the top ten's Staan pairs out of Staan's order stays about 32%).
 
+## Why the LTR couldn't beat Staan-first: MMR (2026-09-29)
+
+Every learned ordering above loses to Staan-first on en-gb. Yet in cross-validation on the
+training labels, `ndcg+new` beats Staan-first by 0.008 [+0.004, +0.012], and still does with
+near-duplicate queries kept in one fold. So the model can learn Staan's value. Something
+between the model and the served list undoes it.
+
+**It is mostly MMR.** Combined Search wraps the LTR in `MMRRanker` (`search_setup.py`).
+Cross-validation never applies it, and Staan-first bypasses it.
+
+- MMR's kernel is domain-dominant. A second page from a domain already shown loses
+  0.3 × 0.8 = 0.24 of rank-relevance, about 17 places.
+- Staan often returns several good pages from one site, such as the Guildford M&S stores.
+- On en-gb, 42% of the Staan results that repeat a domain earlier in Staan's list are
+  displaced from `ndcg+new`'s top ten (107 of 256), against about 4% of first-of-domain
+  ones. The displaced repeats grade 6.2 on average.
+- In cross-validation, `mmr_rerank` on the held-out rankings costs 0.023 NDCG@10 on the
+  training labels, from 0.879 to 0.856. That puts the LTR 0.016 below Staan-first, which is
+  the en-gb picture reproduced from the training data alone.
+
+End to end on en-gb (289 queries, one fresh retrieval; Haiku graded 50 new URLs with 84
+anchors, overall drift +0.24):
+
+| Arm | NDCG@10 | vs ndcg+new | vs Staan-first, fill ndcg+new | Weak (≤ 3) in top 10 |
+|---|---|---|---|---|
+| shipped | 0.795 | −0.013 [−0.019, −0.008] | −0.031 | 20.9% |
+| shipped, no MMR | 0.813 | +0.005 [−0.001, +0.011] | −0.013 | 18.3% |
+| ndcg+new | 0.808 | — | −0.018 [−0.025, −0.011] | 19.7% |
+| ndcg+new, no MMR | 0.826 | +0.018 [+0.014, +0.023] | +0.000 [−0.006, +0.007] | 17.4% |
+| ndcg+new (en-gb Staan) | 0.815 | +0.006 [+0.002, +0.010] | −0.012 | 19.4% |
+| **ndcg+new (en-gb Staan), no MMR** | **0.830** | **+0.022 [+0.016, +0.028]** | **+0.004 [−0.001, +0.010]** | **17.4%** |
+| Staan-first, fill ndcg+new | 0.826 | +0.018 | — | 16.6% |
+| Staan-first, fill ndcg+new, no MMR | 0.830 | +0.022 | +0.004 [+0.002, +0.006] | 16.1% |
+| brave | 0.888 | +0.080 | +0.062 | 9.8% |
+
+- **Without MMR the learned ordering matches Staan-first.** `ndcg+new` gains 0.018 and ties
+  it. The shipped model gains the same 0.018.
+- **Training on en-gb Staan adds a little:** +0.006 with MMR and +0.004 without. The best
+  learned arm, 0.830, is level with the best Staan-first fill.
+- **The MiniLM and Common Crawl gains above were all measured under MMR.** They should be
+  re-checked without it, where the headroom is different.
+- **NDCG can't see what MMR is for.** Each page is graded alone, so a list of five pages
+  from one site isn't penalised as redundant. Removing MMR outright may cost diversity that
+  these labels don't measure. A lighter kernel, or exempting Staan's own repeats, would keep
+  some of it. Either needs a list-level judgment to evaluate.
+
+### What didn't explain it
+
+- **Staan's market.** The training data's Staan results were fetched at the `en-us`
+  default: 6.8% `.uk` hosts, against 30% for en-gb Staan, with US pages in their tail. But
+  refetching the 849 queries at `en-gb` (`engb_staan.py`: 7,604 results, 26% `.uk`, 44%
+  overlap with en-us) and judging the 3,676 new pairs with the Pass-3 prompt left Staan's
+  grade unchanged: 6.31 against 6.30, weak 16.6% against 17.2%.
+- **The judging prompt.** `judge_shift.py` re-graded 740 training pairs with the en-gb
+  prompt (UK searcher, no intent). Index pages moved +0.24 [−0.13, +0.58] relative to
+  Staan's, the opposite of what would explain the gap.
+
+To reproduce:
+
+```sh
+set -a; source .env; set +a   # STAAN_SEARCH_API_KEY; about 849 Staan calls
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan.py collect   # en-gb settings, own cache
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan.py batches   # then Haiku judges -> consolidate
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/judge_shift.py batches  # then Haiku judges -> report
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan_experiment.py cv
+PYTHONPATH=. uv run python scripts/combined_ltr_labels/engb_staan_experiment.py rank   # then batches / consolidate / report
+```
+
 ## Caveats
 
 - **The human gate hasn't run.** The curation export (`devdata/judgments_export/`) wasn't
@@ -455,7 +526,8 @@ wrong order. It now reads `lists["staan"]`, Staan's real order. The fix barely m
   held-out human curation pairs) wasn't run. Run it before shipping.
 - **Approximate Staan ranks.** Where another pool had already added a URL, its Staan rank
   in the LLM training rows is reconstructed, since `pass2_staan.jsonl` wasn't available
-  (`objective_experiment.staan_ranks`). The en-gb Staan ranks are exact from the cascade run
+  (`objective_experiment.staan_ranks`). `pass2_staan.jsonl` has since turned up locally, so
+  exact ranks are now available. The en-gb Staan ranks are exact from the cascade run
   on; the runs before it had them scrambled (see that section).
 - **Tuning.** Every arm uses the shipped tree parameters. rank:ndcg wasn't tuned, and the
   extension rows' gold grade of 7 is a guess.
