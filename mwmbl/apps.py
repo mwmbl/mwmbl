@@ -141,6 +141,7 @@ class MwmblConfig(AppConfig):
             from background_task.models import Task
 
             from mwmbl.background import (
+                count_index_stats,
                 purge_blacklisted_from_queue,
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
@@ -153,6 +154,7 @@ class MwmblConfig(AppConfig):
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
             MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
+            COUNT_INDEX_STATS_TASK = "mwmbl.background.count_index_stats"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -186,6 +188,11 @@ class MwmblConfig(AppConfig):
                     repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
                     repeat_until=None,
                 )
+
+            # Count index stats (URLs, domains, results) once per day (86400 seconds).
+            # schedule=0 runs it immediately on deploy so the stats are fresh.
+            if not Task.objects.filter(task_name=COUNT_INDEX_STATS_TASK).exists():
+                count_index_stats(schedule=0, repeat=86400, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

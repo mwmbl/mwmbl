@@ -304,3 +304,19 @@ def retrain_domain_moderation_model():
     model, so the reload and the pending-queue rescore both take effect immediately.
     """
     call_command("train_domain_moderation_model")
+
+
+@background(schedule=0)
+def count_index_stats():
+    """
+    Count URLs, domains, and results in the search index and persist to DailyIndexStats.
+
+    This replaces the deprecated standalone count_urls process. Runs once per day.
+    """
+    from mwmbl.count_urls import count_urls
+
+    try:
+        count_urls()
+        logger.info("Index stats counting completed")
+    except Exception:
+        logger.exception("Error counting index stats")
