@@ -130,3 +130,7 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py batches
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py consolidate
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/holistic_eval.py report
 ```
+
+The `mmr` experiment (`batches mmr`, `consolidate mmr`, `report mmr`) compares
+`ndcg+new (en-gb Staan)` with and without MMR, each against Staan-first, fill `ndcg+new`,
+no MMR. Its work directory is `holistic_mmr_work/`.

@@ -12,11 +12,17 @@ Before using it to compare arms, this validates it against what we already know:
     ndcg   For each query, the two of our arms in `engb_staan_arms.json` whose NDCG@10 differs
            most, where that is at least MIN_GAP. The judge should mostly agree on the sign.
 
-Commands:
+The `mmr` experiment then compares the best learned arm with and without MMR, each against
+REFERENCE, on every en-gb query:
 
-    batches      write the judge batches and a manifest -> holistic_work/
-    consolidate  judge output -> holistic_judgments.jsonl
-    report       agreement with NDCG, order consistency, and the judges' reasons
+    mmr     ndcg+new (en-gb Staan), with MMR, against REFERENCE.
+    no-mmr  the same model without MMR, against REFERENCE, to separate MMR from the model.
+
+Commands (experiment `validation` unless named):
+
+    batches [experiment]      write the judge batches and a manifest -> its work directory
+    consolidate [experiment]  judge output -> its judgments file
+    report [experiment]       preference, agreement with NDCG, order consistency, reasons
 
 Run from the repository root with DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and PYTHONPATH=.
 """
@@ -36,8 +42,8 @@ from scripts.llm_relabel_pass3_judge import EXTRACT_CHARS, JUDGE_PROMPT
 
 LABELS = Path("devdata/combined_ltr_labels")
 ARMS = LABELS / "engb_staan_arms.json"
-WORK = LABELS / "holistic_work"
-JUDGMENTS = LABELS / "holistic_judgments.jsonl"
+REFERENCE = "staan-first, fill ndcg+new, no MMR"
+MMR_ARMS = {"mmr": "ndcg+new (en-gb Staan)", "no-mmr": "ndcg+new (en-gb Staan), no MMR"}
 BRAVE = "brave"
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
@@ -123,7 +129,7 @@ def ndcg_scores(arms: dict, rows: dict) -> dict[str, dict[str, float]]:
     return scores
 
 
-def comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
+def validation_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     """The two validation sets, as (query, arm_x, arm_y) with arm_x's NDCG gain over arm_y."""
     found = []
     for query in sorted(scores):
@@ -148,6 +154,28 @@ def comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     return found + widest[:MAX_NDCG_PAIRS]
 
 
+def mmr_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
+    """Each MMR_ARMS arm against REFERENCE, on every query where their lists differ."""
+    return [
+        {
+            "set": name,
+            "query": query,
+            "x": arm,
+            "y": REFERENCE,
+            "ndcg_gap": scores[query][arm] - scores[query][REFERENCE],
+        }
+        for name, arm in MMR_ARMS.items()
+        for query in sorted(scores)
+        if arms[query]["lists"][arm] != arms[query]["lists"][REFERENCE]
+    ]
+
+
+EXPERIMENTS = {
+    "validation": (validation_comparisons, LABELS / "holistic_work", LABELS / "holistic_judgments.jsonl"),
+    "mmr": (mmr_comparisons, LABELS / "holistic_mmr_work", LABELS / "holistic_mmr_judgments.jsonl"),
+}
+
+
 def results_block(label: str, urls: list[str], pages: dict) -> str:
     lines = [f"--- RESULTS {label}"]
     for position, url in enumerate(urls, 1):
@@ -158,12 +186,13 @@ def results_block(label: str, urls: list[str], pages: dict) -> str:
     return "\n".join(lines)
 
 
-def batches():
+def batches(experiment: str):
+    find, work, _ = EXPERIMENTS[experiment]
     arms = json.loads(ARMS.read_text())
     rows = {row["query"]: row for row in json.loads((ENGB / "rows-0.05.json").read_text())}
     text = json.loads((ENGB / "pool_text.json").read_text())
     scores = ndcg_scores(arms, rows)
-    found = comparisons(arms, rows, scores)
+    found = find(arms, rows, scores)
 
     # Each comparison is judged in both orders, the second in a different batch: the first
     # orientation is random, and the two halves are shuffled and batched separately.
@@ -178,7 +207,7 @@ def batches():
     for half in halves:
         rng.shuffle(half)
 
-    WORK.mkdir(parents=True, exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True)
     manifest, next_id, batch = {}, 1, 0
     for half in halves:
         for start in range(0, len(half), COMPARISONS_PER_BATCH):
@@ -204,10 +233,10 @@ def batches():
                 )
                 manifest[next_id] = judgment
                 next_id += 1
-            (WORK / f"batch_{batch:02d}.txt").write_text(PROMPT + "\n".join(blocks) + "\n")
+            (work / f"batch_{batch:02d}.txt").write_text(PROMPT + "\n".join(blocks) + "\n")
             batch += 1
-    (WORK / "manifest.json").write_text(json.dumps(manifest))
-    sets = {name: sum(1 for c in found if c["set"] == name) for name in ("brave", "ndcg")}
+    (work / "manifest.json").write_text(json.dumps(manifest))
+    sets = {name: sum(1 for c in found if c["set"] == name) for name in dict.fromkeys(c["set"] for c in found)}
     print(f"{len(found)} comparisons {sets}, {len(manifest)} judgments in {batch} batches")
 
 
@@ -222,10 +251,11 @@ def pages_for(arm: str, query: str, arms: dict, text: dict) -> dict:
     return text[query] if arm == BRAVE else {**text[query], **arms[query]["pages"]}
 
 
-def consolidate():
-    manifest = {int(k): v for k, v in json.loads((WORK / "manifest.json").read_text()).items()}
+def consolidate(experiment: str):
+    _, work, judgments = EXPERIMENTS[experiment]
+    manifest = {int(k): v for k, v in json.loads((work / "manifest.json").read_text()).items()}
     verdicts = {}
-    for path in sorted(WORK.glob("out_*.txt")):
+    for path in sorted(work.glob("out_*.txt")):
         for line in path.read_text().splitlines():
             line = line.strip().rstrip(",")
             if not line.startswith("{"):
@@ -241,10 +271,10 @@ def consolidate():
             verdicts[cid] = dict(verdict, judge=path.stem.removeprefix("out_"))
     missing = sorted(set(manifest) - set(verdicts))
     assert not missing, f"{len(missing)} ids unjudged, first {missing[:10]}"
-    with open(JUDGMENTS, "w") as f:
+    with open(judgments, "w") as f:
         for cid in sorted(manifest):
             f.write(json.dumps(dict(manifest[cid], id=cid, verdict=verdicts[cid])) + "\n")
-    print(f"{len(verdicts)} judgments -> {JUDGMENTS}")
+    print(f"{len(verdicts)} judgments -> {judgments}")
 
 
 def preference_for_x(record: dict) -> int:
@@ -257,8 +287,9 @@ def preference_for_x(record: dict) -> int:
     return size if chosen == record["x"] else -size
 
 
-def report():
-    records = [json.loads(line) for line in open(JUDGMENTS)]
+def report(experiment: str):
+    _, _, judgments = EXPERIMENTS[experiment]
+    records = [json.loads(line) for line in open(judgments)]
     by_comparison: dict[int, list[dict]] = {}
     for record in records:
         by_comparison.setdefault(record["comparison"], []).append(record)
@@ -267,7 +298,7 @@ def report():
     print(f"{len(by_comparison)} comparisons, {len(records)} judgments; A chosen in {first_position:.0%} of non-ties")
 
     rng = np.random.default_rng(0)
-    for name in ("brave", "ndcg"):
+    for name in dict.fromkeys(record["set"] for record in records):
         pairs = [pair for pair in by_comparison.values() if pair[0]["set"] == name]
         prefs = np.array([[preference_for_x(r) for r in pair] for pair in pairs])
         gaps = np.array([pair[0]["ndcg_gap"] for pair in pairs])
@@ -312,4 +343,5 @@ def report():
 
 
 if __name__ == "__main__":
-    {"batches": batches, "consolidate": consolidate, "report": report}[sys.argv[1]]()
+    command = {"batches": batches, "consolidate": consolidate, "report": report}[sys.argv[1]]
+    command(sys.argv[2] if len(sys.argv) > 2 else "validation")

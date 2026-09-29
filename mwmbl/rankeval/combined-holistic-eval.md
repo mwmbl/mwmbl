@@ -60,11 +60,45 @@ Agreement with NDCG's sign by the size of its gap (brave set): 63% below 0.05, 8
   ("fish and chips near me"). Some are judgment calls, such as Wikipedia vs the official site
   at #1 for a brand query.
 
+## MMR (2026-09-29)
+
+The best learned arm served with MMR, `ndcg+new (en-gb Staan)`, and the same model without
+MMR, each against the reference `staan-first, fill ndcg+new, no MMR`. Both are compared on every en-gb
+query with complete grades (289 each), in both orders: 1,156 judgments, 48 batches
+(`holistic_eval.py batches mmr`, judgments in `holistic_mmr_judgments.jsonl`). One judge
+wrote `"better": "slight A"` for 12 verdicts that also gave strength `slight`; these were
+normalised to `A`/`B`.
+
+| | with MMR vs reference | without MMR vs reference |
+|---|---|---|
+| NDCG@10 gap (for reference) | −0.015 | +0.001 |
+| Preference for the arm (−3..3) | −0.29 [−0.40, −0.17] | −0.22 [−0.35, −0.10] |
+| Arm preferred / reference / tie | 29% / 53% / 18% | 32% / 46% / 21% |
+| Both orders agree on the direction | 50% | 59% |
+| Agrees with NDCG's sign, where it decides | 69% of 237 | 64% of 227 |
+| Duplicate flags per judged list | 0.026 (reference 0.065) | 0.067 |
+
+- **The reference wins both comparisons.** Staan-first, filled by `ndcg+new` without
+  MMR, is preferred to the best MMR model by 0.29 on the −3..3 scale. NDCG put the gap at
+  −0.015.
+- **Without MMR the learned ordering still loses, by 0.22.** NDCG called it a tie
+  (+0.001). The judge sees something NDCG doesn't in Staan's own order, mostly at the top:
+  relevance and top result are the main reasons for about 60% of verdicts.
+- **MMR itself makes little difference to the overall verdict.** Paired per query, with
+  MMR minus without MMR (both against the reference) is −0.06 [−0.19, +0.06]. The small
+  NDCG cost of MMR shows up with the same sign, but it isn't significant here.
+- **MMR does what it's for.** Judges flag duplicates in 2.6% of the MMR lists' results,
+  against 6.5–6.7% for the two lists without it. Redundancy is the main reason in 25
+  verdicts with MMR and 51 without. But fewer duplicates don't outweigh what MMR demotes.
+- **These are small differences.** The two orders agree on the direction only 50–59% of
+  the time, less than in validation (65–67%), because the lists are close. The two
+  headline gaps are clear of zero; the MMR-vs-no-MMR difference isn't.
+
 ## Next
 
-- **MMR.** The ndcg set has only 3 pure MMR/no-MMR pairs, so it says nothing about MMR yet.
-  Run `ndcg+new (en-gb Staan)` with and without MMR, and a lighter or Staan-exempt kernel,
-  each against Staan-first, fill `ndcg+new`, no MMR.
+- **MMR.** Done above: the reference beats both the MMR and the no-MMR learned ordering.
+  A lighter or Staan-exempt kernel is only worth testing on top of Staan-first, where MMR
+  would apply to the fill alone.
 - **Noise.** With one pair of judgments per comparison, detecting a small gap needs many
   queries. Three or four judgments per comparison, or a stronger judge on the comparisons
   where the two orders disagree, would tighten it.
