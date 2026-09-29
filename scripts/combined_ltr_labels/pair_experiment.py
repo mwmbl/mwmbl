@@ -18,6 +18,9 @@ Pair models (i is an index result, j a Staan result of the same query):
   at serving. Shallower trees and a lower learning rate.
 - `top`: `diff`, trained only on pairs whose index result is among the model's top three
   for its query: the only ones a merge ever decides.
+- `pool`: `diff`, trained on the pairs of the whole LLM-labelled pool (`llm_gb`) for the
+  same queries, not only the serving pool: the same Staan results against about twice as
+  many index results.
 
 Run from the repository root with DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and PYTHONPATH=.
 """
@@ -47,7 +50,8 @@ from scripts.combined_ltr_labels.objective_experiment import FOLDS, NUM_ROUNDS, 
 
 LABELS = Path("devdata/combined_ltr_labels")
 OUT = LABELS / "pair_oof.json"
-VARIANTS = ["concat", "diff", "top"]
+VARIANTS = ["concat", "diff", "top", "pool"]
+PAIR_FRAMES = ["serving_gb", "llm_gb"]
 TOP = 3
 CONCAT_PARAMS = {**TREE_PARAMS, "tree_method": "hist", "objective": "binary:logistic"}
 DIFF_PARAMS = {**CONCAT_PARAMS, "eta": 0.1, "max_depth": 4, "min_child_weight": 5.0}
@@ -62,8 +66,11 @@ def fold_queries() -> list[set[str]]:
     return [set(fold) for fold in np.array_split(queries, FOLDS)]
 
 
-def ranker_scores(frames: dict[str, pd.DataFrame], feats: dict[str, np.ndarray], excluded: set[str]) -> np.ndarray:
-    """Trains `ndcg+new` (en-gb Staan) without `excluded`'s queries and scores the serving pool."""
+def ranker_scores(
+    frames: dict[str, pd.DataFrame], feats: dict[str, np.ndarray], excluded: set[str]
+) -> dict[str, np.ndarray]:
+    """Trains `ndcg+new` (en-gb Staan) without `excluded`'s queries and scores the frames
+    pair models train on."""
     excluded_norm = {q.lower().strip() for q in excluded}
     masks = {
         "llm_gb": ~frames["llm_gb"]["query"].isin(excluded).to_numpy(),
@@ -72,7 +79,7 @@ def ranker_scores(frames: dict[str, pd.DataFrame], feats: dict[str, np.ndarray],
     }
     frame = pd.concat([frames[n][m] for n, m in masks.items()], ignore_index=True)
     booster = train("ndcg", frame, np.concatenate([feats[n][m] for n, m in masks.items()]))
-    return booster.predict(xgb.DMatrix(feats["serving_gb"]))
+    return {name: booster.predict(xgb.DMatrix(feats[name])) for name in PAIR_FRAMES}
 
 
 def pair_table(serving: pd.DataFrame, feats: np.ndarray, scores: np.ndarray, keep: np.ndarray) -> pd.DataFrame:
@@ -130,7 +137,12 @@ def oof():
     keep = kept(serving, serving_feats)
     grades = serving["overall"].to_numpy().astype(float)
     folds = fold_queries()
-    fold_of = serving["query"].map({q: f for f, qs in enumerate(folds) for q in qs}).to_numpy()
+    fold_by_query = {q: f for f, qs in enumerate(folds) for q in qs}
+    fold_of = serving["query"].map(fold_by_query).to_numpy()
+    pool_fold_of = llm_gb["query"].map(fold_by_query).to_numpy()
+    pool_feats = feats["llm_gb"]
+    pool_keep = kept(llm_gb, pool_feats)
+    pool_grades = llm_gb["overall"].to_numpy().astype(float)
 
     # A model trained without folds f and g scores fold g's queries out of fold for the
     # pair model trained on outer fold f's training queries: 5 + 10 rankers, not 5 + 20.
@@ -143,17 +155,26 @@ def oof():
     out: dict[str, dict] = {}
     for fold in range(FOLDS):
         train_scores = np.zeros(len(serving))
+        pool_scores = np.zeros(len(llm_gb))
         for other in range(FOLDS):
             if other != fold:
-                train_scores[fold_of == other] = inner[(min(fold, other), max(fold, other))][fold_of == other]
-        test_scores = outer[fold]
+                scores = inner[(min(fold, other), max(fold, other))]
+                train_scores[fold_of == other] = scores["serving_gb"][fold_of == other]
+                pool_scores[pool_fold_of == other] = scores["llm_gb"][pool_fold_of == other]
+        test_scores = outer[fold]["serving_gb"]
         train_table = pair_table(serving, serving_feats, train_scores, keep)
         train_table = train_table[fold_of[train_table["i"]] != fold]
+        pool_table = pair_table(llm_gb, pool_feats, pool_scores, pool_keep)
+        pool_table = pool_table[pool_fold_of[pool_table["i"]] != fold]
         test_table = pair_table(serving, serving_feats, test_scores, keep)
         test_table = test_table[fold_of[test_table["i"]] == fold]
         predictions = {}
         for variant in VARIANTS:
-            booster = train_pairs(train_table, serving_feats, train_scores, grades, variant)
+            booster = (
+                train_pairs(pool_table, pool_feats, pool_scores, pool_grades, "diff")
+                if variant == "pool"
+                else train_pairs(train_table, serving_feats, train_scores, grades, variant)
+            )
             predictions[variant] = booster.predict(
                 xgb.DMatrix(pair_features(test_table, serving_feats, test_scores, variant))
             )
