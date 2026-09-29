@@ -41,7 +41,7 @@ NUM_PAGES_TO_COPY = 1024
 basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
 
-stats_manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
+stats_manager = StatsManager()
 
 
 def copy_all_indexes(new_index_path):

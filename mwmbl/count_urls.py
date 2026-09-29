@@ -1,4 +1,3 @@
-import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
@@ -8,15 +7,10 @@ from time import sleep
 
 from django.conf import settings
 from pydistinct.stats_estimators import smoothed_jackknife_estimator
-from redis import Redis
 
+from mwmbl.models import DailyDomainResultCount, DailyIndexStats
 from mwmbl.tinysearchengine.indexer import Document, PageError, TinyIndex
 from mwmbl.utils import parse_url, utc_today
-
-INDEX_RESULT_COUNT_KEY = "index-result-count-{date}"
-INDEX_DOMAIN_COUNT_KEY = "index-domain-count-{date}"
-INDEX_URL_COUNT_KEY = "index-url-count-{date}"
-INDEX_DOMAIN_RESULT_COUNT_KEY = "index-domain-result-count-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
@@ -25,10 +19,6 @@ PAGE_PROPORTION_TO_SAMPLE = 0.01
 
 logger = getLogger(__name__)
 random = Random(1)
-
-
-def get_redis():
-    return Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
 
 
 def count_urls_continuously():
@@ -81,36 +71,58 @@ def count_urls():
         f"and {num_results_estimate} results in the index."
     )
 
-    redis = get_redis()
-
     today = utc_today()
-    _set_count(INDEX_URL_COUNT_KEY, redis, today, int(url_count_estimate))
-    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, int(domain_count_estimate))
-    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results_estimate)
+
+    # Also persist to Postgres (DailyIndexStats)
+    DailyIndexStats.objects.update_or_create(
+        date=today,
+        defaults={
+            "urls_in_index": int(url_count_estimate),
+            "domains_in_index": int(domain_count_estimate),
+            "results_in_index": num_results_estimate,
+        },
+    )
+
+    # Persist per-domain result counts to Postgres (DailyDomainResultCount)
+    for domain, count in domain_counts.items():
+        estimated_count = int(count / PAGE_PROPORTION_TO_SAMPLE)
+        DailyDomainResultCount.objects.update_or_create(
+            date=today,
+            domain=domain,
+            defaults={"count": estimated_count},
+        )
 
     end_time = datetime.now(timezone.utc)
     logger.info(f"Counting took {end_time - start_time}.")
 
 
-def _set_count(key, redis, today, count):
-    redis.set(key.format(date=today), count)
-    redis.expire(key.format(date=today), LONG_EXPIRE_SECONDS)
-
-
 def get_counts() -> dict[str, dict[str, int]]:
-    redis = get_redis()
-
     today = utc_today()
 
     urls_in_index_daily = {}
     domains_in_index_daily = {}
     results_in_index_daily = {}
+
+    # Read from Postgres (DailyIndexStats)
+    thirty_days_ago = today - timedelta(days=29)
+    daily_index_stats = DailyIndexStats.objects.filter(date__gte=thirty_days_ago).order_by("date")
+
+    # Build a lookup dict from Postgres data
+    pg_stats_by_date = {str(stat.date): stat for stat in daily_index_stats}
+
     for i in range(29, -1, -1):
         date_i = today - timedelta(days=i)
+        date_str = str(date_i)
 
-        _get_count(redis, urls_in_index_daily, INDEX_URL_COUNT_KEY, date_i)
-        _get_count(redis, domains_in_index_daily, INDEX_DOMAIN_COUNT_KEY, date_i)
-        _get_count(redis, results_in_index_daily, INDEX_RESULT_COUNT_KEY, date_i)
+        pg_stat = pg_stats_by_date.get(date_str)
+        if pg_stat:
+            urls_in_index_daily[date_str] = pg_stat.urls_in_index
+            domains_in_index_daily[date_str] = pg_stat.domains_in_index
+            results_in_index_daily[date_str] = pg_stat.results_in_index
+        else:
+            urls_in_index_daily[date_str] = 0
+            domains_in_index_daily[date_str] = 0
+            results_in_index_daily[date_str] = 0
 
     return {
         "urls_in_index_daily": urls_in_index_daily,
@@ -120,20 +132,9 @@ def get_counts() -> dict[str, dict[str, int]]:
 
 
 def get_domain_result_count(domain: str) -> int:
-    redis = get_redis()
-
     today = utc_today()
-    count = redis.zscore(INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today), domain)
-    return 0 if count is None else int(count)
-
-
-def _get_count(redis, count_dict, key, date_i):
-    """
-    Get the count for a given date and set it in the count_dict.
-    """
-    count = redis.get(key.format(date=date_i))
-    if count is not None:
-        count_dict[str(date_i)] = int(count)
+    stat = DailyDomainResultCount.objects.filter(date=today, domain=domain).first()
+    return stat.count if stat else 0
 
 
 if __name__ == "__main__":

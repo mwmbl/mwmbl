@@ -3,15 +3,15 @@ from logging import getLogger
 
 from django.db import models
 from pydantic import BaseModel
-from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import Results
-from mwmbl.models import MwmblUser, UserStats
+from mwmbl.models import DailyCrawlerStats, MwmblUser, UserStats
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
 
+# Redis key constants (used by admin_views.py for reading blacklist status)
 USERS_KEY = "users-{date}"
 RESULTS_COUNT_KEY = "results-count-{date}"
 USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
@@ -57,8 +57,8 @@ class MwmblStats(BaseModel):
 
 
 class StatsManager:
-    def __init__(self, redis: Redis):
-        self.redis = redis
+    def __init__(self):
+        pass
 
     def get_stats(self) -> MwmblStats:
         date_time = datetime.now(timezone.utc)
@@ -69,41 +69,37 @@ class StatsManager:
         dataset_queries_daily = {}
         dataset_results_daily = {}
         blacklisted_results_removed_daily = {}
+
+        # Get the last 30 days from Postgres
+        thirty_days_ago = date - timedelta(days=29)
+        daily_stats = DailyCrawlerStats.objects.filter(date__gte=thirty_days_ago).order_by("date")
+
+        # Build a lookup dict from Postgres data
+        pg_stats_by_date = {str(stat.date): stat for stat in daily_stats}
+
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
+            date_str = str(date_i)
 
-            user_day_count_key = USERS_KEY.format(date=date_i)
-            user_day_count = self.redis.scard(user_day_count_key)
-            users_crawled_daily[str(date_i)] = user_day_count
-
-            result_count_key = RESULTS_COUNT_KEY.format(date=date_i)
-            result_count = self.redis.get(result_count_key)
-            if result_count is None:
-                result_count = 0
-            results_indexed_daily[str(date_i)] = result_count
-
-            dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=date_i)
-            dataset_queries_count = self.redis.get(dataset_queries_count_key)
-            if dataset_queries_count is None:
-                dataset_queries_count = 0
-            dataset_queries_daily[str(date_i)] = dataset_queries_count
-
-            dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=date_i)
-            dataset_results_count = self.redis.get(dataset_results_count_key)
-            if dataset_results_count is None:
-                dataset_results_count = 0
-            dataset_results_daily[str(date_i)] = dataset_results_count
-
-            blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=date_i)
-            blacklisted_removed_count = self.redis.get(blacklisted_removed_count_key)
-            if blacklisted_removed_count is None:
-                blacklisted_removed_count = 0
-            blacklisted_results_removed_daily[str(date_i)] = blacklisted_removed_count
+            pg_stat = pg_stats_by_date.get(date_str)
+            if pg_stat:
+                users_crawled_daily[date_str] = pg_stat.users_crawled
+                results_indexed_daily[date_str] = pg_stat.results_indexed
+                dataset_queries_daily[date_str] = pg_stat.dataset_queries
+                dataset_results_daily[date_str] = pg_stat.dataset_results
+                blacklisted_results_removed_daily[date_str] = pg_stat.blacklisted_results_removed
+            else:
+                users_crawled_daily[date_str] = 0
+                results_indexed_daily[date_str] = 0
+                dataset_queries_daily[date_str] = 0
+                dataset_results_daily[date_str] = 0
+                blacklisted_results_removed_daily[date_str] = 0
 
         index_stats = get_counts()
 
-        user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
-        user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
+        # Get today's leaderboard from the UserStats table (Postgres)
+        today_leaderboard = self.get_leaderboard_for_date(date)
+        user_results_counts = [(username, float(score)) for username, score in today_leaderboard]
 
         return MwmblStats(
             users_crawled_daily=users_crawled_daily,
@@ -153,18 +149,6 @@ class StatsManager:
         today = utc_today()
         num_results = len(results.results)
 
-        result_count_key = RESULTS_COUNT_KEY.format(date=today)
-        self.redis.incrby(result_count_key, num_results)
-        self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
-
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
-        self.redis.zincrby(user_result_count_key, num_results, user.username)
-        self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
-
-        users_key = USERS_KEY.format(date=today)
-        self.redis.sadd(users_key, user.username)
-        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
-
         # Persist to Postgres for all-time leaderboard.
         updated = UserStats.objects.filter(
             user=user,
@@ -177,6 +161,22 @@ class StatsManager:
                 date=today,
                 num_results=num_results,
             )
+            # This is a new user for today, increment users_crawled
+            DailyCrawlerStats.objects.filter(date=today).update(
+                users_crawled=models.F("users_crawled") + 1,
+            )
+
+        # Also persist aggregate daily stats to Postgres (DailyCrawlerStats)
+        DailyCrawlerStats.objects.filter(date=today).update(
+            results_indexed=models.F("results_indexed") + num_results,
+        )
+        # If the row didn't exist, create it
+        if not DailyCrawlerStats.objects.filter(date=today).exists():
+            DailyCrawlerStats.objects.create(
+                date=today,
+                users_crawled=1,
+                results_indexed=num_results,
+            )
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.
@@ -186,9 +186,17 @@ class StatsManager:
         a count that stays at zero while queries are being filtered means the loop is
         broken.
         """
-        blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
-        self.redis.incrby(blacklisted_removed_count_key, num_results)
-        self.redis.expire(blacklisted_removed_count_key, LONG_EXPIRE_SECONDS)
+        today = utc_today()
+
+        # Persist to Postgres
+        DailyCrawlerStats.objects.filter(date=today).update(
+            blacklisted_results_removed=models.F("blacklisted_results_removed") + num_results,
+        )
+        if not DailyCrawlerStats.objects.filter(date=today).exists():
+            DailyCrawlerStats.objects.create(
+                date=today,
+                blacklisted_results_removed=num_results,
+            )
 
     def record_dataset(self, hashed_dataset) -> None:
         """Record dataset statistics from a dataset submission."""
@@ -201,9 +209,6 @@ class StatsManager:
 
         # Count queries
         num_queries = len(hashed_dataset.queryDataset)
-        dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=dataset_date)
-        self.redis.incrby(dataset_queries_count_key, num_queries)
-        self.redis.expire(dataset_queries_count_key, LONG_EXPIRE_SECONDS)
 
         # Count successful search results (exclude unsuccessful attempts)
         num_successful_results = 0
@@ -211,6 +216,14 @@ class StatsManager:
             if search_result_set.success:
                 num_successful_results += len(search_result_set.results)
 
-        dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=dataset_date)
-        self.redis.incrby(dataset_results_count_key, num_successful_results)
-        self.redis.expire(dataset_results_count_key, LONG_EXPIRE_SECONDS)
+        # Persist to Postgres
+        DailyCrawlerStats.objects.filter(date=dataset_date).update(
+            dataset_queries=models.F("dataset_queries") + num_queries,
+            dataset_results=models.F("dataset_results") + num_successful_results,
+        )
+        if not DailyCrawlerStats.objects.filter(date=dataset_date).exists():
+            DailyCrawlerStats.objects.create(
+                date=dataset_date,
+                dataset_queries=num_queries,
+                dataset_results=num_successful_results,
+            )

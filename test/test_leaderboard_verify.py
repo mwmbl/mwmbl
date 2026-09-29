@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 
-import fakeredis
 import pytest
 
 from mwmbl.crawler.stats import StatsManager
@@ -34,8 +33,7 @@ def test_leaderboard_functions():
 
     print("Test data inserted!")
 
-    redis = fakeredis.FakeRedis()
-    stats_manager = StatsManager(redis)
+    stats_manager = StatsManager()
 
     # Test get_all_time_leaderboard
     all_time = stats_manager.get_all_time_leaderboard()

@@ -162,6 +162,7 @@ def test_queue_status_samples_without_draining(wired_redis, documents):
     assert queue_size(wired_redis) == 2
 
 
+@pytest.mark.django_db
 def test_removed_counts_covers_the_requested_window(wired_redis):
     counts = admin_views._removed_counts(14)
 
@@ -171,10 +172,12 @@ def test_removed_counts_covers_the_requested_window(wired_redis):
     assert counts[0]["date"] > counts[-1]["date"]
 
 
+@pytest.mark.django_db
 def test_removed_counts_reads_back_what_the_purge_recorded(wired_redis):
     """The page and StatsManager name today's key in different modules, so a disagreement
     about which day "today" is shows up as a permanent zero rather than as an error."""
-    StatsManager(wired_redis).record_blacklisted_removed(5)
+
+    StatsManager().record_blacklisted_removed(5)
 
     counts = admin_views._removed_counts(14)
 

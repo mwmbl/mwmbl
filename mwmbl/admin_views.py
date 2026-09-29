@@ -22,7 +22,6 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
 from mwmbl.indexer.blacklist_snapshot import (
@@ -99,11 +98,13 @@ def _removed_counts(days: int) -> list[dict]:
     happens, so a queue that is filling while this stays at zero is the signature of a
     broken loop - see StatsManager.record_blacklisted_removed.
     """
-    client = purge_queue.get_redis()
+    from mwmbl.models import DailyCrawlerStats
+
     today = utc_today()
     dates = [today - timedelta(days=i) for i in range(days)]
-    counts = client.mget([BLACKLISTED_REMOVED_COUNT_KEY.format(date=date) for date in dates])
-    return [{"date": date, "count": int(count) if count else 0} for date, count in zip(dates, counts)]
+    stats = DailyCrawlerStats.objects.filter(date__in=dates)
+    stats_by_date = {str(s.date): s.blacklisted_results_removed for s in stats}
+    return [{"date": date, "count": stats_by_date.get(str(date), 0)} for date in dates]
 
 
 def _curated_status() -> dict:
