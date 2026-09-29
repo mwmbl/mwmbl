@@ -29,3 +29,6 @@ opt-level = 3
 # codegen-units = 1
 # panic = "abort" # Simplifies the call stack by removing unwinding logic
 
+[patch.crates-io]
+xgboost_lib-sys = { path = "vendor/xgboost_lib-sys-3.0.4" }
+

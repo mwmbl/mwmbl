@@ -3,6 +3,22 @@ from mwmbl.settings_common import *
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-qqr#f(i3uf%m8%8u35vn=ov-uk(*8!a&1t-hxa%ev2^t1%j&sm"
 
+# CORS settings for local development
+INSTALLED_APPS += ["corsheaders"]
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+] + MIDDLEWARE
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
 
 STATIC_ROOT = ""
 DJANGO_VITE_ASSETS_PATH = Path(__file__).parent.parent / "front-end" / "dist"

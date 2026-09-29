@@ -28,6 +28,7 @@ dependencies = [
     "dj-database-url>=2.1.0",
     "django-htmx>=1.17.0",
     "django-vite>=2.1.3",
+    "django-cors-headers>=4.3.0",
     "pybloomfiltermmap3>=0.6.0",
     "lxml-html-clean>=0.1.0",
     "lxml>=5.2.0",
@@ -115,6 +116,7 @@ DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "--reuse-db -m 'not live and not slow'"
 asyncio_mode = "auto"
+norecursedirs = ["vendor", "devdata", "front-end", "test_env"]
 # DTZ cannot see this one: at the point of assignment `timezone.now()` and
 # `datetime.utcnow()` look the same to a linter, and only Django knows the column is aware.
 filterwarnings = ["error:.*received a naive datetime:RuntimeWarning"]
