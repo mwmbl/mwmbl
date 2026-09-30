@@ -21,7 +21,8 @@ REFERENCE, on every en-gb query:
 The `jev` experiment compares each Jev arm of `jev_experiment.py` (engb_jev_arms.json)
 against REFERENCE, on every en-gb query where their lists differ. `jev-ltr` compares the
 Jev-feature cascade of `jev_ltr_eval.py` (engb_jev_ltr_arms.json) with REFERENCE and with
-Jev + Staan rank.
+Jev + Staan rank. `jev-tuned` compares Jev + Staan rank with its Staan weight tuned on the
+training queries (w=0.15) with REFERENCE, and `jev-brave` compares it with Brave.
 
 Commands (experiment `validation` unless named):
 
@@ -54,7 +55,10 @@ JEV_ARMS = ("staan-first, fill Jev", "Jev + Staan rank", "Jev re-rank")
 JEV_LTR_ARMS_PATH = LABELS / "engb_jev_ltr_arms.json"
 JEV_CASCADE = "ndcg+new+jev, no MMR"
 JEV_LTR_PAIRS = ((JEV_CASCADE, REFERENCE), (JEV_CASCADE, "Jev + Staan rank"))
+JEV_TUNED = "Jev + Staan rank, w=0.15"
+JEV_TUNED_PAIRS = ((JEV_TUNED, REFERENCE),)
 BRAVE = "brave"
+JEV_BRAVE_PAIRS = ((JEV_TUNED, BRAVE),)
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
 COMPARISONS_PER_BATCH = 25
@@ -196,14 +200,18 @@ def jev_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     ]
 
 
-def jev_ltr_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
-    """The Jev-feature cascade of `jev_ltr_eval.py` against REFERENCE and against Jev + Staan rank."""
-    return [
-        {"set": f"{x} vs {y}", "query": query, "x": x, "y": y, "ndcg_gap": scores[query][x] - scores[query][y]}
-        for x, y in JEV_LTR_PAIRS
-        for query in sorted(scores)
-        if arms[query]["lists"][x] != arms[query]["lists"][y]
-    ]
+def pair_comparisons(pairs: tuple[tuple[str, str], ...]):
+    """Each (x, y) of `pairs`, on every query where their lists differ."""
+
+    def find(arms: dict, rows: dict, scores: dict) -> list[dict]:
+        return [
+            {"set": f"{x} vs {y}", "query": query, "x": x, "y": y, "ndcg_gap": scores[query][x] - scores[query][y]}
+            for x, y in pairs
+            for query in sorted(scores)
+            if list_for(x, query, arms, rows) != list_for(y, query, arms, rows)
+        ]
+
+    return find
 
 
 EXPERIMENTS = {
@@ -211,9 +219,21 @@ EXPERIMENTS = {
     "mmr": (mmr_comparisons, LABELS / "holistic_mmr_work", LABELS / "holistic_mmr_judgments.jsonl", ARMS),
     "jev": (jev_comparisons, LABELS / "holistic_jev_work", LABELS / "holistic_jev_judgments.jsonl", JEV_ARMS_PATH),
     "jev-ltr": (
-        jev_ltr_comparisons,
+        pair_comparisons(JEV_LTR_PAIRS),
         LABELS / "holistic_jev_ltr_work",
         LABELS / "holistic_jev_ltr_judgments.jsonl",
+        JEV_LTR_ARMS_PATH,
+    ),
+    "jev-tuned": (
+        pair_comparisons(JEV_TUNED_PAIRS),
+        LABELS / "holistic_jev_tuned_work",
+        LABELS / "holistic_jev_tuned_judgments.jsonl",
+        JEV_LTR_ARMS_PATH,
+    ),
+    "jev-brave": (
+        pair_comparisons(JEV_BRAVE_PAIRS),
+        LABELS / "holistic_jev_brave_work",
+        LABELS / "holistic_jev_brave_judgments.jsonl",
         JEV_LTR_ARMS_PATH,
     ),
 }

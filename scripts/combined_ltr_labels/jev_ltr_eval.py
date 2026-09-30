@@ -15,8 +15,9 @@ Jev call otherwise. Writes `engb_jev_ltr_arms.json`:
     ndcg+new+jev, no MMR                 the cascade
     staan-first, fill ndcg+new+jev, no MMR
     Jev + Staan rank                     jev_experiment.py's arm, on this retrieval
+    Jev + Staan rank, w=0.15             the same with the weight tuned on the training queries
 
-    rank     rank the en-gb queries to depth 30, then `arms`
+    rank     rank the en-gb queries to depth 30 -> engb_jev_ltr_ranked.json, then `arms`
     arms     the depth-30 lists -> the arms above -> engb_jev_ltr_arms.json
     batches / consolidate / report   pass-3 NDCG, as engb_eval.py
 
@@ -65,6 +66,12 @@ LABELS = Path("devdata/combined_ltr_labels")
 CASCADE = "ndcg+new+jev"
 STAGE1 = "ndcg+new"
 TOP_OFFSET = 2.0
+RANKED = LABELS / "engb_jev_ltr_ranked.json"
+# The Staan weight that maximises Jev + Staan rank's pass-3 NDCG@10 on the 849 training
+# queries' serving pool (0.885, against 0.875 at jev_experiment.py's 0.05, which was picked on
+# these en-gb queries themselves).
+TUNED_STAAN_WEIGHT = 0.15
+TUNED_BLEND = f"Jev + Staan rank, w={TUNED_STAAN_WEIGHT}"
 JEV_LTR_RUN = Run(
     arms=LABELS / "engb_jev_ltr_arms.json",
     judgments=LABELS / "pass3_engb_jev_ltr.jsonl",
@@ -130,9 +137,14 @@ def rank():
         STAGE1: BoosterModel(stage1),
         CASCADE: JevCascade(stage1, model, jev),
     }
-    rank_all(models, JEV_LTR_RUN.arms, keep=DEPTH, no_mmr=(STAGE1, CASCADE))
+    rank_all(models, RANKED, keep=DEPTH, no_mmr=(STAGE1, CASCADE))
     print(f"{jev.live} candidates scored live")
     arms()
+
+
+def blend(pool: list[str], scores: dict[str, float], position: dict[str, int], weight: float) -> list[str]:
+    """Jev's score minus `weight` x Staan's position (NUM_RESULTS where Staan didn't return it)."""
+    return sorted(pool, key=lambda u: -(scores[u] - weight * position.get(u, NUM_RESULTS)))[:NUM_RESULTS]
 
 
 def arms():
@@ -140,7 +152,7 @@ def arms():
     jev = JevScores()
     rows = {row["query"]: row for row in json.loads((ENGB / "rows-0.05.json").read_text())}
     text = json.loads((ENGB / "pool_text.json").read_text())
-    ranked_arms = json.loads(JEV_LTR_RUN.arms.read_text())
+    ranked_arms = json.loads(RANKED.read_text())
     for query, entry in ranked_arms.items():
         staan = rows[query]["lists"]["staan"][:NUM_RESULTS]
         ranked = entry["lists"][f"{STAGE1}, no MMR"]
@@ -155,9 +167,8 @@ def arms():
             REFERENCE: staan_first(staan, ranked),
             f"{CASCADE}, no MMR": cascade[:NUM_RESULTS],
             f"staan-first, fill {CASCADE}, no MMR": staan_first(staan, cascade),
-            BLEND_JEV: sorted(pool, key=lambda u: -(scores[u] - STAAN_WEIGHT * position.get(u, NUM_RESULTS)))[
-                :NUM_RESULTS
-            ],
+            BLEND_JEV: blend(pool, scores, position, STAAN_WEIGHT),
+            TUNED_BLEND: blend(pool, scores, position, TUNED_STAAN_WEIGHT),
         }
         shown = {url for urls in entry["lists"].values() for url in urls}
         entry["pages"] = {url: pages[url][:2] for url in shown}
