@@ -19,7 +19,9 @@ REFERENCE, on every en-gb query:
     no-mmr  the same model without MMR, against REFERENCE, to separate MMR from the model.
 
 The `jev` experiment compares each Jev arm of `jev_experiment.py` (engb_jev_arms.json)
-against REFERENCE, on every en-gb query where their lists differ.
+against REFERENCE, on every en-gb query where their lists differ. `jev-ltr` compares the
+Jev-feature cascade of `jev_ltr_eval.py` (engb_jev_ltr_arms.json) with REFERENCE and with
+Jev + Staan rank.
 
 Commands (experiment `validation` unless named):
 
@@ -49,6 +51,9 @@ REFERENCE = "staan-first, fill ndcg+new, no MMR"
 MMR_ARMS = {"mmr": "ndcg+new (en-gb Staan)", "no-mmr": "ndcg+new (en-gb Staan), no MMR"}
 JEV_ARMS_PATH = LABELS / "engb_jev_arms.json"
 JEV_ARMS = ("staan-first, fill Jev", "Jev + Staan rank", "Jev re-rank")
+JEV_LTR_ARMS_PATH = LABELS / "engb_jev_ltr_arms.json"
+JEV_CASCADE = "ndcg+new+jev, no MMR"
+JEV_LTR_PAIRS = ((JEV_CASCADE, REFERENCE), (JEV_CASCADE, "Jev + Staan rank"))
 BRAVE = "brave"
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
@@ -191,10 +196,26 @@ def jev_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     ]
 
 
+def jev_ltr_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
+    """The Jev-feature cascade of `jev_ltr_eval.py` against REFERENCE and against Jev + Staan rank."""
+    return [
+        {"set": f"{x} vs {y}", "query": query, "x": x, "y": y, "ndcg_gap": scores[query][x] - scores[query][y]}
+        for x, y in JEV_LTR_PAIRS
+        for query in sorted(scores)
+        if arms[query]["lists"][x] != arms[query]["lists"][y]
+    ]
+
+
 EXPERIMENTS = {
     "validation": (validation_comparisons, LABELS / "holistic_work", LABELS / "holistic_judgments.jsonl", ARMS),
     "mmr": (mmr_comparisons, LABELS / "holistic_mmr_work", LABELS / "holistic_mmr_judgments.jsonl", ARMS),
     "jev": (jev_comparisons, LABELS / "holistic_jev_work", LABELS / "holistic_jev_judgments.jsonl", JEV_ARMS_PATH),
+    "jev-ltr": (
+        jev_ltr_comparisons,
+        LABELS / "holistic_jev_ltr_work",
+        LABELS / "holistic_jev_ltr_judgments.jsonl",
+        JEV_LTR_ARMS_PATH,
+    ),
 }
 
 
