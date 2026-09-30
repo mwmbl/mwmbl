@@ -7,6 +7,11 @@ committed under `devdata/combined_providers_eval/`.
 **Question:** can Jev, TypeSafe's structured-judgment model, rank Combined Search's candidates
 better than the current best arm (Staan first, remaining slots filled by MiniLM)?
 
+> **Superseded in part (2026-09-30):** judged holistically against the stronger reference
+> `staan-first, fill ndcg+new, no MMR`, the pure Jev re-rank below only ties it. Jev's score plus
+> a small Staan-rank prior wins, +0.31 [+0.18, +0.44] on the −3..3 scale. See the Jev section of
+> `combined-holistic-eval.md`.
+
 ## Summary
 
 - **A pointwise Jev re-rank is the best arm we've had:** +0.039 UK relevance and +0.035
