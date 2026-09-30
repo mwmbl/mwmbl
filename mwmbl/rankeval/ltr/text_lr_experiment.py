@@ -10,20 +10,24 @@ XGBoost learns to trust it too much. So within every outer fold the training row
 out-of-fold LR scores (inner GroupKFold), and the test rows get scores from an LR fit on
 the whole training fold. Everything is grouped by query, so no query spans train and test.
 
-Reports, per arm, the same Haiku-axis metrics as ``llm_experiment``:
-``xgb`` (Rust features only), ``xgb+lr`` (plus the LR column) and ``lr`` (LR alone).
+Two LR variants: ``text`` (item TF-IDF only) and ``cross`` (also hashed query-term x
+item-term pairs, per field, so it can learn e.g. that "python" in the query and "tutorial" in
+the title go together). Arms: ``xgb`` (Rust features only), ``xgb+text``, ``xgb+cross`` (the LR
+score added as a column) and the LRs alone, scored with the ``llm_experiment`` Haiku-axis metrics.
 
 Usage::
 
     uv run python -m mwmbl.rankeval.ltr.text_lr_experiment --folds 5
 """
 
+import re
 from argparse import ArgumentParser
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import hstack
 from scipy.stats import sem
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import HashingVectorizer, TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
@@ -42,33 +46,65 @@ class PrecomputedPredictions:
         return self.predictions
 
 
+TOKEN = re.compile(r"\w+")
+
+
 def item_text(frame: pd.DataFrame) -> pd.Series:
     return frame["title"] + " " + frame["extract"]
 
 
-def make_text_model(c: float, max_features: int) -> tuple[TfidfVectorizer, LogisticRegression]:
-    vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2), min_df=2, max_features=max_features, sublinear_tf=True, strip_accents="unicode"
-    )
-    return vectorizer, LogisticRegression(C=c, max_iter=1000)
+def cross_terms(document: str) -> list[str]:
+    """Query term x item term pairs, separately for the title and the extract.
+
+    ``document`` is ``query, title, extract`` joined by the ASCII unit separator: HashingVectorizer hands its analyzer one
+    string per row, so the three fields travel together.
+    """
+    query, title, extract = document.lower().split("\x1f")
+    query_terms = set(TOKEN.findall(query))
+    pairs = []
+    for field, text in (("t", title), ("e", extract)):
+        item_terms = set(TOKEN.findall(text))
+        pairs += [f"{field}:{q}|{d}" for q in query_terms for d in item_terms]
+    return pairs
 
 
-def fit_text_model(train: pd.DataFrame, c: float, max_features: int):
-    vectorizer, classifier = make_text_model(c, max_features)
-    classifier.fit(vectorizer.fit_transform(item_text(train)), train["label"])
-    return vectorizer, classifier
+def cross_documents(frame: pd.DataFrame) -> pd.Series:
+    return frame["query"] + "\x1f" + frame["title"] + "\x1f" + frame["extract"]
 
 
-def predict_text_model(fitted, frame: pd.DataFrame) -> np.ndarray:
-    vectorizer, classifier = fitted
-    return classifier.predict_proba(vectorizer.transform(item_text(frame)))[:, 1]
+class TextModel:
+    """TF-IDF of the item text, optionally plus hashed query x item term crosses, into an LR."""
+
+    def __init__(self, c: float, max_features: int, cross: bool, cross_features: int):
+        self.vectorizer = TfidfVectorizer(
+            ngram_range=(1, 2), min_df=2, max_features=max_features, sublinear_tf=True, strip_accents="unicode"
+        )
+        self.crosser = (
+            HashingVectorizer(analyzer=cross_terms, n_features=cross_features, alternate_sign=False, norm="l2")
+            if cross
+            else None
+        )
+        self.classifier = LogisticRegression(C=c, max_iter=1000)
+
+    def matrix(self, frame: pd.DataFrame, fit: bool):
+        text = item_text(frame)
+        blocks = [self.vectorizer.fit_transform(text) if fit else self.vectorizer.transform(text)]
+        if self.crosser is not None:
+            blocks.append(self.crosser.transform(cross_documents(frame)))
+        return hstack(blocks).tocsr()
+
+    def fit(self, frame: pd.DataFrame) -> "TextModel":
+        self.classifier.fit(self.matrix(frame, fit=True), frame["label"])
+        return self
+
+    def predict(self, frame: pd.DataFrame) -> np.ndarray:
+        return self.classifier.predict_proba(self.matrix(frame, fit=False))[:, 1]
 
 
-def out_of_fold_text_scores(train: pd.DataFrame, c: float, max_features: int, folds: int) -> np.ndarray:
+def out_of_fold_scores(make_model, train: pd.DataFrame, folds: int) -> np.ndarray:
     scores = np.zeros(len(train))
     for fit_index, score_index in GroupKFold(n_splits=folds).split(train, groups=train["qnorm"]):
-        fitted = fit_text_model(train.iloc[fit_index], c, max_features)
-        scores[score_index] = predict_text_model(fitted, train.iloc[score_index])
+        scores[score_index] = make_model().fit(train.iloc[fit_index]).predict(train.iloc[score_index])
     return scores
 
 
@@ -88,6 +124,7 @@ def run():
     parser.add_argument("--overall-threshold", type=float, default=RELEVANT_OVERALL)
     parser.add_argument("--c", type=float, default=1.0, help="LR inverse regularisation strength")
     parser.add_argument("--max-features", type=int, default=50000)
+    parser.add_argument("--cross-features", type=int, default=2**20, help="hash space for query x item crosses")
     args = parser.parse_args()
 
     _, llm = load_datasets()
@@ -96,26 +133,30 @@ def run():
     base_features = rust_features(llm)
     print(f"{len(llm)} rows, {llm['qnorm'].nunique()} queries, positive rate {llm['label'].mean():.3f}")
 
-    arms = ["xgb", "xgb+lr", "lr"]
+    # name -> whether the text model includes query x item crosses
+    text_models = {"text": False, "cross": True}
+    arms = ["xgb"] + [f"xgb+{name}" for name in text_models] + list(text_models)
     results = {arm: [] for arm in arms}
     for fold, (train_index, test_index) in enumerate(GroupKFold(n_splits=args.folds).split(llm, groups=llm["qnorm"])):
         train, test = llm.iloc[train_index], llm.iloc[test_index]
+        train_features, test_features = base_features[train_index], base_features[test_index]
 
-        train_lr = out_of_fold_text_scores(train, args.c, args.max_features, args.inner_folds)
-        test_lr = predict_text_model(fit_text_model(train, args.c, args.max_features), test)
+        predictions = {"xgb": fit_xgb(train_features, train["label"]).predict_proba(test_features)[:, 1]}
+        for name, cross in text_models.items():
 
-        predictions = {
-            "xgb": fit_xgb(base_features[train_index], train["label"]).predict_proba(base_features[test_index])[:, 1],
-            "xgb+lr": fit_xgb(np.column_stack([base_features[train_index], train_lr]), train["label"]).predict_proba(
-                np.column_stack([base_features[test_index], test_lr])
-            )[:, 1],
-            "lr": test_lr,
-        }
+            def make_model(cross=cross):
+                return TextModel(args.c, args.max_features, cross, args.cross_features)
+
+            train_scores = out_of_fold_scores(make_model, train, args.inner_folds)
+            test_scores = make_model().fit(train).predict(test)
+            predictions[name] = test_scores
+            stacked = fit_xgb(np.column_stack([train_features, train_scores]), train["label"])
+            predictions[f"xgb+{name}"] = stacked.predict_proba(np.column_stack([test_features, test_scores]))[:, 1]
+
         for arm in arms:
-            metrics = evaluate(PrecomputedPredictions(predictions[arm]), test)
-            results[arm].append(metrics)
+            results[arm].append(evaluate(PrecomputedPredictions(predictions[arm]), test))
         line = ", ".join(f"{arm} {results[arm][-1]['ndcg']:.4f}" for arm in arms)
-        print(f"fold {fold + 1}/{args.folds}: ndcg {line}")
+        print(f"fold {fold + 1}/{args.folds}: ndcg {line}", flush=True)
 
     print("\n=== mean over folds ===")
     for arm in arms:
@@ -125,8 +166,10 @@ def run():
             f"{arm:8s} ndcg {ndcg.mean():.4f} ± {sem(ndcg):.4f}  ndcg@10 {per_fold['ndcg@10'].mean():.4f}  "
             f"p@5 {per_fold['p@5'].mean():.4f}  p@10 {per_fold['p@10'].mean():.4f}"
         )
-    gains = pd.DataFrame(results["xgb+lr"])["ndcg"] - pd.DataFrame(results["xgb"])["ndcg"]
-    print(f"\nxgb+lr minus xgb, ndcg per fold: {np.round(gains.values, 4).tolist()} (mean {gains.mean():+.4f})")
+    baseline = pd.DataFrame(results["xgb"])["ndcg"]
+    for name in text_models:
+        gains = pd.DataFrame(results[f"xgb+{name}"])["ndcg"] - baseline
+        print(f"xgb+{name} minus xgb, ndcg per fold: {np.round(gains.values, 4).tolist()} (mean {gains.mean():+.4f})")
 
 
 if __name__ == "__main__":
