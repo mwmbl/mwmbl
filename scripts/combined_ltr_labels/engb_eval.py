@@ -84,6 +84,7 @@ RUN_JUDGMENTS = [
     LABELS / "pass3_engb_domain_cc.jsonl",
     LABELS / "pass3_engb_cascade.jsonl",
     LABELS / "pass3_engb_staan.jsonl",
+    LABELS / "pass3_engb_jev.jsonl",
 ]
 
 

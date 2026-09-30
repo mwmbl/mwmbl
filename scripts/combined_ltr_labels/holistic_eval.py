@@ -18,6 +18,9 @@ REFERENCE, on every en-gb query:
     mmr     ndcg+new (en-gb Staan), with MMR, against REFERENCE.
     no-mmr  the same model without MMR, against REFERENCE, to separate MMR from the model.
 
+The `jev` experiment compares each Jev arm of `jev_experiment.py` (engb_jev_arms.json)
+against REFERENCE, on every en-gb query where their lists differ.
+
 Commands (experiment `validation` unless named):
 
     batches [experiment]      write the judge batches and a manifest -> its work directory
@@ -44,6 +47,8 @@ LABELS = Path("devdata/combined_ltr_labels")
 ARMS = LABELS / "engb_staan_arms.json"
 REFERENCE = "staan-first, fill ndcg+new, no MMR"
 MMR_ARMS = {"mmr": "ndcg+new (en-gb Staan)", "no-mmr": "ndcg+new (en-gb Staan), no MMR"}
+JEV_ARMS_PATH = LABELS / "engb_jev_arms.json"
+JEV_ARMS = ("staan-first, fill Jev", "Jev + Staan rank", "Jev re-rank")
 BRAVE = "brave"
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
@@ -170,9 +175,26 @@ def mmr_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     ]
 
 
+def jev_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
+    """Each Jev arm of `jev_experiment.py` against REFERENCE, on every query where their lists differ."""
+    return [
+        {
+            "set": arm,
+            "query": query,
+            "x": arm,
+            "y": REFERENCE,
+            "ndcg_gap": scores[query][arm] - scores[query][REFERENCE],
+        }
+        for arm in JEV_ARMS
+        for query in sorted(scores)
+        if arms[query]["lists"][arm] != arms[query]["lists"][REFERENCE]
+    ]
+
+
 EXPERIMENTS = {
-    "validation": (validation_comparisons, LABELS / "holistic_work", LABELS / "holistic_judgments.jsonl"),
-    "mmr": (mmr_comparisons, LABELS / "holistic_mmr_work", LABELS / "holistic_mmr_judgments.jsonl"),
+    "validation": (validation_comparisons, LABELS / "holistic_work", LABELS / "holistic_judgments.jsonl", ARMS),
+    "mmr": (mmr_comparisons, LABELS / "holistic_mmr_work", LABELS / "holistic_mmr_judgments.jsonl", ARMS),
+    "jev": (jev_comparisons, LABELS / "holistic_jev_work", LABELS / "holistic_jev_judgments.jsonl", JEV_ARMS_PATH),
 }
 
 
@@ -187,8 +209,8 @@ def results_block(label: str, urls: list[str], pages: dict) -> str:
 
 
 def batches(experiment: str):
-    find, work, _ = EXPERIMENTS[experiment]
-    arms = json.loads(ARMS.read_text())
+    find, work, _, arms_path = EXPERIMENTS[experiment]
+    arms = json.loads(arms_path.read_text())
     rows = {row["query"]: row for row in json.loads((ENGB / "rows-0.05.json").read_text())}
     text = json.loads((ENGB / "pool_text.json").read_text())
     scores = ndcg_scores(arms, rows)
@@ -252,7 +274,7 @@ def pages_for(arm: str, query: str, arms: dict, text: dict) -> dict:
 
 
 def consolidate(experiment: str):
-    _, work, judgments = EXPERIMENTS[experiment]
+    _, work, judgments, _ = EXPERIMENTS[experiment]
     manifest = {int(k): v for k, v in json.loads((work / "manifest.json").read_text()).items()}
     verdicts = {}
     for path in sorted(work.glob("out_*.txt")):
@@ -288,7 +310,7 @@ def preference_for_x(record: dict) -> int:
 
 
 def report(experiment: str):
-    _, _, judgments = EXPERIMENTS[experiment]
+    _, _, judgments, _ = EXPERIMENTS[experiment]
     records = [json.loads(line) for line in open(judgments)]
     by_comparison: dict[int, list[dict]] = {}
     for record in records:
