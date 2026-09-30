@@ -25,15 +25,17 @@ Usage::
 import argparse
 import json
 
+import numpy as np
+
 from mwmbl.rankeval.evaluation.haiku_arms_report import (
     EVAL_DIR,
     NUM_RESULTS,
     load_json,
-    load_judgments,
     ndcg,
     print_table,
     staan_first,
 )
+from mwmbl.rankeval.evaluation.wikidata_fill_report import merged_judgments
 
 CANDIDATES_PATH = "engb/jev_candidates.json"
 BASELINE = "staan-first, fill MiniLM(LTR top 30 + Wikipedia)"
@@ -103,11 +105,25 @@ def arms_for(row: dict, deep: dict, wiki: dict, runs: dict[str, dict[str, dict[s
     return arms
 
 
+def report_anchors(relevance_anchors: list[tuple[dict, dict]], pass3_anchors: list[tuple[dict, dict]]) -> None:
+    """How far the new Haiku pass drifts from the original grades, on URLs graded by both."""
+    if not relevance_anchors:
+        return
+    relevance_diff = np.array([new["relevance"] - old["relevance"] for old, new in relevance_anchors])
+    overall_diff = np.array([new["overall"] - old["overall"] for old, new in pass3_anchors])
+    print(
+        f"\nAnchors: UK relevance re-graded identically for {np.mean(relevance_diff == 0):.0%} of "
+        f"{len(relevance_diff)} (mean shift {relevance_diff.mean():+.2f}); pass-3 overall mean shift "
+        f"{overall_diff.mean():+.2f}, mean absolute {np.abs(overall_diff).mean():.2f}."
+    )
+
+
 def report(runs: dict[str, dict[str, dict[str, float]]], dump_ungraded: bool) -> None:
     rows = [row for row in load_json("engb/rows-0.05.json") if all(row["query"] in s for s in runs.values())]
     deep, wiki = load_json("engb/combined_top30.json"), load_json("engb/wiki_pool.json")
-    relevance = load_judgments("haiku/relevance_engb.jsonl")
-    pass3 = load_judgments("haiku/pass3_engb.jsonl")
+    relevance, relevance_anchors = merged_judgments("haiku/relevance_engb.jsonl", "haiku/relevance_engb_jev.jsonl")
+    pass3, pass3_anchors = merged_judgments("haiku/pass3_engb.jsonl", "haiku/pass3_engb_jev.jsonl")
+    report_anchors(relevance_anchors, pass3_anchors)
 
     uk_scores: dict[str, list[float]] = {}
     overall_scores: dict[str, list[float]] = {}
@@ -116,21 +132,24 @@ def report(runs: dict[str, dict[str, dict[str, float]]], dump_ungraded: bool) ->
         query = row["query"]
         arms = arms_for(row, deep, wiki, runs)
         needed = {url for urls in arms.values() for url in urls}
+        jev_urls = {url for arm, urls in arms.items() if "Jev" in arm for url in urls}
         graded, judged = relevance.get(query, {}), pass3.get(query, {})
-        missing = sorted(needed - set(graded))
+        missing = sorted(jev_urls - (set(graded) & set(judged)))
         if missing:
             ungraded[query] = missing
-            continue
-        all_gains = [2 ** g["relevance"] - 1 for g in graded.values()]
-        for arm, urls in arms.items():
-            uk_scores.setdefault(arm, []).append(ndcg([2 ** graded[u]["relevance"] - 1 for u in urls], all_gains))
+        if needed <= set(graded):
+            all_gains = [2 ** g["relevance"] - 1 for g in graded.values()]
+            for arm, urls in arms.items():
+                uk_scores.setdefault(arm, []).append(ndcg([2 ** graded[u]["relevance"] - 1 for u in urls], all_gains))
         if needed <= set(judged):
             all_overall = [j["overall"] for j in judged.values()]
             for arm, urls in arms.items():
                 overall_scores.setdefault(arm, []).append(ndcg([judged[u]["overall"] for u in urls], all_overall))
 
     num_missing = sum(len(urls) for urls in ungraded.values())
-    print(f"\n{len(rows)} queries scored by every run; {len(ungraded)} left out for {num_missing} ungraded URLs.")
+    print(
+        f"\n{len(rows)} queries scored by every run; {num_missing} URLs the Jev arms rank in {len(ungraded)} of them are ungraded."
+    )
     if dump_ungraded:
         (EVAL_DIR / "engb/jev_ungraded.json").write_text(json.dumps(ungraded, indent=1))
         print("Ungraded URLs written to engb/jev_ungraded.json.")
