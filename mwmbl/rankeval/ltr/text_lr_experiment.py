@@ -122,10 +122,18 @@ def run():
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--inner-folds", type=int, default=5)
     parser.add_argument("--overall-threshold", type=float, default=RELEVANT_OVERALL)
+    parser.add_argument(
+        "--negative-below",
+        type=float,
+        default=None,
+        help="train only on overall < this as negatives (grades from here up to --overall-threshold are dropped)",
+    )
     parser.add_argument("--c", type=float, default=1.0, help="LR inverse regularisation strength")
     parser.add_argument("--max-features", type=int, default=50000)
     parser.add_argument("--cross-features", type=int, default=2**20, help="hash space for query x item crosses")
     args = parser.parse_args()
+    if args.negative_below is None:
+        args.negative_below = args.overall_threshold
 
     _, llm = load_datasets()
     llm = llm.reset_index(drop=True)
@@ -138,7 +146,15 @@ def run():
     arms = ["xgb"] + [f"xgb+{name}" for name in text_models] + list(text_models)
     results = {arm: [] for arm in arms}
     for fold, (train_index, test_index) in enumerate(GroupKFold(n_splits=args.folds).split(llm, groups=llm["qnorm"])):
-        train, test = llm.iloc[train_index], llm.iloc[test_index]
+        test = llm.iloc[test_index]
+        # Ambiguous grades between the two cut-offs are left out of training only.
+        train_index = train_index[
+            ~llm["overall"]
+            .iloc[train_index]
+            .between(args.negative_below, args.overall_threshold, inclusive="left")
+            .to_numpy()
+        ]
+        train = llm.iloc[train_index]
         train_features, test_features = base_features[train_index], base_features[test_index]
 
         predictions = {"xgb": fit_xgb(train_features, train["label"]).predict_proba(test_features)[:, 1]}
