@@ -161,3 +161,28 @@ PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py oof
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py auc
 PYTHONPATH=. uv run python scripts/combined_ltr_labels/pair_experiment.py report
 ```
+
+## Learning curve
+
+`learning_curve.py` reruns `objective_experiment.py`'s 5-fold cross-validation, training each fold
+on a random 5–100% of its LLM-labelled queries (3 subsamples a fraction, the extension dataset kept
+whole), for `binary` and `ndcg+new`. It writes `learning_curve.json` and `learning_curve.png`. It
+takes about an hour on 4 threads.
+
+```sh
+DJANGO_SETTINGS_MODULE=mwmbl.settings_dev PYTHONPATH=. uv run python scripts/combined_ltr_labels/learning_curve.py
+```
+
+Result (2026-09-30), NDCG@10 on the serving pool / the original pool:
+
+| Training queries | `binary` | `ndcg+new` |
+|---|---|---|
+| 34 | 0.810 / 0.757 | 0.849 / 0.790 |
+| 136 | 0.842 / 0.787 | 0.864 / 0.805 |
+| 340 | 0.854 / 0.799 | 0.872 / 0.816 |
+| 679 (all) | 0.861 / 0.807 | 0.876 / 0.824 |
+
+Both curves are still rising at 679 queries, but slowly. A log-linear fit over 200+ queries gives
+`ndcg+new` about +0.005 (serving) and +0.008 (original) per doubling of the labelled queries, so
+another ~850 would buy roughly that much. `ndcg+new` is flatter than `binary` on the serving pool:
+its serving-pool labels already cover much of what more queries would add.
