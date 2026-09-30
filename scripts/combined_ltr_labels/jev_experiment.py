@@ -44,7 +44,7 @@ JEV_RUN = Run(
     arms=LABELS / "engb_jev_arms.json",
     judgments=LABELS / "pass3_engb_jev.jsonl",
     work=LABELS / "engb_jev_work",
-    baselines=(REFERENCE,),
+    baselines=(REFERENCE, "brave"),
 )
 
 

@@ -272,7 +272,7 @@ def report(run: Run):
             weak.setdefault(arm, []).append(float(np.mean(gains <= 3)) if len(gains) else 0.0)
 
     rng = np.random.default_rng(0)
-    print(f"\n## en-gb, pass-3 overall NDCG@10 ({len(scores[SHIPPED])} queries)\n")
+    print(f"\n## en-gb, pass-3 overall NDCG@10 ({len(scores[run.baselines[0]])} queries)\n")
     print("| Arm | NDCG@10 | " + " | ".join(f"vs {base}, 95% CI" for base in run.baselines) + " | weak in top 10 |")
     print("|---|---|" + "---|" * len(run.baselines) + "---|")
     for arm, values in scores.items():
@@ -282,7 +282,7 @@ def report(run: Run):
             diff = values - np.array(scores[base])
             means = [diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(2000)]
             cells.append(f"{diff.mean():+.3f} [{np.percentile(means, 2.5):+.3f}, {np.percentile(means, 97.5):+.3f}]")
-        print(f"| {arm} | {values.mean():.3f} | {cells[0]} | {cells[1]} | {np.mean(weak[arm]):.1%} |")
+        print(f"| {arm} | {values.mean():.3f} | {' | '.join(cells)} | {np.mean(weak[arm]):.1%} |")
 
 
 if __name__ == "__main__":
