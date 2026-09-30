@@ -248,3 +248,5 @@ devdata/combined_ltr_labels/interleave_oof.json
 devdata/combined_ltr_labels/interleave_judge_oof.json
 devdata/combined_ltr_labels/pair_oof.json
 devdata/combined_ltr_labels/pair_oof_win.json
+devdata/combined_ltr_labels/engb_jev_work/
+devdata/combined_ltr_labels/holistic_jev_work/
