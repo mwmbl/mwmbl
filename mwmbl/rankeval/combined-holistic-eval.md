@@ -104,3 +104,41 @@ normalised to `A`/`B`.
   where the two orders disagree, would tighten it.
 - **Prompt:** four judges gave `wrong-locale` as the main reason, which isn't in the list
   (it's recorded as `other`). Add `locale` as a main reason.
+
+## Jev (2026-09-30)
+
+Three Jev (TypeSafe) orderings of the same pool against the reference, on every en-gb query
+where their lists differ, in both orders: 722 comparisons, 1,444 judgments, 58 batches
+(`holistic_eval.py batches jev`, judgments in `holistic_jev_judgments.jsonl`). Setup and pass-3
+numbers are in `combined-search-jev-eval.md`.
+
+- **Pool:** ndcg+new's top 30 without MMR, plus Staan's ten, re-ranked fresh
+  (`jev_pool.py`). The rebuilt reference matches `engb_staan_arms.json` on 264 of 295 queries.
+  The index has drifted since, and every arm here fills from the same fresh pool.
+- **Jev:** one pointwise UK-relevance Score per candidate. The arms:
+  - `staan-first, fill Jev`: Staan's order, then Jev;
+  - `Jev + Staan rank`: Jev's score (0–3) minus 0.05 × Staan's position (10 if absent);
+  - `Jev re-rank`: Jev alone.
+
+| | Jev + Staan rank | staan-first, fill Jev | Jev re-rank |
+|---|---|---|---|
+| Comparisons (lists differ) | 289 | 144 | 289 |
+| Pass-3 NDCG@10 gap | +0.035 | +0.009 | +0.031 |
+| Preference for the arm (−3..3) | **+0.31 [+0.18, +0.44]** | **+0.30 [+0.18, +0.42]** | +0.00 [−0.13, +0.14] |
+| Arm preferred / reference / tie | 54% / 28% / 19% | 49% / 19% / 33% | 43% / 43% / 15% |
+| Both orders agree on the direction | 60% | 52% | 61% |
+| Agrees with NDCG's sign, where it decides | 71% of 235 | 66% of 97 | 61% of 246 |
+
+- **`Jev + Staan rank` is the first ordering to beat the reference holistically.** The learned
+  orderings in the MMR section lost to it by 0.22–0.29; this one wins by 0.31. Top result
+  (158) and relevance (132) are the main reasons.
+- **Jev alone ties the reference, though NDCG puts it +0.031 ahead.** It gives up Staan's top
+  of the list: top result is the main reason in 215 of its 578 verdicts. That is this
+  document's MMR finding again: Staan's order has value that per-page NDCG doesn't see.
+- **Filling with Jev wins where it changes anything.** It differs from the reference on only
+  144 queries (only positions below Staan's results move), and there it is preferred by
+  0.30, mostly for dropping junk. Over all 289 queries that is about +0.15.
+- **Caveats.** The Staan weight (0.05) was picked on this eval set's pass-3 NDCG, from five
+  values. Judges for batches 00–03 first produced templated verdicts (22 ties in 25, three
+  distinct notes); those were deleted and re-judged. One verdict's `"better": "slight A"` was
+  normalised to `A`.
