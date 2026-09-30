@@ -142,3 +142,47 @@ numbers are in `combined-search-jev-eval.md`.
   values. Judges for batches 00–03 first produced templated verdicts (22 ties in 25, three
   distinct notes); those were deleted and re-judged. One verdict's `"better": "slight A"` was
   normalised to `A`.
+
+## Jev as a model feature (2026-09-30)
+
+`Jev + Staan rank` hand-picks its Staan weight. Can the model learn the combination instead?
+`jev_scores.py` scores all 51,561 LLM-labelled training pairs with Jev, and
+`jev_feature_experiment.py` adds that score as a feature of ndcg+new.
+
+**Cross-validated** over all 849 training queries (Jev has seen none of them), pass-3
+NDCG@10 on the serving pool:
+
+| Arm | NDCG@10 | vs ndcg+new, 95% CI |
+|---|---|---|
+| ndcg+new | 0.876 | — |
+| + `jev`, every candidate | 0.900 | +0.023 [+0.019, +0.027] |
+| + `jev`, stage-1 top 30 only (cascade) | 0.900 | +0.024 [+0.019, +0.028] |
+| Jev alone | 0.856 | −0.020 [−0.028, −0.012] |
+| Jev + Staan rank | 0.875 | −0.001 [−0.007, +0.005] |
+
+That is three times the MiniLM feature's gain in the same setup, and the cascade keeps all
+of it, so serving needs one Jev request per query.
+
+**End to end on en-gb** (`jev_ltr_eval.py`): the cascade inside `CombinedLTRRanker`,
+without MMR, with 136 top-30 candidates scored by live Jev calls. Pass-3 NDCG@10 over 289
+queries: the cascade 0.853, the reference 0.828 (+0.026 [+0.019, +0.034]), and `Jev + Staan
+rank` 0.863 (the cascade trails it by 0.010 [0.005, 0.014]).
+
+**Holistic** (`holistic_eval.py batches jev-ltr`, 1,154 judgments in 48 batches,
+`holistic_jev_ltr_judgments.jsonl`):
+
+| | cascade vs reference | cascade vs Jev + Staan rank |
+|---|---|---|
+| Comparisons | 289 | 288 |
+| Preference for the cascade (−3..3) | +0.02 [−0.12, +0.15] | **−0.26 [−0.36, −0.16]** |
+| Cascade preferred / other / tie | 40% / 39% / 21% | 26% / 48% / 26% |
+| Both orders agree on the direction | 55% | 46% |
+
+- **The learned model ties the reference and loses to the hand rule.** It gains per-page
+  NDCG, as every learned ordering in this document did. But like `Jev re-rank`, it overrides
+  Staan's top results, and the judge doesn't reward that. Relevance (168) and the top result
+  (144) are the main reasons in its comparison with the reference.
+- **So `Jev + Staan rank` remains the best ordering.** A model trained on pass-3 labels
+  learns what pass-3 rewards, and pass-3 grades pages one at a time.
+- **Data cleaning.** One verdict gave `"better": "slight"` with a note naming B, and was
+  set to B. Three ties lacked a `reason` and got `none`. No batch looked templated.
