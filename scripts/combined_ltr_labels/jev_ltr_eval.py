@@ -16,7 +16,8 @@ Jev call otherwise. Writes `engb_jev_ltr_arms.json`:
     staan-first, fill ndcg+new+jev, no MMR
     Jev + Staan rank                     jev_experiment.py's arm, on this retrieval
 
-    rank     rank the en-gb queries -> engb_jev_ltr_arms.json
+    rank     rank the en-gb queries to depth 30, then `arms`
+    arms     the depth-30 lists -> the arms above -> engb_jev_ltr_arms.json
     batches / consolidate / report   pass-3 NDCG, as engb_eval.py
 
 Run from the repository root with DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and PYTHONPATH=.
@@ -131,15 +132,22 @@ def rank():
     }
     rank_all(models, JEV_LTR_RUN.arms, keep=DEPTH, no_mmr=(STAGE1, CASCADE))
     print(f"{jev.live} candidates scored live")
+    arms()
 
+
+def arms():
+    """The ranked depth-30 lists -> the arms, each cut to ten."""
+    jev = JevScores()
     rows = {row["query"]: row for row in json.loads((ENGB / "rows-0.05.json").read_text())}
-    arms = json.loads(JEV_LTR_RUN.arms.read_text())
-    for query, entry in arms.items():
+    text = json.loads((ENGB / "pool_text.json").read_text())
+    ranked_arms = json.loads(JEV_LTR_RUN.arms.read_text())
+    for query, entry in ranked_arms.items():
         staan = rows[query]["lists"]["staan"][:NUM_RESULTS]
         ranked = entry["lists"][f"{STAGE1}, no MMR"]
         position = {url: i for i, url in enumerate(staan)}
         pool = list(dict.fromkeys(staan + ranked))
-        pages = entry["pages"]
+        # Staan results the ranker's top 30 left out carry Staan's own text.
+        pages = {**text[query], **entry["pages"]}
         pool_records = [{"query": query, "url": url, "title": pages[url][0], "extract": pages[url][1]} for url in pool]
         scores = dict(zip(pool, jev.get(pool_records)))
         cascade = entry["lists"][f"{CASCADE}, no MMR"]
@@ -152,14 +160,15 @@ def rank():
             ],
         }
         shown = {url for urls in entry["lists"].values() for url in urls}
-        entry["pages"] = {url: page for url, page in pages.items() if url in shown}
-    JEV_LTR_RUN.arms.write_text(json.dumps(arms))
-    print(f"{len(arms)} queries -> {JEV_LTR_RUN.arms}; {jev.live} candidates scored live in all")
+        entry["pages"] = {url: pages[url][:2] for url in shown}
+    JEV_LTR_RUN.arms.write_text(json.dumps(ranked_arms))
+    print(f"{len(ranked_arms)} queries -> {JEV_LTR_RUN.arms}; {jev.live} candidates scored live")
 
 
 if __name__ == "__main__":
     command = sys.argv[1]
-    if command == "rank":
-        rank()
+    commands = {"rank": rank, "arms": arms}
+    if command in commands:
+        commands[command]()
     else:
         {"batches": batches, "consolidate": consolidate, "report": report}[command](JEV_LTR_RUN)
