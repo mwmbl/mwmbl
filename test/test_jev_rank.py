@@ -9,7 +9,6 @@ import mwmbl.tinysearchengine.jev_rank as jev_rank
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource
 from mwmbl.tinysearchengine.jev_rank import (
     NUM_LTR_CANDIDATES,
-    NUM_RESULTS,
     QUALITY_QUESTION,
     RELEVANCE_QUESTION,
     JevRanker,
@@ -17,7 +16,6 @@ from mwmbl.tinysearchengine.jev_rank import (
     composite_order,
     jev_request,
 )
-from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
 from mwmbl.tinysearchengine.rank import Ranker
 from mwmbl.tinysearchengine.staan import staan_score
 
@@ -134,17 +132,17 @@ def test_blacklisted_staan_results_stay_out_of_the_pool(monkeypatch):
     assert [document.url for document in candidate_pool(staan, [])] == ["https://a.com/"]
 
 
-def test_search_serves_the_composite_top_ten(jev):
+def test_jev_orders_the_pool_and_the_rest_follow_in_the_ltrs_order(jev):
     staan = [staan_result(f"https://staan{i}.com/", i) for i in range(10)]
-    ranked = [index_result(f"https://index{i}.com/") for i in range(30)]
-    # Every candidate equally good: Staan's position and the index penalty decide.
-    requests_made = jev(lambda n: [(2.0, 2.0)] * n)
+    ranked = [index_result(f"https://index{i}.com/") for i in range(50)]
+    # The index results Jev sees rate best of all, so only the pool's order can be Jev's.
+    requests_made = jev(lambda n: [(1.0, 1.0)] * 10 + [(3.0, 2.0)] * (n - 10))
 
     results = JevRanker(FakeRanker(ranked)).search(QUERY, staan, False)
 
     assert len(requests_made) == 1
     assert len(requests_made[0]["questions"]) == 2 * 40
-    assert results == staan[:NUM_RESULTS]
+    assert results == ranked[:NUM_LTR_CANDIDATES] + staan + ranked[NUM_LTR_CANDIDATES:]
 
 
 def test_a_strong_index_result_outranks_a_weak_staan_result(jev):
@@ -158,7 +156,7 @@ def test_a_strong_index_result_outranks_a_weak_staan_result(jev):
 
 
 @pytest.mark.parametrize("error", [requests.Timeout(), requests.HTTPError(), KeyError("answers")])
-def test_a_failed_jev_call_falls_back_to_the_ltr_and_mmr_ordering(monkeypatch, settings, error):
+def test_a_failed_jev_call_falls_back_to_the_ltrs_order(monkeypatch, settings, error):
     settings.JEV_API_KEY = "test-key"
 
     def failing_post(*args, **kwargs):
@@ -169,7 +167,7 @@ def test_a_failed_jev_call_falls_back_to_the_ltr_and_mmr_ordering(monkeypatch, s
 
     results = JevRanker(FakeRanker(ranked)).search(QUERY, [], False)
 
-    assert results == mmr_rerank(ranked)
+    assert results == ranked
 
 
 def test_without_a_key_jev_is_not_called(monkeypatch, settings):

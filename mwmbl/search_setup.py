@@ -30,6 +30,6 @@ ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True
 # Combined Search gets its own model and its own ranker, so retraining on the pooled
 # Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
 # Staan's ranking as features, which only CombinedLTRRanker supplies. Jev orders the final
-# list from the model's unwrapped output; MMR only applies when Jev is unavailable.
+# list from the model's output, without MMR.
 combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
 combined_ranker = JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))

@@ -8,7 +8,7 @@ Staan's results plus the LTR's top 30, without MMR - is then sorted by
     relevance + 0.5 x quality - 0.1 x Staan's position (10 if Staan didn't return it)
               - 0.5 if Staan didn't return it
 
-and the top ten are served. Every weight was tuned on the 849 training queries' serving pool
+and the rest of the LTR's results follow in the LTR's order. Every weight was tuned on the 849 training queries' serving pool
 (pass-3 NDCG@10), never on the en-gb evaluation queries. Judged holistically it beats
 Staan-first, the previous best ordering, by a wide margin. The experiments and their write-up
 are on the archived branch of mwmbl/mwmbl#462 (scripts/combined_ltr_labels/jev_composite.py,
@@ -18,8 +18,8 @@ Leaning on Staan's order is deliberate: every learned ordering that overrode Sta
 results lost to it holistically, even where it gained on per-page NDCG. MMR is not applied,
 since judged holistically it made no difference and it demotes Staan's same-site results.
 
-If Jev is unconfigured, fails or is slow, the request falls back to the LTR + MMR ordering
-served before this, so Jev being down costs quality, never results.
+If Jev is unconfigured, fails or is slow, the request falls back to the LTR's order, so Jev
+being down costs quality, never results.
 """
 
 import time
@@ -30,13 +30,11 @@ import requests
 from django.conf import settings
 
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource
-from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
 from mwmbl.tinysearchengine.rank import Ranker, Retrieval, find_blacklisted_urls
 from mwmbl.tinysearchengine.staan import STAAN_TOP_SCORE
 
 logger = getLogger(__name__)
 
-NUM_RESULTS = 10
 # How many of the LTR's results join Staan's in the pool Jev scores.
 NUM_LTR_CANDIDATES = 30
 # The Staan position given to a candidate Staan didn't return: one past its last result.
@@ -146,8 +144,7 @@ def candidate_pool(staan_results: list[Document], ranked: list[Document]) -> lis
 class JevRanker:
     """Decorator that orders a CombinedLTRRanker's pool with Jev composite + Staan rank.
 
-    The wrapped ranker must not be wrapped in MMRRanker: Jev scores the LTR's own order, and
-    MMR is only applied on the fallback path.
+    The wrapped ranker must not be wrapped in MMRRanker: Jev scores the LTR's own order.
     """
 
     def __init__(self, ranker: Ranker):
@@ -178,15 +175,17 @@ class JevRanker:
 
         if not settings.JEV_API_KEY:
             logger.warning("JEV_API_KEY is not configured")
-            return mmr_rerank(ranked)
+            return ranked
 
         start = time.monotonic()
         try:
             jev_scores = get_jev_scores(query, pool)
         except Exception as e:
             # Only the type, never the message or body: both can embed the user's query.
-            logger.warning("Jev failed, serving the LTR + MMR ordering: %s", type(e).__name__)
-            return mmr_rerank(ranked)
+            logger.warning("Jev failed, serving the LTR's order: %s", type(e).__name__)
+            return ranked
         logger.info("Jev scored %d candidates in %.2fs", len(pool), time.monotonic() - start)
 
-        return composite_order(pool, jev_scores)[:NUM_RESULTS]
+        pool_urls = {document.url for document in pool}
+        rest = [document for document in ranked if document.url not in pool_urls]
+        return composite_order(pool, jev_scores) + rest

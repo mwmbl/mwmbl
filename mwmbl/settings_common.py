@@ -297,12 +297,13 @@ COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"
 # the external results index - see mwmbl.tinysearchengine.staan.
 STAAN_SEARCH_API_KEY = os.environ.get("STAAN_SEARCH_API_KEY", "")
 STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/search/web")
-STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-us")
+# en-gb because Combined Search's ordering was tuned on en-gb results, for a UK searcher.
+STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
 STAAN_TIMEOUT_SECONDS = 5
 
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
-# Without a key, or when a request fails or times out, Combined Search serves the LTR + MMR
-# ordering instead.
+# Without a key, or when a request fails or times out, Combined Search serves the LTR's
+# order instead.
 JEV_API_KEY = os.environ.get("JEV_API_KEY", "")
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 # The model version the composite weights were tuned on: a new version means re-tuning them.
