@@ -102,8 +102,12 @@ def get_jev_scores(query: str, documents: list[Document]) -> np.ndarray:
         timeout=settings.JEV_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
-    answers = response.json()["answers"]
-    return np.array([[answers[f"{prefix}{i}"]["score"] for prefix in QUESTIONS] for i in range(len(documents))])
+    return scores_from(response.json(), len(documents))
+
+
+def scores_from(response: dict, num_documents: int) -> np.ndarray:
+    answers = response["answers"]
+    return np.array([[answers[f"{prefix}{i}"]["score"] for prefix in QUESTIONS] for i in range(num_documents)])
 
 
 def staan_position(document: Document) -> int:
