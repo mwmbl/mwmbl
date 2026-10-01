@@ -26,7 +26,7 @@ training queries (w=0.15) with REFERENCE, and `jev-brave` compares it with Brave
 
 The composite experiments use `jev_composite.py`'s arms (engb_jev_composite_arms.json):
 `jev-composite` compares the composite Jev ordering with w=0.15, `jev-cap` the composite with
-and without its per-site cap, and `jev-composite-brave` the better of those two with Brave.
+and without its per-site cap, and `jev-composite-brave` the composite without the cap (which lost) with Brave.
 
 Commands (experiment `validation` unless named):
 
@@ -68,6 +68,7 @@ JEV_COMPOSITE = "Jev composite + Staan rank"
 JEV_COMPOSITE_CAP = "Jev composite + Staan rank, at most 2 per site"
 JEV_COMPOSITE_PAIRS = ((JEV_COMPOSITE, JEV_TUNED),)
 JEV_CAP_PAIRS = ((JEV_COMPOSITE_CAP, JEV_COMPOSITE),)
+JEV_COMPOSITE_BRAVE_PAIRS = ((JEV_COMPOSITE, BRAVE),)
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
 COMPARISONS_PER_BATCH = 25
@@ -261,6 +262,12 @@ EXPERIMENTS = {
         pair_comparisons(JEV_CAP_PAIRS, ungraded=True),
         LABELS / "holistic_jev_cap_work",
         LABELS / "holistic_jev_cap_judgments.jsonl",
+        JEV_COMPOSITE_ARMS_PATH,
+    ),
+    "jev-composite-brave": (
+        pair_comparisons(JEV_COMPOSITE_BRAVE_PAIRS, ungraded=True),
+        LABELS / "holistic_jev_composite_brave_work",
+        LABELS / "holistic_jev_composite_brave_judgments.jsonl",
         JEV_COMPOSITE_ARMS_PATH,
     ),
 }
