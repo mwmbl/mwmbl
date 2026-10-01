@@ -24,6 +24,10 @@ Jev-feature cascade of `jev_ltr_eval.py` (engb_jev_ltr_arms.json) with REFERENCE
 Jev + Staan rank. `jev-tuned` compares Jev + Staan rank with its Staan weight tuned on the
 training queries (w=0.15) with REFERENCE, and `jev-brave` compares it with Brave.
 
+The composite experiments use `jev_composite.py`'s arms (engb_jev_composite_arms.json):
+`jev-composite` compares the composite Jev ordering with w=0.15, `jev-cap` the composite with
+and without its per-site cap, and `jev-composite-brave` the better of those two with Brave.
+
 Commands (experiment `validation` unless named):
 
     batches [experiment]      write the judge batches and a manifest -> its work directory
@@ -59,6 +63,11 @@ JEV_TUNED = "Jev + Staan rank, w=0.15"
 JEV_TUNED_PAIRS = ((JEV_TUNED, REFERENCE),)
 BRAVE = "brave"
 JEV_BRAVE_PAIRS = ((JEV_TUNED, BRAVE),)
+JEV_COMPOSITE_ARMS_PATH = LABELS / "engb_jev_composite_arms.json"
+JEV_COMPOSITE = "Jev composite + Staan rank"
+JEV_COMPOSITE_CAP = "Jev composite + Staan rank, at most 2 per site"
+JEV_COMPOSITE_PAIRS = ((JEV_COMPOSITE, JEV_TUNED),)
+JEV_CAP_PAIRS = ((JEV_COMPOSITE_CAP, JEV_COMPOSITE),)
 MIN_GAP = 0.05
 MAX_NDCG_PAIRS = 150
 COMPARISONS_PER_BATCH = 25
@@ -200,18 +209,24 @@ def jev_comparisons(arms: dict, rows: dict, scores: dict) -> list[dict]:
     ]
 
 
-def pair_comparisons(pairs: tuple[tuple[str, str], ...]):
-    """Each (x, y) of `pairs`, on every query where their lists differ."""
+def pair_comparisons(pairs: tuple[tuple[str, str], ...], ungraded: bool = False):
+    """Each (x, y) of `pairs`, on every query where their lists differ. With `ungraded`, also
+    the queries whose lists hold pages pass 3 never graded, with no NDCG gap."""
 
     def find(arms: dict, rows: dict, scores: dict) -> list[dict]:
+        queries = sorted(arms) if ungraded else sorted(scores)
         return [
-            {"set": f"{x} vs {y}", "query": query, "x": x, "y": y, "ndcg_gap": scores[query][x] - scores[query][y]}
+            {"set": f"{x} vs {y}", "query": query, "x": x, "y": y, "ndcg_gap": ndcg_gap(scores, query, x, y)}
             for x, y in pairs
-            for query in sorted(scores)
+            for query in queries
             if list_for(x, query, arms, rows) != list_for(y, query, arms, rows)
         ]
 
     return find
+
+
+def ndcg_gap(scores: dict, query: str, x: str, y: str) -> float:
+    return scores[query][x] - scores[query][y] if query in scores else float("nan")
 
 
 EXPERIMENTS = {
@@ -235,6 +250,18 @@ EXPERIMENTS = {
         LABELS / "holistic_jev_brave_work",
         LABELS / "holistic_jev_brave_judgments.jsonl",
         JEV_LTR_ARMS_PATH,
+    ),
+    "jev-composite": (
+        pair_comparisons(JEV_COMPOSITE_PAIRS, ungraded=True),
+        LABELS / "holistic_jev_composite_work",
+        LABELS / "holistic_jev_composite_judgments.jsonl",
+        JEV_COMPOSITE_ARMS_PATH,
+    ),
+    "jev-cap": (
+        pair_comparisons(JEV_CAP_PAIRS, ungraded=True),
+        LABELS / "holistic_jev_cap_work",
+        LABELS / "holistic_jev_cap_judgments.jsonl",
+        JEV_COMPOSITE_ARMS_PATH,
     ),
 }
 
@@ -369,9 +396,10 @@ def report(experiment: str):
         signs = np.sign(prefs)
         consistent = np.mean(signs[:, 0] == signs[:, 1])
         means = [combined[rng.integers(0, len(combined), len(combined))].mean() for _ in range(2000)]
-        decided = combined != 0
+        graded = np.isfinite(gaps)
+        decided = (combined != 0) & graded
         agree = np.mean(np.sign(combined[decided]) == np.sign(gaps[decided]))
-        rho = spearmanr(gaps, combined).statistic
+        rho = spearmanr(gaps[graded], combined[graded]).statistic
         print(f"\n## {name}: {len(pairs)} comparisons (x = the arm NDCG measures against y)\n")
         print(
             f"- mean preference for x (-3..3): {combined.mean():+.2f} [{np.percentile(means, 2.5):+.2f}, {np.percentile(means, 97.5):+.2f}]"
