@@ -14,10 +14,10 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel
+from polar_sdk.models import SubscriptionCancel, SubscriptionStatus
 from polar_sdk.webhooks import WebhookVerificationError, validate_event
 
-from mwmbl import pricing
+from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
@@ -28,6 +28,7 @@ from mwmbl.models import (
     DomainSubmission,
     MarketingConsent,
     MarketingSource,
+    Membership,
     MwmblUser,
     SearchResultVote,
     UserAgreement,
@@ -59,6 +60,9 @@ from mwmbl.platform.schemas import (
     MarketingConsentListResponse,
     MarketingConsentRequest,
     MarketingConsentResponse,
+    MembershipCheckoutRequest,
+    MembershipResponse,
+    MembershipTierResponse,
     ModeratedDomainSchema,
     ModerationHistory,
     ModerationQueue,
@@ -1276,6 +1280,107 @@ def create_checkout(request, body: CheckoutRequest):
     return CheckoutResponse(checkout_url=result.url)
 
 
+# ---------------------------------------------------------------------------
+# Membership
+# ---------------------------------------------------------------------------
+
+LIVE_SUBSCRIPTION_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+
+
+@router.get(
+    "/membership/tiers",
+    response=list[MembershipTierResponse],
+    summary="List membership tiers",
+    description="Returns the supporter membership tiers with their monthly prices and perks.",
+    tags=["Membership"],
+)
+def list_membership_tiers(request):
+    return [
+        MembershipTierResponse(
+            tier=info.tier,
+            name=info.tier.label,
+            monthly_price_pence=info.monthly_price_pence,
+            perks=info.perks,
+        )
+        for info in membership.TIERS
+    ]
+
+
+@router.get(
+    "/membership",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Get current membership",
+    description="Returns the user's membership tier, or 404 if they aren't a member.",
+    tags=["Membership"],
+)
+def get_membership(request):
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return user_membership
+
+
+@router.post(
+    "/membership/checkout",
+    auth=JWTAuth(),
+    response=CheckoutResponse,
+    summary="Create membership checkout session",
+    description="Creates a Polar hosted-checkout session for a membership tier and returns a redirect URL.",
+    tags=["Membership"],
+)
+def create_membership_checkout(request, body: MembershipCheckoutRequest):
+    check_email_verified(request)
+    if Membership.objects.filter(user=request.user).exists():
+        raise InvalidRequest("You are already a member.", status=409)
+    product_id = membership.product_ids()[body.tier]
+    if not product_id:
+        raise InvalidRequest("Membership is not configured. Contact support.", status=503)
+    checkout_params = {
+        "products": [product_id],
+        "external_customer_id": str(request.user.id),
+        "metadata": {"user_id": str(request.user.id)},
+    }
+    if body.success_url:
+        checkout_params["success_url"] = body.success_url
+    if body.embed_origin:
+        checkout_params["embed_origin"] = body.embed_origin
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        result = polar.checkouts.create(request=checkout_params)
+    return CheckoutResponse(checkout_url=result.url)
+
+
+def _sync_membership(subscription):
+    """Mirror a membership subscription's Polar state onto the user's Membership row.
+
+    Every subscription event carries the full subscription, so the row is derived from its
+    status rather than from the event type: live subscriptions are upserted, anything else
+    removes the membership.
+    """
+    user_id = subscription.metadata.get("user_id")
+    user = MwmblUser.objects.filter(id=user_id).first()
+    if user is None:
+        logger.warning("Polar webhook: no user found for membership user_id=%s", user_id)
+        return
+
+    if subscription.status in LIVE_SUBSCRIPTION_STATUSES:
+        tier = membership.tier_for_product(subscription.product_id)
+        Membership.objects.update_or_create(
+            user=user,
+            defaults={
+                "tier": tier,
+                "polar_subscription_id": subscription.id,
+                "current_period_end": subscription.current_period_end,
+                "cancel_at_period_end": subscription.cancel_at_period_end,
+            },
+        )
+        logger.info("Polar webhook: user id=%s is a %s member", user_id, tier)
+    else:
+        # Match on the subscription id so a late event for an old subscription can't end a newer one.
+        deleted, _ = Membership.objects.filter(user=user, polar_subscription_id=subscription.id).delete()
+        logger.info("Polar webhook: membership ended for user id=%s (deleted=%s)", user_id, deleted)
+
+
 @router.post(
     "/billing/uncancel",
     auth=JWTAuth(),
@@ -1387,7 +1492,9 @@ def polar_webhook(request):
     event_type = event.TYPE
     logger.info("Polar webhook event type=%s", event_type)
 
-    if event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
+    if event_type.startswith("subscription.") and membership.tier_for_product(event.data.product_id):
+        _sync_membership(event.data)
+    elif event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
         user_id = event.data.metadata.get("user_id")
         logger.info("Polar webhook: %s user_id=%s", event_type, user_id)
         user = MwmblUser.objects.filter(id=user_id).first()

@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from ninja import Field, ModelSchema, Schema
 from pydantic import model_validator
 
+from mwmbl.membership import MembershipTier
 from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
 
 
@@ -40,6 +41,25 @@ class CheckoutRequest(Schema):
 
 class CheckoutResponse(Schema):
     checkout_url: str
+
+
+class MembershipTierResponse(Schema):
+    tier: MembershipTier
+    name: str
+    monthly_price_pence: int
+    perks: list[str]
+
+
+class MembershipResponse(Schema):
+    tier: MembershipTier
+    current_period_end: Optional[datetime]
+    cancel_at_period_end: bool
+
+
+class MembershipCheckoutRequest(Schema):
+    tier: MembershipTier
+    success_url: Optional[str] = None
+    embed_origin: Optional[str] = None
 
 
 class UpdateSpendLimitRequest(Schema):

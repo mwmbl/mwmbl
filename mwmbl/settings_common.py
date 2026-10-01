@@ -276,6 +276,9 @@ RUST_MODEL_PATH = Path(__file__).parent / "resources" / "model.xgb"
 POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
 POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")
 POLAR_PRODUCT_ID_USAGE = os.environ.get("POLAR_PRODUCT_ID_USAGE", "")
+POLAR_PRODUCT_ID_SEED = os.environ.get("POLAR_PRODUCT_ID_SEED", "")
+POLAR_PRODUCT_ID_SAPLING = os.environ.get("POLAR_PRODUCT_ID_SAPLING", "")
+POLAR_PRODUCT_ID_CANOPY = os.environ.get("POLAR_PRODUCT_ID_CANOPY", "")
 POLAR_SERVER = os.environ.get("POLAR_SERVER", "sandbox")
 
 GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "")
