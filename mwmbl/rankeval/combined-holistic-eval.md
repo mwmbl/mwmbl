@@ -235,3 +235,55 @@ optimistic. `holistic_eval.py batches jev-tuned` and `jev-brave`, 578 judgments 
     Arrival and Tenet for "ending of sirens explained"; hair-transplant spam for "capital
     hair and beauty".
   - **Repeated pages from one site:** "makerere university", "byfords holt".
+
+## Targeting the Brave losses: composite Jev questions, an index penalty, a site cap (2026-10-01)
+
+On the results the Brave comparison flagged, Jev's relevance score hardly separates them from the
+rest: index results flagged off-topic or otherwise average 1.84 out of 3, clean ones 2.07. So
+`jev_composite.py` asks Jev three Score questions per candidate, one request per query:
+relevance (as before), **entity** (about the entity or sense the query means? 0–2) and
+**quality** (substantive, or thin, spam or junk? 0–2). The arm scores relevance + α·entity +
+β·quality − w·Staan position − p·(not from Staan). The weights are tuned on the 849 training
+queries' pass-3 NDCG@10, never on en-gb.
+
+- **The entity question doesn't help.** Every good weighting gives it weight 0. On the flagged
+  results it separates no better than relevance does: for "bankside hotel" it rates other
+  hotels 1.8 of 2.
+- **Quality and the index penalty do.** The tuned arm is quality 0.5, Staan 0.1, index 0.5:
+  NDCG@10 0.889, against 0.885 for `w=0.15`, +0.004 [+0.002, +0.007]. Without the quality
+  question it is 0.887, and without the index penalty 0.880. The surface is flat, so the
+  weights were picked from the middle of the plateau, not its edge.
+- **Site cap:** after ranking, a site's third and later results move below the top ten.
+
+Holistic judgments (`batches jev-composite`, `jev-cap`, `jev-composite-brave`):
+
+| | composite vs w=0.15 | composite + cap vs composite | composite vs Brave |
+|---|---|---|---|
+| Comparisons | 284 | 71 | 295 |
+| Preference for the first arm (−3..3) | **+0.16 [+0.07, +0.25]** | **−0.65 [−0.87, −0.42]** | −0.12 [−0.26, +0.02] |
+| First preferred / second / tie | 44% / 29% / 27% | 13% / 65% / 23% | 37% / 42% / 22% |
+| Both orders agree on the direction | 46% | 59% | 55% |
+
+- **The composite beats `w=0.15`.** Relevance (179) and the top result (80) are the main
+  reasons. It differs on 284 of 295 queries, but mostly in the bottom half, so a third of
+  verdicts are ties or opposite in the two orders.
+- **The site cap loses badly.** The pages it pulls in to replace a site's third and later
+  results are worse than the repeats: relevance (61) and junk (29) are the main reasons. Often
+  the repeats are what the searcher wants (the official site's own pages). 19 queries keep
+  three or more from one site because the pool has nothing else.
+- **Brave's lead is no longer significant.** On the 289 queries both Brave runs share, the
+  preference moves from −0.25 [−0.38, −0.12] to −0.11 [−0.25, +0.03], paired +0.14
+  [+0.01, +0.27].
+- **Weak-result flags, ours relative to Brave's** in the same verdicts: these judges flag more
+  on both sides than the last run's, so ratios compare better than counts. Poor extract falls
+  from 2.0× Brave's to 1.8×, off-topic from 1.9× to 1.7×, duplicate from 1.2× to 0.8×. Thin
+  stays at 1.3×, and wrong locale rises from 0.5× to 1.0×.
+- **Caveats.** The six queries new to the Brave comparison have ungraded pages, so they have
+  no NDCG gap. A few judges wrote `organization` or another reason outside the list (recorded
+  as `other`). One judge used a script to parse its batch but wrote its verdicts by hand. No
+  batch looked templated: every batch has a distinct note per verdict.
+
+**Next:** the remaining gap is relevance, junk and coverage. Off-topic results are still 1.7×
+Brave's. A better entity signal than a Jev Score question is needed, for example the query's
+Wikidata entity or a pairwise Jev choice between candidates for the same name. Wrong locale
+rose and is worth a targeted locale question.
