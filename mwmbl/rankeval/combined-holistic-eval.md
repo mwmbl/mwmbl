@@ -186,3 +186,52 @@ rank` 0.863 (the cascade trails it by 0.010 [0.005, 0.014]).
   learns what pass-3 rewards, and pass-3 grades pages one at a time.
 - **Data cleaning.** One verdict gave `"better": "slight"` with a note naming B, and was
   set to B. Three ties lacked a `reason` and got `none`. No batch looked templated.
+
+## Jev + Staan rank, tuned on the training queries, and against Brave (2026-10-01)
+
+`Jev + Staan rank` had its Staan weight (0.05) picked on these en-gb queries' pass-3 NDCG.
+Picked instead on the 849 training queries' serving pool, the weight peaks at 0.15 (NDCG@10
+0.885, against 0.875 at 0.05). The original labelled pool peaks at 0.05–0.1. On en-gb,
+pass-3 NDCG gives 0.858 at w=0.15 and 0.863 at w=0.05: the eval-set choice was slightly
+optimistic. `holistic_eval.py batches jev-tuned` and `jev-brave`, 578 judgments each:
+
+| | w=0.15 vs reference | w=0.15 vs Brave |
+|---|---|---|
+| Comparisons | 289 | 289 |
+| Preference for w=0.15 (−3..3) | **+0.49 [+0.37, +0.61]** | **−0.25 [−0.38, −0.12]** |
+| w=0.15 preferred / other / tie | 60% / 21% / 19% | 33% / 47% / 20% |
+| Both orders agree on the direction | 62% | 49% |
+
+- **Tuning on separate queries made it better, not worse.** It beats the reference by +0.49,
+  against +0.31 for the eval-tuned w=0.05 in the `jev` experiment. Leaning harder on
+  Staan's order is what the judge rewards.
+- **Brave is still ahead, but closer.** In validation Brave beat `shipped` by +0.78; it
+  beats this arm by 0.25.
+
+**Where Brave wins** (the 300 verdicts preferring Brave):
+
+- **Main reasons:** relevance 80, junk 63, top result 57, redundancy 39, coverage 38,
+  extracts 21.
+- **Weak-result flags on our list vs Brave's**, in those verdicts:
+
+  | Flag | Ours | Brave's |
+  |---|---|---|
+  | off-topic | 181 | 50 |
+  | poor extract | 111 | 27 |
+  | thin | 67 | 28 |
+  | duplicate | 65 | 16 |
+  | wrong locale | 13 | 4 |
+
+- **Mwmbl's index results are the weak link.** Our top ten averages 8.3 Staan results and
+  1.7 from the index, yet 253 of the 460 flagged results we could place came from the index
+  and 207 from Staan. Per result, an index page is about six times as likely as a Staan page
+  to be flagged.
+- **Recurring failures:**
+  - **The wrong entity of the same name:** other hotels for "bankside hotel", other
+    practices for "muirhead medical practice", the wrong Usman Tariq.
+  - **The wrong sense:** baking and biology for "slaters" (the menswear retailer);
+    definitions of bullion for "bullion by post".
+  - **Off-topic spill from the index:** Fortnite cosmetics for "codes for goalbound";
+    Arrival and Tenet for "ending of sirens explained"; hair-transplant spam for "capital
+    hair and beauty".
+  - **Repeated pages from one site:** "makerere university", "byfords holt".
