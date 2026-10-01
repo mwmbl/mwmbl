@@ -58,13 +58,13 @@ def check_rate_limit(user_id: int) -> bool:
     key = _rate_key(user_id)
     if cache.add(key, 1, timeout=1):
         return True
-    count = cache.incr(key)
-    if count == 1:
-        # Key expired between add() and incr(); Redis created it without a TTL.
-        # Set the TTL now to prevent the key from leaking indefinitely.
-        from django_redis import get_redis_connection
-
-        get_redis_connection("default").expire(key, 1)
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        # The window expired between add() and incr(), and Django's incr() raises on a
+        # missing key rather than creating it, so this request opens the next window.
+        cache.add(key, 1, timeout=1)
+        return True
     return count <= RATE_LIMIT
 
 
