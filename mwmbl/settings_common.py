@@ -300,6 +300,16 @@ STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/s
 STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-us")
 STAAN_TIMEOUT_SECONDS = 5
 
+# Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
+# Without a key, or when a request fails or times out, Combined Search serves the LTR + MMR
+# ordering instead.
+JEV_API_KEY = os.environ.get("JEV_API_KEY", "")
+JEV_URL = "https://api.typesafe.ai/v1/systemone"
+# The model version the composite weights were tuned on: a new version means re-tuning them.
+JEV_MODEL = "jev-1.13.0"
+# Jev takes about 0.6s at p50 and runs after Staan, so a slow call has to give up quickly.
+JEV_TIMEOUT_SECONDS = 1.5
+
 # Super Search
 SUPER_SEARCH_MONTHLY_LIMIT = 100
 SUPER_SEARCH_TOP_K = 10  # promote sources in top-K seen so far for crawling

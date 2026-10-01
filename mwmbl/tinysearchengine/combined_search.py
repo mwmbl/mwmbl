@@ -11,7 +11,8 @@ is what a client actually wants.
 
 The ranking core is three calls. Ranker.retrieve looks the query up in the index while
 Staan is fetched, so the two overlap. Ranker.search_retrieved then pools the index pages
-with Staan's results as additional_results, blacklist-filters the lot and ranks it.
+with Staan's results as additional_results, blacklist-filters the lot and ranks it, and
+JevRanker orders the top of that with one Jev request (see jev_rank.py).
 
 There is no separate Wikipedia fetch: Staan already returns Wikipedia pages when they are
 relevant, and evaluation found the extra fetch roughly neutral on quality (see
@@ -48,10 +49,10 @@ router = Router(tags=["Combined Search"])
 DESCRIPTION = (
     "Search the Mwmbl index and EUSP (European Search Perspective) in one request and "
     "return the ranked union.\n\n"
-    "Every candidate - crawled by Mwmbl or returned by EUSP - is scored by one "
-    "learning-to-rank model trained on the pooled candidate set, then "
-    "diversified so a single domain cannot take the whole page. The response is the same "
-    "SearXNG-compatible shape as `/api/v2/search/`.\n\n"
+    "A learning-to-rank model trained on the pooled candidate set picks the best of the "
+    "index's results. Those and EUSP's are then judged for relevance and quality by an "
+    "LLM-based model, and ordered by that judgment and EUSP's own ranking. The top ten are "
+    "returned, in the same SearXNG-compatible shape as `/api/v2/search/`.\n\n"
     "The `engine` field names the provider a result came from:\n"
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"

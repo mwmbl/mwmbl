@@ -301,6 +301,7 @@ def remove_curate_state(state: DocumentState):
 class Retrieval:
     """What Ranker.retrieve found in the index for a query, ready to be ranked."""
 
+    query: str
     terms: list[str]
     completions: list[str]
     is_complete: bool
@@ -417,7 +418,7 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        return Retrieval(terms, completions, is_complete, curated_items, pages)
+        return Retrieval(q, terms, completions, is_complete, curated_items, pages)
 
     def _rank(
         self, retrieval: Retrieval, additional_results: list[Document], external_search_items: list[Document]
