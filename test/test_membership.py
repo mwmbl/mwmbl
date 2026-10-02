@@ -23,6 +23,7 @@ from mwmbl.models import Membership, UserBilling
 User = get_user_model()
 
 PRODUCT_SETTINGS = override_settings(
+    POLAR_PRODUCT_ID_USAGE="prod_usage",
     POLAR_PRODUCT_ID_SPROUT="prod_sprout",
     POLAR_PRODUCT_ID_SAPLING="prod_sapling",
     POLAR_PRODUCT_ID_CANOPY="prod_canopy",
@@ -380,3 +381,18 @@ def test_webhook_past_due_keeps_membership_and_join_date(api_client, user):
 
     assert Membership.objects.get(user=user).started == member.started
     assert "past_due" in mock_polar.subscriptions.list.call_args[1]["status"]
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_retired_product_is_not_treated_as_usage_billing(api_client, user):
+    UserBilling.objects.create(user=user, polar_subscription_id="sub_usage", max_monthly_spend_cents=1_000)
+    Membership.objects.create(user=user, tier=MembershipTier.SPROUT, polar_subscription_id="sub_member")
+    event = _membership_event("subscription.revoked", user.id, product_id="prod_retired", status="canceled")
+
+    _post_webhook(api_client, event, [])
+
+    billing = UserBilling.objects.get(user=user)
+    assert billing.polar_subscription_id == "sub_usage"
+    assert billing.max_monthly_spend_cents == 1_000
+    assert not Membership.objects.filter(user=user).exists()

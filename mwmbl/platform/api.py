@@ -1380,6 +1380,13 @@ def _sync_membership(subscription):
         logger.warning("Polar webhook: no user found for membership user_id=%s", user_id)
         return
 
+    if membership.tier_for_product(subscription.product_id) is None:
+        logger.warning(
+            "Polar webhook: subscription id=%s is for product id=%s, which isn't a current membership tier",
+            subscription.id,
+            subscription.product_id,
+        )
+
     live_subscriptions = _live_membership_subscriptions(user)
     if not live_subscriptions:
         deleted, _ = Membership.objects.filter(user=user).delete()
@@ -1524,7 +1531,9 @@ def polar_webhook(request):
     event_type = event.TYPE
     logger.info("Polar webhook event type=%s", event_type)
 
-    if event_type.startswith("subscription.") and membership.tier_for_product(event.data.product_id):
+    # Route on the usage product, which is fixed, rather than on the membership products, which can
+    # change: a subscription to a retired membership product must never be mistaken for usage billing.
+    if event_type.startswith("subscription.") and event.data.product_id != settings.POLAR_PRODUCT_ID_USAGE:
         _sync_membership(event.data)
     elif event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
         user_id = event.data.metadata.get("user_id")

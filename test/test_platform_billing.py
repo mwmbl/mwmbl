@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
-from django.test import Client
+from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import AgreementType, UserAgreement, UserBilling
@@ -349,6 +349,7 @@ def _mock_webhook_event(event_type, user_id, **data_overrides):
     event.TYPE = event_type
     event.data = Mock()
     event.data.metadata = {"user_id": str(user_id)}
+    event.data.product_id = "prod_usage"
     event.data.customer_id = data_overrides.get("customer_id", "cust_new")
     event.data.id = data_overrides.get("subscription_id", "sub_new")
     event.data.current_period_end = data_overrides.get("current_period_end", None)
@@ -357,6 +358,7 @@ def _mock_webhook_event(event_type, user_id, **data_overrides):
 
 
 @pytest.mark.django_db
+@override_settings(POLAR_PRODUCT_ID_USAGE="prod_usage")
 def test_webhook_subscription_active_sets_billing_fields_not_spend_limit(api_client, verified_user_with_billing):
     billing = UserBilling.objects.get(user=verified_user_with_billing)
     billing.max_monthly_spend_cents = 2_500
@@ -381,6 +383,7 @@ def test_webhook_subscription_active_sets_billing_fields_not_spend_limit(api_cli
 
 
 @pytest.mark.django_db
+@override_settings(POLAR_PRODUCT_ID_USAGE="prod_usage")
 def test_webhook_subscription_canceled_immediate_resets_spend_limit_to_zero(api_client, verified_user_with_billing):
     billing = UserBilling.objects.get(user=verified_user_with_billing)
     assert billing.max_monthly_spend_cents == 1_000
@@ -400,6 +403,7 @@ def test_webhook_subscription_canceled_immediate_resets_spend_limit_to_zero(api_
 
 
 @pytest.mark.django_db
+@override_settings(POLAR_PRODUCT_ID_USAGE="prod_usage")
 def test_webhook_subscription_canceled_scheduled_does_not_reset_spend_limit(api_client, verified_user_with_billing):
     event = _mock_webhook_event("subscription.canceled", verified_user_with_billing.id, cancel_at_period_end=True)
     with patch("mwmbl.platform.api.validate_event", return_value=event):
@@ -416,6 +420,7 @@ def test_webhook_subscription_canceled_scheduled_does_not_reset_spend_limit(api_
 
 
 @pytest.mark.django_db
+@override_settings(POLAR_PRODUCT_ID_USAGE="prod_usage")
 def test_webhook_subscription_revoked_resets_spend_limit_to_zero(api_client, verified_user_with_billing):
     event = _mock_webhook_event("subscription.revoked", verified_user_with_billing.id)
     with patch("mwmbl.platform.api.validate_event", return_value=event):
