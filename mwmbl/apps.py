@@ -146,7 +146,9 @@ class MwmblConfig(AppConfig):
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
                 retrain_domain_moderation_model,
+                sync_crawler_stats,
                 sync_search_counts,
+                sync_traffic_stats,
             )
 
             SYNC_TASK = "mwmbl.background.sync_search_counts"
@@ -155,6 +157,8 @@ class MwmblConfig(AppConfig):
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
             MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
             COUNT_INDEX_STATS_TASK = "mwmbl.background.count_index_stats"
+            SYNC_TRAFFIC_STATS_TASK = "mwmbl.background.sync_traffic_stats"
+            SYNC_CRAWLER_STATS_TASK = "mwmbl.background.sync_crawler_stats"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -193,6 +197,16 @@ class MwmblConfig(AppConfig):
             # schedule=0 runs it immediately on deploy so the stats are fresh.
             if not Task.objects.filter(task_name=COUNT_INDEX_STATS_TASK).exists():
                 count_index_stats(schedule=0, repeat=86400, repeat_until=None)
+
+            # Sync traffic stats from Redis to Postgres once per day (86400 seconds).
+            # schedule=0 runs it immediately on deploy so the stats are fresh.
+            if not Task.objects.filter(task_name=SYNC_TRAFFIC_STATS_TASK).exists():
+                sync_traffic_stats(schedule=0, repeat=86400, repeat_until=None)
+
+            # Sync crawler stats from Redis to Postgres once per day (86400 seconds).
+            # schedule=0 runs it immediately on deploy so the stats are fresh.
+            if not Task.objects.filter(task_name=SYNC_CRAWLER_STATS_TASK).exists():
+                sync_crawler_stats(schedule=0, repeat=86400, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

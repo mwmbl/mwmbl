@@ -320,3 +320,80 @@ def count_index_stats():
         logger.info("Index stats counting completed")
     except Exception:
         logger.exception("Error counting index stats")
+
+
+@background(schedule=0)
+def sync_traffic_stats():
+    """
+    Sync Redis traffic counters to Postgres (DailyTrafficStats) for historical persistence.
+
+    Reads the daily request counts and user agent counts from Redis and persists them
+    to the DailyTrafficStats table. Runs once per day.
+    """
+    from datetime import timedelta
+
+    from mwmbl.models import DailyTrafficStats
+    from mwmbl.traffic import (
+        get_redis,
+        read_request_counts,
+        read_user_agent_counts,
+    )
+    from mwmbl.utils import utc_today
+
+    today = utc_today()
+    yesterday = today - timedelta(days=1)
+
+    # Sync yesterday's data (today's data is still being written)
+    days_to_sync = [yesterday]
+
+    redis_client = get_redis()
+
+    try:
+        # Sync request counts
+        request_counts = read_request_counts(redis_client, days_to_sync)
+        for (day, endpoint, headers, status), count in request_counts.items():
+            DailyTrafficStats.objects.update_or_create(
+                date=day,
+                endpoint=endpoint,
+                headers=headers,
+                status=status,
+                defaults={"count": count},
+            )
+
+        # Sync user agent counts (store as a special endpoint)
+        user_agent_counts = read_user_agent_counts(redis_client, days_to_sync, limit=2000)
+        for user_agent, count in user_agent_counts:
+            DailyTrafficStats.objects.update_or_create(
+                date=yesterday,
+                endpoint="user_agent",
+                headers=user_agent[:50],  # Truncate to fit CharField
+                status="total",
+                defaults={"count": count},
+            )
+
+        logger.info(f"Traffic stats sync completed for {yesterday}")
+    except Exception:
+        logger.exception("Error syncing traffic stats")
+
+
+@background(schedule=0)
+def sync_crawler_stats():
+    """
+    Sync Redis crawler counters to Postgres (DailyCrawlerStats) for historical persistence.
+
+    Reads the daily crawler stats from Redis and persists them to the DailyCrawlerStats table.
+    Runs once per day.
+    """
+    from mwmbl.crawler.stats import StatsManager
+    from mwmbl.utils import utc_today
+
+    yesterday = utc_today() - timedelta(days=1)
+
+    stats_manager = StatsManager()
+    try:
+        stats_manager.sync_to_postgres(yesterday)
+        # Also cache the all-time leaderboard
+        stats_manager.cache_all_time_leaderboard()
+        logger.info(f"Crawler stats sync completed for {yesterday}")
+    except Exception:
+        logger.exception("Error syncing crawler stats")

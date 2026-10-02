@@ -15,6 +15,7 @@ same set.
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import fakeredis
 import pytest
 
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent, Result, Results
@@ -26,6 +27,18 @@ NO_INDEX_COUNTS = {
     "domains_in_index_daily": {},
     "results_in_index_daily": {},
 }
+
+
+@pytest.fixture
+def redis_client():
+    """Provide a fakeredis instance for testing."""
+    return fakeredis.FakeStrictRedis(decode_responses=True)
+
+
+@pytest.fixture
+def stats_manager(redis_client):
+    """Provide a StatsManager with fakeredis."""
+    return StatsManager(redis_client=redis_client)
 
 
 def make_results(*urls: str) -> Results:
@@ -44,10 +57,8 @@ def make_batch(user_id_hash: str) -> HashedBatch:
 
 
 @pytest.mark.django_db
-def test_record_results_counts_each_crawler_once_per_day():
+def test_record_results_counts_each_crawler_once_per_day(stats_manager):
     from mwmbl.models import MwmblUser
-
-    stats_manager = StatsManager()
 
     # Create users in the database
     alice = MwmblUser.objects.create_user(username="alice", password="testpass")
