@@ -11,7 +11,18 @@ callback that runs longer than 100 ms triggers a warning. Combined with
 accidental sync calls leaking into async paths.
 """
 
+import fakeredis
 import pytest
+
+from mwmbl.indexer import blacklist_snapshot
+
+
+@pytest.fixture(autouse=True)
+def fake_redis_for_blacklist_snapshot():
+    """Patch blacklist_snapshot._redis with fakeredis so tests don't need a real Redis server."""
+    blacklist_snapshot._redis = fakeredis.FakeRedis()
+    yield
+    blacklist_snapshot._redis = None
 
 
 @pytest.fixture

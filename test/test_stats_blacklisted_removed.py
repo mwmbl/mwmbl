@@ -55,9 +55,8 @@ def test_stats_report_zero_removals_for_days_with_no_purge(stats_manager):
 
 
 @pytest.mark.django_db
-def test_the_daily_count_persists_in_postgres():
+def test_the_daily_count_persists_in_postgres(stats_manager):
     """The count is persisted in Postgres, not Redis."""
-    stats_manager = StatsManager()
     stats_manager.record_blacklisted_removed(1)
 
     from mwmbl.models import DailyCrawlerStats
@@ -68,7 +67,7 @@ def test_the_daily_count_persists_in_postgres():
 
 
 @pytest.mark.django_db
-def test_the_purge_task_records_what_it_removed():
+def test_the_purge_task_records_what_it_removed(stats_manager):
     """The count has to come from the purge itself, not from what was queued: documents
     whose domain came off the blacklist while queued are dropped without being removed."""
     queued = [object()]
@@ -79,7 +78,7 @@ def test_the_purge_task_records_what_it_removed():
         patch("mwmbl.background.TinyIndex"),
         patch("mwmbl.background.queue_size", return_value=0),
         patch("mwmbl.background.purge_documents", return_value={"bad.test": 2, "worse.test": 3}),
-        patch("mwmbl.background.stats_manager", StatsManager()),
+        patch("mwmbl.background.stats_manager", stats_manager),
     ):
         from mwmbl.background import purge_blacklisted_from_queue
 
@@ -93,10 +92,10 @@ def test_the_purge_task_records_what_it_removed():
 
 
 @pytest.mark.django_db
-def test_the_purge_task_records_nothing_when_the_queue_is_empty():
+def test_the_purge_task_records_nothing_when_the_queue_is_empty(stats_manager):
     with (
         patch("mwmbl.background.drain_purge_queue", return_value=[]),
-        patch("mwmbl.background.stats_manager", StatsManager()),
+        patch("mwmbl.background.stats_manager", stats_manager),
     ):
         from mwmbl.background import purge_blacklisted_from_queue
 

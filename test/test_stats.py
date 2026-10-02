@@ -2,12 +2,25 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import fakeredis
 import pytest
 
 from mwmbl.crawler.stats import StatsManager
 from mwmbl.models import MwmblUser
 
 TODAY = date(2026, 9, 22)
+
+
+@pytest.fixture
+def redis_client():
+    """Provide a fakeredis instance for testing."""
+    return fakeredis.FakeStrictRedis(decode_responses=True)
+
+
+@pytest.fixture
+def stats_manager(redis_client):
+    """Provide a StatsManager with fakeredis."""
+    return StatsManager(redis_client=redis_client)
 
 
 def _record(stats_manager: StatsManager, day: date, num_results: int, user: MwmblUser) -> None:
@@ -17,10 +30,8 @@ def _record(stats_manager: StatsManager, day: date, num_results: int, user: Mwmb
 
 
 @pytest.mark.django_db
-def test_user_results_count_is_kept_for_the_whole_stats_window():
+def test_user_results_count_is_kept_for_the_whole_stats_window(stats_manager):
     from mwmbl.models import MwmblUser
-
-    stats_manager = StatsManager()
 
     # Create user in the database
     alice = MwmblUser.objects.create_user(username="alice", password="testpass")
@@ -35,10 +46,9 @@ def test_user_results_count_is_kept_for_the_whole_stats_window():
 
 
 @pytest.mark.django_db
-def test_user_stats_include_earlier_days():
+def test_user_stats_include_earlier_days(stats_manager):
     from mwmbl.models import MwmblUser
 
-    stats_manager = StatsManager()
     ten_days_ago = TODAY - timedelta(days=10)
 
     # Create users in the database
