@@ -2,11 +2,11 @@
 Custom authentication for ninja-jwt.
 """
 
+from allauth.account.utils import has_verified_email
+
 
 def require_email_confirmation(user):
     # This function is used in settings, so we need to import here
-    from allauth.account.utils import has_verified_email
-
     if not user.is_active:
         return False
 
@@ -42,6 +42,9 @@ class UsernameOrEmailBackend:
             return None
 
         if user.check_password(password):
+            # Enforce email verification for all logins (ACCOUNT_EMAIL_VERIFICATION = "mandatory")
+            if not require_email_confirmation(user):
+                return None
             return user
         return None
 
