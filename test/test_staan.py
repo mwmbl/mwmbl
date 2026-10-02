@@ -84,7 +84,7 @@ def test_results_come_back_as_documents_attributed_to_staan(cache_index):
     assert [document.url for document in results] == ["https://tokio.rs/", "https://docs.rs/tokio"]
     assert [document.title for document in results] == ["Tokio", "tokio - Rust"]
     assert {document.source for document in results} == {DocumentSource.STAAN}
-    assert requested.call_args.kwargs["params"] == {"q": "rust async", "market": "en-us"}
+    assert requested.call_args.kwargs["params"] == {"q": "rust async", "market": "en-gb"}
     assert requested.call_args.kwargs["headers"] == {"Authorization": "Bearer test-key"}
 
 

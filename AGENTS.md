@@ -51,6 +51,21 @@ request, and `.pre-commit-config.yaml` runs the first of them on every commit.
 - Tests live next to the behaviour they cover, in `test/`, and are part of the same
   change — not a follow-up.
 
+## Evaluating ranking changes
+
+Evaluate a ranking change in at most two steps:
+
+1. **Cross-validation, to check relevance.** Cross-validate over the LLM-labelled
+   queries (`devdata/llm_relabel/`), scoring pass-3 NDCG@10. Pass 3 grades each page
+   alone, so this measures relevance and nothing else.
+2. **Holistic evaluation, for the overall comparison.** A Haiku judge compares two whole
+   top-ten lists side by side, in both orders: `mwmbl/rankeval/evaluation/holistic_judge.py`.
+   This is the step that decides between arms. It sees what per-page NDCG can't:
+   redundancy, coverage, extracts, the top result and ethos. A single verdict is noisy,
+   so small differences need many queries or several judgments per comparison.
+
+Don't add further end-to-end NDCG runs that grade newly surfaced pages with Haiku.
+
 ## Pull requests
 
 Keep them small: at most about 500 added lines, tests included. Say what changed, why,
