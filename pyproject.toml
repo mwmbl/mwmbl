@@ -61,6 +61,7 @@ dependencies = [
     "beautifulsoup4==4.10.0",
     "onnxruntime>=1.27.0",
     "tokenizers>=0.23.1",
+    "standardwebhooks>=1.0.1",
 ]
 
 [project.optional-dependencies]
