@@ -63,6 +63,10 @@ def wired_redis(monkeypatch, redis_server, redis_client):
     monkeypatch.setattr(blacklist_snapshot, "_redis", binary_client)
     monkeypatch.setattr(purge_queue, "_redis", redis_client)
     monkeypatch.setattr(blacklist_snapshot, "_snapshot_blacklist", SnapshotBlacklist(redis_client=binary_client))
+    # Also wire up the StatsManager's Redis client
+    import mwmbl.crawler.stats as crawler_stats
+
+    monkeypatch.setattr(crawler_stats, "_redis", redis_client)
     return redis_client
 
 

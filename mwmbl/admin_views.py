@@ -98,12 +98,15 @@ def _removed_counts(days: int) -> list[dict]:
     happens, so a queue that is filling while this stays at zero is the signature of a
     broken loop - see StatsManager.record_blacklisted_removed.
     """
-    from mwmbl.models import DailyCrawlerStats
+    from mwmbl.crawler.stats import StatsManager
 
     today = utc_today()
     dates = [today - timedelta(days=i) for i in range(days)]
-    stats = DailyCrawlerStats.objects.filter(date__in=dates)
-    stats_by_date = {str(s.date): s.blacklisted_results_removed for s in stats}
+
+    stats_manager = StatsManager()
+    all_stats = stats_manager.get_stats()
+    stats_by_date = all_stats.blacklisted_results_removed_daily
+
     return [{"date": date, "count": stats_by_date.get(str(date), 0)} for date in dates]
 
 

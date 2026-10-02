@@ -24,9 +24,15 @@ ALL_TIME_LEADERBOARD_KEY = "crawler:all-time-leaderboard"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 
+# Module-level Redis client that can be monkeypatched in tests (like blacklist_snapshot._redis)
+_redis: Redis | None = None
+
 
 def get_redis() -> Redis:
-    """Get a Redis connection for stats."""
+    """Get a Redis connection for stats. Uses module-level client if set, otherwise creates new."""
+    global _redis
+    if _redis is not None:
+        return _redis
     return Redis.from_url(
         settings.REDIS_URL,
         socket_connect_timeout=5,
