@@ -5,6 +5,7 @@ from django.conf import settings
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.jev_rank import JevRanker
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
 from mwmbl.tinysearchengine.ltr_rank import CombinedLTRRanker, LTRRanker
 from mwmbl.tinysearchengine.mmr_rank import MMRRanker
@@ -28,6 +29,7 @@ ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True
 
 # Combined Search gets its own model and its own ranker, so retraining on the pooled
 # Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
-# Staan's ranking as features, which only CombinedLTRRanker supplies.
+# Staan's ranking as features, which only CombinedLTRRanker supplies. Jev orders the final
+# list from the model's output, without MMR.
 combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
-combined_ranker = MMRRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))
+combined_ranker = JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))

@@ -822,6 +822,27 @@ def test_rate_limit_allows_up_to_limit():
     cache.delete(rate_key)
 
 
+def test_rate_limit_allows_a_request_when_the_window_expires_between_add_and_incr():
+    user_id = 99998
+    rate_key = f"search:rate:{user_id}"
+    cache.delete(rate_key)
+    real_add = cache.add
+    add_calls = []
+
+    def add_after_expiry(key, value, timeout):
+        # The first add() sees the previous window's key, which expires before incr().
+        add_calls.append(key)
+        if len(add_calls) == 1:
+            return False
+        return real_add(key, value, timeout)
+
+    with patch.object(cache, "add", side_effect=add_after_expiry):
+        assert check_rate_limit(user_id)
+
+    assert cache.get(rate_key) == 1, "The request should start a new window"
+    cache.delete(rate_key)
+
+
 def test_increment_monthly_returns_increasing_counts():
 
     user_id = 88888
