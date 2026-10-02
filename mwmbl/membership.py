@@ -7,7 +7,7 @@ from django.db import models
 
 
 class MembershipTier(models.TextChoices):
-    SEED = "seed", "Seed"
+    SPROUT = "sprout", "Sprout"
     SAPLING = "sapling", "Sapling"
     CANOPY = "canopy", "Canopy"
 
@@ -21,7 +21,7 @@ class TierInfo:
 
 TIERS = [
     TierInfo(
-        tier=MembershipTier.SEED,
+        tier=MembershipTier.SPROUT,
         monthly_price_pence=100,
         perks=["Access to the members area in Matrix and Discord"],
     ),
@@ -29,7 +29,7 @@ TIERS = [
         tier=MembershipTier.SAPLING,
         monthly_price_pence=500,
         perks=[
-            "Everything in Seed",
+            "Everything in Sprout",
             "1,000 Active Discovery queries a month to enhance our index",
         ],
     ),
@@ -47,7 +47,7 @@ TIERS = [
 
 def product_ids() -> dict[MembershipTier, str]:
     return {
-        MembershipTier.SEED: settings.POLAR_PRODUCT_ID_SEED,
+        MembershipTier.SPROUT: settings.POLAR_PRODUCT_ID_SPROUT,
         MembershipTier.SAPLING: settings.POLAR_PRODUCT_ID_SAPLING,
         MembershipTier.CANOPY: settings.POLAR_PRODUCT_ID_CANOPY,
     }

@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
                 (
                     "tier",
                     models.CharField(
-                        choices=[("seed", "Seed"), ("sapling", "Sapling"), ("canopy", "Canopy")],
+                        choices=[("sprout", "Sprout"), ("sapling", "Sapling"), ("canopy", "Canopy")],
                         max_length=20,
                     ),
                 ),
