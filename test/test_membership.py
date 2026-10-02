@@ -60,9 +60,37 @@ def _membership_event(event_type, user_id, product_id="prod_sapling", status="ac
     return event
 
 
-def _post_webhook(api_client, event):
-    with patch("mwmbl.platform.api.validate_event", return_value=event):
-        return api_client.post("/api/v1/platform/billing/webhook", content_type="application/json", data={})
+def _polar_subscription(
+    subscription_id="sub_member",
+    product_id="prod_sapling",
+    created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    current_period_end=None,
+    cancel_at_period_end=False,
+):
+    subscription = Mock()
+    subscription.id = subscription_id
+    subscription.product_id = product_id
+    subscription.created_at = created_at
+    subscription.current_period_end = current_period_end
+    subscription.cancel_at_period_end = cancel_at_period_end
+    return subscription
+
+
+def _mock_polar(MockPolar, live_subscriptions):
+    """Make Polar report these live membership subscriptions for the user."""
+    mock_polar = MockPolar.return_value.__enter__.return_value
+    mock_polar.subscriptions.list.return_value.result.items = live_subscriptions
+    return mock_polar
+
+
+def _post_webhook(api_client, event, live_subscriptions):
+    with (
+        patch("mwmbl.platform.api.validate_event", return_value=event),
+        patch("mwmbl.platform.api.Polar") as MockPolar,
+    ):
+        mock_polar = _mock_polar(MockPolar, live_subscriptions)
+        response = api_client.post("/api/v1/platform/billing/webhook", content_type="application/json", data={})
+    return response, mock_polar
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +146,7 @@ def test_get_membership_unauthenticated(api_client):
 @PRODUCT_SETTINGS
 def test_checkout_uses_tier_product(api_client, user):
     with patch("mwmbl.platform.api.Polar") as MockPolar:
-        mock_polar = MockPolar.return_value.__enter__.return_value
+        mock_polar = _mock_polar(MockPolar, [])
         mock_polar.checkouts.create.return_value.url = "https://polar.example/checkout/member"
 
         response = api_client.post(
@@ -149,6 +177,26 @@ def test_checkout_rejects_existing_member(api_client, user):
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_checkout_rejects_subscription_paid_before_its_webhook(api_client, user):
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar = _mock_polar(MockPolar, [_polar_subscription(product_id="prod_seed")])
+
+        response = api_client.post(
+            "/api/v1/platform/membership/checkout",
+            content_type="application/json",
+            data={"tier": "canopy"},
+            **auth_headers(user),
+        )
+
+    assert response.status_code == 409
+    list_params = mock_polar.subscriptions.list.call_args[1]
+    assert list_params["external_customer_id"] == str(user.id)
+    assert sorted(list_params["product_id"]) == ["prod_canopy", "prod_sapling", "prod_seed"]
+    mock_polar.checkouts.create.assert_not_called()
 
 
 @pytest.mark.django_db
@@ -200,9 +248,9 @@ def test_checkout_requires_verified_email(api_client, user):
 @PRODUCT_SETTINGS
 def test_webhook_active_creates_membership(api_client, user):
     period_end = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    event = _membership_event("subscription.active", user.id, current_period_end=period_end)
+    event = _membership_event("subscription.active", user.id)
 
-    response = _post_webhook(api_client, event)
+    response, _ = _post_webhook(api_client, event, [_polar_subscription(current_period_end=period_end)])
 
     assert response.status_code == 200
     member = Membership.objects.get(user=user)
@@ -216,8 +264,8 @@ def test_webhook_active_creates_membership(api_client, user):
 def test_webhook_does_not_touch_usage_billing(api_client, user):
     UserBilling.objects.create(user=user, polar_subscription_id="sub_usage", max_monthly_spend_cents=1_000)
 
-    _post_webhook(api_client, _membership_event("subscription.active", user.id))
-    _post_webhook(api_client, _membership_event("subscription.revoked", user.id, status="canceled"))
+    _post_webhook(api_client, _membership_event("subscription.active", user.id), [_polar_subscription()])
+    _post_webhook(api_client, _membership_event("subscription.revoked", user.id, status="canceled"), [])
 
     billing = UserBilling.objects.get(user=user)
     assert billing.polar_subscription_id == "sub_usage"
@@ -228,8 +276,9 @@ def test_webhook_does_not_touch_usage_billing(api_client, user):
 @PRODUCT_SETTINGS
 def test_webhook_updated_changes_tier(api_client, user):
     Membership.objects.create(user=user, tier=MembershipTier.SEED, polar_subscription_id="sub_member")
+    event = _membership_event("subscription.updated", user.id, product_id="prod_canopy")
 
-    _post_webhook(api_client, _membership_event("subscription.updated", user.id, product_id="prod_canopy"))
+    _post_webhook(api_client, event, [_polar_subscription(product_id="prod_canopy")])
 
     assert Membership.objects.get(user=user).tier == MembershipTier.CANOPY
 
@@ -238,8 +287,9 @@ def test_webhook_updated_changes_tier(api_client, user):
 @PRODUCT_SETTINGS
 def test_webhook_scheduled_cancel_keeps_membership(api_client, user):
     Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    event = _membership_event("subscription.canceled", user.id, cancel_at_period_end=True)
 
-    _post_webhook(api_client, _membership_event("subscription.canceled", user.id, cancel_at_period_end=True))
+    _post_webhook(api_client, event, [_polar_subscription(cancel_at_period_end=True)])
 
     assert Membership.objects.get(user=user).cancel_at_period_end is True
 
@@ -249,7 +299,7 @@ def test_webhook_scheduled_cancel_keeps_membership(api_client, user):
 def test_webhook_revoked_ends_membership(api_client, user):
     Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
 
-    _post_webhook(api_client, _membership_event("subscription.revoked", user.id, status="canceled"))
+    _post_webhook(api_client, _membership_event("subscription.revoked", user.id, status="canceled"), [])
 
     assert not Membership.objects.filter(user=user).exists()
 
@@ -258,9 +308,75 @@ def test_webhook_revoked_ends_membership(api_client, user):
 @PRODUCT_SETTINGS
 def test_webhook_late_event_for_old_subscription_keeps_newer_membership(api_client, user):
     Membership.objects.create(user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_new")
+    event = _membership_event("subscription.revoked", user.id, status="canceled", subscription_id="sub_old")
 
-    _post_webhook(
-        api_client, _membership_event("subscription.revoked", user.id, status="canceled", subscription_id="sub_old")
-    )
+    _post_webhook(api_client, event, [_polar_subscription(subscription_id="sub_new", product_id="prod_canopy")])
 
     assert Membership.objects.get(user=user).polar_subscription_id == "sub_new"
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_retried_live_event_does_not_revive_ended_membership(api_client, user):
+    event = _membership_event("subscription.updated", user.id, status="active")
+
+    _post_webhook(api_client, event, [])
+
+    assert not Membership.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_live_event_for_old_subscription_does_not_replace_newer(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_new")
+    event = _membership_event("subscription.updated", user.id, product_id="prod_seed", subscription_id="sub_old")
+
+    _post_webhook(api_client, event, [_polar_subscription(subscription_id="sub_new", product_id="prod_canopy")])
+
+    member = Membership.objects.get(user=user)
+    assert member.polar_subscription_id == "sub_new"
+    assert member.tier == MembershipTier.CANOPY
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_duplicate_subscriptions_keep_newest_and_cancel_the_rest(api_client, user):
+    older = _polar_subscription(
+        subscription_id="sub_seed", product_id="prod_seed", created_at=datetime(2026, 10, 1, tzinfo=timezone.utc)
+    )
+    newer = _polar_subscription(
+        subscription_id="sub_canopy", product_id="prod_canopy", created_at=datetime(2026, 10, 2, tzinfo=timezone.utc)
+    )
+    event = _membership_event("subscription.active", user.id, product_id="prod_seed", subscription_id="sub_seed")
+
+    _, mock_polar = _post_webhook(api_client, event, [older, newer])
+
+    member = Membership.objects.get(user=user)
+    assert member.polar_subscription_id == "sub_canopy"
+    assert member.tier == MembershipTier.CANOPY
+    update_params = mock_polar.subscriptions.update.call_args[1]
+    assert update_params["id"] == "sub_seed"
+    assert update_params["subscription_update"].cancel_at_period_end is True
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_duplicate_already_cancelling_is_left_alone(api_client, user):
+    older = _polar_subscription(subscription_id="sub_seed", cancel_at_period_end=True)
+    newer = _polar_subscription(subscription_id="sub_canopy", created_at=datetime(2026, 10, 2, tzinfo=timezone.utc))
+
+    _, mock_polar = _post_webhook(api_client, _membership_event("subscription.updated", user.id), [older, newer])
+
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_webhook_past_due_keeps_membership_and_join_date(api_client, user):
+    member = Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    event = _membership_event("subscription.past_due", user.id, status="past_due")
+
+    _, mock_polar = _post_webhook(api_client, event, [_polar_subscription()])
+
+    assert Membership.objects.get(user=user).started == member.started
+    assert "past_due" in mock_polar.subscriptions.list.call_args[1]["status"]
