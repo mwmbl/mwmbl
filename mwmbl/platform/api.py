@@ -14,10 +14,10 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel
-from polar_sdk.webhooks import WebhookVerificationError, validate_event
+from polar_sdk.models import SubscriptionCancel, SubscriptionStatus
+from polar_sdk.webhooks import WebhookVerificationError
 
-from mwmbl import pricing
+from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
@@ -28,6 +28,7 @@ from mwmbl.models import (
     DomainSubmission,
     MarketingConsent,
     MarketingSource,
+    Membership,
     MwmblUser,
     SearchResultVote,
     UserAgreement,
@@ -59,6 +60,9 @@ from mwmbl.platform.schemas import (
     MarketingConsentListResponse,
     MarketingConsentRequest,
     MarketingConsentResponse,
+    MembershipCheckoutRequest,
+    MembershipResponse,
+    MembershipTierResponse,
     ModeratedDomainSchema,
     ModerationHistory,
     ModerationQueue,
@@ -79,6 +83,7 @@ from mwmbl.platform.schemas import (
     VoteStats,
     VoteStatsRequest,
 )
+from mwmbl.polar_webhooks import validate_event
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
@@ -1276,6 +1281,145 @@ def create_checkout(request, body: CheckoutRequest):
     return CheckoutResponse(checkout_url=result.url)
 
 
+# ---------------------------------------------------------------------------
+# Membership
+# ---------------------------------------------------------------------------
+
+# Past-due subscriptions stay live while Polar retries the payment, so a failed renewal doesn't
+# end the membership straight away; Polar cancels the subscription if the retries run out.
+LIVE_SUBSCRIPTION_STATUSES = [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE]
+
+
+def _live_membership_subscriptions(user) -> list[polar_models.Subscription]:
+    """The user's live membership subscriptions according to Polar, newest first."""
+    membership_products = [product for product in membership.product_ids().values() if product]
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        response = polar.subscriptions.list(
+            external_customer_id=str(user.id),
+            product_id=membership_products,
+            status=LIVE_SUBSCRIPTION_STATUSES,
+            limit=100,
+        )
+    return sorted(response.result.items, key=lambda subscription: subscription.created_at, reverse=True)
+
+
+@router.get(
+    "/membership/tiers",
+    response=list[MembershipTierResponse],
+    summary="List membership tiers",
+    description="Returns the supporter membership tiers with their monthly prices and perks.",
+    tags=["Membership"],
+)
+def list_membership_tiers(request):
+    return [
+        MembershipTierResponse(
+            tier=info.tier,
+            name=info.tier.label,
+            monthly_price_pence=info.monthly_price_pence,
+            perks=info.perks,
+        )
+        for info in membership.TIERS
+    ]
+
+
+@router.get(
+    "/membership",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Get current membership",
+    description="Returns the user's membership tier, or 404 if they aren't a member.",
+    tags=["Membership"],
+)
+def get_membership(request):
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return user_membership
+
+
+@router.post(
+    "/membership/checkout",
+    auth=JWTAuth(),
+    response=CheckoutResponse,
+    summary="Create membership checkout session",
+    description="Creates a Polar hosted-checkout session for a membership tier and returns a redirect URL.",
+    tags=["Membership"],
+)
+def create_membership_checkout(request, body: MembershipCheckoutRequest):
+    check_email_verified(request)
+    product_id = membership.product_ids()[body.tier]
+    if not product_id:
+        raise InvalidRequest("Membership is not configured. Contact support.", status=503)
+    # Ask Polar as well as the local row: a subscription paid for moments ago has no row until its
+    # webhook arrives.
+    if Membership.objects.filter(user=request.user).exists() or _live_membership_subscriptions(request.user):
+        raise InvalidRequest("You are already a member.", status=409)
+    checkout_params = {
+        "products": [product_id],
+        "external_customer_id": str(request.user.id),
+        "metadata": {"user_id": str(request.user.id)},
+    }
+    if body.success_url:
+        checkout_params["success_url"] = body.success_url
+    if body.embed_origin:
+        checkout_params["embed_origin"] = body.embed_origin
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        result = polar.checkouts.create(request=checkout_params)
+    return CheckoutResponse(checkout_url=result.url)
+
+
+def _sync_membership(subscription):
+    """Bring the user's Membership row in line with their live membership subscriptions in Polar.
+
+    Webhooks can arrive late, be retried or come out of order, so the event only says which user
+    to sync; their current subscriptions are fetched from Polar rather than read from the event.
+    """
+    user_id = subscription.metadata.get("user_id")
+    user = MwmblUser.objects.filter(id=user_id).first()
+    if user is None:
+        logger.warning("Polar webhook: no user found for membership user_id=%s", user_id)
+        return
+
+    if membership.tier_for_product(subscription.product_id) is None:
+        logger.warning(
+            "Polar webhook: subscription id=%s is for product id=%s, which isn't a current membership tier",
+            subscription.id,
+            subscription.product_id,
+        )
+
+    live_subscriptions = _live_membership_subscriptions(user)
+    if not live_subscriptions:
+        deleted, _ = Membership.objects.filter(user=user).delete()
+        logger.info("Polar webhook: membership ended for user id=%s (deleted=%s)", user_id, deleted)
+        return
+
+    current, *duplicates = live_subscriptions
+    tier = membership.tier_for_product(current.product_id)
+    Membership.objects.update_or_create(
+        user=user,
+        defaults={
+            "tier": tier,
+            "polar_subscription_id": current.id,
+            "current_period_end": current.current_period_end,
+            "cancel_at_period_end": current.cancel_at_period_end,
+        },
+    )
+    logger.info("Polar webhook: user id=%s is a %s member", user_id, tier)
+
+    # A second checkout paid before the first one's webhook arrived leaves the user with two
+    # subscriptions. Keep the newest and stop the others renewing, so they aren't billed twice.
+    duplicates_to_cancel = [duplicate for duplicate in duplicates if not duplicate.cancel_at_period_end]
+    for duplicate in duplicates_to_cancel:
+        logger.warning(
+            "Polar webhook: cancelling duplicate membership subscription id=%s for user id=%s", duplicate.id, user_id
+        )
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            polar.subscriptions.update(
+                id=duplicate.id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=True),
+            )
+
+
 @router.post(
     "/billing/uncancel",
     auth=JWTAuth(),
@@ -1387,7 +1531,11 @@ def polar_webhook(request):
     event_type = event.TYPE
     logger.info("Polar webhook event type=%s", event_type)
 
-    if event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
+    # Route on the usage product, which is fixed, rather than on the membership products, which can
+    # change: a subscription to a retired membership product must never be mistaken for usage billing.
+    if event_type.startswith("subscription.") and event.data.product_id != settings.POLAR_PRODUCT_ID_USAGE:
+        _sync_membership(event.data)
+    elif event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
         user_id = event.data.metadata.get("user_id")
         logger.info("Polar webhook: %s user_id=%s", event_type, user_id)
         user = MwmblUser.objects.filter(id=user_id).first()
