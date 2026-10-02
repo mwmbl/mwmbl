@@ -15,7 +15,7 @@ from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
 from polar_sdk.models import SubscriptionCancel, SubscriptionStatus
-from polar_sdk.webhooks import WebhookVerificationError, validate_event
+from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
@@ -83,6 +83,7 @@ from mwmbl.platform.schemas import (
     VoteStats,
     VoteStatsRequest,
 )
+from mwmbl.polar_webhooks import validate_event
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
