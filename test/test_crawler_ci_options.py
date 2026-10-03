@@ -107,11 +107,23 @@ def test_allowed_domains_pick_the_seed_deterministically(url_queue):
 
     with (
         patch("mwmbl.redis_url_queue.CRAWL_ALLOWED_DOMAINS", allowed),
-        patch("mwmbl.redis_url_queue.random", Random(1)),
+        patch("mwmbl.redis_url_queue.ALLOWLIST_RANDOM", Random(1)),
+        # The shared generator is reseeded per forked worker, so it must not be the one used.
+        patch("mwmbl.redis_url_queue.random", Random(2)),
     ):
         batch = url_queue.get_batch("test_user")
 
     assert batch[0] == f"https://{expected_domain}/"
+
+
+def test_single_allowed_domain_still_pops_its_queued_urls(url_queue):
+    """The seed is the only domain, so leaving it out of the batch would strand its queue."""
+    url_queue.queue_urls([found_url("https://mwmbl.org/page")])
+
+    with patch("mwmbl.redis_url_queue.CRAWL_ALLOWED_DOMAINS", frozenset({"mwmbl.org"})):
+        batch = url_queue.get_batch("test_user")
+
+    assert batch == ["https://mwmbl.org/", "https://mwmbl.org/page"]
 
 
 def test_no_allowlist_leaves_domain_selection_alone(url_queue):
