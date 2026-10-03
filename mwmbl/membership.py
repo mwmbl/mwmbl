@@ -57,3 +57,15 @@ def tier_for_product(product_id: str) -> MembershipTier | None:
     """The membership tier sold by a Polar product, or None if it isn't a membership product."""
     tiers_by_product = {product: tier for tier, product in product_ids().items() if product}
     return tiers_by_product.get(product_id)
+
+
+# Combined Search queries a month for web (JWT) callers, by tier. Signed-in users without a
+# membership, and tiers not listed, get COMBINED_SEARCH_MONTHLY_LIMIT.
+COMBINED_SEARCH_MONTHLY_LIMITS = {
+    MembershipTier.SAPLING: 1_000,
+    MembershipTier.CANOPY: 1_000,
+}
+
+
+def combined_search_monthly_limit(tier: str | None) -> int:
+    return COMBINED_SEARCH_MONTHLY_LIMITS.get(tier, settings.COMBINED_SEARCH_MONTHLY_LIMIT)

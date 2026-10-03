@@ -20,13 +20,15 @@ from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 
 import mwmbl.tinysearchengine.combined_search as combined_search
-from mwmbl.models import ApiKey, generate_api_key
+from mwmbl.membership import MembershipTier
+from mwmbl.models import ApiKey, Membership, generate_api_key
 from mwmbl.quota import _combined_search_monthly_key
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
 
 User = get_user_model()
 
 URL = "/api/v2/combined-search/"
+USAGE_URL = "/api/v1/platform/combined-search/usage"
 
 INDEX_RESULT = Document("Tokio internals", "https://blog.example.com/tokio", "A crawled page about tokio.")
 STAAN_RESULT = Document(
@@ -72,10 +74,10 @@ def client(db):
 
 
 @pytest.fixture
-def fresh_quota(api_key):
-    cache.delete(_combined_search_monthly_key(api_key.user.id))
+def fresh_quota(user):
+    cache.delete(_combined_search_monthly_key(user.id))
     yield
-    cache.delete(_combined_search_monthly_key(api_key.user.id))
+    cache.delete(_combined_search_monthly_key(user.id))
 
 
 @pytest.fixture
@@ -123,8 +125,8 @@ def stub_sources(monkeypatch):
     return configure
 
 
-def _get(client, api_key, query="tokio"):
-    return client.get(f"{URL}?q={query}", HTTP_X_API_KEY=api_key.raw_key)
+def _get(client, access_token, query="tokio"):
+    return client.get(f"{URL}?q={query}", HTTP_AUTHORIZATION=f"Bearer {access_token}")
 
 
 # ---------------------------------------------------------------------------
@@ -138,30 +140,31 @@ def test_combined_search_requires_auth(client):
 
 
 @pytest.mark.django_db
-def test_combined_search_with_api_key(client, api_key, fresh_quota, stub_sources):
+def test_combined_search_with_jwt(client, access_token, fresh_quota, stub_sources):
     stub_sources()
 
-    response = _get(client, api_key)
+    response = _get(client, access_token)
 
     assert response.status_code == 200
     assert response.json()["query"] == "tokio"
 
 
 @pytest.mark.django_db
-def test_combined_search_with_jwt(client, user, access_token, fresh_quota, stub_sources):
+def test_an_api_key_is_refused_until_keyed_access_is_billed(client, api_key, fresh_quota, stub_sources):
     stub_sources()
 
-    response = client.get(f"{URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+    response = client.get(f"{URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key)
 
-    assert response.status_code == 200
+    assert response.status_code == 402
+    assert cache.get(_combined_search_monthly_key(api_key.user.id)) is None
 
 
 @pytest.mark.django_db
 @override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
-def test_the_response_reports_the_quota(client, api_key, fresh_quota, stub_sources):
+def test_the_response_reports_the_quota(client, access_token, fresh_quota, stub_sources):
     stub_sources()
 
-    body = _get(client, api_key).json()
+    body = _get(client, access_token).json()
 
     assert body["monthly_usage"] == 1
     assert body["monthly_limit"] == 10
@@ -169,39 +172,89 @@ def test_the_response_reports_the_quota(client, api_key, fresh_quota, stub_sourc
 
 @pytest.mark.django_db
 @override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
-def test_combined_search_quota_enforced(client, api_key, fresh_quota, stub_sources):
+def test_combined_search_quota_enforced(client, user, access_token, fresh_quota, stub_sources):
     stub_sources()
-    cache.set(_combined_search_monthly_key(api_key.user.id), 10, timeout=3600)
+    cache.set(_combined_search_monthly_key(user.id), 10, timeout=3600)
 
-    assert _get(client, api_key).status_code == 429
+    assert _get(client, access_token).status_code == 429
 
 
 @pytest.mark.django_db
 @override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
-def test_a_rejected_request_refunds_its_increment(client, api_key, fresh_quota, stub_sources):
+def test_a_rejected_request_refunds_its_increment(client, user, access_token, fresh_quota, stub_sources):
     """The counter is incremented before it is checked, so that concurrent requests cannot
     both pass. A rejected request must give that increment back, or being over the limit
     once would push the counter up forever."""
     stub_sources()
-    key = _combined_search_monthly_key(api_key.user.id)
+    key = _combined_search_monthly_key(user.id)
     cache.set(key, 10, timeout=3600)
 
-    _get(client, api_key)
+    _get(client, access_token)
 
     assert cache.get(key) == 10
 
 
 @pytest.mark.django_db
 @override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
-def test_the_quota_counter_is_its_own(client, api_key, fresh_quota, stub_sources):
+def test_the_quota_counter_is_its_own(client, user, access_token, fresh_quota, stub_sources):
     """Combined Search must not spend the standard-search or Super Search allowance."""
     from mwmbl.quota import get_monthly_count, get_monthly_super_search_count
 
     stub_sources()
-    _get(client, api_key)
+    _get(client, access_token)
 
-    assert get_monthly_count(api_key.user.id) == 0
-    assert get_monthly_super_search_count(api_key.user.id) == 0
+    assert get_monthly_count(user.id) == 0
+    assert get_monthly_super_search_count(user.id) == 0
+
+
+def _join(user, tier):
+    Membership.objects.create(user=user, tier=tier, polar_subscription_id=f"sub_{tier}")
+
+
+@pytest.mark.django_db
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
+@pytest.mark.parametrize(
+    "tier, limit",
+    [(None, 100), (MembershipTier.SPROUT, 100), (MembershipTier.SAPLING, 1_000), (MembershipTier.CANOPY, 1_000)],
+)
+def test_the_limit_is_set_by_the_membership_tier(client, user, access_token, fresh_quota, stub_sources, tier, limit):
+    stub_sources()
+    if tier is not None:
+        _join(user, tier)
+    key = _combined_search_monthly_key(user.id)
+
+    cache.set(key, limit - 1, timeout=3600)
+    last_allowed = _get(client, access_token)
+    over_the_limit = _get(client, access_token)
+
+    assert last_allowed.status_code == 200
+    assert last_allowed.json()["monthly_limit"] == limit
+    assert over_the_limit.status_code == 429
+
+
+@pytest.mark.django_db
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
+def test_the_usage_endpoint_reports_the_members_quota(client, user, access_token, fresh_quota):
+    _join(user, MembershipTier.SAPLING)
+    cache.set(_combined_search_monthly_key(user.id), 7, timeout=3600)
+
+    response = client.get(USAGE_URL, HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 200
+    assert response.json() == {"monthly_usage": 7, "monthly_limit": 1_000}
+
+
+@pytest.mark.django_db
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
+def test_the_usage_endpoint_reports_the_default_quota_for_a_non_member(client, access_token, fresh_quota):
+    response = client.get(USAGE_URL, HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.json() == {"monthly_usage": 0, "monthly_limit": 100}
+
+
+@pytest.mark.django_db
+def test_the_usage_endpoint_requires_a_jwt(client):
+    assert client.get(USAGE_URL).status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -210,36 +263,36 @@ def test_the_quota_counter_is_its_own(client, api_key, fresh_quota, stub_sources
 
 
 @pytest.mark.django_db
-def test_both_sources_reach_the_response(client, api_key, fresh_quota, stub_sources):
+def test_both_sources_reach_the_response(client, access_token, fresh_quota, stub_sources):
     stub_sources()
 
-    results = _get(client, api_key).json()["results"]
+    results = _get(client, access_token).json()["results"]
 
     assert [result["url"] for result in results] == [INDEX_RESULT.url, STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_each_result_names_the_provider_it_came_from(client, api_key, fresh_quota, stub_sources):
+def test_each_result_names_the_provider_it_came_from(client, access_token, fresh_quota, stub_sources):
     stub_sources(index=(INDEX_RESULT, WIKI_INDEX_RESULT))
 
-    results = _get(client, api_key).json()["results"]
+    results = _get(client, access_token).json()["results"]
 
     assert [result["engine"] for result in results] == ["mwmbl", "wikipedia", "eusp"]
 
 
 @pytest.mark.django_db
-def test_the_external_results_are_passed_in_as_additional_results(client, api_key, fresh_quota, stub_sources):
+def test_the_external_results_are_passed_in_as_additional_results(client, access_token, fresh_quota, stub_sources):
     """Staan goes in through Ranker.get_results' additional_results hook, which is what gets
     it blacklist-filtered and ranked alongside the index candidates."""
     calls = stub_sources()
 
-    _get(client, api_key)
+    _get(client, access_token)
 
     assert [document.url for document in calls["additional_results"]] == [STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_the_index_is_searched_while_staan_is_in_flight(client, api_key, fresh_quota, stub_sources, monkeypatch):
+def test_the_index_is_searched_while_staan_is_in_flight(client, access_token, fresh_quota, stub_sources, monkeypatch):
     """Staan is the slow call, so the index lookup must overlap it, not wait for it. Each
     stub waits for the other to start: run one after the other, the first would time out."""
     stub_sources()
@@ -263,26 +316,26 @@ def test_the_index_is_searched_while_staan_is_in_flight(client, api_key, fresh_q
     monkeypatch.setattr(combined_ranker, "retrieve", overlapping_retrieve)
     monkeypatch.setattr(combined_search, "get_staan_results", overlapping_staan)
 
-    results = _get(client, api_key).json()["results"]
+    results = _get(client, access_token).json()["results"]
 
     assert [result["url"] for result in results] == [INDEX_RESULT.url, STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_the_query_reaches_staan(client, api_key, fresh_quota, stub_sources):
+def test_the_query_reaches_staan(client, access_token, fresh_quota, stub_sources):
     calls = stub_sources()
 
-    _get(client, api_key, query="rust")
+    _get(client, access_token, query="rust")
 
     assert calls["staan_query"] == "rust"
     assert calls["retrieve_query"] == "rust"
 
 
 @pytest.mark.django_db
-def test_the_result_count_matches_the_results(client, api_key, fresh_quota, stub_sources):
+def test_the_result_count_matches_the_results(client, access_token, fresh_quota, stub_sources):
     stub_sources()
 
-    body = _get(client, api_key).json()
+    body = _get(client, access_token).json()
 
     assert body["number_of_results"] == len(body["results"])
 
@@ -293,19 +346,19 @@ def test_the_result_count_matches_the_results(client, api_key, fresh_quota, stub
 
 
 @pytest.mark.django_db
-def test_staan_returning_nothing_still_serves_the_index(client, api_key, fresh_quota, stub_sources):
+def test_staan_returning_nothing_still_serves_the_index(client, access_token, fresh_quota, stub_sources):
     stub_sources(staan=())
 
-    results = _get(client, api_key).json()["results"]
+    results = _get(client, access_token).json()["results"]
 
     assert [result["url"] for result in results] == [INDEX_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_an_empty_pool_is_an_empty_response_not_an_error(client, api_key, fresh_quota, stub_sources):
+def test_an_empty_pool_is_an_empty_response_not_an_error(client, access_token, fresh_quota, stub_sources):
     stub_sources(staan=(), index=())
 
-    body = _get(client, api_key).json()
+    body = _get(client, access_token).json()
 
     assert body["results"] == []
     assert body["number_of_results"] == 0
@@ -317,10 +370,10 @@ def test_an_empty_pool_is_an_empty_response_not_an_error(client, api_key, fresh_
 
 
 @pytest.mark.django_db
-def test_staan_results_are_indexed_against_the_query(client, api_key, fresh_quota, stub_sources):
+def test_staan_results_are_indexed_against_the_query(client, access_token, fresh_quota, stub_sources):
     calls = stub_sources(pages_indexed=3)
 
-    body = _get(client, api_key, query="rust").json()
+    body = _get(client, access_token, query="rust").json()
 
     assert calls["indexed"] == [STAAN_RESULT.url]
     assert calls["indexed_query"] == "rust"
@@ -328,7 +381,7 @@ def test_staan_results_are_indexed_against_the_query(client, api_key, fresh_quot
 
 
 @pytest.mark.django_db
-def test_blacklisted_staan_results_are_not_indexed(client, api_key, fresh_quota, stub_sources, monkeypatch):
+def test_blacklisted_staan_results_are_not_indexed(client, access_token, fresh_quota, stub_sources, monkeypatch):
     """index_results_against_query bypasses index_documents' blacklist check."""
     bad = Document("Bad", "https://badsite.test/x", "bad", 5.0, source=DocumentSource.STAAN)
     calls = stub_sources(staan=(bad, STAAN_RESULT))
@@ -338,26 +391,26 @@ def test_blacklisted_staan_results_are_not_indexed(client, api_key, fresh_quota,
         lambda documents: {d.url for d in documents if urlparse(d.url).netloc == "badsite.test"},
     )
 
-    _get(client, api_key)
+    _get(client, access_token)
 
     assert calls["indexed"] == [STAAN_RESULT.url]
 
 
 @pytest.mark.django_db
-def test_nothing_from_staan_indexes_nothing(client, api_key, fresh_quota, stub_sources):
+def test_nothing_from_staan_indexes_nothing(client, access_token, fresh_quota, stub_sources):
     calls = stub_sources(staan=())
 
-    body = _get(client, api_key).json()
+    body = _get(client, access_token).json()
 
     assert "indexed" not in calls
     assert body["pages_indexed"] == 0
 
 
 @pytest.mark.django_db
-def test_a_failed_index_write_still_serves_the_results(client, api_key, fresh_quota, stub_sources):
+def test_a_failed_index_write_still_serves_the_results(client, access_token, fresh_quota, stub_sources):
     stub_sources(pages_indexed=OSError("disk full"))
 
-    body = _get(client, api_key).json()
+    body = _get(client, access_token).json()
 
     assert body["pages_indexed"] == 0
     assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url, STAAN_RESULT.url]

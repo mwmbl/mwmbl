@@ -28,13 +28,14 @@ import asyncio
 from logging import getLogger
 
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from ninja import Router
 from ninja.errors import HttpError
 from pydantic import Field
 
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_results_against_query
+from mwmbl.membership import combined_search_monthly_limit
+from mwmbl.models import Membership
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
@@ -74,9 +75,9 @@ DESCRIPTION = (
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
-    "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
-    "token. Obtain a key via `POST /api/v1/platform/api-keys/`. A per-user monthly quota "
-    "applies; `monthly_usage` and `monthly_limit` report it on every response.\n\n"
+    "Authentication is required with a JWT bearer token. A per-user monthly quota applies, "
+    "set by the user's membership tier; `monthly_usage` and `monthly_limit` report it on "
+    "every response. Access with an API key (`X-API-Key`) is not available yet.\n\n"
     "EUSP's results are added to the Mwmbl index; `pages_indexed` reports how many new "
     "pages that added.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
@@ -130,11 +131,17 @@ def init_router(ranker) -> None:
     )
     async def combined_search(request, q: str):
         user = await authenticate_user(request)
+        # authenticate_user takes the API key over a bearer token whenever the header is
+        # present, so this is how the caller authenticated. Combined Search costs us on
+        # every request, so it has no free API tier; keyed access comes with metered billing.
+        if request.headers.get("X-API-Key"):
+            raise HttpError(402, "Combined Search via API key requires a paid plan, which is not available yet.")
 
         if not await sync_to_async(check_rate_limit)(user.id):
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
 
-        monthly_limit = settings.COMBINED_SEARCH_MONTHLY_LIMIT
+        tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
+        monthly_limit = combined_search_monthly_limit(tier)
         # Increment first, then check: this makes the quota check atomic under concurrent
         # requests (a check-then-increment would let racing requests both pass). Refund the
         # increment if the caller is over the limit.

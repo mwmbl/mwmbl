@@ -52,6 +52,7 @@ from mwmbl.platform.schemas import (
     BulkDecisionRequest,
     CheckoutRequest,
     CheckoutResponse,
+    CombinedSearchUsageResponse,
     ConfirmEmail,
     CreateApiKeyRequest,
     DeviceResponse,
@@ -84,6 +85,7 @@ from mwmbl.platform.schemas import (
     VoteStatsRequest,
 )
 from mwmbl.polar_webhooks import validate_event
+from mwmbl.quota import get_monthly_combined_search_count
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
@@ -1335,6 +1337,23 @@ def get_membership(request):
     if user_membership is None:
         raise InvalidRequest("Not a member.", status=404)
     return user_membership
+
+
+@router.get(
+    "/combined-search/usage",
+    auth=JWTAuth(),
+    response=CombinedSearchUsageResponse,
+    summary="Get Combined Search usage",
+    description="Returns the user's Combined Search usage this month and their limit, which is set by "
+    "their membership tier.",
+    tags=["Membership"],
+)
+def get_combined_search_usage(request):
+    tier = Membership.objects.filter(user=request.user).values_list("tier", flat=True).first()
+    return CombinedSearchUsageResponse(
+        monthly_usage=get_monthly_combined_search_count(request.user.id),
+        monthly_limit=membership.combined_search_monthly_limit(tier),
+    )
 
 
 @router.post(
