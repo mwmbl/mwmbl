@@ -40,10 +40,9 @@ from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
-    decrement_monthly_combined_search_api,
     get_monthly_count,
     increment_monthly_combined_search,
-    increment_monthly_combined_search_api,
+    increment_monthly_combined_search_api_if_below,
 )
 from mwmbl.search_auth import authenticate_user
 from mwmbl.search_setup import index_path
@@ -164,25 +163,26 @@ def init_router(ranker) -> None:
         # the spend limit; web requests use the membership quota. Each has its own counter.
         if request.headers.get("X-API-Key"):
             monthly_limit = await sync_to_async(_keyed_monthly_limit)(user)
-            increment, decrement = increment_monthly_combined_search_api, decrement_monthly_combined_search_api
-            over_limit_message = (
-                f"Combined Search monthly quota exceeded: your spend limit allows {monthly_limit:,} "
-                "requests this month. Increase your monthly spend limit at https://mwmbl.org/pricing "
-                "to allow more."
-            )
+            # Billed requests are counted only when under the limit, so the counter that
+            # sync_search_counts copies to Postgres, and Polar bills, never holds a refused one.
+            monthly_usage = await sync_to_async(increment_monthly_combined_search_api_if_below)(user.id, monthly_limit)
+            if monthly_usage is None:
+                raise HttpError(
+                    429,
+                    f"Combined Search monthly quota exceeded: your spend limit allows {monthly_limit:,} "
+                    "requests this month. Increase your monthly spend limit at https://mwmbl.org/pricing "
+                    "to allow more.",
+                )
         else:
             tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
             monthly_limit = combined_search_monthly_limit(tier)
-            increment, decrement = increment_monthly_combined_search, decrement_monthly_combined_search
-            over_limit_message = f"Combined Search monthly quota exceeded: {monthly_limit} requests per month."
-
-        # Increment first, then check: this makes the quota check atomic under concurrent
-        # requests (a check-then-increment would let racing requests both pass). Refund the
-        # increment if the caller is over the limit.
-        monthly_usage = await sync_to_async(increment)(user.id)
-        if monthly_usage > monthly_limit:
-            await sync_to_async(decrement)(user.id)
-            raise HttpError(429, over_limit_message)
+            # Increment first, then check: this makes the quota check atomic under concurrent
+            # requests (a check-then-increment would let racing requests both pass). Refund the
+            # increment if the caller is over the limit.
+            monthly_usage = await sync_to_async(increment_monthly_combined_search)(user.id)
+            if monthly_usage > monthly_limit:
+                await sync_to_async(decrement_monthly_combined_search)(user.id)
+                raise HttpError(429, f"Combined Search monthly quota exceeded: {monthly_limit} requests per month.")
 
         # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
         # rather than after it. get_staan_results returns [] on failure by itself.

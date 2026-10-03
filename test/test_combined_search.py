@@ -160,16 +160,8 @@ def _get_with_key(client, api_key):
     return client.get(f"{URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key)
 
 
-@pytest.fixture
-def fresh_keyed_quota(user):
-    keys = [_combined_search_api_monthly_key(user.id), _monthly_key(user.id)]
-    cache.delete_many(keys)
-    yield
-    cache.delete_many(keys)
-
-
 @pytest.mark.django_db
-def test_an_api_key_without_a_spend_limit_is_refused(client, api_key, fresh_quota, fresh_keyed_quota, stub_sources):
+def test_an_api_key_without_a_spend_limit_is_refused(client, api_key, fresh_quota, redis_cache, stub_sources):
     """There is no free allowance for keyed Combined Search, so it needs a spend limit."""
     stub_sources()
 
@@ -181,9 +173,7 @@ def test_an_api_key_without_a_spend_limit_is_refused(client, api_key, fresh_quot
 
 
 @pytest.mark.django_db
-def test_a_keyed_request_is_billed_on_its_own_counter(
-    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
-):
+def test_a_keyed_request_is_billed_on_its_own_counter(client, user, api_key, fresh_quota, redis_cache, stub_sources):
     stub_sources()
     UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
 
@@ -198,7 +188,7 @@ def test_a_keyed_request_is_billed_on_its_own_counter(
 
 @pytest.mark.django_db
 def test_a_member_using_a_key_is_billed_not_given_the_membership_quota(
-    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+    client, user, api_key, fresh_quota, redis_cache, stub_sources
 ):
     stub_sources()
     _join(user, MembershipTier.CANOPY)
@@ -207,8 +197,8 @@ def test_a_member_using_a_key_is_billed_not_given_the_membership_quota(
 
 
 @pytest.mark.django_db
-def test_a_keyed_request_over_the_spend_limit_is_refused_and_refunded(
-    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+def test_a_keyed_request_over_the_spend_limit_is_refused_and_not_counted(
+    client, user, api_key, fresh_quota, redis_cache, stub_sources
 ):
     stub_sources()
     UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
@@ -224,7 +214,7 @@ def test_a_keyed_request_over_the_spend_limit_is_refused_and_refunded(
 
 @pytest.mark.django_db
 def test_standard_search_overage_uses_up_the_shared_spend_limit(
-    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+    client, user, api_key, fresh_quota, redis_cache, stub_sources
 ):
     """$10 buys 2,000 overage requests of standard search; once they are used, nothing is
     left of the spend limit for Combined Search."""
