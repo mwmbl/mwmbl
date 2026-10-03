@@ -1,7 +1,6 @@
 import gzip
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from logging import getLogger
 from uuid import uuid4
@@ -11,7 +10,6 @@ import requests
 from django.conf import settings
 from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
-from redis import Redis
 
 from mwmbl.crawler.batch import (
     DatasetRequest,
@@ -38,9 +36,7 @@ from mwmbl.settings import (
 )
 from mwmbl.tinysearchengine.indexer import Document
 
-stats_manager = StatsManager(
-    Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
-)
+stats_manager = StatsManager()
 
 logger = getLogger(__name__)
 

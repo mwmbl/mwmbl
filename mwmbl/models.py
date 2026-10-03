@@ -237,6 +237,97 @@ class UserStats(models.Model):
         ]
 
 
+class DailyCrawlerStats(models.Model):
+    """Records aggregate crawler statistics for a specific calendar day.
+
+    This persists the daily aggregate stats that were previously only stored
+    in Redis (with a 30-day TTL). Having them in Postgres enables historical
+    analysis and survives Redis restarts.
+    """
+
+    date = models.DateField(unique=True)
+    users_crawled = models.IntegerField(default=0)
+    results_indexed = models.IntegerField(default=0)
+    dataset_queries = models.IntegerField(default=0)
+    dataset_results = models.IntegerField(default=0)
+    blacklisted_results_removed = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["-date"]),
+        ]
+
+    def __str__(self):
+        return f"DailyCrawlerStats({self.date})"
+
+
+class DailyIndexStats(models.Model):
+    """Records index statistics for a specific calendar day.
+
+    This persists the daily index stats (unique URLs, domains, results in index)
+    that were previously only stored in Redis (with a 30-day TTL).
+    """
+
+    date = models.DateField(unique=True)
+    urls_in_index = models.IntegerField(default=0)
+    domains_in_index = models.IntegerField(default=0)
+    results_in_index = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["-date"]),
+        ]
+
+    def __str__(self):
+        return f"DailyIndexStats({self.date})"
+
+
+class DailyDomainResultCount(models.Model):
+    """Records per-domain result counts for a specific calendar day.
+
+    This persists the per-domain result counts that were previously only stored
+    in Redis (with a 30-day TTL).
+    """
+
+    date = models.DateField()
+    domain = models.CharField(max_length=255)
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [("date", "domain")]
+        indexes = [
+            models.Index(fields=["-date"]),
+            models.Index(fields=["domain", "-date"]),
+        ]
+
+    def __str__(self):
+        return f"DailyDomainResultCount({self.date}, {self.domain})"
+
+
+class DailyTrafficStats(models.Model):
+    """Records search traffic statistics for a specific calendar day.
+
+    This persists the daily traffic stats that were previously only stored
+    in Redis (with a 30-day TTL).
+    """
+
+    date = models.DateField()
+    endpoint = models.CharField(max_length=50)
+    headers = models.CharField(max_length=20)
+    status = models.CharField(max_length=10)
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [("date", "endpoint", "headers", "status")]
+        indexes = [
+            models.Index(fields=["-date"]),
+            models.Index(fields=["date", "endpoint"]),
+        ]
+
+    def __str__(self):
+        return f"DailyTrafficStats({self.date}, {self.endpoint}, {self.headers}, {self.status})"
+
+
 class UserBilling(models.Model):
     user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="billing")
     polar_customer_id = models.CharField(max_length=100, blank=True, default="")

@@ -29,6 +29,18 @@ NO_INDEX_COUNTS = {
 }
 
 
+@pytest.fixture
+def redis_client():
+    """Provide a fakeredis instance for testing."""
+    return fakeredis.FakeStrictRedis(decode_responses=True)
+
+
+@pytest.fixture
+def stats_manager(redis_client):
+    """Provide a StatsManager with fakeredis."""
+    return StatsManager(redis_client=redis_client)
+
+
 def make_results(*urls: str) -> Results:
     return Results(results=[Result(url=url, title="t", extract="e") for url in urls])
 
@@ -45,11 +57,8 @@ def make_batch(user_id_hash: str) -> HashedBatch:
 
 
 @pytest.mark.django_db
-def test_record_results_counts_each_crawler_once_per_day():
+def test_record_results_counts_each_crawler_once_per_day(stats_manager):
     from mwmbl.models import MwmblUser
-
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    stats_manager = StatsManager(redis)
 
     # Create users in the database
     alice = MwmblUser.objects.create_user(username="alice", password="testpass")
