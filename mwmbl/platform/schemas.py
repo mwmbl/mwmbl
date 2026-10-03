@@ -56,6 +56,11 @@ class MembershipResponse(Schema):
     cancel_at_period_end: bool
 
 
+class CombinedSearchUsageResponse(Schema):
+    monthly_usage: int
+    monthly_limit: int
+
+
 class MembershipCheckoutRequest(Schema):
     tier: MembershipTier
     success_url: Optional[str] = None
