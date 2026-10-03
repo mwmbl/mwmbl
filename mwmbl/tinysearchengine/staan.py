@@ -10,8 +10,7 @@ same machinery as every other candidate. The cache file is already namespaced by
 DocumentSource, so Staan entries and Wikipedia entries share a page without seeing each
 other - see the external_cache module docstring.
 
-Nothing here writes to the search index: these are somebody else's results, and indexing
-them is a separate decision with its own quality question.
+Nothing here writes to the search index; Combined Search does that with what this returns.
 """
 
 from logging import getLogger
