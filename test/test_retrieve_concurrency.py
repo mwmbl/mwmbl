@@ -5,9 +5,11 @@ concurrently with a per-thread delay.
 
 import ssl
 import threading
+from http.client import HTTPMessage
 
 import fakeredis
 import requests
+from requests.cookies import MockRequest, MockResponse
 from urllib3 import HTTPSConnectionPool
 
 from mwmbl.crawler import retrieve
@@ -110,3 +112,15 @@ def test_crawl_batch_counts_fetches_overlapping_on_a_domain(monkeypatch):
     totals = redis.hgetall(retrieve.DOMAIN_OVERLAP_KEY)
     assert totals == {b"fetches": b"3", b"overlapped": b"1", b"duplicate_domains": b"1"}
     assert int(redis.get(retrieve.DOMAIN_IN_FLIGHT_KEY.format(domain="a.test"))) == 0
+
+
+def test_session_keeps_no_cookies():
+    """Sessions live as long as their thread, so a stored cookie would leak into later fetches."""
+    headers = HTTPMessage()
+    headers["Set-Cookie"] = "tracker=1; Path=/"
+    request = requests.Request("GET", "https://example.com/").prepare()
+    session = get_session()
+
+    session.cookies.extract_cookies(MockResponse(headers), MockRequest(request))
+
+    assert len(session.cookies) == 0

@@ -4,6 +4,7 @@ import re
 import ssl
 import threading
 import time
+from http.cookiejar import DefaultCookiePolicy
 from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
@@ -105,6 +106,10 @@ def get_session() -> requests.Session:
         session = requests.Session()
         # Otherwise every request scans os.environ for proxy and CA bundle settings.
         session.trust_env = False
+        # The session outlives the fetch - for ever, on Super Search's long-lived executor - so
+        # a stored cookie would grow without bound and be sent on other users' fetches. An
+        # empty allowlist refuses every cookie, as a fresh requests.get per fetch did.
+        session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
         session.mount("https://", SharedContextAdapter())
         _thread_local.session = session
     return _thread_local.session
