@@ -212,10 +212,9 @@ def _join(user, tier):
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
 @pytest.mark.parametrize(
     "tier, limit",
-    [(None, 100), (MembershipTier.SPROUT, 100), (MembershipTier.SAPLING, 1_000), (MembershipTier.CANOPY, 1_000)],
+    [(None, 30), (MembershipTier.SPROUT, 300), (MembershipTier.SAPLING, 1_500), (MembershipTier.CANOPY, 1_500)],
 )
 def test_the_limit_is_set_by_the_membership_tier(client, user, access_token, fresh_quota, stub_sources, tier, limit):
     stub_sources()
@@ -233,7 +232,6 @@ def test_the_limit_is_set_by_the_membership_tier(client, user, access_token, fre
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
 def test_the_usage_endpoint_reports_the_members_quota(client, user, access_token, fresh_quota):
     _join(user, MembershipTier.SAPLING)
     cache.set(_combined_search_monthly_key(user.id), 7, timeout=3600)
@@ -241,15 +239,14 @@ def test_the_usage_endpoint_reports_the_members_quota(client, user, access_token
     response = client.get(USAGE_URL, HTTP_AUTHORIZATION=f"Bearer {access_token}")
 
     assert response.status_code == 200
-    assert response.json() == {"monthly_usage": 7, "monthly_limit": 1_000}
+    assert response.json() == {"monthly_usage": 7, "monthly_limit": 1_500}
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=100)
 def test_the_usage_endpoint_reports_the_default_quota_for_a_non_member(client, access_token, fresh_quota):
     response = client.get(USAGE_URL, HTTP_AUTHORIZATION=f"Bearer {access_token}")
 
-    assert response.json() == {"monthly_usage": 0, "monthly_limit": 100}
+    assert response.json() == {"monthly_usage": 0, "monthly_limit": 30}
 
 
 @pytest.mark.django_db

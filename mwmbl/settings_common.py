@@ -292,7 +292,7 @@ CURRENT_AGREEMENT_VERSIONS = {
 # ranks the union with its own LTR model. Gated behind login, like Super Search, which it is
 # meant to replace. This is the monthly limit for signed-in users without a membership;
 # member tiers get more - see mwmbl.membership.COMBINED_SEARCH_MONTHLY_LIMITS.
-COMBINED_SEARCH_MONTHLY_LIMIT = 100
+COMBINED_SEARCH_MONTHLY_LIMIT = 30
 # Its own model artifact, so Combined Search can be retrained on the pooled candidate set
 # without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
 COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"

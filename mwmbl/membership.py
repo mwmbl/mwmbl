@@ -60,10 +60,11 @@ def tier_for_product(product_id: str) -> MembershipTier | None:
 
 
 # Combined Search queries a month for web (JWT) callers, by tier. Signed-in users without a
-# membership, and tiers not listed, get COMBINED_SEARCH_MONTHLY_LIMIT.
+# membership get COMBINED_SEARCH_MONTHLY_LIMIT.
 COMBINED_SEARCH_MONTHLY_LIMITS = {
-    MembershipTier.SAPLING: 1_000,
-    MembershipTier.CANOPY: 1_000,
+    MembershipTier.SPROUT: 300,
+    MembershipTier.SAPLING: 1_500,
+    MembershipTier.CANOPY: 1_500,
 }
 
 
