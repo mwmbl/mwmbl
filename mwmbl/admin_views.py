@@ -22,6 +22,7 @@ from background_task.models import CompletedTask, Task
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.cache import cache
+from django.db.models import F, OuterRef, Q, Subquery
 from django.shortcuts import render
 from redis import RedisError
 
@@ -37,7 +38,7 @@ from mwmbl.indexer.blacklist_snapshot import (
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
 from mwmbl.membership import TIERS, combined_search_monthly_limit
-from mwmbl.models import Membership, UserBilling
+from mwmbl.models import ApiKey, Membership, MwmblUser
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -179,44 +180,60 @@ def blacklist_status_view(request):
     return render(request, "admin/blacklist_status.html", context)
 
 
-def _api_customers() -> list[dict]:
-    """Users with a Polar usage subscription, whether or not their spend limit is above $0.
+def _api_users() -> list[dict]:
+    """Users holding a search API key, plus anyone with a Polar usage subscription.
 
-    A subscriber at $0 has given card details but is still hard-capped at the free
-    allowance, which is worth seeing next to the ones actually being billed.
+    Subscribers are included even without a key, because they are still being billed for
+    the month's usage until it is reported. A subscriber at $0 has given card details but
+    is still hard-capped at the free allowance.
     """
-    billings = list(
-        UserBilling.objects.exclude(polar_subscription_id="")
-        .select_related("user")
-        .order_by("-max_monthly_spend_cents")
+    last_key_use = (
+        ApiKey.objects.filter(user=OuterRef("pk"), scopes__contains=[ApiKey.Scope.SEARCH])
+        .order_by(F("last_used").desc(nulls_last=True))
+        .values("last_used")[:1]
+    )
+    users = list(
+        MwmblUser.objects.filter(
+            Q(apikey__scopes__contains=[ApiKey.Scope.SEARCH]) | Q(billing__polar_subscription_id__gt="")
+        )
+        .distinct()
+        .select_related("billing")
+        .annotate(last_key_use=Subquery(last_key_use))
     )
     # One round trip for every counter rather than one per row.
-    usage_keys = {billing.user_id: quota._monthly_key(billing.user_id) for billing in billings}
+    usage_keys = {user.id: quota._monthly_key(user.id) for user in users}
     usage_by_key = cache.get_many(list(usage_keys.values()))
 
-    customers = []
-    for billing in billings:
-        usage = usage_by_key.get(usage_keys[billing.user_id], 0)
-        spend_cents = billing.max_monthly_spend_cents
-        if spend_cents == 0:
+    api_users = []
+    for user in users:
+        usage = usage_by_key.get(usage_keys[user.id], 0)
+        billing = getattr(user, "billing", None)
+        subscribed = billing is not None and billing.polar_subscription_id != ""
+        spend_cents = billing.max_monthly_spend_cents if billing else 0
+        if not subscribed:
+            status = "no subscription"
+        elif spend_cents == 0:
             status = "free"
         elif billing.cancel_at_period_end:
             status = "canceling"
         else:
             status = "active"
-        customers.append(
+        api_users.append(
             {
-                "user": billing.user,
+                "user": user,
                 "status": status,
+                "subscribed": subscribed,
                 "max_monthly_spend_cents": spend_cents,
                 "monthly_cap": pricing.effective_monthly_request_cap(spend_cents),
                 "usage": usage,
                 "estimated_cost_cents": pricing.estimated_cost_cents(usage),
-                "current_period_end": billing.current_period_end,
-                "polar_customer_id": billing.polar_customer_id,
+                "last_key_use": user.last_key_use,
+                "current_period_end": billing.current_period_end if billing else None,
+                "polar_customer_id": billing.polar_customer_id if billing else "",
             }
         )
-    return customers
+    api_users.sort(key=lambda api_user: (api_user["estimated_cost_cents"], api_user["usage"]), reverse=True)
+    return api_users
 
 
 def _members() -> list[dict]:
@@ -259,15 +276,16 @@ def _tier_summary(members: list[dict]) -> list[dict]:
 
 @staff_member_required
 def paying_users_view(request):
-    api_customers = _api_customers()
+    api_users = _api_users()
     members = _members()
     tier_summary = _tier_summary(members)
     # Members still paying out the current period after cancelling are counted: they have paid.
     context = {
         "title": "Paying users",
-        "api_customers": api_customers,
-        "api_billed_count": sum(1 for customer in api_customers if customer["estimated_cost_cents"] > 0),
-        "api_estimated_revenue_cents": sum(customer["estimated_cost_cents"] for customer in api_customers),
+        "api_users": api_users,
+        "api_subscribed_count": sum(1 for api_user in api_users if api_user["subscribed"]),
+        "api_billed_count": sum(1 for api_user in api_users if api_user["estimated_cost_cents"] > 0),
+        "api_estimated_revenue_cents": sum(api_user["estimated_cost_cents"] for api_user in api_users),
         "members": members,
         "tier_summary": tier_summary,
         "membership_revenue_pence": sum(tier["monthly_revenue_pence"] for tier in tier_summary),

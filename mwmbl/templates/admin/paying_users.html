@@ -24,8 +24,8 @@
       <h2>Summary</h2>
       <table>
         <tr>
-          <td>API subscribers</td>
-          <td class="num">{{ api_customers|length }} ({{ api_billed_count }} billed this month)</td>
+          <td>API users</td>
+          <td class="num">{{ api_users|length }} ({{ api_subscribed_count }} subscribed, {{ api_billed_count }} billed this month)</td>
         </tr>
         <tr>
           <td>API estimated revenue this month</td>
@@ -43,9 +43,9 @@
     </div>
 
     <div class="module">
-      <h2>API customers</h2>
+      <h2>API users</h2>
       <p class="note">
-        Users with a Polar usage subscription. The first {{ free_keyed_monthly_limit }} requests a
+        Users with a search API key or a Polar usage subscription. The first {{ free_keyed_monthly_limit }} requests a
         month are free; beyond that they pay {{ price_per_1000_queries_cents|minor_units:"$" }} per
         1,000, up to their spend limit. Usage is this calendar month's live count.
       </p>
@@ -59,25 +59,27 @@
             <th class="num">Monthly cap</th>
             <th class="num">Usage</th>
             <th class="num">Estimated cost</th>
+            <th>Key last used</th>
             <th>Period end</th>
             <th>Polar customer</th>
           </tr>
         </thead>
         <tbody>
-          {% for customer in api_customers %}
+          {% for api_user in api_users %}
             <tr>
-              <td><a href="{% url 'admin:mwmbl_mwmbluser_change' customer.user.pk %}">{{ customer.user.username }}</a></td>
-              <td>{{ customer.user.email }}</td>
-              <td>{{ customer.status }}</td>
-              <td class="num">{{ customer.max_monthly_spend_cents|minor_units:"$" }}</td>
-              <td class="num">{{ customer.monthly_cap }}</td>
-              <td class="num{% if customer.usage >= customer.monthly_cap %} over{% endif %}">{{ customer.usage }}</td>
-              <td class="num">{{ customer.estimated_cost_cents|minor_units:"$" }}</td>
-              <td>{{ customer.current_period_end|default:"-" }}</td>
-              <td>{{ customer.polar_customer_id|default:"-" }}</td>
+              <td><a href="{% url 'admin:mwmbl_mwmbluser_change' api_user.user.pk %}">{{ api_user.user.username }}</a></td>
+              <td>{{ api_user.user.email }}</td>
+              <td>{{ api_user.status }}</td>
+              <td class="num">{{ api_user.max_monthly_spend_cents|minor_units:"$" }}</td>
+              <td class="num">{{ api_user.monthly_cap }}</td>
+              <td class="num{% if api_user.usage >= api_user.monthly_cap %} over{% endif %}">{{ api_user.usage }}</td>
+              <td class="num">{{ api_user.estimated_cost_cents|minor_units:"$" }}</td>
+              <td>{{ api_user.last_key_use|default:"-" }}</td>
+              <td>{{ api_user.current_period_end|default:"-" }}</td>
+              <td>{{ api_user.polar_customer_id|default:"-" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="9">No API subscribers.</td></tr>
+            <tr><td colspan="10">No API users.</td></tr>
           {% endfor %}
         </tbody>
       </table>

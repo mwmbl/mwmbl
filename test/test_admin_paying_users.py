@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
 from mwmbl import quota
-from mwmbl.models import Membership, UserBilling
+from mwmbl.models import ApiKey, Membership, UserBilling
 from mwmbl.templatetags.money import minor_units
 
 User = get_user_model()
@@ -41,30 +41,51 @@ def test_empty_page_renders(staff_client):
     response = staff_client.get(PAYING_USERS_URL)
 
     assert response.status_code == 200
-    assert b"No API subscribers." in response.content
+    assert b"No API users." in response.content
     assert b"No members." in response.content
 
 
-def test_api_customer_quota_usage_and_cost(staff_client):
+def test_api_subscriber_quota_usage_and_cost(staff_client):
     customer = User.objects.create_user(username="api_customer", email="api@example.com")
     UserBilling.objects.create(
         user=customer, polar_customer_id="cus_1", polar_subscription_id="sub_1", max_monthly_spend_cents=1_000
     )
     for _ in range(3_000):
         quota.increment_monthly(customer.id)
-    # Never subscribed, so not a customer at all.
-    UserBilling.objects.create(user=User.objects.create_user(username="never_paid"))
 
     response = staff_client.get(PAYING_USERS_URL)
 
-    [row] = response.context["api_customers"]
+    [row] = response.context["api_users"]
     assert row["user"] == customer
     assert row["status"] == "active"
     assert row["monthly_cap"] == 4_000
     assert row["usage"] == 3_000
     assert row["estimated_cost_cents"] == 500
+    assert response.context["api_subscribed_count"] == 1
     assert response.context["api_billed_count"] == 1
     assert response.context["api_estimated_revenue_cents"] == 500
+
+
+def test_search_key_holders_without_a_subscription_are_listed(staff_client):
+    key_holder = User.objects.create_user(username="key_holder")
+    ApiKey.objects.create(user=key_holder, key="hash_1", scopes=[ApiKey.Scope.SEARCH])
+    ApiKey.objects.create(user=key_holder, key="hash_2", scopes=[ApiKey.Scope.SEARCH, ApiKey.Scope.CRAWL])
+    crawler = User.objects.create_user(username="crawler_only")
+    ApiKey.objects.create(user=crawler, key="hash_3", scopes=[ApiKey.Scope.CRAWL])
+    # A billing row with no subscription, as a spend-limit request without checkout leaves.
+    UserBilling.objects.create(user=User.objects.create_user(username="never_paid"))
+    quota.increment_monthly(key_holder.id)
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    [row] = response.context["api_users"]
+    assert row["user"] == key_holder
+    assert row["status"] == "no subscription"
+    assert row["monthly_cap"] == 2_000
+    assert row["usage"] == 1
+    assert row["estimated_cost_cents"] == 0
+    assert response.context["api_subscribed_count"] == 0
+    assert b"crawler_only" not in response.content
     assert b"never_paid" not in response.content
 
 
