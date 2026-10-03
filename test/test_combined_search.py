@@ -9,6 +9,8 @@ atomically.
 """
 
 import threading
+from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -20,7 +22,7 @@ from ninja_jwt.tokens import RefreshToken
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl.models import ApiKey, generate_api_key
 from mwmbl.quota import _combined_search_monthly_key
-from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState
+from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
 
 User = get_user_model()
 
@@ -85,7 +87,7 @@ def stub_sources(monkeypatch):
     """
     calls = {}
 
-    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,)):
+    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), pages_indexed=1):
         def fake_staan(query, *args, **kwargs):
             calls["staan_query"] = query
             if isinstance(staan, Exception):
@@ -100,7 +102,16 @@ def stub_sources(monkeypatch):
             calls["additional_results"] = additional_results
             return retrieval + list(additional_results)
 
+        def fake_index(documents, query, path):
+            calls["indexed"] = [document.url for document in documents]
+            calls["indexed_query"] = query
+            if isinstance(pages_indexed, Exception):
+                raise pages_indexed
+            return pages_indexed
+
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
+        monkeypatch.setattr(combined_search, "index_results_against_query", fake_index)
+        monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
         # The router closed over the ranker at registration time, so the ranker instance
         # itself is what has to be patched, not the name in search_setup.
         from mwmbl.search_setup import combined_ranker
@@ -298,3 +309,69 @@ def test_an_empty_pool_is_an_empty_response_not_an_error(client, api_key, fresh_
 
     assert body["results"] == []
     assert body["number_of_results"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Indexing Staan's results
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_staan_results_are_indexed_against_the_query(client, api_key, fresh_quota, stub_sources):
+    calls = stub_sources(pages_indexed=3)
+
+    body = _get(client, api_key, query="rust").json()
+
+    assert calls["indexed"] == [STAAN_RESULT.url]
+    assert calls["indexed_query"] == "rust"
+    assert body["pages_indexed"] == 3
+
+
+@pytest.mark.django_db
+def test_blacklisted_staan_results_are_not_indexed(client, api_key, fresh_quota, stub_sources, monkeypatch):
+    """index_results_against_query bypasses index_documents' blacklist check."""
+    bad = Document("Bad", "https://badsite.test/x", "bad", 5.0, source=DocumentSource.STAAN)
+    calls = stub_sources(staan=(bad, STAAN_RESULT))
+    monkeypatch.setattr(
+        combined_search,
+        "find_blacklisted_urls",
+        lambda documents: {d.url for d in documents if urlparse(d.url).netloc == "badsite.test"},
+    )
+
+    _get(client, api_key)
+
+    assert calls["indexed"] == [STAAN_RESULT.url]
+
+
+@pytest.mark.django_db
+def test_nothing_from_staan_indexes_nothing(client, api_key, fresh_quota, stub_sources):
+    calls = stub_sources(staan=())
+
+    body = _get(client, api_key).json()
+
+    assert "indexed" not in calls
+    assert body["pages_indexed"] == 0
+
+
+@pytest.mark.django_db
+def test_a_failed_index_write_still_serves_the_results(client, api_key, fresh_quota, stub_sources):
+    stub_sources(pages_indexed=OSError("disk full"))
+
+    body = _get(client, api_key).json()
+
+    assert body["pages_indexed"] == 0
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url, STAAN_RESULT.url]
+
+
+def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
+    index_path = Path(tmp_path) / "index.tinysearch"
+    with TinyIndex.create(Document, str(index_path), num_pages=64, page_size=4096):
+        pass
+    monkeypatch.setattr(combined_search, "index_path", index_path)
+    monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
+
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 1
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 0
+
+    with TinyIndex(Document, str(index_path), "r") as index:
+        assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]

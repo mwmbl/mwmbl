@@ -18,9 +18,10 @@ There is no separate Wikipedia fetch: Staan already returns Wikipedia pages when
 relevant, and evaluation found the extra fetch roughly neutral on quality (see
 mwmbl/rankeval/combined-search-handover.md).
 
-Nothing found here is written back to the search index. Super Search indexes what it finds;
-whether third-party SERP results belong in our index is a separate question with its own
-answer, and this endpoint does not pre-empt it.
+Staan's results are written back to the search index, against the query's unigrams and
+bigrams, exactly as Super Search indexes what it finds: a page Staan found for one person's
+query then becomes a candidate for every search, plain /search/ included. The write runs
+alongside ranking, and the response reports how many new pages it added.
 """
 
 import asyncio
@@ -30,20 +31,34 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from ninja import Router
 from ninja.errors import HttpError
+from pydantic import Field
 
 from mwmbl.format import format_result_v2
+from mwmbl.indexer.index_batches import index_results_against_query
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
     increment_monthly_combined_search,
 )
 from mwmbl.search_auth import authenticate_user
+from mwmbl.search_setup import index_path
+from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.rank import find_blacklisted_urls
 from mwmbl.tinysearchengine.search import SearchResponse
 from mwmbl.tinysearchengine.staan import get_staan_results
 
 logger = getLogger(__name__)
 
 router = Router(tags=["Combined Search"])
+
+
+class CombinedSearchResponse(SearchResponse):
+    pages_indexed: int = Field(
+        description="Number of distinct new pages (URLs) added to the Mwmbl index from EUSP's "
+        "results for this search. Pages are indexed against the query's unigrams and bigrams, "
+        "so a repeated query usually adds none.",
+        examples=[3],
+    )
 
 
 DESCRIPTION = (
@@ -62,6 +77,8 @@ DESCRIPTION = (
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. Obtain a key via `POST /api/v1/platform/api-keys/`. A per-user monthly quota "
     "applies; `monthly_usage` and `monthly_limit` report it on every response.\n\n"
+    "EUSP's results are added to the Mwmbl index; `pages_indexed` reports how many new "
+    "pages that added.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
@@ -79,10 +96,31 @@ OPENAPI_EXTRA = {
 }
 
 
+def index_staan_results(query: str, staan_results: list[Document]) -> int:
+    """Index Staan's results against the query, returning the number of new pages added.
+
+    Blacklisted domains are dropped first: index_results_against_query bypasses the
+    blacklist check in index_documents, and the ranker's read-path filter only stops these
+    pages being shown, not being written.
+
+    Never raises: a failed index write costs the index its new pages, not the caller its
+    search.
+    """
+    blacklisted_urls = find_blacklisted_urls(staan_results)
+    allowed = [document for document in staan_results if document.url not in blacklisted_urls]
+    if not allowed:
+        return 0
+    try:
+        return index_results_against_query(allowed, query, str(index_path))
+    except Exception:
+        logger.exception("combined-search failed to index Staan results")
+        return 0
+
+
 def init_router(ranker) -> None:
     @router.get(
         "",
-        response=SearchResponse,
+        response=CombinedSearchResponse,
         # Handled manually in the view so both an API key and a JWT work under an async
         # view - the same reason Super Search does it this way.
         auth=None,
@@ -115,13 +153,18 @@ def init_router(ranker) -> None:
             asyncio.to_thread(ranker.retrieve, q),
             asyncio.to_thread(get_staan_results, q),
         )
-        results = await asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results)
+        # Ranking only reads what was already retrieved, so the index write can overlap it.
+        results, pages_indexed = await asyncio.gather(
+            asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results),
+            asyncio.to_thread(index_staan_results, q, staan_results),
+        )
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
-        return SearchResponse(
+        return CombinedSearchResponse(
             query=q,
             number_of_results=len(formatted),
             results=formatted,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
+            pages_indexed=pages_indexed,
         )
