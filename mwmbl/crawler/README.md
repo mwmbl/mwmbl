@@ -14,10 +14,10 @@ The crawler can be configured using the following environment variables:
 - `CRAWLER_WORKERS` (default: 2) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
 - `CRAWL_THREADS` (default: 20) - Number of threads per worker process for concurrent URL crawling (total threads = CRAWLER_WORKERS × CRAWL_THREADS)
 
-**Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 10 crawler processes × 20 threads = 200 total crawling threads, plus 1 indexing process.
+**Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 2 crawler processes × 20 threads = 40 total crawling threads, plus 1 indexing process. The queue gives each batch at most one URL per domain, so the threads of one batch never fetch pages from the same site at once.
 
 ### Rate Limiting Configuration
-- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds between crawling each URL within a batch. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
+- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds each crawl thread waits between the URLs it crawls. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
 
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats

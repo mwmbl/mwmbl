@@ -1,6 +1,7 @@
 """Tests for the SSRF guard and its wiring into fetch() and add_url()."""
 
 import socket
+from types import SimpleNamespace
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -110,10 +111,12 @@ class _FakeResponse:
 
 def test_fetch_blocks_internal_url_without_request(monkeypatch):
     calls = []
-    monkeypatch.setattr(retrieve.requests, "get", lambda *a, **k: calls.append(a) or _FakeResponse(200))
+    monkeypatch.setattr(
+        retrieve, "get_session", lambda: SimpleNamespace(get=lambda *a, **k: calls.append(a) or _FakeResponse(200))
+    )
     with pytest.raises(UnsafeURLError):
         retrieve.fetch("http://127.0.0.1/secret")
-    assert calls == [], "requests.get must not be called for an internal URL"
+    assert calls == [], "no request may be made for an internal URL"
 
 
 def test_fetch_blocks_redirect_to_internal(monkeypatch):
@@ -124,14 +127,16 @@ def test_fetch_blocks_redirect_to_internal(monkeypatch):
         # First (public) hop redirects to an internal address.
         return _FakeResponse(301, headers={"Location": "http://127.0.0.1/"}, is_redirect=True)
 
-    monkeypatch.setattr(retrieve.requests, "get", fake_get)
+    monkeypatch.setattr(retrieve, "get_session", lambda: SimpleNamespace(get=fake_get))
     with pytest.raises(UnsafeURLError):
         retrieve.fetch("http://93.184.216.34/start")
     assert len(calls) == 1, "must stop after the first hop, before fetching the internal redirect target"
 
 
 def test_fetch_returns_content_for_public_url(monkeypatch):
-    monkeypatch.setattr(retrieve.requests, "get", lambda *a, **k: _FakeResponse(200, body=b"page body"))
+    monkeypatch.setattr(
+        retrieve, "get_session", lambda: SimpleNamespace(get=lambda *a, **k: _FakeResponse(200, body=b"page body"))
+    )
     status, content, resolved_url = retrieve.fetch("http://93.184.216.34/page")
     assert status == 200
     assert content == b"page body"
@@ -147,7 +152,7 @@ def test_fetch_reports_the_host_that_answered_not_the_one_we_asked(monkeypatch):
             return _FakeResponse(301, headers={"Location": "http://93.184.216.35/parked"}, is_redirect=True)
         return _FakeResponse(200, body=b"parking page")
 
-    monkeypatch.setattr(retrieve.requests, "get", fake_get)
+    monkeypatch.setattr(retrieve, "get_session", lambda: SimpleNamespace(get=fake_get))
     status, _, resolved_url = retrieve.fetch("http://93.184.216.34/start")
     assert status == 200
     assert resolved_url == "http://93.184.216.35/parked"

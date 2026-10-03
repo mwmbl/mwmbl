@@ -11,8 +11,9 @@ import fakeredis
 import pytest
 from django.test import override_settings
 
-from mwmbl.crawl import REMOTE_INDEX_CACHE_EXPIRY, Crawler, crawl_url
+from mwmbl.crawl import REMOTE_INDEX_CACHE_EXPIRY, Crawler
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent
+from mwmbl.crawler.retrieve import crawl_url
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.redis_url_queue import RedisURLQueue
@@ -153,7 +154,7 @@ class TestCrawlFunctional:
         mock_url_queue.get_batch.return_value = ["https://example.com"]
         crawler._url_queue = mock_url_queue
 
-        with patch("mwmbl.crawl.crawl_url", return_value=mock_crawl_response):
+        with patch("mwmbl.crawler.retrieve.crawl_url", return_value=mock_crawl_response):
             with patch("mwmbl.crawl.record_urls_in_database"):
                 # Should complete without errors
                 crawler.process_batch()
@@ -346,7 +347,7 @@ class TestCrawlFunctional:
         crawler._redis = fake_redis
         crawler._url_queue = url_queue
 
-        with patch("mwmbl.crawl.crawl_url", return_value=mock_crawl_response):
+        with patch("mwmbl.crawler.retrieve.crawl_url", return_value=mock_crawl_response):
             with patch("mwmbl.crawl.record_urls_in_database"):
                 # Mock Counter object for index_batches return value
                 mock_counter = Counter({"example": 1})
