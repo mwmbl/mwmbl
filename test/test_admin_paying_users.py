@@ -3,6 +3,7 @@
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from fakeredis import FakeConnection
 
 from mwmbl import quota
 from mwmbl.models import ApiKey, Membership, UserBilling
@@ -14,7 +15,16 @@ PAYING_USERS_URL = "/admin/paying-users/"
 
 
 @pytest.fixture(autouse=True)
-def clear_cache():
+def redis_cache(settings):
+    """django-redis over fakeredis rather than the test settings' locmem cache, because the
+    Seed Search stats scan the keyspace, which only django-redis supports."""
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": "redis://localhost:6379/0",
+            "OPTIONS": {"CONNECTION_POOL_KWARGS": {"connection_class": FakeConnection}},
+        }
+    }
     cache.clear()
     yield
     cache.clear()
@@ -107,6 +117,30 @@ def test_members_quota_usage_and_revenue(staff_client):
     assert counts == {"Sprout": 0, "Sapling": 1, "Canopy": 1}
     assert response.context["membership_revenue_pence"] == 2_500
     assert "£25.00".encode() in response.content
+
+
+def test_seed_search_usage_by_tier(staff_client):
+    free_user = User.objects.create_user(username="free_user")
+    sprout = User.objects.create_user(username="sprout_member")
+    Membership.objects.create(user=sprout, tier="sprout", polar_subscription_id="sub_sprout")
+    for _ in range(30):
+        quota.increment_monthly_combined_search(free_user.id)
+    for _ in range(5):
+        quota.increment_monthly_combined_search(sprout.id)
+    # Standard search usage is a different counter and must not be counted.
+    quota.increment_monthly(sprout.id)
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    seed_search = response.context["seed_search"]
+    assert seed_search["users"] == 2
+    assert seed_search["queries"] == 35
+    assert seed_search["at_limit"] == 1
+    by_tier = {tier["tier"]: tier for tier in seed_search["by_tier"]}
+    assert by_tier["free"] == {"tier": "free", "users": 1, "queries": 30, "at_limit": 1, "limit": 30}
+    assert by_tier["sprout"] == {"tier": "sprout", "users": 1, "queries": 5, "at_limit": 0, "limit": 300}
+    assert by_tier["canopy"]["users"] == 0
+    assert [row["user"].username for row in seed_search["top_users"]] == ["free_user", "sprout_member"]
 
 
 def test_minor_units():

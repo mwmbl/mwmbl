@@ -274,6 +274,44 @@ def _tier_summary(members: list[dict]) -> list[dict]:
     return summary
 
 
+SEED_SEARCH_TOP_USERS = 25
+
+
+def _seed_search_stats() -> dict:
+    """This month's Seed Search (Combined Search) usage by signed-in users, by tier.
+
+    Combined Search refuses API keys, so every counter belongs to a signed-in web user.
+    "free" is everyone without a membership, matching COMBINED_SEARCH_MONTHLY_LIMITS.
+    """
+    counts = quota.get_all_monthly_combined_search_counts()
+    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
+    users_by_id = MwmblUser.objects.in_bulk(list(counts))
+
+    tier_names = ["free"] + [tier_info.tier.value for tier_info in TIERS]
+    by_tier = {tier: {"tier": tier, "users": 0, "queries": 0, "at_limit": 0} for tier in tier_names}
+    rows = []
+    for user_id, count in counts.items():
+        tier = tier_by_user.get(user_id, "free")
+        limit = combined_search_monthly_limit(tier)
+        tier_stats = by_tier[tier]
+        tier_stats["users"] += 1
+        tier_stats["queries"] += count
+        tier_stats["at_limit"] += count >= limit
+        rows.append({"user": users_by_id[user_id], "tier": tier, "usage": count, "limit": limit})
+
+    for tier_stats in by_tier.values():
+        tier_stats["limit"] = combined_search_monthly_limit(tier_stats["tier"])
+
+    rows.sort(key=lambda row: row["usage"], reverse=True)
+    return {
+        "users": len(counts),
+        "queries": sum(counts.values()),
+        "at_limit": sum(tier_stats["at_limit"] for tier_stats in by_tier.values()),
+        "by_tier": list(by_tier.values()),
+        "top_users": rows[:SEED_SEARCH_TOP_USERS],
+    }
+
+
 @staff_member_required
 def paying_users_view(request):
     api_users = _api_users()
@@ -288,6 +326,7 @@ def paying_users_view(request):
         "api_estimated_revenue_cents": sum(api_user["estimated_cost_cents"] for api_user in api_users),
         "members": members,
         "tier_summary": tier_summary,
+        "seed_search": _seed_search_stats(),
         "membership_revenue_pence": sum(tier["monthly_revenue_pence"] for tier in tier_summary),
         "free_keyed_monthly_limit": pricing.FREE_KEYED_MONTHLY_LIMIT,
         "price_per_1000_queries_cents": pricing.PRICE_PER_1000_QUERIES_CENTS,

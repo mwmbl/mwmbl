@@ -7,6 +7,64 @@
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">Home</a>
     &rsaquo; Paying users
+    <div class="module">
+      <h2>Seed Search this month</h2>
+      <p class="note">
+        Seed Search (Combined Search) is only available to signed-in users. Counts are this
+        calendar month's live counters; "free" is everyone without a membership.
+        {{ seed_search.users }} users have made {{ seed_search.queries }} queries, and
+        {{ seed_search.at_limit }} have reached their quota.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th class="num">Monthly quota</th>
+            <th class="num">Users</th>
+            <th class="num">Queries</th>
+            <th class="num">At quota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tier in seed_search.by_tier %}
+            <tr>
+              <td>{{ tier.tier|capfirst }}</td>
+              <td class="num">{{ tier.limit }}</td>
+              <td class="num">{{ tier.users }}</td>
+              <td class="num">{{ tier.queries }}</td>
+              <td class="num">{{ tier.at_limit }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module">
+      <h2>Top Seed Search users this month</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Tier</th>
+            <th class="num">Usage</th>
+            <th class="num">Quota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in seed_search.top_users %}
+            <tr>
+              <td><a href="{% url 'admin:mwmbl_mwmbluser_change' row.user.pk %}">{{ row.user.username }}</a></td>
+              <td>{{ row.tier|capfirst }}</td>
+              <td class="num{% if row.usage >= row.limit %} over{% endif %}">{{ row.usage }}</td>
+              <td class="num">{{ row.limit }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4">No Seed Search queries this month.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
   </div>
 {% endblock %}
 
@@ -144,6 +202,64 @@
             </tr>
           {% empty %}
             <tr><td colspan="9">No members.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module">
+      <h2>Seed Search this month</h2>
+      <p class="note">
+        Seed Search (Combined Search) is only available to signed-in users. Counts are this
+        calendar month's live counters; "free" is everyone without a membership.
+        {{ seed_search.users }} users have made {{ seed_search.queries }} queries, and
+        {{ seed_search.at_limit }} have reached their quota.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th class="num">Monthly quota</th>
+            <th class="num">Users</th>
+            <th class="num">Queries</th>
+            <th class="num">At quota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tier in seed_search.by_tier %}
+            <tr>
+              <td>{{ tier.tier|capfirst }}</td>
+              <td class="num">{{ tier.limit }}</td>
+              <td class="num">{{ tier.users }}</td>
+              <td class="num">{{ tier.queries }}</td>
+              <td class="num">{{ tier.at_limit }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module">
+      <h2>Top Seed Search users this month</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Tier</th>
+            <th class="num">Usage</th>
+            <th class="num">Quota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in seed_search.top_users %}
+            <tr>
+              <td><a href="{% url 'admin:mwmbl_mwmbluser_change' row.user.pk %}">{{ row.user.username }}</a></td>
+              <td>{{ row.tier|capfirst }}</td>
+              <td class="num{% if row.usage >= row.limit %} over{% endif %}">{{ row.usage }}</td>
+              <td class="num">{{ row.limit }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4">No Seed Search queries this month.</td></tr>
           {% endfor %}
         </tbody>
       </table>

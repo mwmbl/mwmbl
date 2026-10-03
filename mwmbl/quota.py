@@ -144,6 +144,19 @@ def decrement_monthly_combined_search(user_id: int) -> None:
         pass
 
 
+def get_all_monthly_combined_search_counts() -> dict[int, int]:
+    """This month's combined-search count for every user who has used it, by user id.
+
+    Scans the keyspace via django-redis, so it is for admin pages and background jobs, not
+    the search path.
+    """
+    now = datetime.now(timezone.utc)
+    keys = list(cache.iter_keys(f"combined_search:monthly:*:{now.year}:{now.month:02d}"))
+    counts_by_key = cache.get_many(keys)
+    # Keys are combined_search:monthly:<user_id>:<year>:<month>.
+    return {int(key.split(":")[2]): count for key, count in counts_by_key.items()}
+
+
 # ---------------------------------------------------------------------------
 # Key scanning (used by background jobs only — requires django-redis)
 # ---------------------------------------------------------------------------
