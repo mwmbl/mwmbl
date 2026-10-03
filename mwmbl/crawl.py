@@ -1,7 +1,6 @@
 import argparse
 import logging
 import os
-import random
 import time
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Process
@@ -35,13 +34,14 @@ from mwmbl.crawler.device import get_device_name
 from mwmbl.crawler.env_vars import (
     CRAWL_DELAY_SECONDS,
     CRAWL_SUBMIT_MODE,
+    CRAWL_THREADS,
     CRAWLER_WORKERS,
     MWMBL_API_KEY,
     MWMBL_CONTACT_INFO,
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
-from mwmbl.crawler.retrieve import CRAWLER_VERSION, USER_AGENT, crawl_url
+from mwmbl.crawler.retrieve import CRAWLER_VERSION, USER_AGENT, crawl_batch
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
@@ -200,32 +200,21 @@ class Crawler:
 
     def process_batch(self):
         """
-        Process a single batch of URLs by crawling them sequentially with rate limiting.
+        Process a single batch of URLs by crawling them concurrently with rate limiting.
 
         This function handles the core crawling workflow:
         1. Gets a batch of URLs from the Redis URL queue
-        2. Crawls each URL sequentially with configurable delay between requests
+        2. Crawls the URLs on CRAWL_THREADS threads, each waiting CRAWL_DELAY_SECONDS between URLs
         3. Records crawl results in the database for URL tracking
         4. Pushes the completed batch to Redis queue for indexing
 
-        The sequential crawling with delays respects rate limits and reduces load on target servers.
         Each batch is processed as a HashedBatch object containing metadata and crawl results.
         """
         user_id = "test"
         urls = self.url_queue.get_batch(user_id)
-        logger.info(f"Processing batch of {len(urls)} URLs")
+        logger.info(f"Processing batch of {len(urls)} URLs on {CRAWL_THREADS} threads")
 
-        # Process URLs sequentially with rate limiting
-        results = []
-        for i, url in enumerate(urls):
-            if i > 0:  # Don't delay before the first URL
-                # Add delay with 10% random fuzz
-                delay = CRAWL_DELAY_SECONDS * (0.9 + 0.2 * random.random())
-                time.sleep(delay)
-
-            result = crawl_url(url, self.redis)
-            results.append(result)
-            logger.debug("Result", result)
+        results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
 
         js_timestamp = int(time.time() * 1000)
         batch = HashedBatch.parse_obj(
