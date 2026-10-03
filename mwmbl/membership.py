@@ -23,14 +23,17 @@ TIERS = [
     TierInfo(
         tier=MembershipTier.SPROUT,
         monthly_price_pence=100,
-        perks=["Access to the members area in Matrix and Discord"],
+        perks=[
+            "Access to the members area in Matrix and Discord",
+            "300 Seed Search queries a month to enhance our index",
+        ],
     ),
     TierInfo(
         tier=MembershipTier.SAPLING,
         monthly_price_pence=500,
         perks=[
             "Everything in Sprout",
-            "1,000 Active Discovery queries a month to enhance our index",
+            "1,500 Seed Search queries a month to enhance our index",
         ],
     ),
     TierInfo(
@@ -38,7 +41,7 @@ TIERS = [
         monthly_price_pence=2_000,
         perks=[
             "Everything in Sapling",
-            "A dedicated crawler, managed for you",
+            "1 million pages a month crawled against your username",
             "Your username on the crawler leaderboard",
         ],
     ),
