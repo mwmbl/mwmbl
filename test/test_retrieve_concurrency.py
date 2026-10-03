@@ -89,3 +89,24 @@ def test_crawl_batch_without_delay_never_sleeps(monkeypatch):
     )
 
     assert sleeps == []
+
+
+def test_crawl_batch_counts_fetches_overlapping_on_a_domain(monkeypatch):
+    # Both crawls of a.test wait for each other, so the second always starts while the
+    # first is in flight; b.test never overlaps.
+    both_a_in_flight = threading.Barrier(2, timeout=5)
+
+    def fake_crawl_url(url, redis):
+        if "a.test" in url:
+            both_a_in_flight.wait()
+        return {"url": url}
+
+    monkeypatch.setattr(retrieve, "crawl_url", fake_crawl_url)
+    redis = fakeredis.FakeStrictRedis()
+    urls = ["https://a.test/1", "https://a.test/2", "https://b.test/"]
+
+    crawl_batch(urls, num_threads=3, delay_seconds=0.0, redis=redis)
+
+    totals = redis.hgetall(retrieve.DOMAIN_OVERLAP_KEY)
+    assert totals == {b"fetches": b"3", b"overlapped": b"1", b"duplicate_domains": b"1"}
+    assert int(redis.get(retrieve.DOMAIN_IN_FLIGHT_KEY.format(domain="a.test"))) == 0

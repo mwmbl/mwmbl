@@ -1,9 +1,9 @@
 import json
 import math
+import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
-from random import Random
 from typing import Callable
 
 from redis import Redis
@@ -18,7 +18,6 @@ from mwmbl.utils import parse_url
 
 MAX_TIME_DELTA = timedelta(days=100000)
 
-random = Random(1)
 logger = getLogger(__name__)
 
 
@@ -119,6 +118,9 @@ class RedisURLQueue:
             top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
             top_other_domains = top_scoring_domains - DOMAINS.keys()
 
+            # The stdlib's shared random instance, which Python reseeds in every forked child. A
+            # Random of our own, seeded or not, would be copied into each crawl worker, and every
+            # worker would then pick the same domains and seed URL in lockstep.
             domains = list(CORE_DOMAINS)
             top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
             if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
@@ -133,14 +135,20 @@ class RedisURLQueue:
 
             seed_domains = list(DOMAINS.keys() | curated_domains)
 
-        domains = [domain for domain in domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
-        logger.info(f"Getting batch from domains {domains}")
-
         # Add a random url as the root domain of one of DOMAINS. The seed needs the same
         # blacklist filter as the rest: it is a URL we are about to fetch.
         seed_domains = [domain for domain in seed_domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
         random_domain = random.choice(seed_domains)
         urls = [f"https://{random_domain}/"]
+
+        # At most one URL per domain, since the batch is crawled concurrently: the samples
+        # above can pick a core domain again, and the seed can repeat any of them.
+        domains = [
+            domain
+            for domain in dict.fromkeys(domains)
+            if domain != random_domain and not self.blacklist_provider.is_domain_blacklisted(domain)
+        ]
+        logger.info(f"Getting batch from domains {domains}")
 
         # Pop the highest scoring URL from each domain
         for domain in domains:

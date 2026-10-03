@@ -60,6 +60,14 @@ USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact 
 ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
 ROBOTS_CACHE_ERROR_TTL_SECONDS = 60 * 60
 
+# Diagnostic: how often a fetch starts while another fetch to the same domain is in flight,
+# across every worker sharing this Redis. Read the totals with HGETALL crawl-domain-overlap.
+DOMAIN_IN_FLIGHT_KEY = "crawl-in-flight-{domain}"
+DOMAIN_OVERLAP_KEY = "crawl-domain-overlap"
+# Only matters if a worker dies mid-crawl and never decrements: the stale count then
+# lingers until the domain goes this long without a fetch starting.
+DOMAIN_IN_FLIGHT_EXPIRY_SECONDS = 120
+
 logger = getLogger(__name__)
 
 # One verifying context for every fetch. Left to itself, requests builds a fresh context for
@@ -500,11 +508,47 @@ def crawl_batch(urls: list[str], num_threads: int, delay_seconds: float, redis: 
     Each thread waits delay_seconds, with 10% random fuzz, between the URLs it crawls.
     """
 
+    overlaps = []
+
     def crawl_after_delay(url: str) -> dict:
         if delay_seconds and getattr(_thread_local, "has_crawled", False):
             time.sleep(delay_seconds * (0.9 + 0.2 * random.random()))
         _thread_local.has_crawled = True
-        return crawl_url(url, redis)
+        result, overlap = crawl_counting_overlap(url, redis)
+        overlaps.append(overlap)
+        return result
 
     with ThreadPool(num_threads) as pool:
-        return pool.map(crawl_after_delay, urls)
+        results = pool.map(crawl_after_delay, urls)
+
+    record_overlap(urls, overlaps, redis)
+    return results
+
+
+def crawl_counting_overlap(url: str, redis: Redis) -> tuple[dict, int]:
+    """Crawl url, also returning how many other crawls of its domain were in flight as it started."""
+    key = DOMAIN_IN_FLIGHT_KEY.format(domain=urlparse(url).netloc)
+    in_flight, _ = redis.pipeline().incr(key).expire(key, DOMAIN_IN_FLIGHT_EXPIRY_SECONDS).execute()
+    try:
+        return crawl_url(url, redis), in_flight - 1
+    finally:
+        redis.decr(key)
+
+
+def record_overlap(urls: list[str], overlaps: list[int], redis: Redis):
+    """Add a batch to the overlap totals.
+
+    duplicate_domains counts URLs whose domain already appeared earlier in the same batch, so
+    overlapped minus duplicate_domains is a lower bound on the overlap between batches.
+    """
+    num_domains = len({urlparse(url).netloc for url in urls})
+    duplicate_domains = len(urls) - num_domains
+    overlapped = sum(1 for overlap in overlaps if overlap > 0)
+    max_overlap = max(overlaps, default=0)
+    logger.info(
+        f"Domain overlap: {overlapped} of {len(urls)} fetches started while another fetch to the same "
+        f"domain was in flight (max {max_overlap} others); {duplicate_domains} duplicate domains in batch"
+    )
+    redis.pipeline().hincrby(DOMAIN_OVERLAP_KEY, "fetches", len(urls)).hincrby(
+        DOMAIN_OVERLAP_KEY, "overlapped", overlapped
+    ).hincrby(DOMAIN_OVERLAP_KEY, "duplicate_domains", duplicate_domains).execute()
