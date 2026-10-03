@@ -114,6 +114,16 @@ def test_list_tiers_is_public_and_ordered(api_client):
 
 
 @pytest.mark.django_db
+def test_tier_perks_contain_the_phrases_the_front_end_bolds(api_client):
+    response = api_client.get("/api/v1/platform/membership/tiers")
+
+    perks_by_tier = {t["tier"]: " ".join(t["perks"]) for t in response.json()}
+    assert "300 Seed Search queries" in perks_by_tier["sprout"]
+    assert "1,500 Seed Search queries" in perks_by_tier["sapling"]
+    assert "1 million pages" in perks_by_tier["canopy"]
+
+
+@pytest.mark.django_db
 def test_get_membership_not_a_member_returns_404(api_client, user):
     response = api_client.get("/api/v1/platform/membership", **auth_headers(user))
 
