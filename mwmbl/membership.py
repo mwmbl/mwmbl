@@ -59,14 +59,6 @@ def tier_for_product(product_id: str) -> MembershipTier | None:
     return tiers_by_product.get(product_id)
 
 
-# Combined Search queries a month for web (JWT) callers, by tier. Signed-in users without a
-# membership get COMBINED_SEARCH_MONTHLY_LIMIT.
-COMBINED_SEARCH_MONTHLY_LIMITS = {
-    MembershipTier.SPROUT: 300,
-    MembershipTier.SAPLING: 1_500,
-    MembershipTier.CANOPY: 1_500,
-}
-
-
 def combined_search_monthly_limit(tier: str | None) -> int:
-    return COMBINED_SEARCH_MONTHLY_LIMITS.get(tier, settings.COMBINED_SEARCH_MONTHLY_LIMIT)
+    """Combined Search queries a month for a web (JWT) caller with this membership tier."""
+    return settings.COMBINED_SEARCH_MONTHLY_LIMITS[tier or "free"]

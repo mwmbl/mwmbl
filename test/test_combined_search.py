@@ -160,7 +160,7 @@ def test_an_api_key_is_refused_until_keyed_access_is_billed(client, api_key, fre
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
 def test_the_response_reports_the_quota(client, access_token, fresh_quota, stub_sources):
     stub_sources()
 
@@ -171,7 +171,7 @@ def test_the_response_reports_the_quota(client, access_token, fresh_quota, stub_
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
 def test_combined_search_quota_enforced(client, user, access_token, fresh_quota, stub_sources):
     stub_sources()
     cache.set(_combined_search_monthly_key(user.id), 10, timeout=3600)
@@ -180,7 +180,7 @@ def test_combined_search_quota_enforced(client, user, access_token, fresh_quota,
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
 def test_a_rejected_request_refunds_its_increment(client, user, access_token, fresh_quota, stub_sources):
     """The counter is incremented before it is checked, so that concurrent requests cannot
     both pass. A rejected request must give that increment back, or being over the limit
@@ -195,7 +195,7 @@ def test_a_rejected_request_refunds_its_increment(client, user, access_token, fr
 
 
 @pytest.mark.django_db
-@override_settings(COMBINED_SEARCH_MONTHLY_LIMIT=10)
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
 def test_the_quota_counter_is_its_own(client, user, access_token, fresh_quota, stub_sources):
     """Combined Search must not spend the standard-search or Super Search allowance."""
     from mwmbl.quota import get_monthly_count, get_monthly_super_search_count
