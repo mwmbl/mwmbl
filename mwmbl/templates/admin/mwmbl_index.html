@@ -14,6 +14,10 @@
         <th scope="row"><a href="{% url 'blacklist_status' %}">Blacklist status</a></th>
         <td>The published snapshot, the purge queue and the tasks that maintain them.</td>
       </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'search_traffic' %}">Search traffic</a></th>
+        <td>Requests per endpoint and per day, and the user agents that sent them.</td>
+      </tr>
     </table>
   </div>
 {% endblock %}
