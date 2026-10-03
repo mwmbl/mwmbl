@@ -31,7 +31,13 @@ from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
 from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
 from mwmbl.moderation.model import reset_model_cache
 from mwmbl.moderation.suggest import refresh_suggestion
-from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
+from mwmbl.quota import (
+    MONTHLY_TTL,
+    _combined_search_api_monthly_key,
+    _monthly_key,
+    get_all_combined_search_api_monthly_keys,
+    get_all_monthly_keys,
+)
 from mwmbl.tinysearchengine.copy_index import copy_pages
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
@@ -98,37 +104,44 @@ def sync_search_counts():
     so Postgres stays current as a durable backup.
     """
     now = datetime.now(timezone.utc)
+    buckets = list(UsageBucket.objects.filter(year=now.year, month=now.month))
+    # Standard search and keyed Combined Search have a counter each, stored in their own field.
+    counters = [
+        (_monthly_key, get_all_monthly_keys, "count"),
+        (_combined_search_api_monthly_key, get_all_combined_search_api_monthly_keys, "combined_search_count"),
+    ]
+    for key_for, get_all_keys, field in counters:
+        # Step 1: seed Redis from Postgres, taking the max of the two values.
+        # Postgres may lag behind (up to one sync interval), so if Redis already has
+        # a higher count we keep it. If Redis was cleared (restart), the Postgres
+        # value restores the baseline; any requests made since the restart are
+        # already counted in Redis and will be included via max().
+        for bucket in buckets:
+            stored_count = getattr(bucket, field)
+            key = key_for(bucket.user_id, year=now.year, month=now.month)
+            if not cache.add(key, stored_count, timeout=MONTHLY_TTL):
+                # Key already exists — only update if the Postgres value is higher
+                current = cache.get(key, default=0)
+                if stored_count > current:
+                    cache.set(key, stored_count, timeout=MONTHLY_TTL)
 
-    # Step 1: seed Redis from Postgres, taking the max of the two values.
-    # Postgres may lag behind (up to one sync interval), so if Redis already has
-    # a higher count we keep it. If Redis was cleared (restart), the Postgres
-    # value restores the baseline; any requests made since the restart are
-    # already counted in Redis and will be included via max().
-    for bucket in UsageBucket.objects.filter(year=now.year, month=now.month):
-        key = _monthly_key(bucket.user_id, year=now.year, month=now.month)
-        if not cache.add(key, bucket.count, timeout=MONTHLY_TTL):
-            # Key already exists — only update if the Postgres value is higher
-            current = cache.get(key, default=0)
-            if bucket.count > current:
-                cache.set(key, bucket.count, timeout=MONTHLY_TTL)
-
-    # Step 2: sync live Redis counters back to Postgres
-    for key in get_all_monthly_keys():
-        # key format: search:monthly:{user_id}:{year}:{month}
-        try:
-            parts = key.split(":")
-            user_id = int(parts[2])
-            year = int(parts[3])
-            month = int(parts[4])
-            count = cache.get(key, default=0)
-            UsageBucket.objects.update_or_create(
-                user_id=user_id,
-                year=year,
-                month=month,
-                defaults={"count": count},
-            )
-        except Exception:
-            logger.exception("Error syncing search count for key %s", key)
+        # Step 2: sync live Redis counters back to Postgres
+        for key in get_all_keys():
+            # key format: {prefix}:monthly:{user_id}:{year}:{month}
+            try:
+                parts = key.split(":")
+                user_id = int(parts[2])
+                year = int(parts[3])
+                month = int(parts[4])
+                count = cache.get(key, default=0)
+                UsageBucket.objects.update_or_create(
+                    user_id=user_id,
+                    year=year,
+                    month=month,
+                    defaults={field: count},
+                )
+            except Exception:
+                logger.exception("Error syncing search count for key %s", key)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +194,7 @@ def purge_blacklisted_from_queue():
 def report_usage_to_polar():
     """
     Reports each user's billable overage (requests beyond the free 2,000/month)
-    to Polar as usage events, once per hour.
+    and keyed Combined Search requests to Polar as usage events, once per hour.
 
     Only the delta since the last report is sent (UsageBucket.reported_overage
     tracks how much has already been ingested), so re-runs are idempotent and a
@@ -200,18 +213,24 @@ def report_usage_to_polar():
             continue  # no Polar customer yet — nothing to report
 
         total_overage = pricing.billable_overage(bucket.count)
-        delta = total_overage - bucket.reported_overage
-        if delta <= 0:
+        search_delta = total_overage - bucket.reported_overage
+        # Keyed Combined Search has no free allowance, so every request is billable. It is
+        # its own event so that Polar can meter and price it apart from standard search.
+        combined_search_delta = bucket.combined_search_count - bucket.reported_combined_search
+        if search_delta <= 0 and combined_search_delta <= 0:
             continue
 
-        events.append(
-            {
-                "name": "search_request",
-                "external_customer_id": str(bucket.user.id),
-                "metadata": {"quantity": delta},
-            }
-        )
-        bucket.reported_overage = total_overage
+        for name, delta in [("search_request", search_delta), ("combined_search_request", combined_search_delta)]:
+            if delta > 0:
+                events.append(
+                    {
+                        "name": name,
+                        "external_customer_id": str(bucket.user.id),
+                        "metadata": {"quantity": delta},
+                    }
+                )
+        bucket.reported_overage = max(total_overage, bucket.reported_overage)
+        bucket.reported_combined_search = max(bucket.combined_search_count, bucket.reported_combined_search)
         buckets_to_update.append(bucket)
 
     if not events:
@@ -224,7 +243,7 @@ def report_usage_to_polar():
         logger.exception("Error reporting usage to Polar")
         return
 
-    UsageBucket.objects.bulk_update(buckets_to_update, ["reported_overage"])
+    UsageBucket.objects.bulk_update(buckets_to_update, ["reported_overage", "reported_combined_search"])
 
 
 # ---------------------------------------------------------------------------
