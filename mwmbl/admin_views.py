@@ -1,4 +1,6 @@
-"""Admin-only visibility on the blacklist filtering state that lives in Redis.
+"""Admin-only status pages: the blacklist filtering state in Redis, and paying users.
+
+The blacklist page gives visibility on the blacklist filtering state that lives in Redis.
 
 Retrieval filtering, the snapshot refresh and the index purge are three processes talking
 to each other through Redis keys, and none of that state is reachable from the Django
@@ -19,9 +21,11 @@ from logging import getLogger
 from background_task.models import CompletedTask, Task
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
+from django.core.cache import cache
 from django.shortcuts import render
 from redis import RedisError
 
+from mwmbl import pricing, quota
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -32,6 +36,8 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
+from mwmbl.membership import TIERS, combined_search_monthly_limit
+from mwmbl.models import Membership, UserBilling
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -171,3 +177,101 @@ def blacklist_status_view(request):
 
     context["tasks"] = _task_status()
     return render(request, "admin/blacklist_status.html", context)
+
+
+def _api_customers() -> list[dict]:
+    """Users with a Polar usage subscription, whether or not their spend limit is above $0.
+
+    A subscriber at $0 has given card details but is still hard-capped at the free
+    allowance, which is worth seeing next to the ones actually being billed.
+    """
+    billings = list(
+        UserBilling.objects.exclude(polar_subscription_id="")
+        .select_related("user")
+        .order_by("-max_monthly_spend_cents")
+    )
+    # One round trip for every counter rather than one per row.
+    usage_keys = {billing.user_id: quota._monthly_key(billing.user_id) for billing in billings}
+    usage_by_key = cache.get_many(list(usage_keys.values()))
+
+    customers = []
+    for billing in billings:
+        usage = usage_by_key.get(usage_keys[billing.user_id], 0)
+        spend_cents = billing.max_monthly_spend_cents
+        if spend_cents == 0:
+            status = "free"
+        elif billing.cancel_at_period_end:
+            status = "canceling"
+        else:
+            status = "active"
+        customers.append(
+            {
+                "user": billing.user,
+                "status": status,
+                "max_monthly_spend_cents": spend_cents,
+                "monthly_cap": pricing.effective_monthly_request_cap(spend_cents),
+                "usage": usage,
+                "estimated_cost_cents": pricing.estimated_cost_cents(usage),
+                "current_period_end": billing.current_period_end,
+                "polar_customer_id": billing.polar_customer_id,
+            }
+        )
+    return customers
+
+
+def _members() -> list[dict]:
+    price_by_tier = {tier_info.tier.value: tier_info.monthly_price_pence for tier_info in TIERS}
+    memberships = list(Membership.objects.select_related("user").order_by("-started"))
+    usage_keys = {
+        membership.user_id: quota._combined_search_monthly_key(membership.user_id) for membership in memberships
+    }
+    usage_by_key = cache.get_many(list(usage_keys.values()))
+
+    return [
+        {
+            "user": membership.user,
+            "tier": membership.get_tier_display(),
+            "monthly_price_pence": price_by_tier[membership.tier],
+            "combined_search_limit": combined_search_monthly_limit(membership.tier),
+            "combined_search_usage": usage_by_key.get(usage_keys[membership.user_id], 0),
+            "current_period_end": membership.current_period_end,
+            "cancel_at_period_end": membership.cancel_at_period_end,
+            "started": membership.started,
+        }
+        for membership in memberships
+    ]
+
+
+def _tier_summary(members: list[dict]) -> list[dict]:
+    summary = []
+    for tier_info in TIERS:
+        tier_members = [member for member in members if member["tier"] == tier_info.tier.label]
+        summary.append(
+            {
+                "tier": tier_info.tier.label,
+                "count": len(tier_members),
+                "monthly_price_pence": tier_info.monthly_price_pence,
+                "monthly_revenue_pence": len(tier_members) * tier_info.monthly_price_pence,
+            }
+        )
+    return summary
+
+
+@staff_member_required
+def paying_users_view(request):
+    api_customers = _api_customers()
+    members = _members()
+    tier_summary = _tier_summary(members)
+    # Members still paying out the current period after cancelling are counted: they have paid.
+    context = {
+        "title": "Paying users",
+        "api_customers": api_customers,
+        "api_billed_count": sum(1 for customer in api_customers if customer["estimated_cost_cents"] > 0),
+        "api_estimated_revenue_cents": sum(customer["estimated_cost_cents"] for customer in api_customers),
+        "members": members,
+        "tier_summary": tier_summary,
+        "membership_revenue_pence": sum(tier["monthly_revenue_pence"] for tier in tier_summary),
+        "free_keyed_monthly_limit": pricing.FREE_KEYED_MONTHLY_LIMIT,
+        "price_per_1000_queries_cents": pricing.PRICE_PER_1000_QUERIES_CENTS,
+    }
+    return render(request, "admin/paying_users.html", context)
