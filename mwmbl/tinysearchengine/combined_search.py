@@ -32,14 +32,18 @@ from ninja import Router
 from ninja.errors import HttpError
 from pydantic import Field
 
+from mwmbl import pricing
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_results_against_query
 from mwmbl.membership import combined_search_monthly_limit
-from mwmbl.models import Membership
+from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
+    decrement_monthly_combined_search_api,
+    get_monthly_count,
     increment_monthly_combined_search,
+    increment_monthly_combined_search_api,
 )
 from mwmbl.search_auth import authenticate_user
 from mwmbl.search_setup import index_path
@@ -75,9 +79,13 @@ DESCRIPTION = (
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
-    "Authentication is required with a JWT bearer token. A per-user monthly quota applies, "
-    "set by the user's membership tier; `monthly_usage` and `monthly_limit` report it on "
-    "every response. Access with an API key (`X-API-Key`) is not available yet.\n\n"
+    "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
+    "token. With an API key every request is billed - there is no free allowance - at the "
+    "same price as `/api/v2/search/` overage, within your monthly spend limit, which "
+    "standard search and Combined Search share. Obtain a key via "
+    "`POST /api/v1/platform/api-keys/`. With a JWT, a monthly quota set by your membership "
+    "tier applies instead. `monthly_usage` and `monthly_limit` report whichever applies on "
+    "every response.\n\n"
     "EUSP's results are added to the Mwmbl index; `pages_indexed` reports how many new "
     "pages that added.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
@@ -118,6 +126,22 @@ def index_staan_results(query: str, staan_results: list[Document]) -> int:
         return 0
 
 
+def _keyed_monthly_limit(user) -> int:
+    """Keyed Combined Search requests the user's spend limit allows this month.
+
+    There is no free allowance, so a user without a spend limit is refused outright.
+    """
+    billing = UserBilling.objects.filter(user=user).first()
+    spend_cents = billing.max_monthly_spend_cents if billing else 0
+    if spend_cents <= 0:
+        raise HttpError(
+            402,
+            "Combined Search via API key is billed from the first request. Set a monthly spend "
+            "limit at https://mwmbl.org/pricing to use it.",
+        )
+    return pricing.combined_search_monthly_cap(spend_cents, get_monthly_count(user.id))
+
+
 def init_router(ranker) -> None:
     @router.get(
         "",
@@ -131,28 +155,34 @@ def init_router(ranker) -> None:
     )
     async def combined_search(request, q: str):
         user = await authenticate_user(request)
-        # authenticate_user takes the API key over a bearer token whenever the header is
-        # present, so this is how the caller authenticated. Combined Search costs us on
-        # every request, so it has no free API tier; keyed access comes with metered billing.
-        if request.headers.get("X-API-Key"):
-            raise HttpError(402, "Combined Search via API key requires a paid plan, which is not available yet.")
 
         if not await sync_to_async(check_rate_limit)(user.id):
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
 
-        tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
-        monthly_limit = combined_search_monthly_limit(tier)
+        # authenticate_user takes the API key over a bearer token whenever the header is
+        # present, so this is how the caller authenticated. Keyed requests are billed against
+        # the spend limit; web requests use the membership quota. Each has its own counter.
+        if request.headers.get("X-API-Key"):
+            monthly_limit = await sync_to_async(_keyed_monthly_limit)(user)
+            increment, decrement = increment_monthly_combined_search_api, decrement_monthly_combined_search_api
+            over_limit_message = (
+                f"Combined Search monthly quota exceeded: your spend limit allows {monthly_limit:,} "
+                "requests this month. Increase your monthly spend limit at https://mwmbl.org/pricing "
+                "to allow more."
+            )
+        else:
+            tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
+            monthly_limit = combined_search_monthly_limit(tier)
+            increment, decrement = increment_monthly_combined_search, decrement_monthly_combined_search
+            over_limit_message = f"Combined Search monthly quota exceeded: {monthly_limit} requests per month."
+
         # Increment first, then check: this makes the quota check atomic under concurrent
         # requests (a check-then-increment would let racing requests both pass). Refund the
         # increment if the caller is over the limit.
-        monthly_usage = await sync_to_async(increment_monthly_combined_search)(user.id)
+        monthly_usage = await sync_to_async(increment)(user.id)
         if monthly_usage > monthly_limit:
-            await sync_to_async(decrement_monthly_combined_search)(user.id)
-            raise HttpError(
-                429,
-                f"Combined Search monthly quota exceeded: {monthly_limit} requests per month "
-                f"and you have used {monthly_usage - 1}.",
-            )
+            await sync_to_async(decrement)(user.id)
+            raise HttpError(429, over_limit_message)
 
         # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
         # rather than after it. get_staan_results returns [] on failure by itself.

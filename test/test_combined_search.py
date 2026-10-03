@@ -20,9 +20,16 @@ from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 
 import mwmbl.tinysearchengine.combined_search as combined_search
+from mwmbl import pricing
 from mwmbl.membership import MembershipTier
-from mwmbl.models import ApiKey, Membership, generate_api_key
-from mwmbl.quota import _combined_search_monthly_key
+from mwmbl.models import ApiKey, Membership, UserBilling, generate_api_key
+from mwmbl.quota import (
+    _combined_search_api_monthly_key,
+    _combined_search_monthly_key,
+    _monthly_key,
+    get_monthly_combined_search_api_count,
+    get_monthly_count,
+)
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
 
 User = get_user_model()
@@ -149,14 +156,83 @@ def test_combined_search_with_jwt(client, access_token, fresh_quota, stub_source
     assert response.json()["query"] == "tokio"
 
 
+def _get_with_key(client, api_key):
+    return client.get(f"{URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key)
+
+
+@pytest.fixture
+def fresh_keyed_quota(user):
+    keys = [_combined_search_api_monthly_key(user.id), _monthly_key(user.id)]
+    cache.delete_many(keys)
+    yield
+    cache.delete_many(keys)
+
+
 @pytest.mark.django_db
-def test_an_api_key_is_refused_until_keyed_access_is_billed(client, api_key, fresh_quota, stub_sources):
+def test_an_api_key_without_a_spend_limit_is_refused(client, api_key, fresh_quota, fresh_keyed_quota, stub_sources):
+    """There is no free allowance for keyed Combined Search, so it needs a spend limit."""
     stub_sources()
 
-    response = client.get(f"{URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key)
+    response = _get_with_key(client, api_key)
 
     assert response.status_code == 402
-    assert cache.get(_combined_search_monthly_key(api_key.user.id)) is None
+    assert "spend limit" in response.json()["detail"]
+    assert get_monthly_combined_search_api_count(api_key.user.id) == 0
+
+
+@pytest.mark.django_db
+def test_a_keyed_request_is_billed_on_its_own_counter(
+    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+):
+    stub_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+
+    body = _get_with_key(client, api_key).json()
+
+    assert body["monthly_usage"] == 1
+    assert body["monthly_limit"] == pricing.combined_search_monthly_cap(1_000, 0)
+    assert get_monthly_combined_search_api_count(user.id) == 1
+    assert cache.get(_combined_search_monthly_key(user.id)) is None
+    assert get_monthly_count(user.id) == 0
+
+
+@pytest.mark.django_db
+def test_a_member_using_a_key_is_billed_not_given_the_membership_quota(
+    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+):
+    stub_sources()
+    _join(user, MembershipTier.CANOPY)
+
+    assert _get_with_key(client, api_key).status_code == 402
+
+
+@pytest.mark.django_db
+def test_a_keyed_request_over_the_spend_limit_is_refused_and_refunded(
+    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+):
+    stub_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+    cap = pricing.combined_search_monthly_cap(1_000, 0)
+    cache.set(_combined_search_api_monthly_key(user.id), cap, timeout=3600)
+
+    response = _get_with_key(client, api_key)
+
+    assert response.status_code == 429
+    assert "spend limit" in response.json()["detail"]
+    assert get_monthly_combined_search_api_count(user.id) == cap
+
+
+@pytest.mark.django_db
+def test_standard_search_overage_uses_up_the_shared_spend_limit(
+    client, user, api_key, fresh_quota, fresh_keyed_quota, stub_sources
+):
+    """$10 buys 2,000 overage requests of standard search; once they are used, nothing is
+    left of the spend limit for Combined Search."""
+    stub_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+    cache.set(_monthly_key(user.id), pricing.FREE_KEYED_MONTHLY_LIMIT + 2_000, timeout=3600)
+
+    assert _get_with_key(client, api_key).status_code == 429
 
 
 @pytest.mark.django_db
@@ -198,7 +274,7 @@ def test_a_rejected_request_refunds_its_increment(client, user, access_token, fr
 @override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
 def test_the_quota_counter_is_its_own(client, user, access_token, fresh_quota, stub_sources):
     """Combined Search must not spend the standard-search or Super Search allowance."""
-    from mwmbl.quota import get_monthly_count, get_monthly_super_search_count
+    from mwmbl.quota import get_monthly_super_search_count
 
     stub_sources()
     _get(client, access_token)

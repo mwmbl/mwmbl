@@ -210,6 +210,10 @@ class UsageBucket(models.Model):
     # ingested to Polar as usage events for this month. Lets the reporting job
     # send only the incremental delta each run, idempotently.
     reported_overage = models.IntegerField(default=0)
+    # Keyed Combined Search requests, which are billed from the first one and reported to
+    # Polar as their own event, so they are counted and tracked apart from the above.
+    combined_search_count = models.IntegerField(default=0)
+    reported_combined_search = models.IntegerField(default=0)
 
     class Meta:
         unique_together = [("user", "year", "month")]

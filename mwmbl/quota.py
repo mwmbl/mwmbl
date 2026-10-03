@@ -41,6 +41,13 @@ def _combined_search_monthly_key(user_id: int, year: int | None = None, month: i
     return f"combined_search:monthly:{user_id}:{y}:{m:02d}"
 
 
+def _combined_search_api_monthly_key(user_id: int, year: int | None = None, month: int | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    y = year if year is not None else now.year
+    m = month if month is not None else now.month
+    return f"combined_search_api:monthly:{user_id}:{y}:{m:02d}"
+
+
 def _rate_key(user_id: int) -> str:
     return f"search:rate:{user_id}"
 
@@ -144,9 +151,42 @@ def decrement_monthly_combined_search(user_id: int) -> None:
         pass
 
 
+def get_monthly_combined_search_api_count(user_id: int) -> int:
+    """Return the current monthly keyed (billed) combined-search count for a user (0 if not set)."""
+    return cache.get(_combined_search_api_monthly_key(user_id), default=0)
+
+
+def increment_monthly_combined_search_api(user_id: int) -> int:
+    """Increment the monthly keyed combined-search counter and return the new value."""
+    key = _combined_search_api_monthly_key(user_id)
+    if cache.add(key, 1, timeout=MONTHLY_TTL):
+        return 1
+    return cache.incr(key)
+
+
+def decrement_monthly_combined_search_api(user_id: int) -> None:
+    """Refund one keyed combined-search increment. Never drops below 0."""
+    key = _combined_search_api_monthly_key(user_id)
+    try:
+        if cache.get(key, default=0) > 0:
+            cache.decr(key)
+    except ValueError:
+        # decr() raises if the key vanished between the get and the decr; ignore.
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Key scanning (used by background jobs only — requires django-redis)
 # ---------------------------------------------------------------------------
+
+
+def _scan_current_month_keys(prefix: str) -> list[str]:
+    now = datetime.now(timezone.utc)
+    pattern = f"{prefix}:monthly:*:{now.year}:{now.month:02d}"
+    from django_redis import get_redis_connection
+
+    conn = get_redis_connection("default")
+    return [k.decode() if isinstance(k, bytes) else k for k in conn.scan_iter(pattern)]
 
 
 def get_all_monthly_keys() -> list[str]:
@@ -155,12 +195,12 @@ def get_all_monthly_keys() -> list[str]:
     Uses the underlying Redis SCAN command via django-redis.
     Only call this from background tasks, not from request handlers.
     """
-    now = datetime.now(timezone.utc)
-    pattern = f"search:monthly:*:{now.year}:{now.month:02d}"
-    from django_redis import get_redis_connection
+    return _scan_current_month_keys("search")
 
-    conn = get_redis_connection("default")
-    return [k.decode() if isinstance(k, bytes) else k for k in conn.scan_iter(pattern)]
+
+def get_all_combined_search_api_monthly_keys() -> list[str]:
+    """The keyed combined-search counterpart of get_all_monthly_keys."""
+    return _scan_current_month_keys("combined_search_api")
 
 
 def delete_all_monthly_keys() -> None:

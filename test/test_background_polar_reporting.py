@@ -132,3 +132,53 @@ def test_report_usage_to_polar_incremental_second_run(billed_user):
 
     bucket.refresh_from_db()
     assert bucket.reported_overage == 800
+
+
+@pytest.mark.django_db
+def test_report_usage_to_polar_reports_combined_search_as_its_own_event(billed_user):
+    """Keyed Combined Search has no free allowance, so every request is reported."""
+    now = datetime.now(timezone.utc)
+    bucket = UsageBucket.objects.create(
+        user=billed_user,
+        year=now.year,
+        month=now.month,
+        count=pricing.FREE_KEYED_MONTHLY_LIMIT + 500,
+        reported_overage=200,
+        combined_search_count=40,
+        reported_combined_search=10,
+    )
+
+    with patch("polar_sdk.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
+        report_usage_to_polar.now()
+
+    events = mock_polar_instance.events.ingest.call_args[1]["request"]["events"]
+    quantities = {event["name"]: event["metadata"]["quantity"] for event in events}
+    assert quantities == {"search_request": 300, "combined_search_request": 30}
+
+    bucket.refresh_from_db()
+    assert bucket.reported_overage == 500
+    assert bucket.reported_combined_search == 40
+
+
+@pytest.mark.django_db
+def test_report_usage_to_polar_reports_combined_search_within_the_free_allowance(billed_user):
+    now = datetime.now(timezone.utc)
+    bucket = UsageBucket.objects.create(
+        user=billed_user,
+        year=now.year,
+        month=now.month,
+        count=100,
+        combined_search_count=5,
+    )
+
+    with patch("polar_sdk.Polar") as MockPolar:
+        mock_polar_instance = MockPolar.return_value.__enter__.return_value
+        report_usage_to_polar.now()
+
+    events = mock_polar_instance.events.ingest.call_args[1]["request"]["events"]
+    assert [(event["name"], event["metadata"]["quantity"]) for event in events] == [("combined_search_request", 5)]
+
+    bucket.refresh_from_db()
+    assert bucket.reported_overage == 0
+    assert bucket.reported_combined_search == 5
