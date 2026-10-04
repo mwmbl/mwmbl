@@ -48,8 +48,6 @@ This is a **distributed, collaborative crawler**:
 2. **Crawling**: Users crawl those URLs with rate limiting (configurable delay between requests), respecting robots.txt.
 3. **Result Submission**: Users submit pre-indexed search results via `POST /api/v1/crawler/results`. This endpoint requires a valid crawl-scoped API key and inserts the pages directly into the Mwmbl index while also storing the submission in object storage.
 
-The old `/api/v1/crawler/batches/new` (URL assignment) and `/api/v1/crawler/batches/` (batch submission) endpoints have been removed; crawlers now manage their own URL selection and submit results through `/results`.
-
 ### Data Processing Pipeline
 
 The crawler processes data through several stages:
