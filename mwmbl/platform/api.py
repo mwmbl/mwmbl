@@ -1411,10 +1411,7 @@ def cancel_membership(request):
             )
     except polar_models.AlreadyCanceledSubscription:
         raise InvalidRequest("Membership is already canceled.", status=409)
-    user_membership.current_period_end = result.current_period_end
-    user_membership.cancel_at_period_end = True
-    user_membership.save()
-    return user_membership
+    return _save_cancellation(user_membership, result, cancel_at_period_end=True)
 
 
 @router.post(
@@ -1440,10 +1437,25 @@ def uncancel_membership(request):
             )
     except polar_models.AlreadyCanceledSubscription:
         raise InvalidRequest("Membership has already ended.", status=409)
-    user_membership.current_period_end = result.current_period_end
-    user_membership.cancel_at_period_end = False
-    user_membership.save()
-    return user_membership
+    return _save_cancellation(user_membership, result, cancel_at_period_end=False)
+
+
+def _save_cancellation(user_membership, subscription, cancel_at_period_end):
+    """Record a cancel or uncancel on the Membership row, unless a webhook changed it during the Polar call.
+
+    Only the two changed fields are written, and only while the row still points at the same
+    subscription, so a webhook that deleted the row or moved it to another subscription wins.
+    """
+    Membership.objects.filter(
+        pk=user_membership.pk, polar_subscription_id=user_membership.polar_subscription_id
+    ).update(
+        current_period_end=subscription.current_period_end,
+        cancel_at_period_end=cancel_at_period_end,
+    )
+    current_membership = Membership.objects.filter(user=user_membership.user).first()
+    if current_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return current_membership
 
 
 def _sync_membership(subscription):
