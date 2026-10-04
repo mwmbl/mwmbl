@@ -284,8 +284,10 @@ def _seed_search_stats() -> dict:
     "free" is everyone without a membership, matching COMBINED_SEARCH_MONTHLY_LIMITS.
     """
     counts = quota.get_all_monthly_combined_search_counts()
-    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
     users_by_id = MwmblUser.objects.in_bulk(list(counts))
+    # Counters outlive deleted accounts until they expire, so skip users that no longer exist.
+    counts = {user_id: count for user_id, count in counts.items() if user_id in users_by_id}
+    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
 
     tier_names = ["free"] + [tier_info.tier.value for tier_info in TIERS]
     by_tier = {tier: {"tier": tier, "users": 0, "queries": 0, "at_limit": 0} for tier in tier_names}

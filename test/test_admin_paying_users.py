@@ -143,6 +143,25 @@ def test_seed_search_usage_by_tier(staff_client):
     assert [row["user"].username for row in seed_search["top_users"]] == ["free_user", "sprout_member"]
 
 
+def test_seed_search_skips_deleted_users(staff_client):
+    deleted = User.objects.create_user(username="deleted_user")
+    quota.increment_monthly_combined_search(deleted.id)
+    deleted.delete()
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    assert response.status_code == 200
+    seed_search = response.context["seed_search"]
+    assert seed_search["users"] == 0
+    assert seed_search["top_users"] == []
+
+
+def test_breadcrumbs_do_not_contain_seed_search_tables(staff_client):
+    response = staff_client.get(PAYING_USERS_URL)
+
+    assert response.content.count(b"Seed Search this month") == 1
+
+
 def test_minor_units():
     assert minor_units(0, "$") == "$0.00"
     assert minor_units(123_456, "£") == "£1,234.56"
