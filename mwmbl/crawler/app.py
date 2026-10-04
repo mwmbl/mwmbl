@@ -81,35 +81,6 @@ def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object
 def _register_routes(r: Router | NinjaAPI):
     """Register all crawler routes on the given router or API instance."""
 
-    @r.post(
-        "/batches/",
-        summary="Submit a crawl batch (removed)",
-        description=(
-            "Removed - this endpoint served the old crawler and now always returns 410 Gone.\n\n"
-            "Crawlers should submit crawled pages via `POST /results/` instead."
-        ),
-    )
-    def post_batch(request):
-        # HttpError rather than r.create_response: `r` may be a Router, which has no
-        # create_response.
-        raise HttpError(410, "This endpoint has been removed. Submit crawled pages via POST /results/ instead.")
-
-    @r.post(
-        "/batches/new",
-        summary="Request URLs to crawl (removed)",
-        description=(
-            "Removed - this handed out URLs to be submitted back via the now-removed "
-            "`POST /batches/`, so it always returns 410 Gone.\n\n"
-            "Crawlers now choose their own URLs and submit them via `POST /results/`."
-        ),
-    )
-    def request_new_batch(request):
-        # Not an empty list: get_batch() pops URLs off the queue permanently, so every
-        # legacy crawler still polling this was draining the crawl frontier into results
-        # it could no longer submit. An error tells its operator the client is dead;
-        # an empty list would have left it polling a queue it can never contribute to.
-        raise HttpError(410, "This endpoint has been removed. Crawlers now choose their own URLs.")
-
     @r.get(
         "/batches/{date_str}/users/{public_user_id}",
         summary="List batch IDs for a user on a date",
@@ -141,17 +112,6 @@ def _register_routes(r: Router | NinjaAPI):
             "url": url,
             "batch": data,
         }
-
-    @r.get(
-        "/latest-batch",
-        summary="Get the latest batch (removed)",
-        description=(
-            "Removed - this returned the most recent submission to the now-removed "
-            "`POST /batches/` endpoint, so it always returns 410 Gone."
-        ),
-    )
-    def get_latest_batch(request):
-        raise HttpError(410, "This endpoint has been removed along with POST /batches/.")
 
     @r.get(
         "/batches/{date_str}/users",
@@ -260,8 +220,8 @@ def _register_routes(r: Router | NinjaAPI):
         if dry_run:
             return {"status": "dry-run", "url": None}
 
-        # Update or create Device records for this submission. This used to happen on the
-        # now-removed /batches/ endpoint, which was the only path that saw a device name.
+        # Update or create Device records for this submission when the crawler identifies
+        # the installation that produced these results.
         if results.device_name:
             record_device(api_key.user, results.device_name)
 

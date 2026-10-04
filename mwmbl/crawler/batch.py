@@ -111,17 +111,6 @@ class Item(Schema):
     )
 
 
-class NewBatchRequest(Schema):
-    """Request for a new batch of URLs to crawl."""
-
-    user_id: str = Field(
-        description=(
-            "The crawler's private user ID (a 64-character hex string). Used to assign URLs to this specific crawler."
-        ),
-        example="a" * 64,
-    )
-
-
 class HashedBatch(Schema):
     """A batch as stored/returned by the server, with the user ID replaced by its hash."""
 

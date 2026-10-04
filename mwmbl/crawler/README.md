@@ -42,12 +42,13 @@ The crawler fetches **web pages (HTML content)** from URLs, specifically:
 
 ### How It Works (Request/Response Flow)
 
-This is an **on-demand, distributed crawler**:
+This is a **distributed, collaborative crawler**:
 
-1. **URL Assignment**: Users request batches of URLs to crawl via `/api/v1/crawler/batches/new`
-2. **Batch Processing**: The system assigns up to 100 URLs at a time (configurable via the `CRAWL_BATCH_SIZE` environment variable)
-3. **Crawling**: Users crawl those URLs with rate limiting (configurable delay between requests)
-4. **Result Submission**: Users submit crawled results back via `/api/v1/crawler/batches/`
+1. **URL Selection**: Each crawler chooses its own URLs to crawl. The curated-domains endpoint (`GET /api/v1/crawler/curated-domains`) lists domains that the community has prioritised, and the Redis-backed URL queue tracks new links discovered during crawling.
+2. **Crawling**: Users crawl those URLs with rate limiting (configurable delay between requests), respecting robots.txt.
+3. **Result Submission**: Users submit pre-indexed search results via `POST /api/v1/crawler/results`. This endpoint requires a valid crawl-scoped API key and inserts the pages directly into the Mwmbl index while also storing the submission in object storage.
+
+The old `/api/v1/crawler/batches/new` (URL assignment) and `/api/v1/crawler/batches/` (batch submission) endpoints have been removed; crawlers now manage their own URL selection and submit results through `/results`.
 
 ### Data Processing Pipeline
 
