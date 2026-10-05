@@ -1,4 +1,6 @@
-"""Admin-only visibility on the blacklist filtering state that lives in Redis.
+"""Admin-only status pages: the blacklist filtering state in Redis, and paying users.
+
+The blacklist page gives visibility on the blacklist filtering state that lives in Redis.
 
 Retrieval filtering, the snapshot refresh and the index purge are three processes talking
 to each other through Redis keys, and none of that state is reachable from the Django
@@ -19,9 +21,12 @@ from logging import getLogger
 from background_task.models import CompletedTask, Task
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
+from django.core.cache import cache
+from django.db.models import F, OuterRef, Q, Subquery
 from django.shortcuts import render
 from redis import RedisError
 
+from mwmbl import pricing, quota
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -32,6 +37,8 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
+from mwmbl.membership import TIERS, combined_search_monthly_limit
+from mwmbl.models import ApiKey, Membership, MwmblUser
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -171,3 +178,159 @@ def blacklist_status_view(request):
 
     context["tasks"] = _task_status()
     return render(request, "admin/blacklist_status.html", context)
+
+
+def _api_users() -> list[dict]:
+    """Users holding a search API key, plus anyone with a Polar usage subscription.
+
+    Subscribers are included even without a key, because they are still being billed for
+    the month's usage until it is reported. A subscriber at $0 has given card details but
+    is still hard-capped at the free allowance.
+    """
+    last_key_use = (
+        ApiKey.objects.filter(user=OuterRef("pk"), scopes__contains=[ApiKey.Scope.SEARCH])
+        .order_by(F("last_used").desc(nulls_last=True))
+        .values("last_used")[:1]
+    )
+    users = list(
+        MwmblUser.objects.filter(
+            Q(apikey__scopes__contains=[ApiKey.Scope.SEARCH]) | Q(billing__polar_subscription_id__gt="")
+        )
+        .distinct()
+        .select_related("billing")
+        .annotate(last_key_use=Subquery(last_key_use))
+    )
+    # One round trip for every counter rather than one per row.
+    usage_keys = {user.id: quota._monthly_key(user.id) for user in users}
+    usage_by_key = cache.get_many(list(usage_keys.values()))
+
+    api_users = []
+    for user in users:
+        usage = usage_by_key.get(usage_keys[user.id], 0)
+        billing = getattr(user, "billing", None)
+        subscribed = billing is not None and billing.polar_subscription_id != ""
+        spend_cents = billing.max_monthly_spend_cents if billing else 0
+        if not subscribed:
+            status = "no subscription"
+        elif spend_cents == 0:
+            status = "free"
+        elif billing.cancel_at_period_end:
+            status = "canceling"
+        else:
+            status = "active"
+        api_users.append(
+            {
+                "user": user,
+                "status": status,
+                "subscribed": subscribed,
+                "max_monthly_spend_cents": spend_cents,
+                "monthly_cap": pricing.effective_monthly_request_cap(spend_cents),
+                "usage": usage,
+                "estimated_cost_cents": pricing.estimated_cost_cents(usage),
+                "last_key_use": user.last_key_use,
+                "current_period_end": billing.current_period_end if billing else None,
+                "polar_customer_id": billing.polar_customer_id if billing else "",
+            }
+        )
+    api_users.sort(key=lambda api_user: (api_user["estimated_cost_cents"], api_user["usage"]), reverse=True)
+    return api_users
+
+
+def _members() -> list[dict]:
+    price_by_tier = {tier_info.tier.value: tier_info.monthly_price_pence for tier_info in TIERS}
+    memberships = list(Membership.objects.select_related("user").order_by("-started"))
+    usage_keys = {
+        membership.user_id: quota._combined_search_monthly_key(membership.user_id) for membership in memberships
+    }
+    usage_by_key = cache.get_many(list(usage_keys.values()))
+
+    return [
+        {
+            "user": membership.user,
+            "tier": membership.get_tier_display(),
+            "monthly_price_pence": price_by_tier[membership.tier],
+            "combined_search_limit": combined_search_monthly_limit(membership.tier),
+            "combined_search_usage": usage_by_key.get(usage_keys[membership.user_id], 0),
+            "current_period_end": membership.current_period_end,
+            "cancel_at_period_end": membership.cancel_at_period_end,
+            "started": membership.started,
+        }
+        for membership in memberships
+    ]
+
+
+def _tier_summary(members: list[dict]) -> list[dict]:
+    summary = []
+    for tier_info in TIERS:
+        tier_members = [member for member in members if member["tier"] == tier_info.tier.label]
+        summary.append(
+            {
+                "tier": tier_info.tier.label,
+                "count": len(tier_members),
+                "monthly_price_pence": tier_info.monthly_price_pence,
+                "monthly_revenue_pence": len(tier_members) * tier_info.monthly_price_pence,
+            }
+        )
+    return summary
+
+
+SEED_SEARCH_TOP_USERS = 25
+
+
+def _seed_search_stats() -> dict:
+    """This month's Seed Search (Combined Search) usage by signed-in users, by tier.
+
+    Combined Search refuses API keys, so every counter belongs to a signed-in web user.
+    "free" is everyone without a membership, matching COMBINED_SEARCH_MONTHLY_LIMITS.
+    """
+    counts = quota.get_all_monthly_combined_search_counts()
+    users_by_id = MwmblUser.objects.in_bulk(list(counts))
+    # Counters outlive deleted accounts until they expire, so skip users that no longer exist.
+    counts = {user_id: count for user_id, count in counts.items() if user_id in users_by_id}
+    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
+
+    tier_names = ["free"] + [tier_info.tier.value for tier_info in TIERS]
+    by_tier = {tier: {"tier": tier, "users": 0, "queries": 0, "at_limit": 0} for tier in tier_names}
+    rows = []
+    for user_id, count in counts.items():
+        tier = tier_by_user.get(user_id, "free")
+        limit = combined_search_monthly_limit(tier)
+        tier_stats = by_tier[tier]
+        tier_stats["users"] += 1
+        tier_stats["queries"] += count
+        tier_stats["at_limit"] += count >= limit
+        rows.append({"user": users_by_id[user_id], "tier": tier, "usage": count, "limit": limit})
+
+    for tier_stats in by_tier.values():
+        tier_stats["limit"] = combined_search_monthly_limit(tier_stats["tier"])
+
+    rows.sort(key=lambda row: row["usage"], reverse=True)
+    return {
+        "users": len(counts),
+        "queries": sum(counts.values()),
+        "at_limit": sum(tier_stats["at_limit"] for tier_stats in by_tier.values()),
+        "by_tier": list(by_tier.values()),
+        "top_users": rows[:SEED_SEARCH_TOP_USERS],
+    }
+
+
+@staff_member_required
+def paying_users_view(request):
+    api_users = _api_users()
+    members = _members()
+    tier_summary = _tier_summary(members)
+    # Members still paying out the current period after cancelling are counted: they have paid.
+    context = {
+        "title": "Paying users",
+        "api_users": api_users,
+        "api_subscribed_count": sum(1 for api_user in api_users if api_user["subscribed"]),
+        "api_billed_count": sum(1 for api_user in api_users if api_user["estimated_cost_cents"] > 0),
+        "api_estimated_revenue_cents": sum(api_user["estimated_cost_cents"] for api_user in api_users),
+        "members": members,
+        "tier_summary": tier_summary,
+        "seed_search": _seed_search_stats(),
+        "membership_revenue_pence": sum(tier["monthly_revenue_pence"] for tier in tier_summary),
+        "free_keyed_monthly_limit": pricing.FREE_KEYED_MONTHLY_LIMIT,
+        "price_per_1000_queries_cents": pricing.PRICE_PER_1000_QUERIES_CENTS,
+    }
+    return render(request, "admin/paying_users.html", context)
