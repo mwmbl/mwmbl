@@ -6,6 +6,7 @@ Covers:
 - GET /api/v1/platform/membership
 - POST /api/v1/platform/membership/checkout
 - POST /api/v1/platform/membership/cancel and /uncancel
+- POST /api/v1/platform/membership/change
 - Membership subscription events on POST /api/v1/platform/billing/webhook
 """
 
@@ -419,6 +420,124 @@ def test_cancel_membership_does_not_overwrite_a_subscription_changed_during_the_
     member = Membership.objects.get(user=user)
     assert member.polar_subscription_id == "sub_new"
     assert member.cancel_at_period_end is False
+
+
+# ---------------------------------------------------------------------------
+# Change tier
+# ---------------------------------------------------------------------------
+
+
+def _post_change(api_client, user, tier, polar_update_result=None, polar_update_error=None):
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar = MockPolar.return_value.__enter__.return_value
+        mock_polar.subscriptions.update.return_value = polar_update_result
+        mock_polar.subscriptions.update.side_effect = polar_update_error
+        response = api_client.post(
+            "/api/v1/platform/membership/change",
+            data={"tier": tier},
+            content_type="application/json",
+            **auth_headers(user),
+        )
+    return response, mock_polar
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_switches_product_with_proration(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    period_end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+    response, mock_polar = _post_change(
+        api_client,
+        user,
+        "canopy",
+        polar_update_result=_polar_subscription(product_id="prod_canopy", current_period_end=period_end),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tier"] == "canopy"
+    update_params = mock_polar.subscriptions.update.call_args[1]
+    assert update_params["id"] == "sub_member"
+    assert update_params["subscription_update"].product_id == "prod_canopy"
+    assert update_params["subscription_update"].proration_behavior == "prorate"
+    member = Membership.objects.get(user=user)
+    assert member.tier == MembershipTier.CANOPY
+    assert member.current_period_end == period_end
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_not_a_member_returns_404(api_client, user):
+    response, mock_polar = _post_change(api_client, user, "canopy")
+
+    assert response.status_code == 404
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_to_current_tier_returns_409(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+
+    response, mock_polar = _post_change(api_client, user, "sapling")
+
+    assert response.status_code == 409
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_while_cancelling_returns_409(api_client, user):
+    Membership.objects.create(
+        user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member", cancel_at_period_end=True
+    )
+
+    response, mock_polar = _post_change(api_client, user, "sprout")
+
+    assert response.status_code == 409
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_already_canceled_in_polar_returns_409(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+
+    response, _ = _post_change(api_client, user, "canopy", polar_update_error=_already_canceled_error())
+
+    assert response.status_code == 409
+    assert Membership.objects.get(user=user).tier == MembershipTier.SAPLING
+
+
+@pytest.mark.django_db
+@override_settings(POLAR_PRODUCT_ID_CANOPY="")
+def test_change_membership_not_configured_returns_503(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+
+    response, mock_polar = _post_change(api_client, user, "canopy")
+
+    assert response.status_code == 503
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_change_membership_requires_verified_email(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    EmailAddress.objects.filter(user=user).update(verified=False)
+
+    response, _ = _post_change(api_client, user, "canopy")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_change_membership_unauthenticated(api_client):
+    response = api_client.post(
+        "/api/v1/platform/membership/change", data={"tier": "canopy"}, content_type="application/json"
+    )
+
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
