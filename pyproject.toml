@@ -60,6 +60,7 @@ dependencies = [
     "beautifulsoup4==4.10.0",
     "onnxruntime>=1.27.0",
     "tokenizers>=0.23.1",
+    "standardwebhooks>=1.0.1",
 ]
 
 [project.optional-dependencies]
@@ -143,6 +144,7 @@ ignore = ["E501"]
 "mwmbl/crawl.py" = ["E402"]
 "mwmbl/rankeval/evaluation/compare_ltr_models.py" = ["E402"]
 "test/test_rust_features.py" = ["E402"]
+"scripts/combined_search_haiku/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mwmbl", "mwmbl_rank"]

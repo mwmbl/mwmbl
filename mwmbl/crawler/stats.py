@@ -1,11 +1,13 @@
 from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
+from django.db import models
 from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import Results
+from mwmbl.models import MwmblUser, UserStats
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -114,19 +116,13 @@ class StatsManager:
         )
 
     def get_user_stats(self, username: str) -> dict:
-        """Per-user stats for the last 30 days.
-
-        Reads the per-user results-indexed sorted set for each day. Crawled and
-        blacklisted counts are only tracked per-user on the legacy hash path, not
-        per-username, so this exposes the user's indexed results  only.
-        """
+        """Per-user stats for the last 30 days from the UserStats table."""
         date = utc_today()
         results_indexed_daily = {}
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
-            user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=date_i)
-            count = self.redis.zscore(user_result_count_key, username)
-            results_indexed_daily[str(date_i)] = int(count) if count else 0
+            stat = UserStats.objects.filter(user__username=username, date=date_i).first()
+            results_indexed_daily[str(date_i)] = stat.num_results if stat else 0
 
         return {
             "username": username,
@@ -138,42 +134,49 @@ class StatsManager:
         return DomainStats(domain_name=host, num_index_results=get_domain_result_count(host))
 
     def get_leaderboard_for_date(self, target_date: date) -> list[tuple[str, int]]:
-        """Get leaderboard for a specific date from the per-user results sorted set."""
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=target_date)
-        results = self.redis.zrevrange(user_result_count_key, 0, 100, withscores=True)
-        return [(username, int(score)) for username, score in results]
+        """Get leaderboard for a specific date from the UserStats table."""
+        results = UserStats.objects.filter(date=target_date).select_related("user").order_by("-num_results")[:100]
+        return [(stat.user.username, stat.num_results) for stat in results]
 
     def get_all_time_leaderboard(self) -> list[tuple[str, int]]:
-        """Get all-time leaderboard by aggregating across the last 30 days."""
-        from collections import Counter
+        """Get all-time leaderboard by querying the UserStats table."""
+        from django.db.models import Sum
 
-        date_time = datetime.now(timezone.utc)
-        today = date_time.date()
+        results = (
+            UserStats.objects.values("user__username")
+            .annotate(total_results=Sum("num_results"))
+            .order_by("-total_results")[:100]
+        )
+        return [(row["user__username"], row["total_results"]) for row in results]
 
-        aggregated = Counter()
-        for i in range(30):
-            date_i = today - timedelta(days=i)
-            user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=date_i)
-            results = self.redis.zrevrange(user_result_count_key, 0, -1, withscores=True)
-            for username, score in results:
-                aggregated[username] += int(score)
-
-        # Return top 100 sorted by score descending
-        return aggregated.most_common(100)
-
-    def record_results(self, results: Results, username: str) -> None:
-        result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
+    def record_results(self, results: Results, user: MwmblUser) -> None:
+        today = utc_today()
         num_results = len(results.results)
+
+        result_count_key = RESULTS_COUNT_KEY.format(date=today)
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
 
-        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=utc_today())
-        self.redis.zincrby(user_result_count_key, num_results, username)
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
+        self.redis.zincrby(user_result_count_key, num_results, user.username)
         self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
 
-        users_key = USERS_KEY.format(date=utc_today())
-        self.redis.sadd(users_key, username)
+        users_key = USERS_KEY.format(date=today)
+        self.redis.sadd(users_key, user.username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
+
+        # Persist to Postgres for all-time leaderboard.
+        updated = UserStats.objects.filter(
+            user=user,
+            date=today,
+        ).update(num_results=models.F("num_results") + num_results)
+
+        if updated == 0:
+            UserStats.objects.create(
+                user=user,
+                date=today,
+                num_results=num_results,
+            )
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.

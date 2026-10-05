@@ -45,6 +45,7 @@ from mwmbl.tinysearchengine.super_search import _run_pipeline  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.registry import get_meta  # noqa: E402
 from mwmbl.tinysearchengine.super_search_select.rewards import SelectionContext  # noqa: E402
 from mwmbl.tinysearchengine.super_search_sources import SOURCES  # noqa: E402
+from scripts._relabel_pool import add  # noqa: E402
 
 PASS1 = "devdata/llm_relabel/pass1_intents.jsonl"
 CHECKPOINT = "devdata/llm_relabel/pass2_pool.jsonl"
@@ -83,50 +84,6 @@ async def _collect_ss(query: str, sources: list[str]) -> tuple[list[Document], d
     return all_docs, dict(ctx.source_by_url)
 
 
-def _add(
-    pool: dict,
-    url: str,
-    title: str,
-    extract: str,
-    state,
-    score,
-    *,
-    pool_tag: str,
-    ss_source: str | None = None,
-    gold_rank: int | None = None,
-):
-    """Merge one result into the per-url pool, keeping the richest title/extract."""
-    if not url:
-        return
-    item = pool.setdefault(
-        url,
-        {
-            "url": url,
-            "title": "",
-            "extract": "",
-            "state": None,
-            "score": None,
-            "pools": [],
-            "ss_source": None,
-            "gold_rank": None,
-        },
-    )
-    if title and len(title) > len(item["title"]):
-        item["title"] = title
-    if extract and len(extract) > len(item["extract"]):
-        item["extract"] = extract
-    if score is not None and item["score"] is None:
-        item["score"] = float(score)
-    if state is not None and item["state"] is None:
-        item["state"] = state
-    if pool_tag not in item["pools"]:
-        item["pools"].append(pool_tag)
-    if ss_source and not item["ss_source"]:
-        item["ss_source"] = ss_source
-    if gold_rank is not None and item["gold_rank"] is None:
-        item["gold_rank"] = int(gold_rank)
-
-
 def collect_query(query: str, sources: list[str], gold: pd.DataFrame, std_top_k: int) -> dict:
     pool: dict = {}
     gold_urls = set(gold["url"].tolist())
@@ -142,7 +99,7 @@ def collect_query(query: str, sources: list[str], gold: pd.DataFrame, std_top_k:
     )
     kept = std[:std_top_k] + [d for d in std[std_top_k:] if d.url in gold_urls]
     for d in kept:
-        _add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="standard")
+        add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="standard")
 
     # super search (forced sources) + provenance. Drop results from always-on
     # sources (e.g. hn) that Pass-1 did NOT choose: the pipeline pins them
@@ -154,11 +111,11 @@ def collect_query(query: str, sources: list[str], gold: pd.DataFrame, std_top_k:
         src = source_by_url.get(d.url)
         if src in stray:
             continue
-        _add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="supersearch", ss_source=src)
+        add(pool, d.url, d.title or "", d.extract or "", d.state, d.score, pool_tag="supersearch", ss_source=src)
 
     # google gold (snippet only)
     for _, row in gold.iterrows():
-        _add(pool, row["url"], "", str(row.get("snippet") or ""), None, None, pool_tag="google", gold_rank=row["rank"])
+        add(pool, row["url"], "", str(row.get("snippet") or ""), None, None, pool_tag="google", gold_rank=row["rank"])
 
     return {"query": query, "sources": sources, "candidates": list(pool.values())}
 

@@ -21,10 +21,10 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 
 import mwmbl.crawler.app as crawler
-from mwmbl.admin_views import blacklist_status_view, search_traffic_view
+from mwmbl.admin_views import blacklist_status_view, paying_users_view, search_traffic_view
 from mwmbl.api import api as v1_api
 from mwmbl.api import register_routers, v2_api
-from mwmbl.search_setup import ranker
+from mwmbl.search_setup import combined_ranker, ranker, tiny_index
 from mwmbl.tinysearchengine import search
 from mwmbl.views import (
     CurationDetailView,
@@ -45,7 +45,7 @@ from mwmbl.views import (
 
 # Initialise the unified v1 API by registering all sub-routers with their runtime dependencies.
 # This must be called before urlpatterns is evaluated.
-register_routers(ranker=ranker)
+register_routers(ranker=ranker, combined_ranker=combined_ranker, tiny_index=tiny_index)
 
 
 def trigger_error(request):
@@ -57,6 +57,7 @@ urlpatterns = [
     # staff_member_required on the view, matching the rest of the admin.
     path("admin/blacklist-status/", blacklist_status_view, name="blacklist_status"),
     path("admin/search-traffic/", search_traffic_view, name="search_traffic"),
+    path("admin/paying-users/", paying_users_view, name="paying_users"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", index, name="index"),

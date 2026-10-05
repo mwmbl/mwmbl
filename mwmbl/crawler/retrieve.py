@@ -1,6 +1,10 @@
 import json
+import random
 import re
+import ssl
+import threading
 import time
+from http.cookiejar import DefaultCookiePolicy
 from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
@@ -11,6 +15,8 @@ from urllib.robotparser import RobotFileParser
 import requests
 from redis import Redis
 from requests import ReadTimeout
+from requests.adapters import HTTPAdapter
+from requests.utils import DEFAULT_CA_BUNDLE_PATH
 from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
@@ -55,7 +61,58 @@ USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact 
 ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
 ROBOTS_CACHE_ERROR_TTL_SECONDS = 60 * 60
 
+# Diagnostic: how often a fetch starts while another fetch to the same domain is in flight,
+# across every worker sharing this Redis. Read the totals with HGETALL crawl-domain-overlap.
+DOMAIN_IN_FLIGHT_KEY = "crawl-in-flight-{domain}"
+DOMAIN_OVERLAP_KEY = "crawl-domain-overlap"
+# Only matters if a worker dies mid-crawl and never decrements: the stale count then
+# lingers until the domain goes this long without a fetch starting.
+DOMAIN_IN_FLIGHT_EXPIRY_SECONDS = 120
+
 logger = getLogger(__name__)
+
+# One verifying context for every fetch. Left to itself, requests builds a fresh context for
+# each new connection and parses the whole CA bundle into it, which on OpenSSL 3 costs about
+# 100ms of CPU - most of what the crawler spent per page. requests no longer shares a
+# preloaded context, so the crawler has to.
+SSL_CONTEXT = ssl.create_default_context(cafile=DEFAULT_CA_BUNDLE_PATH)
+
+_thread_local = threading.local()
+
+
+class SharedContextAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        super().init_poolmanager(connections, maxsize, block, ssl_context=SSL_CONTEXT, **pool_kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        """Keep verification on, but stop urllib3 reloading the bundle into SSL_CONTEXT.
+
+        The base class points every connection at the bundle file, and urllib3 then calls
+        load_verify_locations on the shared context per connection - the cost the shared
+        context exists to avoid. SSL_CONTEXT was built from that same bundle.
+        """
+        super().cert_verify(conn, url, verify, cert)
+        conn.ca_certs = None
+        conn.ca_cert_dir = None
+
+
+def get_session() -> requests.Session:
+    """A session per thread: requests does not promise a Session is safe to share.
+
+    Keeping it also keeps connections alive between fetches, so a page's robots.txt and the
+    page itself share one TLS handshake.
+    """
+    if not hasattr(_thread_local, "session"):
+        session = requests.Session()
+        # Otherwise every request scans os.environ for proxy and CA bundle settings.
+        session.trust_env = False
+        # The session outlives the fetch - for ever, on Super Search's long-lived executor - so
+        # a stored cookie would grow without bound and be sent on other users' fetches. An
+        # empty allowlist refuses every cookie, as a fresh requests.get per fetch did.
+        session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+        session.mount("https://", SharedContextAdapter())
+        _thread_local.session = session
+    return _thread_local.session
 
 
 def fetch(url):
@@ -75,7 +132,7 @@ def fetch(url):
     headers = {"User-Agent": USER_AGENT}
     for _ in range(MAX_REDIRECTS + 1):
         validate_url(url)
-        r = requests.get(url, stream=True, timeout=TIMEOUT_SECONDS, headers=headers, allow_redirects=False)
+        r = get_session().get(url, stream=True, timeout=TIMEOUT_SECONDS, headers=headers, allow_redirects=False)
 
         if r.is_redirect and r.next is not None:
             r.close()
@@ -97,6 +154,8 @@ def fetch(url):
                 logger.debug(f"Maximum size reached for URL {url}")
                 break
 
+        # A response left open holds its connection out of the session's pool.
+        r.close()
         return r.status_code, content, url
 
     raise ValueError(f"Too many redirects for URL {url}")
@@ -444,7 +503,57 @@ def crawl_url(url, redis: Redis):
     }
 
 
-def crawl_batch(batch, num_threads, redis: Redis):
+def crawl_batch(urls: list[str], num_threads: int, delay_seconds: float, redis: Redis) -> list[dict]:
+    """Crawl a batch concurrently, returning results in the order of the URLs.
+
+    Fetching is almost all waiting on the network, so one URL at a time leaves the machine
+    idle. The queue hands out at most one URL per domain in a batch, so crawling a batch in
+    parallel does not put more load on any one site.
+
+    Each thread waits delay_seconds, with 10% random fuzz, between the URLs it crawls.
+    """
+
+    overlaps = []
+
+    def crawl_after_delay(url: str) -> dict:
+        if delay_seconds and getattr(_thread_local, "has_crawled", False):
+            time.sleep(delay_seconds * (0.9 + 0.2 * random.random()))
+        _thread_local.has_crawled = True
+        result, overlap = crawl_counting_overlap(url, redis)
+        overlaps.append(overlap)
+        return result
+
     with ThreadPool(num_threads) as pool:
-        result = pool.map(lambda url: crawl_url(url, redis), batch)
-    return result
+        results = pool.map(crawl_after_delay, urls)
+
+    record_overlap(urls, overlaps, redis)
+    return results
+
+
+def crawl_counting_overlap(url: str, redis: Redis) -> tuple[dict, int]:
+    """Crawl url, also returning how many other crawls of its domain were in flight as it started."""
+    key = DOMAIN_IN_FLIGHT_KEY.format(domain=urlparse(url).netloc)
+    in_flight, _ = redis.pipeline().incr(key).expire(key, DOMAIN_IN_FLIGHT_EXPIRY_SECONDS).execute()
+    try:
+        return crawl_url(url, redis), in_flight - 1
+    finally:
+        redis.decr(key)
+
+
+def record_overlap(urls: list[str], overlaps: list[int], redis: Redis):
+    """Add a batch to the overlap totals.
+
+    duplicate_domains counts URLs whose domain already appeared earlier in the same batch, so
+    overlapped minus duplicate_domains is a lower bound on the overlap between batches.
+    """
+    num_domains = len({urlparse(url).netloc for url in urls})
+    duplicate_domains = len(urls) - num_domains
+    overlapped = sum(1 for overlap in overlaps if overlap > 0)
+    max_overlap = max(overlaps, default=0)
+    logger.info(
+        f"Domain overlap: {overlapped} of {len(urls)} fetches started while another fetch to the same "
+        f"domain was in flight (max {max_overlap} others); {duplicate_domains} duplicate domains in batch"
+    )
+    redis.pipeline().hincrby(DOMAIN_OVERLAP_KEY, "fetches", len(urls)).hincrby(
+        DOMAIN_OVERLAP_KEY, "overlapped", overlapped
+    ).hincrby(DOMAIN_OVERLAP_KEY, "duplicate_domains", duplicate_domains).execute()

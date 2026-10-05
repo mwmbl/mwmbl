@@ -319,6 +319,20 @@ def test_a_stale_entry_is_not_a_cache_hit(cache_index):
     assert stale is None
 
 
+def test_a_provider_with_its_own_ttl_expires_on_it(cache_index):
+    """Staan names its own TTL, far shorter than Wikipedia's, because a general web index
+    turns over far faster than an encyclopedia. A single shared TTL would serve six-month-old
+    SERP results."""
+    now = int(time.time())
+    store_external_results(DocumentSource.STAAN, "python", [STAAN_RESULT], now=now)
+    store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON], now=now)
+
+    a_fortnight_later = now + 14 * 24 * 60 * 60
+
+    assert get_cached_external_results(DocumentSource.STAAN, "python", now=a_fortnight_later) is None
+    assert get_cached_external_results(DocumentSource.WIKIPEDIA, "python", now=a_fortnight_later) is not None
+
+
 def test_an_untimestamped_document_is_stale():
     """A document with no last_crawled predates the cache or came from somewhere else;
     treating it as fresh would pin it forever."""

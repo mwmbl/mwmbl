@@ -84,6 +84,10 @@ pub const NUM_TERMS_INDEX: usize = 42;
 /// domain_tokenized/path) in the feature vector.
 pub const MATCH_TERMS_INDEX: usize = NUM_FEATURES - 1;
 
+/// Staan's own ranking, appended after FEATURE_NAMES by a pipeline that uses provider
+/// features (Combined Search's). Standard search never sees these columns.
+pub const PROVIDER_FEATURE_NAMES: &[&str] = &["in_staan", "staan_rank"];
+
 /// Result of matching query terms against a text part.
 #[derive(Debug, Default)]
 pub struct MatchFeatures {

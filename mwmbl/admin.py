@@ -9,6 +9,7 @@ from mwmbl.models import (
     DomainSubmission,
     FlagCuration,
     MarketingConsent,
+    Membership,
     MwmblUser,
     OldIndex,
     UserBilling,
@@ -83,6 +84,16 @@ class UserBillingAdmin(ModelAdmin):
 admin.site.register(ApiKey, ApiKeyAdmin)
 admin.site.register(MarketingConsent, MarketingConsentAdmin)
 admin.site.register(UserBilling, UserBillingAdmin)
+
+
+class MembershipAdmin(ModelAdmin):
+    list_display = ("user", "tier", "current_period_end", "cancel_at_period_end", "started")
+    list_filter = ("tier", "cancel_at_period_end")
+    readonly_fields = ("polar_subscription_id", "current_period_end", "started")
+    search_fields = ("user__username", "user__email", "polar_subscription_id")
+
+
+admin.site.register(Membership, MembershipAdmin)
 
 # Adds the "Status" panel linking to the blacklist status page (mwmbl.admin_views) to the
 # admin front page.

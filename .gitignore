@@ -208,13 +208,23 @@ devdata/super_search_xgb/
 
 # Claude Code configuration
 .claude/
+# Pass-3 judging manifests and the Pass-2 per-source collection checkpoints. Both are
+# resumable intermediates: once a checkpoint is merged, pass2_pool.jsonl holds everything it
+# carried, and a manifest is only meaningful while its batch is out being judged.
 devdata/llm_relabel/pass3_manifest_*.jsonl
+devdata/llm_relabel/pass2_staan.jsonl
 
 # Relevance judge artifacts (small results*.json stay tracked via explicit add)
 devdata/judge_bakeoff/*.npy
 devdata/judge_bakeoff/*.npz
 devdata/judgments_export/
 devdata/judge_train/*
+# Combined Search Haiku judging: batch files and raw judge outputs. The consolidated
+# judgments are tracked under devdata/combined_providers_eval/haiku/.
+devdata/combined_providers_eval/haiku_work/
+devdata/external-cache-engb.tinysearch
 !devdata/judge_train/RESULTS.md
 !devdata/judge_train/eval_manifest.json
 devdata/moderation_bakeoff/
+
+vendor/

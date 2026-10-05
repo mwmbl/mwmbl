@@ -6,6 +6,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
+from mwmbl.membership import MembershipTier
 from mwmbl.utils import bare_host
 
 
@@ -217,6 +218,25 @@ class UsageBucket(models.Model):
         ]
 
 
+class UserStats(models.Model):
+    """Records a user's crawl results for a specific calendar day.
+
+    This persists the per-user result counts that were previously only stored
+    in Redis (with a 30-day TTL). Having them in Postgres enables all-time
+    leaderboards and historical analysis.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="user_stats")
+    date = models.DateField()
+    num_results = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [("user", "date")]
+        indexes = [
+            models.Index(fields=["user", "date"]),
+        ]
+
+
 class UserBilling(models.Model):
     user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="billing")
     polar_customer_id = models.CharField(max_length=100, blank=True, default="")
@@ -226,6 +246,17 @@ class UserBilling(models.Model):
     # Maximum amount (in cents) the account may be billed per month for metered
     # usage beyond the free allowance. 0 = free-tier-only (hard capped).
     max_monthly_spend_cents = models.IntegerField(default=0)
+
+
+class Membership(models.Model):
+    """An active supporter membership. The row is deleted when the Polar subscription ends."""
+
+    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="membership")
+    tier = models.CharField(max_length=20, choices=MembershipTier.choices)
+    polar_subscription_id = models.CharField(max_length=100, unique=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    started = models.DateTimeField(auto_now_add=True)
 
 
 class AgreementType(models.TextChoices):

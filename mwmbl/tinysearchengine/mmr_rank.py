@@ -13,7 +13,7 @@ from collections import Counter
 from urllib.parse import urlparse
 
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.rank import Ranker
+from mwmbl.tinysearchengine.rank import Ranker, Retrieval
 from mwmbl.tokenizer import tokenize
 
 # MMR tuning parameters.
@@ -91,6 +91,12 @@ class MMRRanker:
 
     def search(self, s: str, additional_results: list[Document], use_external_search: bool = True) -> list[Document]:
         return mmr_rerank(self.ranker.search(s, additional_results, use_external_search))
+
+    def retrieve(self, q: str) -> Retrieval:
+        return self.ranker.retrieve(q)
+
+    def search_retrieved(self, retrieval: Retrieval, additional_results: list[Document]) -> list[Document]:
+        return mmr_rerank(self.ranker.search_retrieved(retrieval, additional_results))
 
     def complete(self, q: str):
         return self.ranker.complete(q)

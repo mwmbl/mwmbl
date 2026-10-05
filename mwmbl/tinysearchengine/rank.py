@@ -7,6 +7,7 @@ import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
+from dataclasses import dataclass
 from logging import getLogger
 from operator import itemgetter
 from pathlib import Path
@@ -270,7 +271,19 @@ def fix_document_state(result: Document):
         fixed_state = DocumentState(result.state)
     except ValueError:
         fixed_state = None
-    fixed_document = Document(result.title, result.url, result.extract, result.score, result.term, fixed_state)
+    # `source` is carried across: it is what tells the formatter a result came from
+    # Wikipedia or Staan rather than our index, and rebuilding without it silently
+    # relabelled every external result as "mwmbl". user_ids and last_crawled are still
+    # dropped on purpose - the formatted path has no business exposing them.
+    fixed_document = Document(
+        result.title,
+        result.url,
+        result.extract,
+        result.score,
+        result.term,
+        fixed_state,
+        source=result.source,
+    )
     return fixed_document
 
 
@@ -282,6 +295,18 @@ def remove_curate_state(state: DocumentState):
     if state == DocumentState.FROM_GOOGLE_APPROVED:
         return DocumentState.FROM_GOOGLE
     return state
+
+
+@dataclass
+class Retrieval:
+    """What Ranker.retrieve found in the index for a query, ready to be ranked."""
+
+    query: str
+    terms: list[str]
+    completions: list[str]
+    is_complete: bool
+    curated_items: list[Document]
+    pages: list[Document]
 
 
 class Ranker:
@@ -297,8 +322,20 @@ class Ranker:
         # use_external_search=False is how the search-as-you-type path avoids a Wikipedia
         # call per keystroke; get_results has taken the flag all along, but only complete()
         # could reach it. See mwmbl.views.
-        results, terms, _ = self.get_results(s, additional_results, use_external_search)
+        results, _, _ = self.get_results(s, additional_results, use_external_search)
+        return self._drop_repeated_urls(results)
 
+    def search_retrieved(self, retrieval: Retrieval, additional_results: list[Document]) -> list[Document]:
+        """search() over an index retrieval already made with retrieve().
+
+        This is how a caller overlaps the index lookup with a slow external fetch: retrieve
+        and fetch concurrently, then rank the two together here. Never fetches Wikipedia.
+        """
+        results = self._rank(retrieval, additional_results, external_search_items=[])
+        return self._drop_repeated_urls(results)
+
+    @staticmethod
+    def _drop_repeated_urls(results: list[Document]) -> list[Document]:
         ranked_results = []
         seen_urls = set()
         for result in results:
@@ -334,6 +371,13 @@ class Ranker:
 
     def get_results(self, q: str, additional_results: list[Document], use_external_search: bool = True):
         logger.info(f"Get results with {len(additional_results)} additional results")
+        retrieval = self.retrieve(q)
+        external_search_items = self.external_search(q) if use_external_search else []
+        results = self._rank(retrieval, additional_results, external_search_items)
+        return results, retrieval.terms, retrieval.completions
+
+    def retrieve(self, q: str) -> Retrieval:
+        """The index lookup for a query: everything get_results needs before ranking."""
         terms = tokenize(q)
 
         is_complete = q.endswith(" ")
@@ -374,14 +418,19 @@ class Ranker:
             if items is not None:
                 pages += items
 
-        external_search_items = self.external_search(q) if use_external_search else []
-        candidates = pages + additional_results + external_search_items
-        candidates, curated_items = self._remove_blacklisted(candidates, curated_items, index_items=pages)
+        return Retrieval(q, terms, completions, is_complete, curated_items, pages)
 
-        ordered_results = self.order_results(terms, candidates, is_complete)
+    def _rank(
+        self, retrieval: Retrieval, additional_results: list[Document], external_search_items: list[Document]
+    ) -> list[Document]:
+        candidates = retrieval.pages + additional_results + external_search_items
+        candidates, curated_items = self._remove_blacklisted(
+            candidates, retrieval.curated_items, index_items=retrieval.pages
+        )
+
+        ordered_results = self.order_results(retrieval.terms, candidates, retrieval.is_complete)
         deduplicated_results = deduplicate(curated_items + ordered_results, set())
-        state_fixed = [fix_document_state(result) for result in deduplicated_results]
-        return state_fixed, terms, completions
+        return [fix_document_state(result) for result in deduplicated_results]
 
     @staticmethod
     def _remove_blacklisted(

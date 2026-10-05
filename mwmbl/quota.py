@@ -34,6 +34,13 @@ def _super_search_monthly_key(user_id: int, year: int | None = None, month: int 
     return f"super_search:monthly:{user_id}:{y}:{m:02d}"
 
 
+def _combined_search_monthly_key(user_id: int, year: int | None = None, month: int | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    y = year if year is not None else now.year
+    m = month if month is not None else now.month
+    return f"combined_search:monthly:{user_id}:{y}:{m:02d}"
+
+
 def _rate_key(user_id: int) -> str:
     return f"search:rate:{user_id}"
 
@@ -51,13 +58,13 @@ def check_rate_limit(user_id: int) -> bool:
     key = _rate_key(user_id)
     if cache.add(key, 1, timeout=1):
         return True
-    count = cache.incr(key)
-    if count == 1:
-        # Key expired between add() and incr(); Redis created it without a TTL.
-        # Set the TTL now to prevent the key from leaking indefinitely.
-        from django_redis import get_redis_connection
-
-        get_redis_connection("default").expire(key, 1)
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        # The window expired between add() and incr(), and Django's incr() raises on a
+        # missing key rather than creating it, so this request opens the next window.
+        cache.add(key, 1, timeout=1)
+        return True
     return count <= RATE_LIMIT
 
 
@@ -108,6 +115,46 @@ def decrement_monthly_super_search(user_id: int) -> None:
     except ValueError:
         # decr() raises if the key vanished between the get and the decr; ignore.
         pass
+
+
+def get_monthly_combined_search_count(user_id: int) -> int:
+    """Return the current monthly combined-search request count for a user (0 if not set)."""
+    return cache.get(_combined_search_monthly_key(user_id), default=0)
+
+
+def increment_monthly_combined_search(user_id: int) -> int:
+    """Increment the monthly combined-search counter and return the new value."""
+    key = _combined_search_monthly_key(user_id)
+    if cache.add(key, 1, timeout=MONTHLY_TTL):
+        return 1
+    return cache.incr(key)
+
+
+def decrement_monthly_combined_search(user_id: int) -> None:
+    """Refund one combined-search increment (e.g. when the request is rejected over-limit).
+
+    Never drops below 0. No-op if the counter is missing.
+    """
+    key = _combined_search_monthly_key(user_id)
+    try:
+        if cache.get(key, default=0) > 0:
+            cache.decr(key)
+    except ValueError:
+        # decr() raises if the key vanished between the get and the decr; ignore.
+        pass
+
+
+def get_all_monthly_combined_search_counts() -> dict[int, int]:
+    """This month's combined-search count for every user who has used it, by user id.
+
+    Scans the keyspace via django-redis, so it is for admin pages and background jobs, not
+    the search path.
+    """
+    now = datetime.now(timezone.utc)
+    keys = list(cache.iter_keys(f"combined_search:monthly:*:{now.year}:{now.month:02d}"))
+    counts_by_key = cache.get_many(keys)
+    # Keys are combined_search:monthly:<user_id>:<year>:<month>.
+    return {int(key.split(":")[2]): count for key, count in counts_by_key.items()}
 
 
 # ---------------------------------------------------------------------------

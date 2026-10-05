@@ -273,7 +273,7 @@ def _register_routes(r: Router | NinjaAPI):
         filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
 
         # Update stats for the user
-        stats_manager.record_results(results, api_key.user.username)
+        stats_manager.record_results(results, api_key.user)
 
         return {
             "status": "ok",
