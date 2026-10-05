@@ -1484,7 +1484,10 @@ def change_membership(request, body: MembershipChangeRequest):
             )
     except polar_models.AlreadyCanceledSubscription:
         raise InvalidRequest("Membership has already ended.", status=409)
-    return _save_membership_update(user_membership, tier=body.tier, current_period_end=result.current_period_end)
+    except polar_models.SubscriptionLocked:
+        raise InvalidRequest("A change to this membership is already in progress. Try again shortly.", status=409)
+    tier = membership.tier_for_product(result.product_id)
+    return _save_membership_update(user_membership, tier=tier, current_period_end=result.current_period_end)
 
 
 def _save_membership_update(user_membership, **changes):
