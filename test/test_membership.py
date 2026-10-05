@@ -5,6 +5,7 @@ Covers:
 - GET /api/v1/platform/membership/tiers
 - GET /api/v1/platform/membership
 - POST /api/v1/platform/membership/checkout
+- POST /api/v1/platform/membership/cancel and /uncancel
 - Membership subscription events on POST /api/v1/platform/billing/webhook
 """
 
@@ -16,6 +17,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
+from polar_sdk.models import AlreadyCanceledSubscription
 
 from mwmbl.membership import MembershipTier
 from mwmbl.models import Membership, UserBilling
@@ -248,6 +250,175 @@ def test_checkout_requires_verified_email(api_client, user):
     )
 
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Cancel and uncancel
+# ---------------------------------------------------------------------------
+
+
+def _post_membership_action(api_client, user, action, polar_update_result=None, polar_update_error=None):
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        mock_polar = MockPolar.return_value.__enter__.return_value
+        mock_polar.subscriptions.update.return_value = polar_update_result
+        mock_polar.subscriptions.update.side_effect = polar_update_error
+        response = api_client.post(f"/api/v1/platform/membership/{action}", **auth_headers(user))
+    return response, mock_polar
+
+
+def _already_canceled_error():
+    raw_response = Mock(status_code=403, text="Subscription is already canceled")
+    return AlreadyCanceledSubscription(data=Mock(detail="Subscription is already canceled"), raw_response=raw_response)
+
+
+@pytest.mark.django_db
+def test_cancel_membership_schedules_cancellation(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    period_end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+    response, mock_polar = _post_membership_action(
+        api_client, user, "cancel", polar_update_result=_polar_subscription(current_period_end=period_end)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cancel_at_period_end"] is True
+    assert response.json()["tier"] == "sapling"
+    update_params = mock_polar.subscriptions.update.call_args[1]
+    assert update_params["id"] == "sub_member"
+    assert update_params["subscription_update"].cancel_at_period_end is True
+    member = Membership.objects.get(user=user)
+    assert member.cancel_at_period_end is True
+    assert member.current_period_end == period_end
+
+
+@pytest.mark.django_db
+def test_cancel_membership_not_a_member_returns_404(api_client, user):
+    response, mock_polar = _post_membership_action(api_client, user, "cancel")
+
+    assert response.status_code == 404
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_cancel_membership_already_cancelling_returns_409(api_client, user):
+    Membership.objects.create(
+        user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member", cancel_at_period_end=True
+    )
+
+    response, mock_polar = _post_membership_action(api_client, user, "cancel")
+
+    assert response.status_code == 409
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_cancel_membership_already_canceled_in_polar_returns_409(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+
+    response, _ = _post_membership_action(api_client, user, "cancel", polar_update_error=_already_canceled_error())
+
+    assert response.status_code == 409
+    assert Membership.objects.get(user=user).cancel_at_period_end is False
+
+
+@pytest.mark.django_db
+def test_cancel_membership_requires_verified_email(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+    EmailAddress.objects.filter(user=user).update(verified=False)
+
+    response, _ = _post_membership_action(api_client, user, "cancel")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_cancel_membership_unauthenticated(api_client):
+    response = api_client.post("/api/v1/platform/membership/cancel")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_uncancel_membership_removes_scheduled_cancellation(api_client, user):
+    Membership.objects.create(
+        user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_member", cancel_at_period_end=True
+    )
+    period_end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+    response, mock_polar = _post_membership_action(
+        api_client, user, "uncancel", polar_update_result=_polar_subscription(current_period_end=period_end)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cancel_at_period_end"] is False
+    update_params = mock_polar.subscriptions.update.call_args[1]
+    assert update_params["id"] == "sub_member"
+    assert update_params["subscription_update"].cancel_at_period_end is False
+    member = Membership.objects.get(user=user)
+    assert member.cancel_at_period_end is False
+    assert member.current_period_end == period_end
+
+
+@pytest.mark.django_db
+def test_uncancel_membership_not_a_member_returns_404(api_client, user):
+    response, _ = _post_membership_action(api_client, user, "uncancel")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_uncancel_membership_not_cancelling_returns_409(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_member")
+
+    response, mock_polar = _post_membership_action(api_client, user, "uncancel")
+
+    assert response.status_code == 409
+    mock_polar.subscriptions.update.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_uncancel_membership_already_ended_in_polar_returns_409(api_client, user):
+    Membership.objects.create(
+        user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_member", cancel_at_period_end=True
+    )
+
+    response, _ = _post_membership_action(api_client, user, "uncancel", polar_update_error=_already_canceled_error())
+
+    assert response.status_code == 409
+    assert Membership.objects.get(user=user).cancel_at_period_end is True
+
+
+@pytest.mark.django_db
+def test_uncancel_membership_does_not_recreate_a_membership_deleted_during_the_polar_call(api_client, user):
+    Membership.objects.create(
+        user=user, tier=MembershipTier.CANOPY, polar_subscription_id="sub_member", cancel_at_period_end=True
+    )
+
+    def revoke_webhook_arrives(**kwargs):
+        Membership.objects.filter(user=user).delete()
+        return _polar_subscription()
+
+    response, _ = _post_membership_action(api_client, user, "uncancel", polar_update_error=revoke_webhook_arrives)
+
+    assert response.status_code == 404
+    assert not Membership.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+def test_cancel_membership_does_not_overwrite_a_subscription_changed_during_the_polar_call(api_client, user):
+    Membership.objects.create(user=user, tier=MembershipTier.SAPLING, polar_subscription_id="sub_member")
+
+    def upgrade_webhook_arrives(**kwargs):
+        Membership.objects.filter(user=user).update(tier=MembershipTier.CANOPY, polar_subscription_id="sub_new")
+        return _polar_subscription()
+
+    response, _ = _post_membership_action(api_client, user, "cancel", polar_update_error=upgrade_webhook_arrives)
+
+    assert response.status_code == 200
+    assert response.json()["tier"] == "canopy"
+    member = Membership.objects.get(user=user)
+    assert member.polar_subscription_id == "sub_new"
+    assert member.cancel_at_period_end is False
 
 
 # ---------------------------------------------------------------------------

@@ -1387,6 +1387,77 @@ def create_membership_checkout(request, body: MembershipCheckoutRequest):
     return CheckoutResponse(checkout_url=result.url)
 
 
+@router.post(
+    "/membership/cancel",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Cancel membership at period end",
+    description="Schedules the membership to cancel at the end of the current billing period. "
+    "The membership and its perks remain active until then.",
+    tags=["Membership"],
+)
+def cancel_membership(request):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is already scheduled to cancel.", status=409)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=True),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership is already canceled.", status=409)
+    return _save_cancellation(user_membership, result, cancel_at_period_end=True)
+
+
+@router.post(
+    "/membership/uncancel",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Uncancel a pending membership cancellation",
+    description="Removes a scheduled cancellation, so the membership renews at the end of the current period.",
+    tags=["Membership"],
+)
+def uncancel_membership(request):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if not user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is not scheduled to cancel.", status=409)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=False),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership has already ended.", status=409)
+    return _save_cancellation(user_membership, result, cancel_at_period_end=False)
+
+
+def _save_cancellation(user_membership, subscription, cancel_at_period_end):
+    """Record a cancel or uncancel on the Membership row, unless a webhook changed it during the Polar call.
+
+    Only the two changed fields are written, and only while the row still points at the same
+    subscription, so a webhook that deleted the row or moved it to another subscription wins.
+    """
+    Membership.objects.filter(
+        pk=user_membership.pk, polar_subscription_id=user_membership.polar_subscription_id
+    ).update(
+        current_period_end=subscription.current_period_end,
+        cancel_at_period_end=cancel_at_period_end,
+    )
+    current_membership = Membership.objects.filter(user=user_membership.user).first()
+    if current_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return current_membership
+
+
 def _sync_membership(subscription):
     """Bring the user's Membership row in line with their live membership subscriptions in Polar.
 
