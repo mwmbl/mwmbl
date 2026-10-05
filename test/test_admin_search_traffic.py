@@ -150,6 +150,25 @@ def test_the_gap_is_the_traffic_no_tracked_agent_accounts_for(redis_client):
     assert (agents["request_total"], agents["tracked_total"], agents["gap"]) == (14, 10, 4)
 
 
+def test_the_gap_excludes_agents_only_the_readout_dropped(redis_client):
+    """Each day is read down to the trim limit on its own, so the window's union of agents
+    can exceed it without a single request going unattributed. Summing only the window's top
+    TRACKED_USER_AGENTS would report the readout's own cut as a gap."""
+    yesterday = utc_today() - timedelta(days=1)
+    for i in range(traffic.TRACKED_USER_AGENTS):
+        record(redis_client, "v1_search", user_agent=f"Today/{i}")
+        record(redis_client, "v1_search", day=yesterday, user_agent=f"Yesterday/{i}")
+
+    agents = admin_views._user_agents(traffic.get_redis(), *window(2))
+
+    assert agents["tracked"] == 2 * traffic.TRACKED_USER_AGENTS
+    assert (agents["request_total"], agents["tracked_total"], agents["gap"]) == (
+        2 * traffic.TRACKED_USER_AGENTS,
+        2 * traffic.TRACKED_USER_AGENTS,
+        0,
+    )
+
+
 def test_view_requires_staff(client, db):
     user = User.objects.create_user(username="ordinary_user_2", password="correctpassword")
     client.force_login(user)

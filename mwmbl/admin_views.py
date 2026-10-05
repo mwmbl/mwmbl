@@ -258,9 +258,14 @@ def _user_agents(redis_client, days: list[date], counts: dict) -> dict:
     shows up at all.
     """
     agent_days = days[:USER_AGENT_MAX_DAYS]
-    tracked = read_user_agent_counts(redis_client, agent_days, TRACKED_USER_AGENTS)
+    # The limit is the window's union, not one day's trim. Each day is already read down to
+    # TRACKED_USER_AGENTS of its own, so a week of browsers routinely sums to more distinct
+    # strings than that; cutting the sum to one day's limit again would put the readout's own
+    # cut into the gap below, where it reads as the trim's.
+    tracked = read_user_agent_counts(redis_client, agent_days, TRACKED_USER_AGENTS * len(agent_days))
     tracked_total = sum(count for _, count in tracked)
-    request_total = sum(count for coordinate, count in counts.items() if coordinate[DAY] in set(agent_days))
+    agent_day_set = set(agent_days)
+    request_total = sum(count for coordinate, count in counts.items() if coordinate[DAY] in agent_day_set)
 
     top = [
         {
