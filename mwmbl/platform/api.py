@@ -14,7 +14,12 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel, SubscriptionStatus
+from polar_sdk.models import (
+    SubscriptionCancel,
+    SubscriptionProrationBehavior,
+    SubscriptionStatus,
+    SubscriptionUpdateBase,
+)
 from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
@@ -61,6 +66,7 @@ from mwmbl.platform.schemas import (
     MarketingConsentListResponse,
     MarketingConsentRequest,
     MarketingConsentResponse,
+    MembershipChangeRequest,
     MembershipCheckoutRequest,
     MembershipResponse,
     MembershipTierResponse,
@@ -1411,7 +1417,9 @@ def cancel_membership(request):
             )
     except polar_models.AlreadyCanceledSubscription:
         raise InvalidRequest("Membership is already canceled.", status=409)
-    return _save_cancellation(user_membership, result, cancel_at_period_end=True)
+    return _save_membership_update(
+        user_membership, current_period_end=result.current_period_end, cancel_at_period_end=True
+    )
 
 
 @router.post(
@@ -1437,21 +1445,60 @@ def uncancel_membership(request):
             )
     except polar_models.AlreadyCanceledSubscription:
         raise InvalidRequest("Membership has already ended.", status=409)
-    return _save_cancellation(user_membership, result, cancel_at_period_end=False)
+    return _save_membership_update(
+        user_membership, current_period_end=result.current_period_end, cancel_at_period_end=False
+    )
 
 
-def _save_cancellation(user_membership, subscription, cancel_at_period_end):
-    """Record a cancel or uncancel on the Membership row, unless a webhook changed it during the Polar call.
+@router.post(
+    "/membership/change",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Change membership tier",
+    description="Moves the membership to another tier straight away. The price difference for the rest of "
+    "the current period is added to the next invoice.",
+    tags=["Membership"],
+)
+def change_membership(request, body: MembershipChangeRequest):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if user_membership.tier == body.tier:
+        raise InvalidRequest("Already on this tier.", status=409)
+    # Changing tier would leave the cancellation in place, which is rarely what anyone wants;
+    # making them uncancel first keeps the outcome explicit.
+    if user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is scheduled to cancel. Uncancel it before changing tier.", status=409)
+    product_id = membership.product_ids()[body.tier]
+    if not product_id:
+        raise InvalidRequest("Membership is not configured. Contact support.", status=503)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionUpdateBase(
+                    product_id=product_id,
+                    proration_behavior=SubscriptionProrationBehavior.PRORATE,
+                ),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership has already ended.", status=409)
+    except polar_models.SubscriptionLocked:
+        raise InvalidRequest("A change to this membership is already in progress. Try again shortly.", status=409)
+    tier = membership.tier_for_product(result.product_id)
+    return _save_membership_update(user_membership, tier=tier, current_period_end=result.current_period_end)
 
-    Only the two changed fields are written, and only while the row still points at the same
+
+def _save_membership_update(user_membership, **changes):
+    """Record a change made in Polar on the Membership row, unless a webhook changed it during the Polar call.
+
+    Only the changed fields are written, and only while the row still points at the same
     subscription, so a webhook that deleted the row or moved it to another subscription wins.
     """
     Membership.objects.filter(
         pk=user_membership.pk, polar_subscription_id=user_membership.polar_subscription_id
-    ).update(
-        current_period_end=subscription.current_period_end,
-        cancel_at_period_end=cancel_at_period_end,
-    )
+    ).update(**changes)
     current_membership = Membership.objects.filter(user=user_membership.user).first()
     if current_membership is None:
         raise InvalidRequest("Not a member.", status=404)
