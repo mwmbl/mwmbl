@@ -69,6 +69,10 @@ class MembershipCheckoutRequest(Schema):
     embed_origin: Optional[str] = None
 
 
+class MembershipChangeRequest(Schema):
+    tier: MembershipTier
+
+
 class UpdateSpendLimitRequest(Schema):
     max_monthly_spend_cents: int = Field(ge=0)
 
