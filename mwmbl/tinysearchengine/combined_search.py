@@ -4,8 +4,9 @@ Pools both sources, ranks the union with a model of its own, and answers with th
 SearXNG-shaped JSON as /api/v2/search/. Authentication is required and a flat monthly quota
 applies, exactly as for Super Search, which this endpoint is meant to replace.
 
-There is deliberately no streaming and no crawling here. Super Search streams because it
-crawls promoted pages and follows their outbound links, which takes seconds; Staan is the
+There is deliberately no streaming and no crawling on the request path. Super Search streams
+because it crawls promoted pages and follows their outbound links, which takes seconds; the
+seed crawl below runs in the background instead, so the response never waits on it. Staan is the
 only network call here, and it is cached, so there is nothing to stream and a plain response
 is what a client actually wants.
 
@@ -22,19 +23,28 @@ Staan's results are written back to the search index, against the query's unigra
 bigrams, exactly as Super Search indexes what it finds: a page Staan found for one person's
 query then becomes a candidate for every search, plain /search/ included. The write runs
 alongside ranking, and the response reports how many new pages it added.
+
+With crawl=true the search also starts a seed crawl: the Staan results the index lacked are
+crawled in the background, following links within Staan's domains, and what that adds is
+read back from /new-pages - see mwmbl.indexer.seed_crawl. JWT only for now: it is free, and
+API customers are billed per request.
 """
 
 import asyncio
 from logging import getLogger
 
 from asgiref.sync import sync_to_async
-from ninja import Router
+from django.conf import settings
+from ninja import Router, Schema
 from ninja.errors import HttpError
+from ninja_jwt.authentication import JWTAuth
 from pydantic import Field
 
 from mwmbl import pricing
+from mwmbl.background import seed_crawl
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_results_against_query
+from mwmbl.indexer.seed_crawl import get_seed_crawl, start_seed_crawl
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
@@ -63,6 +73,26 @@ class CombinedSearchResponse(SearchResponse):
         "so a repeated query usually adds none.",
         examples=[3],
     )
+    crawl_scheduled: bool = Field(
+        description="Whether this search started a seed crawl (`crawl=true`). False when every "
+        "EUSP result is already in the index, or when a crawl for this query is still running.",
+        examples=[True],
+    )
+
+
+class NewPage(Schema):
+    url: str
+    title: str
+    extract: str
+
+
+class SeedCrawlResponse(Schema):
+    query: str
+    status: str = Field(description="`crawling` while the crawl runs, then `done`.", examples=["crawling"])
+    started_at: str
+    finished_at: str | None
+    pages_crawled: int = Field(description="Pages fetched so far, including ones that added nothing.")
+    pages: list[NewPage] = Field(description="Pages the crawl has added to the Mwmbl index so far.")
 
 
 DESCRIPTION = (
@@ -87,6 +117,10 @@ DESCRIPTION = (
     "every response.\n\n"
     "EUSP's results are added to the Mwmbl index; `pages_indexed` reports how many new "
     "pages that added.\n\n"
+    "With `crawl=true` (JWT only), the search also starts a background crawl of the EUSP results "
+    "that were not already in the Mwmbl index, following their links within the domains EUSP "
+    f"returned, up to {settings.SEED_CRAWL_MAX_PAGES:,} pages. "
+    "`GET /api/v2/combined-search/new-pages?q=...` lists what it has added.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
@@ -99,7 +133,13 @@ OPENAPI_EXTRA = {
             "in": "query",
             "required": True,
             "schema": {"type": "string", "example": "rust async runtimes"},
-        }
+        },
+        {
+            "name": "crawl",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "boolean", "default": False},
+        },
     ]
 }
 
@@ -152,8 +192,12 @@ def init_router(ranker) -> None:
         description=DESCRIPTION,
         openapi_extra=OPENAPI_EXTRA,
     )
-    async def combined_search(request, q: str):
+    async def combined_search(request, q: str, crawl: bool = False):
         user = await authenticate_user(request)
+
+        # Checked before the quota, so a refused request is not counted.
+        if crawl and request.headers.get("X-API-Key"):
+            raise HttpError(403, "crawl=true is not yet available with an API key.")
 
         if not await sync_to_async(check_rate_limit)(user.id):
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
@@ -196,6 +240,13 @@ def init_router(ranker) -> None:
             asyncio.to_thread(index_staan_results, q, staan_results),
         )
 
+        crawl_scheduled = False
+        if crawl:
+            crawl_args = await sync_to_async(start_seed_crawl)(user.id, q, retrieval.pages, staan_results)
+            if crawl_args is not None:
+                await sync_to_async(seed_crawl)(user.id, q, *crawl_args)
+                crawl_scheduled = True
+
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(
             query=q,
@@ -204,4 +255,20 @@ def init_router(ranker) -> None:
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
             pages_indexed=pages_indexed,
+            crawl_scheduled=crawl_scheduled,
         )
+
+    @router.get(
+        "new-pages",
+        response=SeedCrawlResponse,
+        auth=JWTAuth(),
+        summary="Pages added by a seed crawl",
+        description="What the seed crawl started by `crawl=true` for this query has added to the "
+        "Mwmbl index, so far or in all. 404 when there is no crawl for this query; records are "
+        "kept for a week.",
+    )
+    def new_pages(request, q: str):
+        record = get_seed_crawl(request.user.id, q)
+        if record is None:
+            raise HttpError(404, "No seed crawl for this query.")
+        return record

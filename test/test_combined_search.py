@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
+from background_task.models import Task
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client, override_settings
@@ -21,6 +22,7 @@ from ninja_jwt.tokens import RefreshToken
 
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
+from mwmbl.indexer import seed_crawl
 from mwmbl.membership import MembershipTier
 from mwmbl.models import ApiKey, Membership, UserBilling, generate_api_key
 from mwmbl.quota import (
@@ -53,6 +55,14 @@ WIKI_INDEX_RESULT = Document(
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+class _Retrieval(list):
+    """What the stub ranker retrieves: a list of index pages that a seed crawl can also read."""
+
+    @property
+    def pages(self):
+        return list(self)
 
 
 @pytest.fixture
@@ -105,7 +115,7 @@ def stub_sources(monkeypatch):
 
         def fake_retrieve(query):
             calls["retrieve_query"] = query
-            return list(index)
+            return _Retrieval(index)
 
         def fake_search_retrieved(retrieval, additional_results):
             calls["additional_results"] = additional_results
@@ -491,3 +501,101 @@ def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
 
     with TinyIndex(Document, str(index_path), "r") as index:
         assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]
+
+
+# ---------------------------------------------------------------------------
+# Seed crawls (the crawl itself is tested in test_seed_crawl.py)
+# ---------------------------------------------------------------------------
+
+NEW_PAGES_URL = f"{URL}new-pages"
+
+
+@pytest.fixture
+def crawl_sources(stub_sources, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    return stub_sources
+
+
+def _crawl(client, access_token, query="tokio"):
+    return client.get(f"{URL}?q={query}&crawl=true", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+
+@pytest.mark.django_db
+def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+
+    body = _crawl(client, access_token).json()
+
+    assert body["crawl_scheduled"] is True
+    task = Task.objects.get(task_name="mwmbl.background.seed_crawl")
+    assert task.params() == ([user.id, "tokio", [STAAN_RESULT.url], ["tokio.rs"]], {})
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "crawling"
+
+
+@pytest.mark.django_db
+def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+
+    assert _get(client, access_token).json()["crawl_scheduled"] is False
+    assert not Task.objects.filter(task_name="mwmbl.background.seed_crawl").exists()
+
+
+@pytest.mark.django_db
+def test_no_crawl_when_the_index_already_has_every_staan_result(
+    client, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources(index=(INDEX_RESULT, STAAN_RESULT))
+
+    assert _crawl(client, access_token).json()["crawl_scheduled"] is False
+    assert not Task.objects.filter(task_name="mwmbl.background.seed_crawl").exists()
+
+
+@pytest.mark.django_db
+def test_crawl_is_refused_with_an_api_key_and_not_counted(
+    client, user, api_key, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+
+    response = client.get(f"{URL}?q=tokio&crawl=true", HTTP_X_API_KEY=api_key.raw_key)
+
+    assert response.status_code == 403
+    assert get_monthly_combined_search_api_count(user.id) == 0
+
+
+@pytest.mark.django_db
+def test_new_pages_reports_the_crawl_for_the_query(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token)
+
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "crawling"
+    assert response.json()["pages"] == []
+
+
+@pytest.mark.django_db
+def test_new_pages_is_404_without_a_crawl(client, access_token, redis_cache):
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_only_shows_the_users_own_crawls(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token)
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    other_token = str(RefreshToken.for_user(other).access_token)
+
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {other_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_requires_a_jwt(client, api_key):
+    assert client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401

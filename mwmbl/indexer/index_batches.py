@@ -76,16 +76,43 @@ def index_documents(documents, index_path):
     POST /crawler/results calls this from a gunicorn worker, and the providers download
     tens of megabytes and hold ~156 MB of domain strings for the process's life - see
     blacklist_snapshot."""
+    page_documents = _page_documents(documents, index_path)
+    new_page_doc_counts = index_pages(index_path, page_documents)
+    end_time = datetime.now(timezone.utc)
+    return end_time, new_page_doc_counts
+
+
+def index_new_documents(documents, index_path) -> set[str]:
+    """index_documents, returning the URLs of the documents the index did not hold before.
+
+    A URL counts as new when none of the pages it is written to held it beforehand. Those
+    are the pages its tokens hash to, so an earlier copy of the same page lives there too.
+    Like index_results_against_query's count, this is a slight upper bound: a new document
+    the store then trims from a full page is still counted.
+    """
+    page_documents = _page_documents(documents, index_path)
+    seen_urls = set()
+    with TinyIndex(Document, index_path, "r") as indexer:
+        for page_index in page_documents:
+            try:
+                seen_urls |= {document.url for document in indexer.get_page(page_index)}
+            except PageError:
+                # An unlocked read, as in index_results_against_query: it only decides
+                # what counts as new, and the write below reads the page properly.
+                logger.warning("Could not read index page %d while finding new URLs", page_index)
+    new_urls = {document.url for documents in page_documents.values() for document in documents} - seen_urls
+    index_pages(index_path, page_documents)
+    return new_urls
+
+
+def _page_documents(documents, index_path) -> dict[int, list[Document]]:
     documents = filter_blacklisted_documents(documents)
     # Cleaned here rather than at each of the paths above, for the same reason the
     # blacklist is: every one of them takes its text from somewhere outside, and a title or
     # an extract holding a character that cannot be stored costs the whole page it would be
     # written to - a page that is shared with documents from everywhere else.
     cleaned_documents = [cleaned_document(document) for document in documents]
-    page_documents = preprocess_documents(cleaned_documents, index_path)
-    new_page_doc_counts = index_pages(index_path, page_documents)
-    end_time = datetime.now(timezone.utc)
-    return end_time, new_page_doc_counts
+    return preprocess_documents(cleaned_documents, index_path)
 
 
 def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:

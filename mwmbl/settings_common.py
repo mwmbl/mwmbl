@@ -206,6 +206,12 @@ HAS_DATABASE = True
 # `dokku config:set <app> RUN_BACKGROUND_TASKS=true`.
 RUN_BACKGROUND_TASKS = os.environ.get("RUN_BACKGROUND_TASKS", "false").lower() == "true"
 
+# Run tasks on a thread pool rather than one at a time. A seed crawl (below) takes minutes,
+# and in series it would hold up the hourly usage sync and the Polar report behind it.
+# Each task row is locked while it runs, so no task ever overlaps with itself.
+BACKGROUND_TASK_RUN_ASYNC = True
+BACKGROUND_TASK_ASYNC_THREADS = 4
+
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
 
@@ -304,6 +310,15 @@ STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/s
 # en-gb because Combined Search's ordering was tuned on en-gb results, for a UK searcher.
 STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
 STAAN_TIMEOUT_SECONDS = 5
+
+# Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
+# following links within Staan's domains - see mwmbl.indexer.seed_crawl.
+SEED_CRAWL_MAX_PAGES = 1000
+SEED_CRAWL_THREADS = 8
+# The least time between two fetches from one domain.
+SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
+# Queries are private, so a user's record of what their crawl added is not kept for long.
+SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
 
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
