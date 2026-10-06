@@ -3,6 +3,7 @@ and what is recorded for the user. The endpoint that starts a crawl is tested wi
 rest of Combined Search, in test_combined_search.py.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,13 @@ def fake_web(monkeypatch, settings):
 
 
 @pytest.fixture
+def worker(monkeypatch):
+    """The worker, minus its connection cleanup, which would close the test's transaction."""
+    monkeypatch.setattr(seed_crawl, "close_old_connections", lambda: None)
+    return seed_crawl.run_next_seed_crawl
+
+
+@pytest.fixture
 def index_path(tmp_path):
     path = Path(tmp_path) / "index.tinysearch"
     with TinyIndex.create(Document, str(path), num_pages=64, page_size=4096):
@@ -98,12 +106,14 @@ def test_each_round_fetches_at_most_one_url_per_domain(fake_web):
     assert all(len({url.split("/")[2].removeprefix("www.") for url in batch}) == len(batch) for batch in fake_web)
 
 
-def test_the_crawl_stops_at_the_page_limit(fake_web, settings):
-    settings.SEED_CRAWL_MAX_PAGES = 2
+def test_each_domain_stops_at_its_page_limit(fake_web, settings):
+    settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 2
 
-    rounds = _crawl([SEED], ["tokio.rs"])
+    rounds = _crawl([SEED, "https://rust-lang.github.io/async-book/"], ["tokio.rs", "rust-lang.github.io"])
 
-    assert sum(num_crawled for num_crawled, _ in rounds) == 2
+    fetched = [url for batch in fake_web for url in batch]
+    assert fetched == [SEED, "https://rust-lang.github.io/async-book/", "https://tokio.rs/tutorial"]
+    assert sum(num_crawled for num_crawled, _ in rounds) == 3
 
 
 def test_a_failed_fetch_adds_no_document(fake_web):
@@ -117,39 +127,57 @@ def test_a_failed_fetch_adds_no_document(fake_web):
 # ---------------------------------------------------------------------------
 
 
+def _queued_jobs(redis_cache):
+    return [json.loads(job) for job in reversed(redis_cache.lrange(seed_crawl.QUEUE_KEY, 0, -1))]
+
+
 def test_only_staan_results_missing_from_the_index_are_seeds(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     index_pages = [Document("Async book", "https://rust-lang.github.io/async-book/", "")]
 
-    seed_urls, domains = seed_crawl.start_seed_crawl(1, "tokio", index_pages, STAAN_RESULTS)
+    assert seed_crawl.start_seed_crawl(1, "tokio", index_pages, STAAN_RESULTS) is True
 
-    assert seed_urls == [SEED]
+    [job] = _queued_jobs(redis_cache)
+    assert job["seed_urls"] == [SEED]
     # Every Staan domain is crawlable, including those of results the index already had.
-    assert domains == ["rust-lang.github.io", "tokio.rs"]
+    assert job["domains"] == ["rust-lang.github.io", "tokio.rs"]
 
 
 def test_blacklisted_staan_results_are_neither_seeds_nor_domains(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: {SEED})
 
-    seed_urls, domains = seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS)
+    seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS)
 
-    assert SEED not in seed_urls
-    assert domains == ["rust-lang.github.io"]
+    [job] = _queued_jobs(redis_cache)
+    assert SEED not in job["seed_urls"]
+    assert job["domains"] == ["rust-lang.github.io"]
 
 
 def test_nothing_to_crawl_starts_nothing(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", STAAN_RESULTS, STAAN_RESULTS) is None
+    assert seed_crawl.start_seed_crawl(1, "tokio", STAAN_RESULTS, STAAN_RESULTS) is False
     assert seed_crawl.get_seed_crawl(1, "tokio") is None
+    assert _queued_jobs(redis_cache) == []
 
 
-def test_a_running_crawl_is_not_started_again(redis_cache, monkeypatch):
+def test_a_user_has_one_crawl_at_a_time(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS) is not None
-    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS) is None
-    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS) is not None
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS) is True
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS) is False
+    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS) is False
+    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS) is True
+    assert len(_queued_jobs(redis_cache)) == 2
+
+
+def test_nothing_is_queued_once_the_queue_is_full(redis_cache, monkeypatch, settings):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_QUEUED = 1
+
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS) is True
+    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS) is False
+    assert seed_crawl.get_seed_crawl(2, "tokio") is None
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +187,8 @@ def test_a_running_crawl_is_not_started_again(redis_cache, monkeypatch):
 
 def _run(user, index_path, seed_urls=(SEED,)):
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS)
+    # Crawl only the seeds and domain given, whatever start_seed_crawl made of STAAN_RESULTS.
+    seed_crawl.get_redis_connection("default").delete(seed_crawl.QUEUE_KEY)
     seed_crawl.run_seed_crawl(user.id, "tokio", list(seed_urls), ["tokio.rs"], index_path)
     return seed_crawl.get_seed_crawl(user.id, "tokio")
 
@@ -181,6 +211,47 @@ def test_the_record_lists_the_new_pages_once_the_crawl_is_done(fake_web, redis_c
         "title": "Tokio tutorial",
         "extract": "About Tokio tutorial.",
     }
+
+
+@pytest.mark.django_db
+def test_the_worker_runs_a_queued_crawl(fake_web, redis_cache, user, index_path, worker):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS)
+
+    assert worker(index_path) is True
+
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "done"
+    # The user can start another crawl once theirs has finished.
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS) is True
+
+
+@pytest.mark.django_db
+def test_a_failed_crawl_is_recorded_and_not_retried(fake_web, redis_cache, user, index_path, worker, monkeypatch):
+    def failing_crawl_batch(urls, num_threads, delay_seconds, redis):
+        raise ConnectionError("Redis went away")
+
+    monkeypatch.setattr(seed_crawl, "crawl_batch", failing_crawl_batch)
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS)
+
+    worker(index_path)
+
+    record = seed_crawl.get_seed_crawl(user.id, "tokio")
+    assert record["status"] == "failed"
+    assert record["finished_at"] is not None
+    assert _queued_jobs(redis_cache) == []
+    assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS) is True
+
+
+@pytest.mark.django_db
+def test_crawling_a_query_again_keeps_its_pages_and_counts_none_twice(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+
+    record = _run(user, index_path)
+    user.refresh_from_db()
+
+    assert record["status"] == "done"
+    assert record["pages_indexed"] == 3
+    assert record["pages_crawled"] == 6
+    assert user.seed_search_pages_indexed == 3
 
 
 @pytest.mark.django_db

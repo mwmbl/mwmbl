@@ -8,13 +8,13 @@ provider being down costs recall rather than the request, and that the quota is 
 atomically.
 """
 
+import json
 import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
-from background_task.models import Task
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client, override_settings
@@ -529,9 +529,9 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
     body = _crawl(client, access_token).json()
 
     assert body["crawl_scheduled"] is True
-    task = Task.objects.get(task_name="mwmbl.background.seed_crawl")
-    assert task.params() == ([user.id, "tokio", [STAAN_RESULT.url], ["tokio.rs"]], {})
-    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "crawling"
+    job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
+    assert job == {"user_id": user.id, "query": "tokio", "seed_urls": [STAAN_RESULT.url], "domains": ["tokio.rs"]}
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
 
 
 @pytest.mark.django_db
@@ -539,7 +539,7 @@ def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cach
     crawl_sources()
 
     assert _get(client, access_token).json()["crawl_scheduled"] is False
-    assert not Task.objects.filter(task_name="mwmbl.background.seed_crawl").exists()
+    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
 
 
 @pytest.mark.django_db
@@ -549,7 +549,7 @@ def test_no_crawl_when_the_index_already_has_every_staan_result(
     crawl_sources(index=(INDEX_RESULT, STAAN_RESULT))
 
     assert _crawl(client, access_token).json()["crawl_scheduled"] is False
-    assert not Task.objects.filter(task_name="mwmbl.background.seed_crawl").exists()
+    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
 
 
 @pytest.mark.django_db
@@ -573,7 +573,7 @@ def test_new_pages_reports_the_crawl_for_the_query(client, access_token, fresh_q
     response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "crawling"
+    assert response.json()["status"] == "queued"
     assert response.json()["pages"] == []
 
 
@@ -613,7 +613,7 @@ def test_new_pages_count_reports_how_many_pages_the_crawl_added(
 
     assert response.status_code == 200
     assert response.json()["pages_indexed"] == 1
-    assert response.json()["status"] == "crawling"
+    assert response.json()["status"] == "queued"
     assert "pages" not in response.json()
 
 

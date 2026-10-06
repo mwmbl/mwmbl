@@ -41,7 +41,6 @@ from ninja_jwt.authentication import JWTAuth
 from pydantic import Field
 
 from mwmbl import pricing
-from mwmbl.background import seed_crawl
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_results_against_query
 from mwmbl.indexer.seed_crawl import get_seed_crawl, get_seed_crawl_summary, start_seed_crawl
@@ -75,7 +74,8 @@ class CombinedSearchResponse(SearchResponse):
     )
     crawl_scheduled: bool = Field(
         description="Whether this search started a seed crawl (`crawl=true`). False when every "
-        "EUSP result is already in the index, or when a crawl for this query is still running.",
+        "EUSP result is already in the index, when one of your crawls is still queued or running, or "
+        "when the crawl queue is full.",
         examples=[True],
     )
 
@@ -88,10 +88,15 @@ class NewPage(Schema):
 
 class SeedCrawlSummaryResponse(Schema):
     query: str
-    status: str = Field(description="`crawling` while the crawl runs, then `done`.", examples=["crawling"])
+    status: str = Field(
+        description="`queued` until the crawl starts, `crawling` while it runs, then `done`, or `failed`.",
+        examples=["crawling"],
+    )
     started_at: str
     finished_at: str | None
-    pages_crawled: int = Field(description="Pages fetched so far, including ones that added nothing.")
+    pages_crawled: int = Field(
+        description="Pages fetched so far, by every crawl of this query, including ones that added nothing."
+    )
     pages_indexed: int = Field(description="Pages the crawl has added to the Mwmbl index so far.", examples=[42])
 
 
@@ -123,7 +128,8 @@ DESCRIPTION = (
     "pages that added.\n\n"
     "With `crawl=true` (JWT only), the search also starts a background crawl of the EUSP results "
     "that were not already in the Mwmbl index, following their links within the domains EUSP "
-    f"returned, up to {settings.SEED_CRAWL_MAX_PAGES:,} pages. "
+    f"returned, up to {settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN:,} pages per domain. You can have "
+    "one crawl queued or running at a time. "
     "`GET /api/v2/combined-search/new-pages?q=...` lists what it has added, and "
     "`GET /api/v2/combined-search/new-pages/count?q=...` counts it.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
@@ -245,12 +251,7 @@ def init_router(ranker) -> None:
             asyncio.to_thread(index_staan_results, q, staan_results),
         )
 
-        crawl_scheduled = False
-        if crawl:
-            crawl_args = await sync_to_async(start_seed_crawl)(user.id, q, retrieval.pages, staan_results)
-            if crawl_args is not None:
-                await sync_to_async(seed_crawl)(user.id, q, *crawl_args)
-                crawl_scheduled = True
+        crawl_scheduled = crawl and await sync_to_async(start_seed_crawl)(user.id, q, retrieval.pages, staan_results)
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(

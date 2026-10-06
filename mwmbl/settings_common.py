@@ -195,9 +195,9 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 # Gates database initialisation and background task scheduling; False for the crawler and tests.
 HAS_DATABASE = True
 
-# Whether this container runs the django-background-tasks queue (see mwmbl.main). Note the
-# distinction from HAS_DATABASE above: that gates *scheduling* the tasks, this gates
-# *running* them.
+# Whether this container runs the django-background-tasks queue and the seed crawl worker
+# (see mwmbl.main). Note the distinction from HAS_DATABASE above: that gates *scheduling*
+# the tasks, this gates *running* them.
 #
 # Opt-in rather than on by default because beta shares its database, index and Redis with
 # production. Exactly one deployment should run the queue, and it should be production:
@@ -205,12 +205,6 @@ HAS_DATABASE = True
 # picking up the same rows would do both against production. Turn it on with
 # `dokku config:set <app> RUN_BACKGROUND_TASKS=true`.
 RUN_BACKGROUND_TASKS = os.environ.get("RUN_BACKGROUND_TASKS", "false").lower() == "true"
-
-# Run tasks on a thread pool rather than one at a time. A seed crawl (below) takes minutes,
-# and in series it would hold up the hourly usage sync and the Polar report behind it.
-# Each task row is locked while it runs, so no task ever overlaps with itself.
-BACKGROUND_TASK_RUN_ASYNC = True
-BACKGROUND_TASK_ASYNC_THREADS = 4
 
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
@@ -313,7 +307,11 @@ STAAN_TIMEOUT_SECONDS = 5
 
 # Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
 # following links within Staan's domains - see mwmbl.indexer.seed_crawl.
-SEED_CRAWL_MAX_PAGES = 1000
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 100
+# A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
+SEED_CRAWL_MAX_SECONDS = 15 * 60
+# Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.
+SEED_CRAWL_MAX_QUEUED = 10
 SEED_CRAWL_THREADS = 8
 # The least time between two fetches from one domain.
 SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0

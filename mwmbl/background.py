@@ -6,7 +6,6 @@ Django Background Tasks for periodic maintenance:
   - report_usage_to_polar: reports billable usage overage to Polar once per hour
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
-  - seed_crawl: crawls outwards from a Combined Search's Staan results, on request
 """
 
 import logging
@@ -28,7 +27,6 @@ from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
-from mwmbl.indexer.seed_crawl import run_seed_crawl
 from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
 from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
 from mwmbl.moderation.model import reset_model_cache
@@ -251,16 +249,6 @@ def report_usage_to_polar():
 # ---------------------------------------------------------------------------
 # Domain moderation suggestions (Django Background Tasks)
 # ---------------------------------------------------------------------------
-
-
-@background(schedule=0)
-def seed_crawl(user_id: int, query: str, seed_urls: list[str], domains: list[str]):
-    """Crawl the pages a Combined Search found that the index lacked - see mwmbl.indexer.seed_crawl.
-
-    Takes minutes, which is why the queue runs tasks concurrently (BACKGROUND_TASK_RUN_ASYNC).
-    """
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
-    run_seed_crawl(user_id, query, seed_urls, domains, str(index_path))
 
 
 @background(schedule=0)
