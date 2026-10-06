@@ -1,7 +1,10 @@
+import json
 from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
 from django.db import models
+from django.db.models import Count
+from django.db.models.functions import TruncWeek
 from pydantic import BaseModel
 from redis import Redis
 
@@ -19,7 +22,11 @@ DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
+USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly"
+
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
+USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
+REGISTRATION_WEEKS = 52
 
 
 class DomainStats(BaseModel):
@@ -37,6 +44,7 @@ class MwmblStats(BaseModel):
     dataset_queries_daily: dict[str, int]
     dataset_results_daily: dict[str, int]
     blacklisted_results_removed_daily: dict[str, int]
+    users_registered_weekly: dict[str, int]
 
 
 # New stats we want per domain:
@@ -112,8 +120,39 @@ class StatsManager:
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
             blacklisted_results_removed_daily=blacklisted_results_removed_daily,
+            users_registered_weekly=self.get_users_registered_weekly(),
             **index_stats,
         )
+
+    def get_users_registered_weekly(self) -> dict[str, int]:
+        """Registrations per week for the last year, keyed by the Monday starting each week.
+
+        Cached in Redis because it scans the user table on every stats request otherwise.
+        """
+        cached = self.redis.get(USERS_REGISTERED_WEEKLY_KEY)
+        if cached is not None:
+            return json.loads(cached)
+
+        today = utc_today()
+        this_week_start = today - timedelta(days=today.weekday())
+        first_week_start = this_week_start - timedelta(weeks=REGISTRATION_WEEKS - 1)
+        weekly_counts = (
+            MwmblUser.objects.filter(date_joined__date__gte=first_week_start)
+            .annotate(week=TruncWeek("date_joined", tzinfo=timezone.utc))
+            .values("week")
+            .annotate(num_users=Count("id"))
+        )
+        counts_by_week = {row["week"].date(): row["num_users"] for row in weekly_counts}
+
+        users_registered_weekly = {}
+        for i in range(REGISTRATION_WEEKS):
+            week_start = first_week_start + timedelta(weeks=i)
+            users_registered_weekly[str(week_start)] = counts_by_week.get(week_start, 0)
+
+        self.redis.set(
+            USERS_REGISTERED_WEEKLY_KEY, json.dumps(users_registered_weekly), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS
+        )
+        return users_registered_weekly
 
     def get_user_stats(self, username: str) -> dict:
         """Per-user stats for the last 30 days from the UserStats table."""
