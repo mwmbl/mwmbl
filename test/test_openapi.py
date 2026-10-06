@@ -208,6 +208,7 @@ def test_v2_openapi_spec_generation():
         "/api/v2/search/raw",
         "/api/v2/super-search/",
         "/api/v2/combined-search/",
+        "/api/v2/combined-search/new-pages",
     }
 
 
@@ -218,7 +219,10 @@ def test_combined_search_is_documented():
     spec = Client().get("/api/v2/openapi.json").json()
     operation = spec["paths"]["/api/v2/combined-search/"]["get"]
 
-    assert [(p["name"], p["in"], p["required"]) for p in operation["parameters"]] == [("q", "query", True)]
+    assert [(p["name"], p["in"], p["required"]) for p in operation["parameters"]] == [
+        ("q", "query", True),
+        ("crawl", "query", False),
+    ]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/CombinedSearchResponse"
     }
