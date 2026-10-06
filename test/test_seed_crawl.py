@@ -170,6 +170,7 @@ def test_the_record_lists_the_new_pages_once_the_crawl_is_done(fake_web, redis_c
     assert record["status"] == "done"
     assert record["finished_at"] is not None
     assert record["pages_crawled"] == 3
+    assert record["pages_indexed"] == 3
     assert [page["url"] for page in record["pages"]] == [
         SEED,
         "https://tokio.rs/tutorial",
@@ -199,6 +200,16 @@ def test_pages_already_in_the_index_are_not_counted_as_new(fake_web, redis_cache
 
     assert record["pages_crawled"] == 3
     assert [page["url"] for page in record["pages"]] == ["https://tokio.rs/tutorial"]
+
+
+@pytest.mark.django_db
+def test_the_summary_counts_the_pages_without_listing_them(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+
+    summary = seed_crawl.get_seed_crawl_summary(user.id, "tokio")
+
+    assert summary["pages_indexed"] == 3
+    assert "pages" not in summary
 
 
 @pytest.mark.django_db

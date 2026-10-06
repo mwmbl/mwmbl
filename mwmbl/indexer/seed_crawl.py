@@ -11,7 +11,7 @@ much of the frontier it holds. Each round is indexed as it finishes, so what a c
 added is visible while it is still running.
 
 What it added is recorded in Redis against the user and the query, where
-GET /api/v2/combined-search/new-pages reads it, and counted on the user for their stats.
+GET /api/v2/combined-search/new-pages (and /new-pages/count) reads it, and counted on the user for their stats.
 """
 
 import hashlib
@@ -170,19 +170,32 @@ def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
         yield len(batch), documents
 
 
-def get_seed_crawl(user_id: int, query: str) -> dict | None:
-    """The record of this user's seed crawl for this query, or None if there is none."""
+def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
+    """This user's seed crawl for this query without its pages, or None if there is none.
+
+    Counts the pages rather than reading them, so it stays cheap for a crawl that has added
+    a thousand.
+    """
     redis = get_redis_connection("default")
     record = redis.hgetall(_record_key(user_id, query))
     if not record:
         return None
     fields = {key.decode(): value.decode() for key, value in record.items()}
-    pages = [json.loads(page) for page in redis.lrange(_pages_key(user_id, query), 0, -1)]
     return {
         "query": fields["query"],
         "status": fields["status"],
         "started_at": fields["started_at"],
         "finished_at": fields.get("finished_at"),
         "pages_crawled": int(fields["pages_crawled"]),
-        "pages": pages,
+        "pages_indexed": redis.llen(_pages_key(user_id, query)),
     }
+
+
+def get_seed_crawl(user_id: int, query: str) -> dict | None:
+    """This user's seed crawl for this query with the pages it added, or None if there is none."""
+    summary = get_seed_crawl_summary(user_id, query)
+    if summary is None:
+        return None
+    redis = get_redis_connection("default")
+    pages = [json.loads(page) for page in redis.lrange(_pages_key(user_id, query), 0, -1)]
+    return {**summary, "pages": pages}

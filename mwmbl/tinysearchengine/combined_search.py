@@ -44,7 +44,7 @@ from mwmbl import pricing
 from mwmbl.background import seed_crawl
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_results_against_query
-from mwmbl.indexer.seed_crawl import get_seed_crawl, start_seed_crawl
+from mwmbl.indexer.seed_crawl import get_seed_crawl, get_seed_crawl_summary, start_seed_crawl
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
@@ -86,12 +86,16 @@ class NewPage(Schema):
     extract: str
 
 
-class SeedCrawlResponse(Schema):
+class SeedCrawlSummaryResponse(Schema):
     query: str
     status: str = Field(description="`crawling` while the crawl runs, then `done`.", examples=["crawling"])
     started_at: str
     finished_at: str | None
     pages_crawled: int = Field(description="Pages fetched so far, including ones that added nothing.")
+    pages_indexed: int = Field(description="Pages the crawl has added to the Mwmbl index so far.", examples=[42])
+
+
+class SeedCrawlResponse(SeedCrawlSummaryResponse):
     pages: list[NewPage] = Field(description="Pages the crawl has added to the Mwmbl index so far.")
 
 
@@ -120,7 +124,8 @@ DESCRIPTION = (
     "With `crawl=true` (JWT only), the search also starts a background crawl of the EUSP results "
     "that were not already in the Mwmbl index, following their links within the domains EUSP "
     f"returned, up to {settings.SEED_CRAWL_MAX_PAGES:,} pages. "
-    "`GET /api/v2/combined-search/new-pages?q=...` lists what it has added.\n\n"
+    "`GET /api/v2/combined-search/new-pages?q=...` lists what it has added, and "
+    "`GET /api/v2/combined-search/new-pages/count?q=...` counts it.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
@@ -272,3 +277,18 @@ def init_router(ranker) -> None:
         if record is None:
             raise HttpError(404, "No seed crawl for this query.")
         return record
+
+    @router.get(
+        "new-pages/count",
+        response=SeedCrawlSummaryResponse,
+        auth=JWTAuth(),
+        summary="Count of pages added by a seed crawl",
+        description="How many pages the seed crawl started by `crawl=true` for this query has "
+        "added to the Mwmbl index, so far or in all, without listing them. 404 when there is no "
+        "crawl for this query; records are kept for a week.",
+    )
+    def new_pages_count(request, q: str):
+        summary = get_seed_crawl_summary(request.user.id, q)
+        if summary is None:
+            raise HttpError(404, "No seed crawl for this query.")
+        return summary

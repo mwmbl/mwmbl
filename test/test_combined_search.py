@@ -599,3 +599,31 @@ def test_new_pages_only_shows_the_users_own_crawls(client, access_token, fresh_q
 @pytest.mark.django_db
 def test_new_pages_requires_a_jwt(client, api_key):
     assert client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401
+
+
+@pytest.mark.django_db
+def test_new_pages_count_reports_how_many_pages_the_crawl_added(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    _crawl(client, access_token)
+    redis_cache.rpush(f"{seed_crawl._record_key(user.id, 'tokio')}:pages", '{"url": "u", "title": "t", "extract": ""}')
+
+    response = client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 200
+    assert response.json()["pages_indexed"] == 1
+    assert response.json()["status"] == "crawling"
+    assert "pages" not in response.json()
+
+
+@pytest.mark.django_db
+def test_new_pages_count_is_404_without_a_crawl(client, access_token, redis_cache):
+    response = client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_count_requires_a_jwt(client, api_key):
+    assert client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401

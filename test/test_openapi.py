@@ -209,6 +209,7 @@ def test_v2_openapi_spec_generation():
         "/api/v2/super-search/",
         "/api/v2/combined-search/",
         "/api/v2/combined-search/new-pages",
+        "/api/v2/combined-search/new-pages/count",
     }
 
 
