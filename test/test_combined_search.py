@@ -96,7 +96,11 @@ def stub_sources(monkeypatch):
     """
     calls = {}
 
-    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), pages_indexed=1):
+    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), pages_indexed=1, cached_staan=None):
+        def fake_cached_staan(query, *args, **kwargs):
+            calls["cached_staan_query"] = query
+            return None if cached_staan is None else list(cached_staan)
+
         def fake_staan(query, *args, **kwargs):
             calls["staan_query"] = query
             if isinstance(staan, Exception):
@@ -118,6 +122,7 @@ def stub_sources(monkeypatch):
                 raise pages_indexed
             return pages_indexed
 
+        monkeypatch.setattr(combined_search, "get_cached_staan_results", fake_cached_staan)
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
         monkeypatch.setattr(combined_search, "index_results_against_query", fake_index)
         monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
@@ -258,6 +263,55 @@ def test_a_rejected_request_refunds_its_increment(client, user, access_token, fr
     _get(client, access_token)
 
     assert cache.get(key) == 10
+
+
+@pytest.mark.django_db
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
+def test_a_cached_query_is_not_counted(client, user, access_token, fresh_quota, stub_sources):
+    calls = stub_sources(cached_staan=(STAAN_RESULT,))
+    cache.set(_combined_search_monthly_key(user.id), 3, timeout=3600)
+
+    body = _get(client, access_token).json()
+
+    assert body["monthly_usage"] == 3
+    assert body["monthly_limit"] == 10
+    assert cache.get(_combined_search_monthly_key(user.id)) == 3
+    assert "staan_query" not in calls
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url, STAAN_RESULT.url]
+
+
+@pytest.mark.django_db
+@override_settings(COMBINED_SEARCH_MONTHLY_LIMITS={"free": 10})
+def test_a_cached_query_is_served_at_the_limit(client, user, access_token, fresh_quota, stub_sources):
+    """A cache hit costs nothing, so being out of quota is no reason to refuse it."""
+    stub_sources(cached_staan=(STAAN_RESULT,))
+    cache.set(_combined_search_monthly_key(user.id), 10, timeout=3600)
+
+    response = _get(client, access_token)
+
+    assert response.status_code == 200
+    assert cache.get(_combined_search_monthly_key(user.id)) == 10
+
+
+@pytest.mark.django_db
+def test_a_cached_query_is_not_billed(client, user, api_key, fresh_quota, redis_cache, stub_sources):
+    stub_sources(cached_staan=(STAAN_RESULT,))
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+
+    response = _get_with_key(client, api_key)
+
+    assert response.status_code == 200
+    assert response.json()["monthly_usage"] == 0
+    assert get_monthly_combined_search_api_count(user.id) == 0
+
+
+@pytest.mark.django_db
+def test_a_cached_query_with_no_staan_results_is_not_counted(client, user, access_token, fresh_quota, stub_sources):
+    """An empty cache entry is a query Staan had nothing for: still no Staan call to pay for."""
+    calls = stub_sources(cached_staan=())
+
+    assert _get(client, access_token).json()["monthly_usage"] == 0
+    assert "staan_query" not in calls
 
 
 @pytest.mark.django_db

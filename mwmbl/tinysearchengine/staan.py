@@ -73,6 +73,24 @@ def _documents(payload: dict, query: str) -> list[Document]:
     return documents
 
 
+def get_cached_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[Document] | None:
+    """Staan's cached results for a query, or None when they would have to be fetched.
+
+    Separate from get_staan_results so Combined Search can tell, before it counts a request
+    against the caller's quota, whether answering it costs a Staan call at all.
+    """
+    query = query[:MAX_QUERY_CHARS]
+    cached = get_cached_external_results(DocumentSource.STAAN, query)
+    if cached is None:
+        return None
+    # The cache stores the rank Staan gave, not a score - scoring is this function's to do,
+    # and doing it here is what makes an entry mean the same thing to every caller.
+    staan_results = cached[:max_results]
+    for rank, document in enumerate(staan_results):
+        document.score = staan_score(rank)
+    return staan_results
+
+
 def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[Document]:
     """Staan's results for a query, from the external cache where possible.
 
@@ -83,14 +101,9 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
 
     # Ahead of the API-key check deliberately: a cache hit costs Staan nothing and needs no
     # credentials, so a deployment that has since dropped the key still serves what it has.
-    cached = get_cached_external_results(DocumentSource.STAAN, query)
+    cached = get_cached_staan_results(query, max_results)
     if cached is not None:
-        # The cache stores the rank Staan gave, not a score - scoring is this function's to
-        # do, and doing it here is what makes an entry mean the same thing to every caller.
-        staan_results = cached[:max_results]
-        for rank, document in enumerate(staan_results):
-            document.score = staan_score(rank)
-        return staan_results
+        return cached
 
     if not settings.STAAN_SEARCH_API_KEY:
         logger.warning("STAAN_SEARCH_API_KEY is not configured")
