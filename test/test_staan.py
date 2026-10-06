@@ -19,7 +19,7 @@ from mwmbl.indexer.external_cache import (
 )
 from mwmbl.tinysearchengine import staan
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, TinyIndex
-from mwmbl.tinysearchengine.staan import NUM_STAAN_RESULTS, get_staan_results, staan_score
+from mwmbl.tinysearchengine.staan import NUM_STAAN_RESULTS, get_cached_staan_results, get_staan_results, staan_score
 
 NUM_PAGES = 8
 
@@ -233,6 +233,33 @@ def test_a_cache_hit_is_rescored_here_not_by_the_cache(cache_index):
         mock.stop()
 
     assert [document.score for document in results] == [staan_score(0), staan_score(1)]
+
+
+def test_the_cache_lookup_is_none_until_a_fetch_and_then_matches_it(cache_index):
+    """Combined Search decides whether to count a request from this, so a miss must be None
+    and a hit must be exactly what get_staan_results would have served."""
+    assert get_cached_staan_results("rust async") is None
+
+    mock, _ = _patched_staan(API_RESPONSE)
+    try:
+        fetched = get_staan_results("rust async")
+    finally:
+        mock.stop()
+
+    cached = get_cached_staan_results("rust async")
+    assert [(document.url, document.score) for document in cached] == [
+        (document.url, document.score) for document in fetched
+    ]
+
+
+def test_a_cached_empty_result_is_a_hit_not_a_miss(cache_index):
+    mock, _ = _patched_staan({"web": {"results": []}})
+    try:
+        get_staan_results("nonsense query")
+    finally:
+        mock.stop()
+
+    assert get_cached_staan_results("nonsense query") == []
 
 
 def test_a_query_staan_has_nothing_for_is_remembered(cache_index):
