@@ -22,7 +22,7 @@ DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
-USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly"
+USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
@@ -129,16 +129,18 @@ class StatsManager:
 
         Cached in Redis because it scans the user table on every stats request otherwise.
         """
-        cached = self.redis.get(USERS_REGISTERED_WEEKLY_KEY)
+        today = utc_today()
+        this_week_start = today - timedelta(days=today.weekday())
+        # Keyed by week so a new week never serves the previous week's window from cache.
+        cache_key = USERS_REGISTERED_WEEKLY_KEY.format(week_start=this_week_start)
+        cached = self.redis.get(cache_key)
         if cached is not None:
             return json.loads(cached)
 
-        today = utc_today()
-        this_week_start = today - timedelta(days=today.weekday())
         first_week_start = this_week_start - timedelta(weeks=REGISTRATION_WEEKS - 1)
         weekly_counts = (
             MwmblUser.objects.filter(date_joined__date__gte=first_week_start)
-            .annotate(week=TruncWeek("date_joined", tzinfo=timezone.utc))
+            .annotate(week=TruncWeek("date_joined"))
             .values("week")
             .annotate(num_users=Count("id"))
         )
@@ -149,9 +151,7 @@ class StatsManager:
             week_start = first_week_start + timedelta(weeks=i)
             users_registered_weekly[str(week_start)] = counts_by_week.get(week_start, 0)
 
-        self.redis.set(
-            USERS_REGISTERED_WEEKLY_KEY, json.dumps(users_registered_weekly), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS
-        )
+        self.redis.set(cache_key, json.dumps(users_registered_weekly), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS)
         return users_registered_weekly
 
     def get_user_stats(self, username: str) -> dict:
