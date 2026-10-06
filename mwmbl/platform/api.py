@@ -91,7 +91,7 @@ from mwmbl.platform.schemas import (
     VoteStatsRequest,
 )
 from mwmbl.polar_webhooks import validate_event
-from mwmbl.quota import get_monthly_combined_search_count
+from mwmbl.quota import get_monthly_combined_search_api_count, get_monthly_combined_search_count
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
@@ -1229,12 +1229,15 @@ def _subscription_response(user, billing, status: str) -> SubscriptionResponse:
 
     spend_cents = billing.max_monthly_spend_cents if billing else 0
     usage = get_monthly_count(user.id)
+    combined_search_usage = get_monthly_combined_search_api_count(user.id)
     return SubscriptionResponse(
         status=status,
         max_monthly_spend_cents=spend_cents,
-        monthly_limit=pricing.effective_monthly_request_cap(spend_cents),
+        monthly_limit=pricing.effective_monthly_request_cap(spend_cents, combined_search_usage),
         monthly_usage=usage,
-        estimated_cost_cents=pricing.estimated_cost_cents(usage),
+        combined_search_monthly_limit=pricing.combined_search_monthly_cap(spend_cents, usage),
+        combined_search_monthly_usage=combined_search_usage,
+        estimated_cost_cents=pricing.estimated_cost_cents(usage, combined_search_usage),
         current_period_end=billing.current_period_end if billing else None,
         polar_customer_id=billing.polar_customer_id if billing else None,
     )

@@ -29,6 +29,8 @@ class SubscriptionResponse(Schema):
     max_monthly_spend_cents: int
     monthly_limit: int
     monthly_usage: int
+    combined_search_monthly_limit: int
+    combined_search_monthly_usage: int
     estimated_cost_cents: int
     current_period_end: Optional[datetime]
     polar_customer_id: Optional[str]

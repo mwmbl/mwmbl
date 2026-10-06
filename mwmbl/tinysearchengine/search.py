@@ -8,7 +8,12 @@ from ninja.errors import HttpError
 from mwmbl import pricing
 from mwmbl.format import format_result, format_result_v2
 from mwmbl.models import MwmblUser
-from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
+from mwmbl.quota import (
+    check_rate_limit,
+    get_monthly_combined_search_api_count,
+    get_monthly_count,
+    increment_monthly,
+)
 from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.tinysearchengine.indexer import TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
@@ -306,7 +311,9 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             user: MwmblUser = api_key.user
             billing = getattr(user, "billing", None)
             spend_cents = billing.max_monthly_spend_cents if billing else 0
-            monthly_limit = pricing.effective_monthly_request_cap(spend_cents)
+            monthly_limit = pricing.effective_monthly_request_cap(
+                spend_cents, get_monthly_combined_search_api_count(user.id)
+            )
 
             if not check_rate_limit(user.id):
                 raise HttpError(

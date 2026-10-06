@@ -19,6 +19,9 @@ uv run manage.py <command> --settings=mwmbl.settings_dev
 
 `make test` and `make migrate` need `DATABASE_URL` in the environment, for example
 `DATABASE_URL="postgres://user@/mwmbl_test"`. Tests use `mwmbl.settings_test`.
+The tests also need a running Redis: the quota counters' Lua scripts and key scans are
+tested against a real one (the `redis_cache` fixture), in the database `TEST_REDIS_URL`
+names, which the tests flush. `make test` defaults it to `redis://127.0.0.1:6379/15`.
 
 `make check` and `make test` are the two gates. Both must pass before you open a pull
 request, and `.pre-commit-config.yaml` runs the first of them on every commit.
