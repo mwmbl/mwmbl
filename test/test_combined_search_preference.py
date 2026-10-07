@@ -31,11 +31,11 @@ def _set(client, auth, enabled):
 
 
 @pytest.mark.django_db
-def test_a_newly_registered_user_has_seed_search_on(client):
+def test_a_newly_registered_user_has_combined_search_on(client):
     body = {"email": "new@example.com", "password": "correctpassword", "username": "newbie"}
     client.post(REGISTER_URL, data=json.dumps(body), content_type="application/json")
 
-    assert User.objects.get(username="newbie").seed_search_enabled
+    assert User.objects.get(username="newbie").combined_search_enabled
 
 
 @pytest.mark.django_db
@@ -47,22 +47,22 @@ def test_the_preference_endpoint_reports_the_users_setting(client, user, auth):
 
 
 @pytest.mark.django_db
-def test_switching_seed_search_off_is_saved(client, user, auth):
+def test_switching_combined_search_off_is_saved(client, user, auth):
     response = _set(client, auth, False)
 
     user.refresh_from_db()
     assert response.json() == {"enabled": False}
-    assert not user.seed_search_enabled
+    assert not user.combined_search_enabled
     assert client.get(PREFERENCE_URL, **auth).json() == {"enabled": False}
 
 
 @pytest.mark.django_db
-def test_switching_seed_search_back_on_is_saved(client, user, auth):
+def test_switching_combined_search_back_on_is_saved(client, user, auth):
     _set(client, auth, False)
     _set(client, auth, True)
 
     user.refresh_from_db()
-    assert user.seed_search_enabled
+    assert user.combined_search_enabled
 
 
 @pytest.mark.django_db

@@ -6,17 +6,17 @@ class Migration(migrations.Migration):
         ("mwmbl", "0041_usagebucket_combined_search"),
     ]
 
-    # Existing users get False, so nobody already registered has Seed Search switched on for them;
+    # Existing users get False, so nobody already registered has Combined Search switched on for them;
     # the second step makes it on for accounts created from now on.
     operations = [
         migrations.AddField(
             model_name="mwmbluser",
-            name="seed_search_enabled",
+            name="combined_search_enabled",
             field=models.BooleanField(default=False),
         ),
         migrations.AlterField(
             model_name="mwmbluser",
-            name="seed_search_enabled",
+            name="combined_search_enabled",
             field=models.BooleanField(default=True),
         ),
     ]

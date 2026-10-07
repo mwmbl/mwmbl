@@ -63,7 +63,7 @@ class CombinedSearchUsageResponse(Schema):
     monthly_limit: int
 
 
-class SeedSearchPreference(Schema):
+class CombinedSearchPreference(Schema):
     enabled: bool
 
 
