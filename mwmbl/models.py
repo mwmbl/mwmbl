@@ -11,7 +11,8 @@ from mwmbl.utils import bare_host
 
 
 class MwmblUser(AbstractUser):
-    pass
+    # On for new accounts. Accounts created before this field existed start off (see the migration).
+    seed_search_enabled = models.BooleanField(default=True)
 
 
 class UserCuration(models.Model):
