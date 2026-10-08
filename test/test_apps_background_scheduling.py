@@ -21,8 +21,9 @@ SYNC_TASK = "mwmbl.background.sync_search_counts"
 POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
 BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
 BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
+INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
 
-ALL_TASKS = {SYNC_TASK, POLAR_REPORT_TASK, BLACKLIST_SNAPSHOT_TASK, BLACKLIST_PURGE_TASK}
+ALL_TASKS = {SYNC_TASK, POLAR_REPORT_TASK, BLACKLIST_SNAPSHOT_TASK, BLACKLIST_PURGE_TASK, INDEX_COUNT_TASK}
 
 
 @pytest.fixture(autouse=True)
@@ -98,3 +99,12 @@ def test_a_one_off_snapshot_rebuild_does_not_suppress_the_periodic_one():
     MwmblConfig._schedule_background_tasks()
 
     assert Task.objects.filter(task_name=BLACKLIST_SNAPSHOT_TASK, repeat__gt=0).count() == 1
+
+
+@pytest.mark.django_db
+def test_index_count_task_repeats_at_the_configured_interval():
+    MwmblConfig._schedule_background_tasks()
+
+    index_count = Task.objects.get(task_name=INDEX_COUNT_TASK)
+
+    assert index_count.repeat == settings.INDEX_COUNT_RUN_INTERVAL_SECONDS
