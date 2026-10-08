@@ -6,6 +6,7 @@ Django Background Tasks for periodic maintenance:
   - report_usage_to_polar: reports billable usage overage to Polar once per hour
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
+  - count_index_urls: counts the unique URLs and domains in the index once a week
 """
 
 import logging
@@ -23,6 +24,7 @@ from django.db import transaction
 from redis import Redis
 
 from mwmbl import pricing
+from mwmbl.count_urls import count_urls_step, get_redis
 from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
@@ -142,6 +144,23 @@ def sync_search_counts():
                 )
             except Exception:
                 logger.exception("Error syncing search count for key %s", key)
+
+
+# ---------------------------------------------------------------------------
+# Index statistics (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+
+@background(schedule=0)
+def count_index_urls():
+    """
+    Read the next slice of the index into the weekly count of its unique URLs.
+
+    Each run stops after INDEX_COUNT_SECONDS_PER_RUN, so the hours-long scan is spread
+    over many runs rather than blocking the hourly tasks queued behind it.
+    """
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    count_urls_step(get_redis(), index_path, settings.INDEX_COUNT_SECONDS_PER_RUN)
 
 
 # ---------------------------------------------------------------------------
