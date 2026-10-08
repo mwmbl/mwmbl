@@ -17,8 +17,6 @@ from urllib.parse import urlparse
 import dj_database_url
 import sentry_sdk
 
-from mwmbl.auth import require_email_confirmation
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -47,12 +45,14 @@ INSTALLED_APPS = [
     "ninja_extra",
     "debug_toolbar",
     "background_task",
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "mwmbl.traffic_middleware.SearchTrafficMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -131,10 +131,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTHENTICATION_BACKENDS = [
     # Accepts username or email in the username field — used by the JWT token endpoint
     "mwmbl.auth.UsernameOrEmailBackend",
+    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
+    # Also enforces ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+    "allauth.account.auth_backends.AuthenticationBackend",
     # Needed for Django's permission system (has_perm, has_module_perms) used by the admin
     "django.contrib.auth.backends.ModelBackend",
-    # allauth backend for allauth's own views (social auth, email confirmation, etc.)
-    "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 
@@ -145,6 +146,11 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+
+# ninja-jwt setting: enforce email verification for token authentication
+NINJA_JWT = {
+    "USER_AUTHENTICATION_RULE": "mwmbl.auth.require_email_confirmation",
+}
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 
@@ -237,10 +243,15 @@ def strip_query_string(event):
     return event
 
 
-# Django ninja-jwt settings
-NINJA_JWT = {
-    "USER_AUTHENTICATION_RULE": require_email_confirmation,
-}
+# CORS settings
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
 # Apply PostgreSQL's default: if no database name is given in the URL, fall back to
