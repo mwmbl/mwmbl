@@ -204,6 +204,53 @@ def get_counts(redis: Redis | None = None) -> dict[str, dict[str, int]]:
     }
 
 
+def get_scan_status(redis: Redis, index_path: Path) -> dict:
+    """How far the scan in progress has got, and when the last one finished.
+
+    For the admin status page. The counts so far are PFCOUNTs of the scan's HyperLogLogs,
+    which is cheap, so looking at the scan does not slow it down.
+    """
+    scan = redis.hgetall(INDEX_SCAN_KEY)
+    last_finished = redis.get(INDEX_SCAN_LAST_FINISHED_KEY)
+    last_finished_date = None if last_finished is None else date.fromisoformat(last_finished)
+    interval = timedelta(days=settings.INDEX_COUNT_INTERVAL_DAYS)
+    status = {
+        "in_progress": bool(scan),
+        "last_finished": last_finished_date,
+        "next_scan_due": None if last_finished_date is None else last_finished_date + interval,
+        "interval_days": settings.INDEX_COUNT_INTERVAL_DAYS,
+        "run_interval_seconds": settings.INDEX_COUNT_RUN_INTERVAL_SECONDS,
+        "seconds_per_run": settings.INDEX_COUNT_SECONDS_PER_RUN,
+    }
+    if scan:
+        num_pages = TinyIndex(item_factory=Document, index_path=index_path).num_pages
+        next_page = int(scan["next_page"])
+        status |= {
+            "next_page": next_page,
+            "num_pages": num_pages,
+            "percent_done": 100 * next_page / num_pages,
+            "num_results": int(scan["num_results"]),
+            "urls_so_far": redis.pfcount(INDEX_SCAN_URL_HLL_KEY),
+            "domains_so_far": redis.pfcount(INDEX_SCAN_DOMAIN_HLL_KEY),
+            "expires_in_seconds": redis.ttl(INDEX_SCAN_KEY),
+        }
+    return status
+
+
+def get_published_counts(redis: Redis, num_days: int) -> list[dict]:
+    """The counts published by finished scans in the last num_days, most recent first."""
+    today = utc_today()
+    days = [today - timedelta(days=i) for i in range(num_days)]
+    keys = (INDEX_URL_COUNT_KEY, INDEX_DOMAIN_COUNT_KEY, INDEX_RESULT_COUNT_KEY)
+    counts = redis.mget([key.format(date=day) for day in days for key in keys])
+    published = []
+    for i, day in enumerate(days):
+        urls, domains, results = counts[i * len(keys) : (i + 1) * len(keys)]
+        if urls is not None:
+            published.append({"date": day, "urls": int(urls), "domains": int(domains), "results": int(results)})
+    return published
+
+
 def get_domain_result_count(domain: str) -> int:
     redis = get_redis()
 
