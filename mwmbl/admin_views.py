@@ -1,12 +1,13 @@
-"""Admin-only status pages: state that lives in Redis, which nothing else can show, the weekly
-index count, and paying users.
+"""Admin-only status pages: the blacklist filtering state in Redis, the weekly index count,
+the search traffic counters, and paying users.
 
-Blacklist status: retrieval filtering, the snapshot refresh and the index purge are three processes talking
-to each other through Redis keys, and none of that state is reachable from the Django
-admin: a snapshot that never publishes and a purge queue that never drains look exactly
-like everything working, because retrieval quietly falls back to the built-in rules either
-way. This puts the whole loop - the published snapshot, what this worker actually loaded,
-the queue waiting to be purged, and the background tasks that maintain both - on one page.
+Blacklist status: retrieval filtering, the snapshot refresh and the index purge are three
+processes talking to each other through Redis keys, and none of that state is reachable
+from the Django admin: a snapshot that never publishes and a purge queue that never drains
+look exactly like everything working, because retrieval quietly falls back to the built-in
+rules either way. This puts the whole loop - the published snapshot, what this worker
+actually loaded, the queue waiting to be purged, and the background tasks that maintain
+both - on one page.
 
 The page is read-only, and deliberately cheap: the snapshot's size comes from STRLEN so a
 page load never pulls the ~11 MB blob out of Redis, and the queue is sampled with
