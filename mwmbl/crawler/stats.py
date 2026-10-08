@@ -36,6 +36,7 @@ class DomainStats(BaseModel):
 
 class MwmblStats(BaseModel):
     users_crawled_daily: dict[str, int]
+    users_crawled_30d: int
     results_indexed_daily: dict[str, int]
     top_user_results: list[tuple[str, int]]
     urls_in_index_daily: dict[str, int]
@@ -77,6 +78,11 @@ class StatsManager:
         dataset_queries_daily = {}
         dataset_results_daily = {}
         blacklisted_results_removed_daily = {}
+
+        # Collect all unique users over 30 days for users_crawled_30d
+        keys = [USERS_KEY.format(date=date - timedelta(days=i)) for i in range(30)]
+        all_users = self.redis.sunion(keys)
+
         for i in range(29, -1, -1):
             date_i = date - timedelta(days=i)
 
@@ -115,6 +121,7 @@ class StatsManager:
 
         return MwmblStats(
             users_crawled_daily=users_crawled_daily,
+            users_crawled_30d=len(all_users),
             results_indexed_daily=results_indexed_daily,
             top_user_results=user_results_counts,
             dataset_queries_daily=dataset_queries_daily,
