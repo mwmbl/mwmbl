@@ -17,9 +17,11 @@ from mwmbl.count_urls import (
     INDEX_DOMAIN_COUNT_KEY,
     INDEX_RESULT_COUNT_KEY,
     INDEX_SCAN_KEY,
-    INDEX_SCAN_LAST_STARTED_KEY,
+    INDEX_SCAN_LAST_FINISHED_KEY,
+    INDEX_SCAN_URL_HLL_KEY,
     INDEX_URL_COUNT_KEY,
     count_urls_step,
+    get_counts,
 )
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, PageError, TinyIndex
 from mwmbl.utils import utc_today
@@ -86,18 +88,18 @@ def test_no_new_scan_starts_within_the_interval(redis, index_path, settings):
 
 
 def test_a_new_scan_starts_once_the_interval_has_passed(redis, index_path, settings):
-    last_started = utc_today() - timedelta(days=settings.INDEX_COUNT_INTERVAL_DAYS)
-    redis.set(INDEX_SCAN_LAST_STARTED_KEY, str(last_started))
+    last_finished = utc_today() - timedelta(days=settings.INDEX_COUNT_INTERVAL_DAYS)
+    redis.set(INDEX_SCAN_LAST_FINISHED_KEY, str(last_finished))
 
     count_urls_step(redis, index_path, time_budget_seconds=60)
 
     assert _count(redis, INDEX_URL_COUNT_KEY) == 4
-    assert redis.get(INDEX_SCAN_LAST_STARTED_KEY) == str(utc_today())
+    assert redis.get(INDEX_SCAN_LAST_FINISHED_KEY) == str(utc_today())
 
 
 def test_a_new_scan_does_not_inherit_the_last_ones_urls(redis, index_path, tmp_path):
     count_urls_step(redis, index_path, time_budget_seconds=60)
-    redis.delete(INDEX_SCAN_LAST_STARTED_KEY)
+    redis.delete(INDEX_SCAN_LAST_FINISHED_KEY)
 
     with TinyIndex(Document, str(index_path), "w") as index:
         index.store_in_page(0, [])
@@ -109,16 +111,78 @@ def test_a_new_scan_does_not_inherit_the_last_ones_urls(redis, index_path, tmp_p
     assert _count(redis, INDEX_RESULT_COUNT_KEY) == 1
 
 
-def test_an_unreadable_page_is_skipped_rather_than_ending_the_scan(redis, index_path):
-    get_page = TinyIndex.get_page
+@pytest.mark.parametrize("error", [PageError("torn page"), OSError(5, "Input/output error")])
+def test_an_unreadable_page_is_skipped_rather_than_ending_the_scan(redis, index_path, error):
+    get_page_tuples = TinyIndex._get_page_tuples
 
-    def get_page_failing_on_page_zero(self, i):
+    def get_page_tuples_failing_on_page_zero(self, i, term=None):
         if i == 0:
-            raise PageError("torn page")
-        return get_page(self, i)
+            raise error
+        return get_page_tuples(self, i, term)
 
-    with patch.object(TinyIndex, "get_page", get_page_failing_on_page_zero):
+    with patch.object(TinyIndex, "_get_page_tuples", get_page_tuples_failing_on_page_zero):
         count_urls_step(redis, index_path, time_budget_seconds=60)
 
     assert _count(redis, INDEX_URL_COUNT_KEY) == 3
     assert _count(redis, INDEX_RESULT_COUNT_KEY) == 3
+
+
+def test_a_scan_whose_state_is_lost_starts_again(redis, index_path):
+    with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 2):
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+        redis.delete(INDEX_SCAN_KEY)
+
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+
+    assert redis.hget(INDEX_SCAN_KEY, "next_page") == "2"
+
+
+def test_the_scan_state_expires_if_it_stops_being_advanced(redis, index_path):
+    with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 2):
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+
+    assert redis.ttl(INDEX_SCAN_KEY) > 0
+    assert redis.ttl(INDEX_SCAN_URL_HLL_KEY) > 0
+
+
+def test_a_batch_another_run_has_already_counted_is_not_counted_again(redis, index_path):
+    count_pages = count_urls._count_pages
+
+    def count_pages_raced_by_another_run(redis, index, start_page, end_page):
+        # The other run reads and records the same batch first.
+        assert count_pages(redis, index, start_page, end_page)
+        return count_pages(redis, index, start_page, end_page)
+
+    with patch.object(count_urls, "_count_pages", count_pages_raced_by_another_run):
+        count_urls_step(redis, index_path, time_budget_seconds=60)
+
+    assert not redis.exists(INDEX_URL_COUNT_KEY.format(date=utc_today()))
+
+    count_urls_step(redis, index_path, time_budget_seconds=60)
+
+    assert _count(redis, INDEX_RESULT_COUNT_KEY) == 5
+
+
+def test_each_day_reports_the_latest_count_published_on_or_before_it(redis):
+    today = utc_today()
+    redis.set(INDEX_URL_COUNT_KEY.format(date=today - timedelta(days=33)), 100)
+    redis.set(INDEX_URL_COUNT_KEY.format(date=today - timedelta(days=10)), 200)
+
+    urls_daily = get_counts(redis)["urls_in_index_daily"]
+
+    assert len(urls_daily) == 30
+    assert urls_daily[str(today - timedelta(days=29))] == 100
+    assert urls_daily[str(today - timedelta(days=11))] == 100
+    assert urls_daily[str(today - timedelta(days=10))] == 200
+    assert urls_daily[str(today)] == 200
+
+
+def test_no_counts_are_reported_before_the_first_scan(redis):
+    assert get_counts(redis)["urls_in_index_daily"] == {}
+
+
+def test_the_background_task_does_not_raise_so_it_keeps_repeating():
+    from mwmbl import background
+
+    with patch.object(background, "count_urls_step", side_effect=ConnectionError("Redis is down")):
+        background.count_index_urls.now()

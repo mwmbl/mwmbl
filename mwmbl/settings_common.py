@@ -365,7 +365,7 @@ BLACKLIST_PURGE_BATCH_SIZE = 1000  # documents removed from the index per purge 
 # mwmbl.count_urls.
 INDEX_COUNT_INTERVAL_DAYS = 7  # how often a new scan of the index starts
 INDEX_COUNT_RUN_INTERVAL_SECONDS = 300  # how often a slice of the scan runs
-INDEX_COUNT_SECONDS_PER_RUN = 120  # how long each slice reads pages for
+INDEX_COUNT_SECONDS_PER_RUN = 120  # how long each slice reads pages for; keep well under MAX_RUN_TIME
 # How far ahead approving a domain submission schedules a snapshot rebuild. Approvers work
 # through submissions in batches, so the delay collapses a batch into one rebuild rather
 # than one per approval - see mwmbl.signals.

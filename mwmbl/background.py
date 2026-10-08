@@ -158,9 +158,17 @@ def count_index_urls():
 
     Each run stops after INDEX_COUNT_SECONDS_PER_RUN, so the hours-long scan is spread
     over many runs rather than blocking the hourly tasks queued behind it.
+
+    It never raises. django-background-tasks only repeats a task that succeeds, and after
+    MAX_ATTEMPTS failures it deletes the row, so one bad spell - Redis down, the index
+    missing - would stop the count until the next deploy rescheduled it. The scan's state
+    is in Redis, so the next run just tries again.
     """
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
-    count_urls_step(get_redis(), index_path, settings.INDEX_COUNT_SECONDS_PER_RUN)
+    try:
+        count_urls_step(get_redis(), index_path, settings.INDEX_COUNT_SECONDS_PER_RUN)
+    except Exception:
+        logger.exception("Error counting the URLs in the index")
 
 
 # ---------------------------------------------------------------------------
