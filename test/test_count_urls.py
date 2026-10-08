@@ -194,7 +194,7 @@ def test_scan_status_reports_the_progress_of_a_scan_in_progress(redis, index_pat
     with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 4):
         count_urls_step(redis, index_path, time_budget_seconds=0)
 
-    status = get_scan_status(redis, index_path)
+    status = get_scan_status(redis, NUM_PAGES)
 
     assert status["in_progress"]
     assert status["next_page"] == 4
@@ -210,7 +210,7 @@ def test_scan_status_reports_the_progress_of_a_scan_in_progress(redis, index_pat
 def test_scan_status_after_a_scan_has_finished(redis, index_path, settings):
     count_urls_step(redis, index_path, time_budget_seconds=60)
 
-    status = get_scan_status(redis, index_path)
+    status = get_scan_status(redis, NUM_PAGES)
 
     assert not status["in_progress"]
     assert status["last_finished"] == utc_today()
@@ -221,3 +221,16 @@ def test_published_counts_list_only_the_days_a_scan_finished(redis, index_path):
     count_urls_step(redis, index_path, time_budget_seconds=60)
 
     assert get_published_counts(redis, num_days=30) == [{"date": utc_today(), "urls": 4, "domains": 3, "results": 5}]
+
+
+def test_scan_status_of_an_empty_index_has_no_percent_done(redis, index_path):
+    with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 4):
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+
+    assert get_scan_status(redis, num_pages=0)["percent_done"] is None
+
+
+def test_published_counts_skip_a_day_missing_some_of_its_counts(redis):
+    redis.set(INDEX_URL_COUNT_KEY.format(date=utc_today()), 10)
+
+    assert get_published_counts(redis, num_days=30) == []

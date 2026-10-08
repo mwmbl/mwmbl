@@ -37,7 +37,7 @@
               <td class="key">Progress</td>
               <td>
                 page {{ scan.next_page|intcomma }} of {{ scan.num_pages|intcomma }}
-                ({{ scan.percent_done|floatformat:1 }}%)
+                {% if scan.percent_done is not None %}({{ scan.percent_done|floatformat:1 }}%){% endif %}
               </td>
             </tr>
             <tr><td class="key">Results so far</td><td>{{ scan.num_results|intcomma }}</td></tr>
@@ -58,10 +58,12 @@
             <td class="key">Last scan finished</td>
             <td>{% if scan.last_finished %}{{ scan.last_finished }}{% else %}<span class="bad">never</span>{% endif %}</td>
           </tr>
-          <tr>
-            <td class="key">Next scan due</td>
-            <td>{% if scan.next_scan_due %}{{ scan.next_scan_due }}{% else %}now{% endif %}</td>
-          </tr>
+          {% if not scan.in_progress %}
+            <tr>
+              <td class="key">Next scan due</td>
+              <td>{% if scan.next_scan_due %}{{ scan.next_scan_due }}{% else %}now{% endif %}</td>
+            </tr>
+          {% endif %}
         </table>
         <p class="note">
           A scan reads every page of the index into HyperLogLogs, about 1% accurate. It runs
@@ -96,35 +98,7 @@
 
     <div class="module">
       <h2>Background task</h2>
-      <table>
-        <thead>
-          <tr><th>Task</th><th>Next run</th><th>Attempts</th><th>Last completed</th><th>Last error</th></tr>
-        </thead>
-        <tbody>
-          {% for task in tasks %}
-            <tr>
-              <td><code>{{ task.name }}</code></td>
-              <td>
-                {% if task.task %}
-                  {{ task.task.run_at }}
-                  {% if task.task.locked_by %}<br><span class="note">running on {{ task.task.locked_by }}</span>{% endif %}
-                {% else %}
-                  <span class="bad">not scheduled</span>
-                {% endif %}
-              </td>
-              <td>{% if task.task %}{{ task.task.attempts }}{% endif %}</td>
-              <td>
-                {% if task.last_completed %}
-                  {{ task.last_completed.run_at }}
-                {% else %}
-                  <span class="bad">never</span>
-                {% endif %}
-              </td>
-              <td>{% if task.task.last_error %}<span class="bad">{{ task.task.last_error|truncatechars:200 }}</span>{% endif %}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      {% include "admin/_task_status.html" %}
       <p class="note">
         The task logs and swallows its own errors so that it keeps being rescheduled, so a
         failing scan shows here as runs completing without the progress above moving. Look

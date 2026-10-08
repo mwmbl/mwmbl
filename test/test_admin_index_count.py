@@ -5,7 +5,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from redis import ConnectionError as RedisConnectionError
 
-from mwmbl import count_urls
+from mwmbl import count_urls, search_setup
 from mwmbl.count_urls import count_urls_step
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 
@@ -23,12 +23,13 @@ def redis(monkeypatch):
 
 
 @pytest.fixture
-def index_path(tmp_path, settings):
-    settings.DATA_PATH = str(tmp_path)
-    path = tmp_path / settings.INDEX_NAME
+def index_path(tmp_path, monkeypatch):
+    path = tmp_path / "index.tinysearch"
     TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=NUM_PAGES, page_size=PAGE_SIZE)
     with TinyIndex(Document, str(path), "w") as index:
         index.store_in_page(0, [Document(title="A", url="https://a.test/", extract="x", score=1.0, term="a")])
+    # The page reads the size of the index the web process has open.
+    monkeypatch.setattr(search_setup, "tiny_index", TinyIndex(Document, str(path)))
     return path
 
 
@@ -56,6 +57,7 @@ def test_shows_a_scan_in_progress(staff_client, redis, index_path, monkeypatch):
     assert response.context["scan"]["in_progress"]
     assert response.context["scan"]["next_page"] == 1
     assert b"page 1 of 4" in response.content
+    assert b"Next scan due" not in response.content
 
 
 def test_shows_published_counts(staff_client, redis, index_path):

@@ -18,7 +18,6 @@ SRANDMEMBER so looking at it cannot consume it.
 import os
 from datetime import timedelta
 from logging import getLogger
-from pathlib import Path
 
 from background_task.models import CompletedTask, Task
 from django.conf import settings
@@ -28,7 +27,7 @@ from django.db.models import F, OuterRef, Q, Subquery
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl import count_urls, pricing, quota
+from mwmbl import count_urls, pricing, quota, search_setup
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -52,7 +51,8 @@ INDEX_COUNT_TASK_NAME = "mwmbl.background.count_index_urls"
 
 QUEUE_SAMPLE_SIZE = 50
 REMOVED_COUNT_DAYS = 14
-PUBLISHED_INDEX_COUNT_DAYS = 60
+# As far back as published counts are kept.
+PUBLISHED_INDEX_COUNT_DAYS = count_urls.LONG_EXPIRE_SECONDS // (60 * 60 * 24)
 
 
 def _snapshot_status() -> dict:
@@ -186,12 +186,12 @@ def blacklist_status_view(request):
 @staff_member_required
 def index_count_view(request):
     context = {"title": "Index count"}
-    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     # Rendered with Redis down, like the blacklist page: the scan stalling because Redis
     # is unreachable is one of the things this page is for.
     try:
         redis = count_urls.get_redis()
-        context["scan"] = count_urls.get_scan_status(redis, index_path)
+        # The index this process already has open, rather than opening it again per request.
+        context["scan"] = count_urls.get_scan_status(redis, search_setup.tiny_index.num_pages)
         context["published"] = count_urls.get_published_counts(redis, PUBLISHED_INDEX_COUNT_DAYS)
     except RedisError as e:
         logger.exception("Could not read the index count from Redis")
