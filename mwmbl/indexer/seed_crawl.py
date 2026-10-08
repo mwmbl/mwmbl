@@ -26,8 +26,10 @@ import json
 import time
 from collections import Counter, deque
 from datetime import datetime, timezone
+from http import HTTPStatus
 from logging import getLogger
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.db import close_old_connections
@@ -75,8 +77,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def start_seed_crawl(user_id: int, query: str, index_pages: list[Document], staan_results: list[Document]) -> bool:
+def start_seed_crawl(
+    user_id: int, query: str, index_pages: list[Document], staan_results: list[Document], new_staan_urls: set[str]
+) -> bool:
     """Queue a seed crawl of the Staan results the index lacked, returning whether it did.
+
+    The seeds are the results the query did not retrieve. Of those, only the ones in
+    new_staan_urls - which Combined Search's own write of Staan's results found missing from
+    the index - count as pages the crawl added; the rest the index already held.
 
     Nothing is queued when every Staan result is already in the index, when this user
     already has a crawl queued or running, or when the queue is full.
@@ -102,7 +110,14 @@ def start_seed_crawl(user_id: int, query: str, index_pages: list[Document], staa
 
     record_key = _record_key(user_id, query)
     domains = sorted({bare_host(document.url) for document in allowed})
-    job = {"user_id": user_id, "query": query, "seed_urls": seed_urls, "domains": domains}
+    new_seed_urls = [url for url in seed_urls if url in new_staan_urls]
+    job = {
+        "user_id": user_id,
+        "query": query,
+        "seed_urls": seed_urls,
+        "new_seed_urls": new_seed_urls,
+        "domains": domains,
+    }
     # An earlier crawl's pages are kept: the new one adds to them, and the user's total
     # already includes them.
     pipeline = redis.pipeline()
@@ -132,16 +147,18 @@ def run_next_seed_crawl(index_path: str) -> bool:
     # Postgres has long since closed.
     close_old_connections()
     job = json.loads(popped[1])
-    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["domains"], index_path)
+    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["new_seed_urls"], job["domains"], index_path)
     return True
 
 
-def run_seed_crawl(user_id: int, query: str, seed_urls: list[str], domains: list[str], index_path: str) -> None:
+def run_seed_crawl(
+    user_id: int, query: str, seed_urls: list[str], new_seed_urls: list[str], domains: list[str], index_path: str
+) -> None:
     redis = get_redis_connection("default")
     record_key = _record_key(user_id, query)
     redis.hset(record_key, "status", STATUS_CRAWLING)
     try:
-        _crawl_and_record(user_id, query, seed_urls, domains, index_path, redis)
+        _crawl_and_record(user_id, query, seed_urls, set(new_seed_urls), domains, index_path, redis)
         status = STATUS_DONE
     except Exception:
         # Recorded rather than retried: a retry would start again from the seeds, fetching
@@ -157,16 +174,19 @@ def run_seed_crawl(user_id: int, query: str, seed_urls: list[str], domains: list
     pipeline.execute()
 
 
-def _crawl_and_record(user_id: int, query: str, seed_urls: list[str], domains: list[str], index_path: str, redis):
+def _crawl_and_record(
+    user_id: int, query: str, seed_urls: list[str], new_seed_urls: set[str], domains: list[str], index_path: str, redis
+):
     record_key = _record_key(user_id, query)
     pages_key = _pages_key(user_id, query)
     counted_urls_key = _counted_urls_key(user_id, query)
     ttl = settings.SEED_CRAWL_RECORD_TTL_SECONDS
 
     for num_crawled, documents in crawl_within_domains(seed_urls, set(domains), redis):
-        # The seeds were missing from the index when the user searched, but Combined Search
-        # has since written Staan's snippets of them, so the index alone no longer says so.
-        new_urls = index_new_documents(documents, index_path) | set(seed_urls)
+        indexed = index_new_documents(documents, index_path)
+        # Combined Search has since written Staan's snippets of the new seeds, so the index
+        # alone no longer says they were new. Only those this write stored count.
+        new_urls = indexed.new | (indexed.stored & new_seed_urls)
         candidates = [document for document in documents if document.url in new_urls]
 
         # A page is counted once per query, however many crawls of it find it new.
@@ -213,6 +233,13 @@ def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
     for url in seed_urls:
         enqueue(url)
 
+    def follow(link: str) -> None:
+        # Query strings are where faceted search, sorting and calendars multiply one page
+        # into thousands, which would spend a domain's budget on near-duplicates.
+        if urlsplit(link).query:
+            return
+        enqueue(link)
+
     # The per-domain cap already bounds the rounds; this bounds a round's slow fetches.
     deadline = time.monotonic() + settings.SEED_CRAWL_MAX_SECONDS
     last_round_started = None
@@ -231,7 +258,8 @@ def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
         documents = []
         for result in results:
             content = result["content"]
-            if content is None:
+            # An error page is not content, and its links are no lead to any.
+            if content is None or result["status"] != HTTPStatus.OK:
                 continue
             if content["title"]:
                 documents.append(
@@ -243,7 +271,7 @@ def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
                     )
                 )
             for link in content["links"] + content["extra_links"]:
-                enqueue(link)
+                follow(link)
         yield len(batch), documents
 
 

@@ -106,7 +106,7 @@ def stub_sources(monkeypatch):
     """
     calls = {}
 
-    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), pages_indexed=1):
+    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), new_urls=(STAAN_RESULT.url,)):
         def fake_staan(query, *args, **kwargs):
             calls["staan_query"] = query
             if isinstance(staan, Exception):
@@ -124,12 +124,12 @@ def stub_sources(monkeypatch):
         def fake_index(documents, query, path):
             calls["indexed"] = [document.url for document in documents]
             calls["indexed_query"] = query
-            if isinstance(pages_indexed, Exception):
-                raise pages_indexed
-            return pages_indexed
+            if isinstance(new_urls, Exception):
+                raise new_urls
+            return set(new_urls)
 
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
-        monkeypatch.setattr(combined_search, "index_results_against_query", fake_index)
+        monkeypatch.setattr(combined_search, "index_new_results_against_query", fake_index)
         monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
         # The router closed over the ranker at registration time, so the ranker instance
         # itself is what has to be patched, not the name in search_setup.
@@ -444,7 +444,7 @@ def test_an_empty_pool_is_an_empty_response_not_an_error(client, access_token, f
 
 @pytest.mark.django_db
 def test_staan_results_are_indexed_against_the_query(client, access_token, fresh_quota, stub_sources):
-    calls = stub_sources(pages_indexed=3)
+    calls = stub_sources(new_urls=("https://a.example/", "https://b.example/", "https://c.example/"))
 
     body = _get(client, access_token, query="rust").json()
 
@@ -455,7 +455,7 @@ def test_staan_results_are_indexed_against_the_query(client, access_token, fresh
 
 @pytest.mark.django_db
 def test_blacklisted_staan_results_are_not_indexed(client, access_token, fresh_quota, stub_sources, monkeypatch):
-    """index_results_against_query bypasses index_documents' blacklist check."""
+    """index_new_results_against_query bypasses index_documents' blacklist check."""
     bad = Document("Bad", "https://badsite.test/x", "bad", 5.0, source=DocumentSource.STAAN)
     calls = stub_sources(staan=(bad, STAAN_RESULT))
     monkeypatch.setattr(
@@ -481,7 +481,7 @@ def test_nothing_from_staan_indexes_nothing(client, access_token, fresh_quota, s
 
 @pytest.mark.django_db
 def test_a_failed_index_write_still_serves_the_results(client, access_token, fresh_quota, stub_sources):
-    stub_sources(pages_indexed=OSError("disk full"))
+    stub_sources(new_urls=OSError("disk full"))
 
     body = _get(client, access_token).json()
 
@@ -496,8 +496,8 @@ def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
     monkeypatch.setattr(combined_search, "index_path", index_path)
     monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
 
-    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 1
-    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 0
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == {STAAN_RESULT.url}
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == set()
 
     with TinyIndex(Document, str(index_path), "r") as index:
         assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]
@@ -530,7 +530,13 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
 
     assert body["crawl_scheduled"] is True
     job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
-    assert job == {"user_id": user.id, "query": "tokio", "seed_urls": [STAAN_RESULT.url], "domains": ["tokio.rs"]}
+    assert job == {
+        "user_id": user.id,
+        "query": "tokio",
+        "seed_urls": [STAAN_RESULT.url],
+        "new_seed_urls": [STAAN_RESULT.url],
+        "domains": ["tokio.rs"],
+    }
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
 
 

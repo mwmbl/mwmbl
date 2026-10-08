@@ -5,7 +5,7 @@ Write crawled documents into the index.
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from logging import getLogger
-from typing import Collection, Iterable, Optional
+from typing import Collection, Iterable, NamedTuple, Optional
 from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
@@ -82,27 +82,30 @@ def index_documents(documents, index_path):
     return end_time, new_page_doc_counts
 
 
-def index_new_documents(documents, index_path) -> set[str]:
-    """index_documents, returning the URLs of the documents the index did not hold before.
+class IndexedURLs(NamedTuple):
+    stored: set[str]
+    """URLs of the documents written, now on at least one of their pages."""
+    new: set[str]
+    """Of those, the URLs none of their pages held beforehand."""
+
+
+def index_new_documents(documents, index_path) -> IndexedURLs:
+    """index_documents, returning which URLs it stored and which of those the index lacked.
 
     A URL counts as new when none of the pages it is written to held it beforehand. Those
     are the pages its tokens hash to, so an earlier copy of the same page lives there too.
-    Like index_results_against_query's count, this is a slight upper bound: a new document
-    the store then trims from a full page is still counted.
+    Both are read under the page locks the write takes, so a document the store trimmed, or
+    one the blacklist dropped, is in neither.
     """
     page_documents = _page_documents(documents, index_path)
-    seen_urls = set()
-    with TinyIndex(Document, index_path, "r") as indexer:
-        for page_index in page_documents:
-            try:
-                seen_urls |= {document.url for document in indexer.get_page(page_index)}
-            except PageError:
-                # An unlocked read, as in index_results_against_query: it only decides
-                # what counts as new, and the write below reads the page properly.
-                logger.warning("Could not read index page %d while finding new URLs", page_index)
-    new_urls = {document.url for documents in page_documents.values() for document in documents} - seen_urls
-    index_pages(index_path, page_documents)
-    return new_urls
+    stored_urls = set()
+    held_urls = set()
+    for stored_documents, existing_documents in _store_pages(index_path, page_documents):
+        stored_urls |= {document.url for document in stored_documents}
+        held_urls |= {document.url for document in existing_documents}
+    incoming_urls = {document.url for documents in page_documents.values() for document in documents}
+    written_urls = stored_urls & incoming_urls
+    return IndexedURLs(stored=written_urls, new=written_urls - held_urls)
 
 
 def _page_documents(documents, index_path) -> dict[int, list[Document]]:
@@ -137,16 +140,27 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
+    for stored_documents, _ in _store_pages(index_path, page_documents, mark_synced):
+        term_new_doc_counts.update(
+            document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX
+        )
+    return term_new_doc_counts
+
+
+def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False):
+    """Merge the documents into their pages, yielding for each page written what it now
+    stores and what it held before."""
     with TinyIndex(Document, index_path, "w") as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
         for page_index, documents in page_documents.items():
             try:
                 with indexer.page(page_index) as page:
-                    combined_documents = combine_documents(page.documents, documents, mark_synced, ranker)
+                    existing_documents = page.documents
+                    combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
                     num_stored = page.store(combined_documents)
                     logger.info(
                         f"Storing {num_stored} of {len(combined_documents)} documents for "
-                        f"page {page_index}, originally {len(page.documents)}"
+                        f"page {page_index}, originally {len(existing_documents)}"
                     )
             except PageError:
                 # One page we cannot safely write costs the documents bound for it, not the
@@ -156,12 +170,7 @@ def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            term_new_doc_counts.update(
-                document.term
-                for document in combined_documents[:num_stored]
-                if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX
-            )
-    return term_new_doc_counts
+            yield combined_documents[:num_stored], existing_documents
 
 
 def _document_token_set(doc: Document) -> set[str]:
@@ -171,13 +180,18 @@ def _document_token_set(doc: Document) -> set[str]:
 
 
 def index_results_against_query(documents: list[Document], query: str, index_path: str) -> int:
+    """index_new_results_against_query, returning how many URLs it added."""
+    return len(index_new_results_against_query(documents, query, index_path))
+
+
+def index_new_results_against_query(documents: list[Document], query: str, index_path: str) -> set[str]:
     """Index each document against the query unigrams/bigrams it matches.
 
     A query term matches a document when all of the term's words are present in
     the document's token set (unigram: the token; bigram: both words, in any
     order). Matching docs are stored against that term via index_pages(), which
-    applies the normal combine/prioritise path. Returns the number of distinct
-    URLs newly added to the index.
+    applies the normal combine/prioritise path. Returns the distinct URLs newly
+    added to the index.
 
     The count is computed in the read pass, before combine/store, so a candidate
     later dropped by URL/title dedup or by the full-page trim is still counted;
@@ -185,7 +199,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
     """
     tokens = tokenize(query)
     if not tokens or not documents:
-        return 0
+        return set()
 
     # term string -> the set of words that must all be present to match.
     query_terms: dict[str, frozenset[str]] = {t: frozenset((t,)) for t in tokens}
@@ -230,7 +244,7 @@ def index_results_against_query(documents: list[Document], query: str, index_pat
 
     if page_documents:
         index_pages(index_path, page_documents)  # reuse the existing write path
-    return len(new_urls)
+    return new_urls
 
 
 def combine_documents(existing_documents, documents, mark_synced, ranker):

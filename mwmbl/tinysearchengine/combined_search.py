@@ -42,7 +42,7 @@ from pydantic import Field
 
 from mwmbl import pricing
 from mwmbl.format import format_result_v2
-from mwmbl.indexer.index_batches import index_results_against_query
+from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import get_seed_crawl, get_seed_crawl_summary, start_seed_crawl
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
@@ -155,10 +155,10 @@ OPENAPI_EXTRA = {
 }
 
 
-def index_staan_results(query: str, staan_results: list[Document]) -> int:
-    """Index Staan's results against the query, returning the number of new pages added.
+def index_staan_results(query: str, staan_results: list[Document]) -> set[str]:
+    """Index Staan's results against the query, returning the URLs of the new pages added.
 
-    Blacklisted domains are dropped first: index_results_against_query bypasses the
+    Blacklisted domains are dropped first: index_new_results_against_query bypasses the
     blacklist check in index_documents, and the ranker's read-path filter only stops these
     pages being shown, not being written.
 
@@ -168,12 +168,12 @@ def index_staan_results(query: str, staan_results: list[Document]) -> int:
     blacklisted_urls = find_blacklisted_urls(staan_results)
     allowed = [document for document in staan_results if document.url not in blacklisted_urls]
     if not allowed:
-        return 0
+        return set()
     try:
-        return index_results_against_query(allowed, query, str(index_path))
+        return index_new_results_against_query(allowed, query, str(index_path))
     except Exception:
         logger.exception("combined-search failed to index Staan results")
-        return 0
+        return set()
 
 
 def _keyed_monthly_limit(user) -> int:
@@ -246,12 +246,14 @@ def init_router(ranker) -> None:
             asyncio.to_thread(get_staan_results, q),
         )
         # Ranking only reads what was already retrieved, so the index write can overlap it.
-        results, pages_indexed = await asyncio.gather(
+        results, new_staan_urls = await asyncio.gather(
             asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results),
             asyncio.to_thread(index_staan_results, q, staan_results),
         )
 
-        crawl_scheduled = crawl and await sync_to_async(start_seed_crawl)(user.id, q, retrieval.pages, staan_results)
+        crawl_scheduled = crawl and await sync_to_async(start_seed_crawl)(
+            user.id, q, retrieval.pages, staan_results, new_staan_urls
+        )
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(
@@ -260,7 +262,7 @@ def init_router(ranker) -> None:
             results=formatted,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
-            pages_indexed=pages_indexed,
+            pages_indexed=len(new_staan_urls),
             crawl_scheduled=crawl_scheduled,
         )
 
