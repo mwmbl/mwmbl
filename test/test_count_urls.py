@@ -22,6 +22,8 @@ from mwmbl.count_urls import (
     INDEX_URL_COUNT_KEY,
     count_urls_step,
     get_counts,
+    get_published_counts,
+    get_scan_status,
 )
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, PageError, TinyIndex
 from mwmbl.utils import utc_today
@@ -186,3 +188,49 @@ def test_the_background_task_does_not_raise_so_it_keeps_repeating():
 
     with patch.object(background, "count_urls_step", side_effect=ConnectionError("Redis is down")):
         background.count_index_urls.now()
+
+
+def test_scan_status_reports_the_progress_of_a_scan_in_progress(redis, index_path):
+    with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 4):
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+
+    status = get_scan_status(redis, NUM_PAGES)
+
+    assert status["in_progress"]
+    assert status["next_page"] == 4
+    assert status["num_pages"] == NUM_PAGES
+    assert status["percent_done"] == 40
+    assert status["num_results"] == 4
+    assert status["urls_so_far"] == 3
+    assert status["domains_so_far"] == 2
+    assert status["last_finished"] is None
+    assert status["next_scan_due"] is None
+
+
+def test_scan_status_after_a_scan_has_finished(redis, index_path, settings):
+    count_urls_step(redis, index_path, time_budget_seconds=60)
+
+    status = get_scan_status(redis, NUM_PAGES)
+
+    assert not status["in_progress"]
+    assert status["last_finished"] == utc_today()
+    assert status["next_scan_due"] == utc_today() + timedelta(days=settings.INDEX_COUNT_INTERVAL_DAYS)
+
+
+def test_published_counts_list_only_the_days_a_scan_finished(redis, index_path):
+    count_urls_step(redis, index_path, time_budget_seconds=60)
+
+    assert get_published_counts(redis, num_days=30) == [{"date": utc_today(), "urls": 4, "domains": 3, "results": 5}]
+
+
+def test_scan_status_of_an_empty_index_has_no_percent_done(redis, index_path):
+    with patch.object(count_urls, "NUM_PAGES_IN_BATCH", 4):
+        count_urls_step(redis, index_path, time_budget_seconds=0)
+
+    assert get_scan_status(redis, num_pages=0)["percent_done"] is None
+
+
+def test_published_counts_skip_a_day_missing_some_of_its_counts(redis):
+    redis.set(INDEX_URL_COUNT_KEY.format(date=utc_today()), 10)
+
+    assert get_published_counts(redis, num_days=30) == []
