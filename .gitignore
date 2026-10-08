@@ -206,8 +206,10 @@ devdata/super_search_xgb/
 # Claude issue automation writes and reads, stays tracked.
 /plans/
 
-# Claude Code configuration
-.claude/
+# Claude Code configuration, apart from the shared settings and the web session hook
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 # Pass-3 judging manifests and the Pass-2 per-source collection checkpoints. Both are
 # resumable intermediates: once a checkpoint is merged, pass2_pool.jsonl holds everything it
 # carried, and a manifest is only meaningful while its batch is out being judged.
