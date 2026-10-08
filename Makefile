@@ -27,6 +27,8 @@
 # These have no defaults — you must set them in your environment or on the command line.
 DATABASE_URL   ?=
 REDIS_URL      ?= redis://127.0.0.1:6379
+# A Redis database the tests flush, so keep it apart from REDIS_URL's.
+TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 
@@ -80,11 +82,11 @@ migrate:
 		uv run python manage.py migrate --settings=$(DJANGO_SETTINGS_MODULE)
 
 test:
-	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(PYTEST_ARGS)
 
 test-file:
-	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
 
 run:

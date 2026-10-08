@@ -141,6 +141,7 @@ class MwmblConfig(AppConfig):
             from background_task.models import Task
 
             from mwmbl.background import (
+                count_index_urls,
                 purge_blacklisted_from_queue,
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
@@ -153,6 +154,7 @@ class MwmblConfig(AppConfig):
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
             MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
+            INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -186,6 +188,12 @@ class MwmblConfig(AppConfig):
                     repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
                     repeat_until=None,
                 )
+
+            # Count the unique URLs in the index. The task runs every few minutes but only
+            # starts a new scan once a week; most runs either carry on with a scan or do
+            # nothing - see mwmbl.count_urls.
+            if not Task.objects.filter(task_name=INDEX_COUNT_TASK).exists():
+                count_index_urls(repeat=settings.INDEX_COUNT_RUN_INTERVAL_SECONDS, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

@@ -1,4 +1,5 @@
-"""Admin-only status pages: state that lives in Redis, which nothing else can show, and paying users.
+"""Admin-only status pages: state that lives in Redis, which nothing else can show, the weekly
+index count, and paying users.
 
 Blacklist status: retrieval filtering, the snapshot refresh and the index purge are three processes talking
 to each other through Redis keys, and none of that state is reachable from the Django
@@ -32,7 +33,7 @@ from django.http import HttpRequest
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl import pricing, quota, traffic
+from mwmbl import count_urls, pricing, quota, search_setup, traffic
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -61,9 +62,14 @@ logger = getLogger(__name__)
 
 SNAPSHOT_TASK_NAME = "mwmbl.background.refresh_blacklist_snapshot"
 PURGE_TASK_NAME = "mwmbl.background.purge_blacklisted_from_queue"
+INDEX_COUNT_TASK_NAME = "mwmbl.background.count_index_urls"
+
+SECONDS_PER_DAY = 60 * 60 * 24
 
 QUEUE_SAMPLE_SIZE = 50
 REMOVED_COUNT_DAYS = 14
+# As far back as published counts are kept.
+PUBLISHED_INDEX_COUNT_DAYS = count_urls.LONG_EXPIRE_SECONDS // SECONDS_PER_DAY
 
 
 def _snapshot_status() -> dict:
@@ -145,15 +151,14 @@ def _curated_status() -> dict:
     }
 
 
-def _task_status() -> list[dict]:
-    """The two background tasks that maintain the state above.
+def _task_status(task_names: list[str]) -> list[dict]:
+    """The background tasks that maintain the state a status page reports on.
 
-    Nothing in this loop runs without a `manage.py process_tasks` worker, and one running
-    an image that predates these tasks skips them silently by name rather than failing -
-    so "pending, run_at long past, never completed" is what a missing or stale worker
-    looks like, and it is otherwise invisible.
+    None of them runs without a `manage.py process_tasks` worker, and one running an image
+    that predates a task skips it silently by name rather than failing - so "pending,
+    run_at long past, never completed" is what a missing or stale worker looks like, and
+    it is otherwise invisible.
     """
-    task_names = [SNAPSHOT_TASK_NAME, PURGE_TASK_NAME]
     pending = {task.task_name: task for task in Task.objects.filter(task_name__in=task_names)}
 
     statuses = []
@@ -191,11 +196,27 @@ def blacklist_status_view(request):
         logger.exception("Could not read blacklist status from Redis")
         context["redis_error"] = str(e)
 
-    context["tasks"] = _task_status()
+    context["tasks"] = _task_status([SNAPSHOT_TASK_NAME, PURGE_TASK_NAME])
     return render(request, "admin/blacklist_status.html", context)
 
 
-SECONDS_PER_DAY = 60 * 60 * 24
+@staff_member_required
+def index_count_view(request):
+    context = {"title": "Index count"}
+    # Rendered with Redis down, like the blacklist page: the scan stalling because Redis
+    # is unreachable is one of the things this page is for.
+    try:
+        redis = count_urls.get_redis()
+        # The index this process already has open, rather than opening it again per request.
+        context["scan"] = count_urls.get_scan_status(redis, search_setup.tiny_index.num_pages)
+        context["published"] = count_urls.get_published_counts(redis, PUBLISHED_INDEX_COUNT_DAYS)
+    except RedisError as e:
+        logger.exception("Could not read the index count from Redis")
+        context["redis_error"] = str(e)
+
+    context["tasks"] = _task_status([INDEX_COUNT_TASK_NAME])
+    return render(request, "admin/index_count.html", context)
+
 
 # Both windows come from the expiries rather than from taste: a window wider than what Redis
 # keeps shows zeros for days that were never retained, which reads as no traffic rather than
