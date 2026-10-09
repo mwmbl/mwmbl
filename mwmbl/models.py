@@ -11,7 +11,10 @@ from mwmbl.utils import bare_host
 
 
 class MwmblUser(AbstractUser):
-    pass
+    # Pages the user's seed crawls (Combined Search with crawl=true) have added to the index,
+    # all time. A total on the user rather than a UserStats column, because a UserStats row
+    # created for it would enter the crawl leaderboards with no crawl results behind it.
+    seed_search_pages_indexed = models.IntegerField(default=0)
 
 
 class UserCuration(models.Model):

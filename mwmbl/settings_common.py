@@ -195,9 +195,9 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 # Gates database initialisation and background task scheduling; False for the crawler and tests.
 HAS_DATABASE = True
 
-# Whether this container runs the django-background-tasks queue (see mwmbl.main). Note the
-# distinction from HAS_DATABASE above: that gates *scheduling* the tasks, this gates
-# *running* them.
+# Whether this container runs the django-background-tasks queue and the seed crawl worker
+# (see mwmbl.main). Note the distinction from HAS_DATABASE above: that gates *scheduling*
+# the tasks, this gates *running* them.
 #
 # Opt-in rather than on by default because beta shares its database, index and Redis with
 # production. Exactly one deployment should run the queue, and it should be production:
@@ -304,6 +304,19 @@ STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/s
 # en-gb because Combined Search's ordering was tuned on en-gb results, for a UK searcher.
 STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
 STAAN_TIMEOUT_SECONDS = 5
+
+# Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
+# following links within Staan's domains - see mwmbl.indexer.seed_crawl.
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 100
+# A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
+SEED_CRAWL_MAX_SECONDS = 15 * 60
+# Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.
+SEED_CRAWL_MAX_QUEUED = 10
+SEED_CRAWL_THREADS = 8
+# The least time between two fetches from one domain.
+SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
+# Queries are private, so a user's record of what their crawl added is not kept for long.
+SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
 
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
