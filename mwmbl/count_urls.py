@@ -174,20 +174,18 @@ def _finish_scan(redis: Redis):
         f"Counted {url_count} unique URLs, {domain_count} unique domains and {num_results} results in the index."
     )
 
+    # One transaction, so the counts are published together or not at all.
     today = utc_today()
-    _set_count(INDEX_URL_COUNT_KEY, redis, today, url_count)
-    _set_count(INDEX_DOMAIN_COUNT_KEY, redis, today, domain_count)
-    _set_count(INDEX_RESULT_COUNT_KEY, redis, today, num_results)
-
     pipeline = redis.pipeline()
+    for key, count in (
+        (INDEX_URL_COUNT_KEY, url_count),
+        (INDEX_DOMAIN_COUNT_KEY, domain_count),
+        (INDEX_RESULT_COUNT_KEY, num_results),
+    ):
+        pipeline.set(key.format(date=today), count, ex=LONG_EXPIRE_SECONDS)
     pipeline.set(INDEX_SCAN_LAST_FINISHED_KEY, str(today))
     pipeline.delete(INDEX_SCAN_KEY, INDEX_SCAN_URL_HLL_KEY, INDEX_SCAN_DOMAIN_HLL_KEY)
     pipeline.execute()
-
-
-def _set_count(key, redis, today, count):
-    redis.set(key.format(date=today), count)
-    redis.expire(key.format(date=today), LONG_EXPIRE_SECONDS)
 
 
 def get_counts(redis: Redis | None = None) -> dict[str, dict[str, int]]:
@@ -202,6 +200,63 @@ def get_counts(redis: Redis | None = None) -> dict[str, dict[str, int]]:
         "domains_in_index_daily": _get_daily_counts(redis, INDEX_DOMAIN_COUNT_KEY),
         "results_in_index_daily": _get_daily_counts(redis, INDEX_RESULT_COUNT_KEY),
     }
+
+
+def get_scan_status(redis: Redis, num_pages: int) -> dict:
+    """How far the scan in progress has got, and when the last one finished.
+
+    For the admin status page. num_pages is the size of the index being scanned, taken
+    from the index the caller already has open. The counts so far are PFCOUNTs of the
+    scan's HyperLogLogs, which is cheap, so looking at the scan does not slow it down.
+    """
+    # Read in one transaction, so a scan finishing or expiring part way through is not
+    # shown as a mix of its old and new state.
+    pipeline = redis.pipeline(transaction=True)
+    pipeline.hgetall(INDEX_SCAN_KEY)
+    pipeline.get(INDEX_SCAN_LAST_FINISHED_KEY)
+    pipeline.pfcount(INDEX_SCAN_URL_HLL_KEY)
+    pipeline.pfcount(INDEX_SCAN_DOMAIN_HLL_KEY)
+    pipeline.ttl(INDEX_SCAN_KEY)
+    scan, last_finished, urls_so_far, domains_so_far, expires_in_seconds = pipeline.execute()
+
+    last_finished_date = None if last_finished is None else date.fromisoformat(last_finished)
+    interval = timedelta(days=settings.INDEX_COUNT_INTERVAL_DAYS)
+    status = {
+        "in_progress": bool(scan),
+        "last_finished": last_finished_date,
+        "next_scan_due": None if last_finished_date is None else last_finished_date + interval,
+        "interval_days": settings.INDEX_COUNT_INTERVAL_DAYS,
+        "run_interval_seconds": settings.INDEX_COUNT_RUN_INTERVAL_SECONDS,
+        "seconds_per_run": settings.INDEX_COUNT_SECONDS_PER_RUN,
+    }
+    if scan:
+        next_page = int(scan["next_page"])
+        status |= {
+            "next_page": next_page,
+            "num_pages": num_pages,
+            "percent_done": 100 * next_page / num_pages if num_pages else None,
+            "num_results": int(scan["num_results"]),
+            "urls_so_far": urls_so_far,
+            "domains_so_far": domains_so_far,
+            "expires_in_seconds": expires_in_seconds,
+        }
+    return status
+
+
+def get_published_counts(redis: Redis, num_days: int) -> list[dict]:
+    """The counts published by finished scans in the last num_days, most recent first."""
+    today = utc_today()
+    days = [today - timedelta(days=i) for i in range(num_days)]
+    keys = (INDEX_URL_COUNT_KEY, INDEX_DOMAIN_COUNT_KEY, INDEX_RESULT_COUNT_KEY)
+    counts = redis.mget([key.format(date=day) for day in days for key in keys])
+    published = []
+    for i, day in enumerate(days):
+        day_counts = counts[i * len(keys) : (i + 1) * len(keys)]
+        # A day missing any of its counts was not published whole, so it is left out.
+        if None not in day_counts:
+            urls, domains, results = map(int, day_counts)
+            published.append({"date": day, "urls": urls, "domains": domains, "results": results})
+    return published
 
 
 def get_domain_result_count(domain: str) -> int:
