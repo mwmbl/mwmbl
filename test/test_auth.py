@@ -107,3 +107,22 @@ def test_login_email_and_username_return_same_user(client, verified_user):
         return _json.loads(base64.urlsafe_b64decode(payload))["user_id"]
 
     assert subject(by_username["access"]) == subject(by_email["access"])
+
+
+@pytest.mark.django_db
+def test_refresh_rotates_refresh_token(client, verified_user):
+    # Rotation restarts the refresh token lifetime, so active users stay logged in
+    pair = client.post(
+        TOKEN_URL,
+        {"username": "swift_falcon_379", "password": "correctpassword"},
+        content_type="application/json",
+    ).json()
+    response = client.post(
+        "/api/v1/platform/token/refresh",
+        {"refresh": pair["refresh"]},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["access"]
+    assert data["refresh"] != pair["refresh"]
