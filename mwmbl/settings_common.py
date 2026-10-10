@@ -220,6 +220,8 @@ if SENTRY_DSN is not None:
         # We recommend adjusting this value in production.
         profiles_sample_rate=0.1,
         send_default_pii=False,
+        # Request bodies on the auth endpoints carry email addresses and passwords.
+        max_request_body_size="never",
         before_send=lambda event, hint: strip_query_string(event),
     )
 else:

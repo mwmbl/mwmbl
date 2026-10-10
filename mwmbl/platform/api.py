@@ -1686,9 +1686,9 @@ def polar_webhook(request):
         else:
             billing, created = UserBilling.objects.get_or_create(user=user)
             logger.info(
-                "Polar webhook: UserBilling %s for user %s customer_id=%s subscription_id=%s",
+                "Polar webhook: UserBilling %s for user id=%s customer_id=%s subscription_id=%s",
                 "created" if created else "updated",
-                user.email,
+                user.id,
                 event.data.customer_id,
                 event.data.id,
             )
@@ -1713,13 +1713,10 @@ def polar_webhook(request):
             if billing:
                 billing.cancel_at_period_end = True
                 billing.save()
-            logger.info(
-                "Polar webhook: user %s (id=%s) subscription scheduled to cancel at period end", user.email, user_id
-            )
+            logger.info("Polar webhook: user id=%s subscription scheduled to cancel at period end", user_id)
         else:
             logger.info(
-                "Polar webhook: immediate cancellation for user %s (id=%s), resetting spend limit to $0",
-                user.email,
+                "Polar webhook: immediate cancellation for user id=%s, resetting spend limit to $0",
                 user_id,
             )
             billing = getattr(user, "billing", None)
@@ -1734,7 +1731,7 @@ def polar_webhook(request):
         if user is None:
             logger.warning("Polar webhook: no user found for user_id=%s", user_id)
         else:
-            logger.info("Polar webhook: resetting user %s (id=%s) spend limit to $0", user.email, user_id)
+            logger.info("Polar webhook: resetting user id=%s spend limit to $0", user_id)
             billing = getattr(user, "billing", None)
             if billing:
                 billing.cancel_at_period_end = False
