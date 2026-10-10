@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("mwmbl", "0041_usagebucket_combined_search"),
+        ("mwmbl", "0043_seed_domains"),
     ]
 
     # Existing users get False, so nobody already registered has Combined Search switched on for them;

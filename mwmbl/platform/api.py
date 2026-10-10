@@ -1211,13 +1211,15 @@ def get_current_user(request):
     summary="Get current user's contribution stats",
     description=(
         "Returns the authenticated user's contribution stats: how many results they "
-        "have indexed, broken down per day for the last 30 days."
+        "have indexed, broken down per day for the last 30 days, and how many pages their "
+        "seed crawls (Combined Search with `crawl=true`) have added to the index in all."
     ),
     tags=["Users"],
 )
 def get_current_user_stats(request):
     user = request.user
-    return stats_manager.get_user_stats(user.username)
+    stats = stats_manager.get_user_stats(user.username)
+    return {**stats, "seed_search_pages_indexed": user.seed_search_pages_indexed}
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "ninja_extra",
+    "ninja_jwt.token_blacklist",
     "debug_toolbar",
     "background_task",
 ]
@@ -195,9 +197,9 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 # Gates database initialisation and background task scheduling; False for the crawler and tests.
 HAS_DATABASE = True
 
-# Whether this container runs the django-background-tasks queue (see mwmbl.main). Note the
-# distinction from HAS_DATABASE above: that gates *scheduling* the tasks, this gates
-# *running* them.
+# Whether this container runs the django-background-tasks queue and the seed crawl worker
+# (see mwmbl.main). Note the distinction from HAS_DATABASE above: that gates *scheduling*
+# the tasks, this gates *running* them.
 #
 # Opt-in rather than on by default because beta shares its database, index and Redis with
 # production. Exactly one deployment should run the queue, and it should be production:
@@ -240,6 +242,12 @@ def strip_query_string(event):
 # Django ninja-jwt settings
 NINJA_JWT = {
     "USER_AUTHENTICATION_RULE": require_email_confirmation,
+    # Refresh tokens rotate on every use, so this is an inactivity limit: users who
+    # visit at least once a year stay logged in indefinitely.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365),
+    "ROTATE_REFRESH_TOKENS": True,
+    # Each refresh token works once, so a leaked token dies when its owner next refreshes
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
@@ -305,6 +313,26 @@ STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/s
 STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
 STAAN_TIMEOUT_SECONDS = 5
 
+# Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
+# following links within Staan's domains - see mwmbl.indexer.seed_crawl.
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 100
+# A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
+SEED_CRAWL_MAX_SECONDS = 15 * 60
+# Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.
+SEED_CRAWL_MAX_QUEUED = 10
+SEED_CRAWL_THREADS = 8
+# The least time between two fetches from one domain.
+SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
+# Queries are private, so a user's record of what their crawl added is not kept for long.
+SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
+# A seed domain's new-page score averages only its most recent crawls, so a domain the
+# crawls have saturated drops down the list rather than living off its first crawl.
+SEED_DOMAIN_RECENT_CRAWLS = 5
+# The seed domain list crawlers read is republished at most this often, so it cannot be
+# diffed to learn what one private query returned - see mwmbl.indexer.seed_domains.
+SEED_DOMAINS_PUBLISH_SECONDS = 24 * 60 * 60
+SEED_DOMAINS_PUBLISHED = 1000
+
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
 # order instead.
@@ -359,6 +387,13 @@ BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300  # how often a worker checks Redis for a 
 BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60  # how often the snapshot is rebuilt from the remote lists
 BLACKLIST_PURGE_INTERVAL_SECONDS = 300  # how often the purge queue is drained
 BLACKLIST_PURGE_BATCH_SIZE = 1000  # documents removed from the index per purge run
+
+# Counting the unique URLs in the index means reading all of it, which takes hours. It is
+# done a slice at a time so it never holds up the rest of the task queue - see
+# mwmbl.count_urls.
+INDEX_COUNT_INTERVAL_DAYS = 7  # how often a new scan of the index starts
+INDEX_COUNT_RUN_INTERVAL_SECONDS = 300  # how often a slice of the scan runs
+INDEX_COUNT_SECONDS_PER_RUN = 120  # how long each slice reads pages for; keep well under MAX_RUN_TIME
 # How far ahead approving a domain submission schedules a snapshot rebuild. Approvers work
 # through submissions in batches, so the delay collapses a batch into one rebuild rather
 # than one per approval - see mwmbl.signals.

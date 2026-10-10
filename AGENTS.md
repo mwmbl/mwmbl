@@ -33,7 +33,11 @@ request, and `.pre-commit-config.yaml` runs the first of them on every commit.
   `rankeval/` (ranking quality), `api.py` (django-ninja endpoints), `models.py`,
   `settings_*.py` per environment.
 - `mwmbl_rank/` — the Rust ranking extension, built with maturin. Changing it means
-  `uv run maturin develop` before the tests will see it.
+  `uv run maturin develop` before the tests will see it. Its build downloads a prebuilt
+  `libxgboost.so` from GitHub, which Claude Code on the web cannot reach; there,
+  `.claude/hooks/session-start.sh` seeds the library from the `xgboost-cpu` wheel at
+  session start. If the build fails with `libxgboost.so: unknown file type`, rerun that
+  script rather than working around it by hand.
 - `test/` — pytest suite, one file per area.
 - `front-end/` — the JS build; leave it alone unless the change is about the UI.
 - `scripts/`, `analyse/` — one-off analysis and evaluation tools, not application code.

@@ -1,0 +1,110 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block title %}Index count | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Index count
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .index-count table { width: 100%; margin-bottom: 10px; }
+    .index-count td.key { width: 30%; font-weight: bold; }
+    .index-count .ok { color: #417690; font-weight: bold; }
+    .index-count .bad { color: #ba2121; font-weight: bold; }
+    .index-count .note { color: #666; font-size: 0.9em; }
+  </style>
+
+  <div id="content-main" class="index-count">
+
+    {% if redis_error %}
+      <div class="module">
+        <h2>Redis unreachable</h2>
+        <p class="bad">{{ redis_error }}</p>
+        <p class="note">The scan keeps its progress in Redis, so it cannot advance until Redis is back.</p>
+      </div>
+    {% else %}
+
+      <div class="module">
+        <h2>Current scan</h2>
+        <table>
+          {% if scan.in_progress %}
+            <tr>
+              <td class="key">Progress</td>
+              <td>
+                page {{ scan.next_page|intcomma }} of {{ scan.num_pages|intcomma }}
+                {% if scan.percent_done is not None %}({{ scan.percent_done|floatformat:1 }}%){% endif %}
+              </td>
+            </tr>
+            <tr><td class="key">Results so far</td><td>{{ scan.num_results|intcomma }}</td></tr>
+            <tr><td class="key">Unique URLs so far</td><td>{{ scan.urls_so_far|intcomma }}</td></tr>
+            <tr><td class="key">Unique domains so far</td><td>{{ scan.domains_so_far|intcomma }}</td></tr>
+            <tr>
+              <td class="key">State expires in</td>
+              <td>
+                {{ scan.expires_in_seconds|intcomma }}s
+                <span class="note">&mdash; reset by every batch, so this falling well below
+                two days means the scan has stopped advancing</span>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td class="key">Scan in progress</td><td>no</td></tr>
+          {% endif %}
+          <tr>
+            <td class="key">Last scan finished</td>
+            <td>{% if scan.last_finished %}{{ scan.last_finished }}{% else %}<span class="bad">never</span>{% endif %}</td>
+          </tr>
+          {% if not scan.in_progress %}
+            <tr>
+              <td class="key">Next scan due</td>
+              <td>{% if scan.next_scan_due %}{{ scan.next_scan_due }}{% else %}now{% endif %}</td>
+            </tr>
+          {% endif %}
+        </table>
+        <p class="note">
+          A scan reads every page of the index into HyperLogLogs, about 1% accurate. It runs
+          for {{ scan.seconds_per_run }}s every {{ scan.run_interval_seconds }}s, and a new one
+          starts {{ scan.interval_days }} days after the last finished. Counts are published
+          only when a scan reaches the last page.
+        </p>
+      </div>
+
+      <div class="module">
+        <h2>Published counts</h2>
+        {% if published %}
+          <table>
+            <thead><tr><th>Date (UTC)</th><th>Unique URLs</th><th>Unique domains</th><th>Results</th></tr></thead>
+            <tbody>
+              {% for count in published %}
+                <tr>
+                  <td>{{ count.date }}</td>
+                  <td>{{ count.urls|intcomma }}</td>
+                  <td>{{ count.domains|intcomma }}</td>
+                  <td>{{ count.results|intcomma }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="note">No scan has finished in the counts still held in Redis.</p>
+        {% endif %}
+      </div>
+
+    {% endif %}
+
+    <div class="module">
+      <h2>Background task</h2>
+      {% include "admin/_task_status.html" %}
+      <p class="note">
+        The task logs and swallows its own errors so that it keeps being rescheduled, so a
+        failing scan shows here as runs completing without the progress above moving. Look
+        for "Error counting the URLs in the index" in the worker logs.
+      </p>
+    </div>
+
+  </div>
+{% endblock %}

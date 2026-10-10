@@ -22,6 +22,7 @@ class UserStatsResponse(Schema):
     username: str
     results_indexed_today: int
     results_indexed_daily: dict[str, int]
+    seed_search_pages_indexed: int
 
 
 class SubscriptionResponse(Schema):
