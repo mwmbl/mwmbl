@@ -6,13 +6,18 @@ that turned out to be new pages, averaged over its last SEED_DOMAIN_RECENT_CRAWL
 it falls as crawls saturate the domain. And it should be likely to answer searches: Staan
 returning it often, across everyone's seed queries, is the evidence for that. A domain's
 score is the product of the two, and GET /api/v2/combined-search/seed-domains lists the
-domains by it.
+domains by it, to crawl-scoped API keys only.
+
+That list is published in batches, rebuilt at most every SEED_DOMAINS_PUBLISH_SECONDS. Were
+it live, comparing it before and after one crawl would show which domains Staan returned
+for that crawl's query, and queries are private.
 
 The user whose crawl first met a domain is kept against it, so that discovering a domain
 that turns out well can be rewarded later. Nothing shows it yet.
 """
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import F
 
@@ -67,5 +72,22 @@ def record_seed_domain_crawls(pages_indexed: dict[str, int]) -> None:
             seed_domain.save(update_fields=["new_page_score", "score"])
 
 
-def top_seed_domains(limit: int) -> list[SeedDomain]:
-    return list(SeedDomain.objects.order_by("-score", "domain")[:limit])
+PUBLISHED_KEY = "seed-domains:published"
+
+
+def published_seed_domains() -> list[dict]:
+    """The best SEED_DOMAINS_PUBLISHED seed domains, as of the last time the list was published."""
+    published = cache.get(PUBLISHED_KEY)
+    if published is None:
+        top = SeedDomain.objects.order_by("-score", "domain")[: settings.SEED_DOMAINS_PUBLISHED]
+        published = [
+            {
+                "domain": seed_domain.domain,
+                "new_page_score": seed_domain.new_page_score,
+                "staan_results": seed_domain.staan_results,
+                "score": seed_domain.score,
+            }
+            for seed_domain in top
+        ]
+        cache.set(PUBLISHED_KEY, published, settings.SEED_DOMAINS_PUBLISH_SECONDS)
+    return published

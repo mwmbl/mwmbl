@@ -8,12 +8,13 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.indexer import index_batches, seed_crawl
+from mwmbl.indexer import index_batches, seed_crawl, seed_domains
 from mwmbl.indexer.index_batches import index_new_documents
-from mwmbl.models import SeedDomain, SeedDomainCrawl
+from mwmbl.models import ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
 
 User = get_user_model()
@@ -518,8 +519,21 @@ def test_new_pages_reports_progress_and_domains(fake_web, redis_cache, user, ind
     assert "discovered_by" not in response.json()["domains"][0]
 
 
+SEED_DOMAINS_URL = "/api/v2/combined-search/seed-domains"
+
+
+def _api_key(user, scope):
+    raw, hashed = generate_api_key()
+    ApiKey.objects.create(user=user, key=hashed, name="seed-domains", scopes=[scope])
+    return raw
+
+
+def _seed_domains(user, query=""):
+    return Client().get(f"{SEED_DOMAINS_URL}{query}", HTTP_X_API_KEY=_api_key(user, ApiKey.Scope.CRAWL))
+
+
 @pytest.mark.django_db
-def test_the_seed_domains_endpoint_lists_the_best_first_without_their_discoverers(user):
+def test_the_seed_domains_endpoint_lists_the_best_first_without_their_discoverers(redis_cache, user):
     SeedDomain.objects.create(
         domain="low.example.com", discovered_by=user, new_page_score=0.1, staan_results=1, score=0.1
     )
@@ -527,10 +541,34 @@ def test_the_seed_domains_endpoint_lists_the_best_first_without_their_discoverer
         domain="high.example.com", discovered_by=user, new_page_score=0.5, staan_results=4, score=2
     )
 
-    response = Client().get("/api/v2/combined-search/seed-domains?limit=1")
+    response = _seed_domains(user, "?limit=1")
 
     assert response.status_code == 200
     assert response.json() == [{"domain": "high.example.com", "new_page_score": 0.5, "staan_results": 4, "score": 2.0}]
+
+
+@pytest.mark.django_db
+def test_the_seed_domains_endpoint_requires_a_crawl_scoped_key(redis_cache, user):
+    search_key = _api_key(user, ApiKey.Scope.SEARCH)
+
+    assert Client().get(SEED_DOMAINS_URL).status_code == 401
+    assert Client().get(SEED_DOMAINS_URL, HTTP_X_API_KEY=search_key).status_code == 401
+
+
+@pytest.mark.django_db
+def test_seed_domains_are_published_in_batches(redis_cache, user):
+    SeedDomain.objects.create(domain="old.example.com", new_page_score=0.1, staan_results=1, score=0.1)
+    assert [domain["domain"] for domain in _seed_domains(user).json()] == ["old.example.com"]
+
+    # What a crawl changes is not shown until the list is next published.
+    SeedDomain.objects.create(domain="new.example.com", new_page_score=0.5, staan_results=1, score=0.5)
+    SeedDomain.objects.filter(domain="old.example.com").update(score=0.0)
+    assert _seed_domains(user).json() == [
+        {"domain": "old.example.com", "new_page_score": 0.1, "staan_results": 1, "score": 0.1}
+    ]
+
+    cache.delete(seed_domains.PUBLISHED_KEY)
+    assert [domain["domain"] for domain in _seed_domains(user).json()] == ["new.example.com", "old.example.com"]
 
 
 def test_index_new_documents_returns_only_urls_the_index_lacked(index_path, monkeypatch):

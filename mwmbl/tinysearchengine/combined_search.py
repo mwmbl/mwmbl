@@ -50,7 +50,7 @@ from mwmbl.indexer.seed_crawl import (
     get_seed_crawl_summary,
     start_seed_crawl,
 )
-from mwmbl.indexer.seed_domains import top_seed_domains
+from mwmbl.indexer.seed_domains import published_seed_domains
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
@@ -60,7 +60,7 @@ from mwmbl.quota import (
     increment_monthly_combined_search,
     increment_monthly_combined_search_api_if_below,
 )
-from mwmbl.search_auth import authenticate_user
+from mwmbl.search_auth import CrawlApiKeyAuth, authenticate_user
 from mwmbl.search_setup import index_path
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
@@ -362,11 +362,14 @@ def init_router(ranker) -> None:
     @router.get(
         "seed-domains",
         response=list[SeedDomainResponse],
-        auth=None,
+        auth=CrawlApiKeyAuth(),
         summary="Seed domains, best first",
         description="The domains EUSP has returned for seed crawls, ordered by `score`: how likely "
         "a crawl of the domain is to add new pages to the index, times how often EUSP returns it. "
-        "For crawlers deciding where to go next.",
+        "For crawlers deciding where to go next; requires a crawl-scoped API key in `X-API-Key`.\n\n"
+        "The list is republished at most once every "
+        f"{settings.SEED_DOMAINS_PUBLISH_SECONDS // 3600} hours, so that it cannot reveal what any "
+        "one search returned.",
     )
-    def seed_domains(request, limit: int = Query(100, ge=1, le=1000)):
-        return top_seed_domains(limit)
+    def seed_domains(request, limit: int = Query(100, ge=1, le=settings.SEED_DOMAINS_PUBLISHED)):
+        return published_seed_domains()[:limit]
