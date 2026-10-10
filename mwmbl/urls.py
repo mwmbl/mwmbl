@@ -21,7 +21,12 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 
 import mwmbl.crawler.app as crawler
-from mwmbl.admin_views import blacklist_status_view, index_count_view, paying_users_view
+from mwmbl.admin_views import (
+    blacklist_status_view,
+    index_count_view,
+    paying_users_view,
+    search_traffic_view,
+)
 from mwmbl.api import api as v1_api
 from mwmbl.api import register_routers, v2_api
 from mwmbl.search_setup import combined_ranker, ranker, tiny_index
@@ -56,6 +61,7 @@ urlpatterns = [
     # Before admin.site.urls so the admin catch-all does not shadow it. Access is gated by
     # staff_member_required on the view, matching the rest of the admin.
     path("admin/blacklist-status/", blacklist_status_view, name="blacklist_status"),
+    path("admin/search-traffic/", search_traffic_view, name="search_traffic"),
     path("admin/paying-users/", paying_users_view, name="paying_users"),
     path("admin/index-count/", index_count_view, name="index_count"),
     path("admin/", admin.site.urls),

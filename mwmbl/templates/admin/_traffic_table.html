@@ -1,0 +1,33 @@
+{% load humanize %}
+{% comment %} One of the three request tables. They differ only in their columns, so one view
+   function builds all three and this renders all three: `table`, `column_header`, and
+   `label_date` when the columns are dates. {% endcomment %}
+{% if table.rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>{{ column_header }}</th>
+        {% for label in table.labels %}
+          <th class="num">{% if label_date %}{{ label|date:"j M" }}{% else %}{{ label }}{% endif %}</th>
+        {% endfor %}
+        <th class="num">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in table.rows %}
+        <tr>
+          <td><code>{{ row.endpoint }}</code></td>
+          {% for count in row.counts %}<td class="num">{{ count|intcomma }}</td>{% endfor %}
+          <td class="num strong">{{ row.total|intcomma }}</td>
+        </tr>
+      {% endfor %}
+      <tr class="strong">
+        <td>All endpoints</td>
+        {% for count in table.totals %}<td class="num">{{ count|intcomma }}</td>{% endfor %}
+        <td class="num">{{ table.total|intcomma }}</td>
+      </tr>
+    </tbody>
+  </table>
+{% else %}
+  <p class="note">No requests counted in this window.</p>
+{% endif %}
