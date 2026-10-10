@@ -157,7 +157,9 @@ def test_only_staan_results_missing_from_the_index_are_seeds(redis_cache, monkey
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     index_pages = [Document("Async book", "https://rust-lang.github.io/async-book/", "")]
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", index_pages, STAAN_RESULTS, set()) is True
+    assert (
+        seed_crawl.start_seed_crawl(1, "tokio", index_pages, STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    )
 
     [job] = _queued_jobs(redis_cache)
     assert job["seed_urls"] == [SEED]
@@ -180,18 +182,30 @@ def test_blacklisted_staan_results_are_neither_seeds_nor_domains(redis_cache, mo
 def test_nothing_to_crawl_starts_nothing(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", STAAN_RESULTS, STAAN_RESULTS, set()) is False
+    assert (
+        seed_crawl.start_seed_crawl(1, "tokio", STAAN_RESULTS, STAAN_RESULTS, set())
+        == seed_crawl.CrawlOutcome.ALREADY_INDEXED
+    )
     assert seed_crawl.get_seed_crawl(1, "tokio") is None
+    assert _queued_jobs(redis_cache) == []
+
+
+def test_nothing_starts_when_staan_returned_nothing_crawlable(redis_cache, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: {SEED})
+
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], [STAAN_RESULTS[0]], set()) == seed_crawl.CrawlOutcome.NO_RESULTS
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], [], set()) == seed_crawl.CrawlOutcome.NO_RESULTS
     assert _queued_jobs(redis_cache) == []
 
 
 def test_a_user_has_one_crawl_at_a_time(redis_cache, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) is True
-    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) is False
-    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS, set()) is False
-    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS, set()) is True
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.ALREADY_RUNNING
+    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.ALREADY_RUNNING
+    assert seed_crawl.get_active_seed_crawl_query(1) == "tokio"
+    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
     assert len(_queued_jobs(redis_cache)) == 2
 
 
@@ -199,8 +213,8 @@ def test_nothing_is_queued_once_the_queue_is_full(redis_cache, monkeypatch, sett
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     settings.SEED_CRAWL_MAX_QUEUED = 1
 
-    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) is True
-    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS, set()) is False
+    assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.QUEUE_FULL
     assert seed_crawl.get_seed_crawl(2, "tokio") is None
 
 
@@ -245,7 +259,7 @@ def test_the_worker_runs_a_queued_crawl(fake_web, redis_cache, user, index_path,
 
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "done"
     # The user can start another crawl once theirs has finished.
-    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) is True
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
 
 
 @pytest.mark.django_db
@@ -262,7 +276,7 @@ def test_a_failed_crawl_is_recorded_and_not_retried(fake_web, redis_cache, user,
     assert record["status"] == "failed"
     assert record["finished_at"] is not None
     assert _queued_jobs(redis_cache) == []
-    assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) is True
+    assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
 
 
 @pytest.mark.django_db
