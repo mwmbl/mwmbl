@@ -62,6 +62,7 @@ class CrawlOutcome(StrEnum):
     NO_RESULTS = "no_results"
     ALREADY_INDEXED = "already_indexed"
     ALREADY_RUNNING = "already_running"
+    ALREADY_CRAWLED = "already_crawled"
     QUEUE_FULL = "queue_full"
 
 
@@ -106,8 +107,8 @@ def start_seed_crawl(
     the index - count as pages the crawl added; the rest the index already held.
 
     Nothing is queued when Staan returned nothing crawlable, when every Staan result is
-    already in the index, when this user already has a crawl queued or running, or when the
-    queue is full.
+    already in the index, when this user has already crawled the query, when they already
+    have a crawl queued or running, or when the queue is full.
     """
     blacklisted_urls = find_blacklisted_urls(staan_results)
     allowed = [document for document in staan_results if document.url not in blacklisted_urls]
@@ -119,6 +120,14 @@ def start_seed_crawl(
         return CrawlOutcome.ALREADY_INDEXED
 
     redis = get_redis_connection("default")
+    record_key = _record_key(user_id, query)
+    # Pages a crawl adds need not rank for the query, so its seeds would mostly be the same
+    # again: a query is crawled once while its record lasts, unless that crawl failed.
+    status = redis.hget(record_key, "status")
+    if status in (STATUS_QUEUED.encode(), STATUS_CRAWLING.encode()):
+        return CrawlOutcome.ALREADY_RUNNING
+    if status == STATUS_DONE.encode():
+        return CrawlOutcome.ALREADY_CRAWLED
     # A slight overshoot from racing requests is harmless; the cap is there to stop one
     # user, or many, queueing hours of crawling.
     if redis.llen(QUEUE_KEY) >= settings.SEED_CRAWL_MAX_QUEUED:
@@ -130,7 +139,6 @@ def start_seed_crawl(
     if not redis.set(_active_key(user_id), query, nx=True, ex=lock_seconds):
         return CrawlOutcome.ALREADY_RUNNING
 
-    record_key = _record_key(user_id, query)
     # Each domain with the number of Staan results it had, which the seed domains count.
     staan_results_per_domain = Counter(bare_host(document.url) for document in allowed)
     domains = dict(sorted(staan_results_per_domain.items()))
@@ -142,7 +150,7 @@ def start_seed_crawl(
         "new_seed_urls": new_seed_urls,
         "domains": domains,
     }
-    # An earlier crawl's pages are kept: the new one adds to them, and the user's total
+    # A failed earlier crawl's pages are kept: the new one adds to them, and the user's total
     # already includes them. Its progress and domains are this crawl's alone.
     record = {
         "status": STATUS_QUEUED,
@@ -235,7 +243,14 @@ def _crawl_and_record(
     ttl = settings.SEED_CRAWL_RECORD_TTL_SECONDS
     domain_pages = Counter()
 
-    for num_crawled, documents in crawl_within_domains(seed_urls, set(domains), redis):
+    rounds = crawl_within_domains(seed_urls, set(domains), redis)
+    # Each round is told which of its pages were new, so it can tell when a domain has run dry.
+    counted_urls = None
+    while True:
+        try:
+            num_crawled, documents = rounds.send(counted_urls)
+        except StopIteration:
+            return domain_pages
         indexed = index_new_documents(documents, index_path)
         # Combined Search has since written Staan's snippets of the new seeds, so the index
         # alone no longer says they were new. Only those this write stored count.
@@ -269,17 +284,22 @@ def _crawl_and_record(
             MwmblUser.objects.filter(id=user_id).update(
                 seed_search_pages_indexed=F("seed_search_pages_indexed") + len(new_documents)
             )
-    return domain_pages
+        counted_urls = {document.url for document in new_documents}
 
 
 def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
     """Crawl breadth first from the seeds, staying within the domains given.
 
-    Yields, for each round, how many URLs it fetched and the documents it got from them.
+    Yields, for each round, how many URLs it fetched and the documents it got from them, and
+    is sent back the URLs of those documents that were new. A domain is dropped once
+    SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN fetches in a row from it have added nothing new, so
+    the crawl ends when there is nothing left for it to find rather than when it has fetched
+    every domain's budget.
     """
     frontiers: dict[str, deque[str]] = {}
     seen_urls = set()
     enqueued_per_domain = Counter()
+    stale_fetches_per_domain = Counter()
     max_pages_per_domain = settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN
 
     def enqueue(url: str) -> None:
@@ -332,7 +352,16 @@ def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
                 )
             for link in content["links"] + content["extra_links"]:
                 follow(link)
-        yield len(batch), documents
+        new_urls = yield len(batch), documents
+
+        for url, result in zip(batch, results):
+            domain = bare_host(url)
+            if result["url"] in new_urls:
+                stale_fetches_per_domain[domain] = 0
+                continue
+            stale_fetches_per_domain[domain] += 1
+            if stale_fetches_per_domain[domain] >= settings.SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN:
+                frontiers[domain].clear()
 
 
 def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
