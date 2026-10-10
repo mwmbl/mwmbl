@@ -36,6 +36,8 @@ MAX_OTHER_DOMAINS = 10000
 
 NUM_TOP_DOMAIN_URLS_TO_INCLUDE = 50
 NUM_OTHER_URLS_TO_INCLUDE = 100
+# Promoted domains go into a batch ahead of everything else, best first.
+NUM_PROMOTED_DOMAINS_TO_INCLUDE = 50
 
 # Seeded so that two CI runs with the same allowlist start from the same place. Only the
 # allowlist path uses it: forked crawl workers each get a copy, so they would seed in lockstep.
@@ -57,17 +59,34 @@ def get_domain_max_urls(domain: str, curated_domains: set[str]):
 
 class RedisURLQueue:
     def __init__(
-        self, redis: Redis, get_curated_domains_function: Callable[[], set[str]], blacklist_provider=None
+        self,
+        redis: Redis,
+        get_curated_domains_function: Callable[[], set[str]],
+        blacklist_provider=None,
+        get_promoted_domains_function: Callable[[], list[str]] = lambda: [],
     ) -> None:
+        """
+        get_promoted_domains_function returns the promoted domains best first: the seed
+        domains the server scores as most likely to add new pages that answer searches. They
+        take priority over curated domains when a batch is put together.
+        """
         self.redis = redis
         self.get_curated_domains_function = get_curated_domains_function
+        self.get_promoted_domains_function = get_promoted_domains_function
         # Curated domains override the blacklist, and the queue already knows where to get
         # them - over HTTP in the standalone crawler, which has no database.
         self.blacklist_provider = blacklist_provider or get_default_blacklist_provider(get_curated_domains_function)
 
     def queue_urls(self, found_urls: list[FoundURL]):
         curated_domains = self.get_curated_domains_function()
-        logger.info(f"Got {len(found_urls)} URLs, {len(curated_domains)} curated domains")
+        promoted_domains = self.get_promoted_domains_function()
+        logger.info(
+            f"Got {len(found_urls)} URLs, {len(curated_domains)} curated domains, "
+            f"{len(promoted_domains)} promoted domains"
+        )
+        # A promoted domain is only worth crawling for its depth, so it can queue as many URLs
+        # as a curated one.
+        deep_domains = curated_domains | set(promoted_domains)
         url_scores = defaultdict(list)
         domain_scores = {}
         with DomainLinkDatabase() as link_db:
@@ -99,7 +118,7 @@ class RedisURLQueue:
 
         for domain in domain_scores.keys():
             self.redis.zadd(DOMAIN_URLS_KEY.format(domain=domain), dict(url_scores[domain]))
-            max_urls = get_domain_max_urls(domain, curated_domains)
+            max_urls = get_domain_max_urls(domain, deep_domains)
             self.redis.zremrangebyrank(DOMAIN_URLS_KEY.format(domain=domain), 0, -(max_urls + 1))
 
         # Remove the lowest scoring domains
@@ -121,13 +140,28 @@ class RedisURLQueue:
             seed_domains = sorted(CRAWL_ALLOWED_DOMAINS)
             seed_random = ALLOWLIST_RANDOM
         else:
+            promoted_domains = [
+                domain
+                for domain in self.get_promoted_domains_function()
+                if not self.blacklist_provider.is_domain_blacklisted(domain)
+            ]
+            promoted_domain_scores = self.redis.zmscore(DOMAIN_SCORE_KEY, promoted_domains) if promoted_domains else []
+            queued_promoted_domains = [
+                domain for domain, score in zip(promoted_domains, promoted_domain_scores) if score is not None
+            ]
+            # A promoted domain this crawler has never seen has nothing queued, so the only way
+            # in is to seed its root page, whose links then fill its queue.
+            unqueued_promoted_domains = [
+                domain for domain, score in zip(promoted_domains, promoted_domain_scores) if score is None
+            ]
+
             top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
             top_other_domains = top_scoring_domains - DOMAINS.keys()
 
             # The stdlib's shared random instance, which Python reseeds in every forked child. A
             # Random of our own, seeded or not, would be copied into each crawl worker, and every
             # worker would then pick the same domains and seed URL in lockstep.
-            domains = list(CORE_DOMAINS)
+            domains = queued_promoted_domains[:NUM_PROMOTED_DOMAINS_TO_INCLUDE] + list(CORE_DOMAINS)
             top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
             if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
                 domains += random.sample(list(top_curated_domains), NUM_TOP_DOMAIN_URLS_TO_INCLUDE)
@@ -139,7 +173,7 @@ class RedisURLQueue:
             else:
                 domains += list(top_other_domains)
 
-            seed_domains = list(DOMAINS.keys() | curated_domains)
+            seed_domains = unqueued_promoted_domains or list(DOMAINS.keys() | curated_domains)
             seed_random = random
 
         # Add a random url as the root domain of one of DOMAINS. The seed needs the same
