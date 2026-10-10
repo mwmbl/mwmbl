@@ -39,6 +39,26 @@ def run_background_tasks():
         sleep(TASK_QUEUE_RESTART_SECONDS)
 
 
+def run_seed_crawls():
+    """Run queued seed crawls - see mwmbl.indexer.seed_crawl. Entry point for the child process.
+
+    A process of its own, rather than a task on the queue above, so that crawls lasting
+    minutes never hold up the periodic tasks. Spawned for the same reason that is.
+    """
+    django.setup()
+
+    from mwmbl.indexer.seed_crawl import run_seed_crawl_worker
+
+    while True:
+        try:
+            run_seed_crawl_worker()
+        except Exception:
+            # A crawl's own failure is recorded and survived inside the worker, so this is
+            # Redis or the database going away.
+            logger.exception("Seed crawl worker failed; restarting in %ds", TASK_QUEUE_RESTART_SECONDS)
+        sleep(TASK_QUEUE_RESTART_SECONDS)
+
+
 def run():
     django.setup()
 
@@ -78,6 +98,12 @@ def run():
             )
             process.start()
             logger.info("Started the background task queue (pid %d)", process.pid)
+
+            seed_crawl_process = multiprocessing.get_context("spawn").Process(
+                target=run_seed_crawls, name="seed-crawls", daemon=True
+            )
+            seed_crawl_process.start()
+            logger.info("Started the seed crawl worker (pid %d)", seed_crawl_process.pid)
 
         workers = multiprocessing.cpu_count() * 2 + 1
 

@@ -8,6 +8,7 @@ provider being down costs recall rather than the request, and that the quota is 
 atomically.
 """
 
+import json
 import threading
 from pathlib import Path
 from urllib.parse import urlparse
@@ -21,6 +22,7 @@ from ninja_jwt.tokens import RefreshToken
 
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
+from mwmbl.indexer import seed_crawl
 from mwmbl.membership import MembershipTier
 from mwmbl.models import ApiKey, Membership, UserBilling, generate_api_key
 from mwmbl.quota import (
@@ -53,6 +55,14 @@ WIKI_INDEX_RESULT = Document(
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+class _Retrieval(list):
+    """What the stub ranker retrieves: a list of index pages that a seed crawl can also read."""
+
+    @property
+    def pages(self):
+        return list(self)
 
 
 @pytest.fixture
@@ -96,7 +106,7 @@ def stub_sources(monkeypatch):
     """
     calls = {}
 
-    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), pages_indexed=1):
+    def configure(staan=(STAAN_RESULT,), index=(INDEX_RESULT,), new_urls=(STAAN_RESULT.url,)):
         def fake_staan(query, *args, **kwargs):
             calls["staan_query"] = query
             if isinstance(staan, Exception):
@@ -105,7 +115,7 @@ def stub_sources(monkeypatch):
 
         def fake_retrieve(query):
             calls["retrieve_query"] = query
-            return list(index)
+            return _Retrieval(index)
 
         def fake_search_retrieved(retrieval, additional_results):
             calls["additional_results"] = additional_results
@@ -114,12 +124,12 @@ def stub_sources(monkeypatch):
         def fake_index(documents, query, path):
             calls["indexed"] = [document.url for document in documents]
             calls["indexed_query"] = query
-            if isinstance(pages_indexed, Exception):
-                raise pages_indexed
-            return pages_indexed
+            if isinstance(new_urls, Exception):
+                raise new_urls
+            return set(new_urls)
 
         monkeypatch.setattr(combined_search, "get_staan_results", fake_staan)
-        monkeypatch.setattr(combined_search, "index_results_against_query", fake_index)
+        monkeypatch.setattr(combined_search, "index_new_results_against_query", fake_index)
         monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
         # The router closed over the ranker at registration time, so the ranker instance
         # itself is what has to be patched, not the name in search_setup.
@@ -434,7 +444,7 @@ def test_an_empty_pool_is_an_empty_response_not_an_error(client, access_token, f
 
 @pytest.mark.django_db
 def test_staan_results_are_indexed_against_the_query(client, access_token, fresh_quota, stub_sources):
-    calls = stub_sources(pages_indexed=3)
+    calls = stub_sources(new_urls=("https://a.example/", "https://b.example/", "https://c.example/"))
 
     body = _get(client, access_token, query="rust").json()
 
@@ -445,7 +455,7 @@ def test_staan_results_are_indexed_against_the_query(client, access_token, fresh
 
 @pytest.mark.django_db
 def test_blacklisted_staan_results_are_not_indexed(client, access_token, fresh_quota, stub_sources, monkeypatch):
-    """index_results_against_query bypasses index_documents' blacklist check."""
+    """index_new_results_against_query bypasses index_documents' blacklist check."""
     bad = Document("Bad", "https://badsite.test/x", "bad", 5.0, source=DocumentSource.STAAN)
     calls = stub_sources(staan=(bad, STAAN_RESULT))
     monkeypatch.setattr(
@@ -471,7 +481,7 @@ def test_nothing_from_staan_indexes_nothing(client, access_token, fresh_quota, s
 
 @pytest.mark.django_db
 def test_a_failed_index_write_still_serves_the_results(client, access_token, fresh_quota, stub_sources):
-    stub_sources(pages_indexed=OSError("disk full"))
+    stub_sources(new_urls=OSError("disk full"))
 
     body = _get(client, access_token).json()
 
@@ -486,8 +496,159 @@ def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
     monkeypatch.setattr(combined_search, "index_path", index_path)
     monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
 
-    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 1
-    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == 0
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == {STAAN_RESULT.url}
+    assert combined_search.index_staan_results("tokio", [STAAN_RESULT]) == set()
 
     with TinyIndex(Document, str(index_path), "r") as index:
         assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]
+
+
+# ---------------------------------------------------------------------------
+# Seed crawls (the crawl itself is tested in test_seed_crawl.py)
+# ---------------------------------------------------------------------------
+
+NEW_PAGES_URL = f"{URL}new-pages"
+
+
+@pytest.fixture
+def crawl_sources(stub_sources, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    return stub_sources
+
+
+def _crawl(client, access_token, query="tokio"):
+    return client.get(f"{URL}?q={query}&crawl=true", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+
+@pytest.mark.django_db
+def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+
+    body = _crawl(client, access_token).json()
+
+    assert body["crawl_scheduled"] is True
+    assert body["crawl_outcome"] == "scheduled"
+    job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
+    assert job == {
+        "user_id": user.id,
+        "query": "tokio",
+        "seed_urls": [STAAN_RESULT.url],
+        "new_seed_urls": [STAAN_RESULT.url],
+        "domains": ["tokio.rs"],
+    }
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
+
+
+@pytest.mark.django_db
+def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+
+    body = _get(client, access_token).json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] is None
+    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
+
+
+@pytest.mark.django_db
+def test_no_crawl_when_the_index_already_has_every_staan_result(
+    client, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources(index=(INDEX_RESULT, STAAN_RESULT))
+
+    body = _crawl(client, access_token).json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] == "already_indexed"
+    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
+
+
+@pytest.mark.django_db
+def test_a_crawl_already_running_is_named(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token, query="tokio")
+
+    body = _crawl(client, access_token, query="rust").json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] == "already_running"
+    assert body["active_crawl_query"] == "tokio"
+
+
+@pytest.mark.django_db
+def test_crawl_is_refused_with_an_api_key_and_not_counted(
+    client, user, api_key, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+
+    response = client.get(f"{URL}?q=tokio&crawl=true", HTTP_X_API_KEY=api_key.raw_key)
+
+    assert response.status_code == 403
+    assert get_monthly_combined_search_api_count(user.id) == 0
+
+
+@pytest.mark.django_db
+def test_new_pages_reports_the_crawl_for_the_query(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token)
+
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert response.json()["pages"] == []
+
+
+@pytest.mark.django_db
+def test_new_pages_is_404_without_a_crawl(client, access_token, redis_cache):
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_only_shows_the_users_own_crawls(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token)
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    other_token = str(RefreshToken.for_user(other).access_token)
+
+    response = client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_AUTHORIZATION=f"Bearer {other_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_requires_a_jwt(client, api_key):
+    assert client.get(f"{NEW_PAGES_URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401
+
+
+@pytest.mark.django_db
+def test_new_pages_count_reports_how_many_pages_the_crawl_added(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    _crawl(client, access_token)
+    redis_cache.rpush(f"{seed_crawl._record_key(user.id, 'tokio')}:pages", '{"url": "u", "title": "t", "extract": ""}')
+
+    response = client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 200
+    assert response.json()["pages_indexed"] == 1
+    assert response.json()["status"] == "queued"
+    assert "pages" not in response.json()
+
+
+@pytest.mark.django_db
+def test_new_pages_count_is_404_without_a_crawl(client, access_token, redis_cache):
+    response = client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_new_pages_count_requires_a_jwt(client, api_key):
+    assert client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401
