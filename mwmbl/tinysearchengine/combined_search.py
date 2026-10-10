@@ -43,7 +43,13 @@ from pydantic import Field
 from mwmbl import pricing
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_new_results_against_query
-from mwmbl.indexer.seed_crawl import get_seed_crawl, get_seed_crawl_summary, start_seed_crawl
+from mwmbl.indexer.seed_crawl import (
+    CrawlOutcome,
+    get_active_seed_crawl_query,
+    get_seed_crawl,
+    get_seed_crawl_summary,
+    start_seed_crawl,
+)
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
@@ -73,10 +79,21 @@ class CombinedSearchResponse(SearchResponse):
         examples=[3],
     )
     crawl_scheduled: bool = Field(
-        description="Whether this search started a seed crawl (`crawl=true`). False when every "
-        "EUSP result is already in the index, when one of your crawls is still queued or running, or "
-        "when the crawl queue is full.",
+        description="Whether this search started a seed crawl (`crawl=true`). `crawl_outcome` says why not.",
         examples=[True],
+    )
+    crawl_outcome: CrawlOutcome | None = Field(
+        default=None,
+        description="What `crawl=true` did: `scheduled` a crawl, or none because EUSP returned "
+        "nothing to crawl (`no_results`), every EUSP result is already in the index "
+        "(`already_indexed`), one of your crawls is still queued or running (`already_running`), "
+        "or the crawl queue is full (`queue_full`). Null without `crawl=true`.",
+        examples=["scheduled"],
+    )
+    active_crawl_query: str | None = Field(
+        default=None,
+        description="With `already_running`, the query of your crawl that is queued or running.",
+        examples=["rust async runtimes"],
     )
 
 
@@ -251,9 +268,14 @@ def init_router(ranker) -> None:
             asyncio.to_thread(index_staan_results, q, staan_results),
         )
 
-        crawl_scheduled = crawl and await sync_to_async(start_seed_crawl)(
-            user.id, q, retrieval.pages, staan_results, new_staan_urls
-        )
+        crawl_outcome = None
+        active_crawl_query = None
+        if crawl:
+            crawl_outcome = await sync_to_async(start_seed_crawl)(
+                user.id, q, retrieval.pages, staan_results, new_staan_urls
+            )
+            if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
+                active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(
@@ -263,7 +285,9 @@ def init_router(ranker) -> None:
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
             pages_indexed=len(new_staan_urls),
-            crawl_scheduled=crawl_scheduled,
+            crawl_scheduled=crawl_outcome == CrawlOutcome.SCHEDULED,
+            crawl_outcome=crawl_outcome,
+            active_crawl_query=active_crawl_query,
         )
 
     @router.get(

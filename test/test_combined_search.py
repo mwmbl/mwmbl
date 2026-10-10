@@ -529,6 +529,7 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
     body = _crawl(client, access_token).json()
 
     assert body["crawl_scheduled"] is True
+    assert body["crawl_outcome"] == "scheduled"
     job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
     assert job == {
         "user_id": user.id,
@@ -544,7 +545,10 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
 def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cache, crawl_sources):
     crawl_sources()
 
-    assert _get(client, access_token).json()["crawl_scheduled"] is False
+    body = _get(client, access_token).json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] is None
     assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
 
 
@@ -554,8 +558,23 @@ def test_no_crawl_when_the_index_already_has_every_staan_result(
 ):
     crawl_sources(index=(INDEX_RESULT, STAAN_RESULT))
 
-    assert _crawl(client, access_token).json()["crawl_scheduled"] is False
+    body = _crawl(client, access_token).json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] == "already_indexed"
     assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
+
+
+@pytest.mark.django_db
+def test_a_crawl_already_running_is_named(client, access_token, fresh_quota, redis_cache, crawl_sources):
+    crawl_sources()
+    _crawl(client, access_token, query="tokio")
+
+    body = _crawl(client, access_token, query="rust").json()
+
+    assert body["crawl_scheduled"] is False
+    assert body["crawl_outcome"] == "already_running"
+    assert body["active_crawl_query"] == "tokio"
 
 
 @pytest.mark.django_db

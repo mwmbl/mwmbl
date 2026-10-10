@@ -26,6 +26,7 @@ import json
 import time
 from collections import Counter, deque
 from datetime import datetime, timezone
+from enum import StrEnum
 from http import HTTPStatus
 from logging import getLogger
 from pathlib import Path
@@ -49,6 +50,17 @@ STATUS_QUEUED = "queued"
 STATUS_CRAWLING = "crawling"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
+
+
+class CrawlOutcome(StrEnum):
+    """Why a search with crawl=true did or did not queue a crawl."""
+
+    SCHEDULED = "scheduled"
+    NO_RESULTS = "no_results"
+    ALREADY_INDEXED = "already_indexed"
+    ALREADY_RUNNING = "already_running"
+    QUEUE_FULL = "queue_full"
+
 
 QUEUE_KEY = "seed-crawl:queue"
 # Under the Redis client's five-second socket timeout, which a longer blocking pop would trip.
@@ -79,34 +91,37 @@ def _now() -> str:
 
 def start_seed_crawl(
     user_id: int, query: str, index_pages: list[Document], staan_results: list[Document], new_staan_urls: set[str]
-) -> bool:
-    """Queue a seed crawl of the Staan results the index lacked, returning whether it did.
+) -> CrawlOutcome:
+    """Queue a seed crawl of the Staan results the index lacked, returning whether it did, or why not.
 
     The seeds are the results the query did not retrieve. Of those, only the ones in
     new_staan_urls - which Combined Search's own write of Staan's results found missing from
     the index - count as pages the crawl added; the rest the index already held.
 
-    Nothing is queued when every Staan result is already in the index, when this user
-    already has a crawl queued or running, or when the queue is full.
+    Nothing is queued when Staan returned nothing crawlable, when every Staan result is
+    already in the index, when this user already has a crawl queued or running, or when the
+    queue is full.
     """
     blacklisted_urls = find_blacklisted_urls(staan_results)
     allowed = [document for document in staan_results if document.url not in blacklisted_urls]
     indexed_urls = {document.url for document in index_pages}
     seed_urls = [document.url for document in allowed if document.url not in indexed_urls]
+    if not allowed:
+        return CrawlOutcome.NO_RESULTS
     if not seed_urls:
-        return False
+        return CrawlOutcome.ALREADY_INDEXED
 
     redis = get_redis_connection("default")
     # A slight overshoot from racing requests is harmless; the cap is there to stop one
     # user, or many, queueing hours of crawling.
     if redis.llen(QUEUE_KEY) >= settings.SEED_CRAWL_MAX_QUEUED:
-        return False
+        return CrawlOutcome.QUEUE_FULL
     # Set atomically, so a double click or a retried request cannot queue the crawl twice.
     # The expiry outlasts the longest wait plus the crawl, and frees the user should the
     # worker die mid-crawl.
     lock_seconds = settings.SEED_CRAWL_MAX_SECONDS * (settings.SEED_CRAWL_MAX_QUEUED + 1)
     if not redis.set(_active_key(user_id), query, nx=True, ex=lock_seconds):
-        return False
+        return CrawlOutcome.ALREADY_RUNNING
 
     record_key = _record_key(user_id, query)
     domains = sorted({bare_host(document.url) for document in allowed})
@@ -127,7 +142,13 @@ def start_seed_crawl(
     pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
     pipeline.lpush(QUEUE_KEY, json.dumps(job))
     pipeline.execute()
-    return True
+    return CrawlOutcome.SCHEDULED
+
+
+def get_active_seed_crawl_query(user_id: int) -> str | None:
+    """The query of this user's queued or running crawl, or None if they have none."""
+    query = get_redis_connection("default").get(_active_key(user_id))
+    return None if query is None else query.decode()
 
 
 def run_seed_crawl_worker() -> None:
