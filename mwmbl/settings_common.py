@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "ninja_extra",
+    "ninja_jwt.token_blacklist",
     "debug_toolbar",
     "background_task",
 ]
@@ -245,6 +246,8 @@ NINJA_JWT = {
     # visit at least once a year stay logged in indefinitely.
     "REFRESH_TOKEN_LIFETIME": timedelta(days=365),
     "ROTATE_REFRESH_TOKENS": True,
+    # Each refresh token works once, so a leaked token dies when its owner next refreshes
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Database configuration (shared across all environments via DATABASE_URL env var)

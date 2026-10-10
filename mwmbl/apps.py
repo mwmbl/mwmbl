@@ -142,6 +142,7 @@ class MwmblConfig(AppConfig):
 
             from mwmbl.background import (
                 count_index_urls,
+                flush_expired_tokens,
                 purge_blacklisted_from_queue,
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
@@ -155,6 +156,7 @@ class MwmblConfig(AppConfig):
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
             MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
             INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
+            FLUSH_TOKENS_TASK = "mwmbl.background.flush_expired_tokens"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -194,6 +196,10 @@ class MwmblConfig(AppConfig):
             # nothing - see mwmbl.count_urls.
             if not Task.objects.filter(task_name=INDEX_COUNT_TASK).exists():
                 count_index_urls(repeat=settings.INDEX_COUNT_RUN_INTERVAL_SECONDS, repeat_until=None)
+
+            # Clear expired refresh tokens out of the JWT blacklist tables once a day
+            if not Task.objects.filter(task_name=FLUSH_TOKENS_TASK).exists():
+                flush_expired_tokens(repeat=Task.DAILY, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
