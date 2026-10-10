@@ -490,3 +490,48 @@ class ModerationModelArtifact(models.Model):
 
     def __str__(self):
         return f"{self.version} ({self.created_on:%Y-%m-%d})"
+
+
+class SeedDomain(models.Model):
+    """A domain Staan returned for a seed crawl (Combined Search with crawl=true).
+
+    Scored for how much a crawl of it is still likely to add to the index, and for how often
+    Staan returns it - its likely benefit to searches - so crawlers can go where both are
+    high. See mwmbl.indexer.seed_domains.
+    """
+
+    domain = models.CharField(max_length=300, unique=True)
+    # Kept so discovering a high-impact domain can be rewarded later; private for now.
+    discovered_by = models.ForeignKey(
+        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="discovered_seed_domains"
+    )
+    discovered_at = models.DateTimeField(default=timezone.now)
+    # Staan results for this domain across every seed crawl.
+    staan_results = models.IntegerField(default=0)
+    # Denormalised from the recent SeedDomainCrawls, so the domains can be ordered by score.
+    new_page_score = models.FloatField(default=0.0)
+    score = models.FloatField(default=0.0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["-score"]),
+        ]
+
+    def __str__(self):
+        return self.domain
+
+
+class SeedDomainCrawl(models.Model):
+    """How many new pages one finished seed crawl added from one domain.
+
+    Holds neither the user nor the query: queries are private.
+    """
+
+    seed_domain = models.ForeignKey(SeedDomain, on_delete=models.CASCADE, related_name="crawls")
+    crawled_at = models.DateTimeField(default=timezone.now)
+    pages_indexed = models.IntegerField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["seed_domain", "-crawled_at"]),
+        ]

@@ -317,6 +317,9 @@ SEED_CRAWL_THREADS = 8
 SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
 # Queries are private, so a user's record of what their crawl added is not kept for long.
 SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
+# A seed domain's new-page score averages only its most recent crawls, so a domain the
+# crawls have saturated drops down the list rather than living off its first crawl.
+SEED_DOMAIN_RECENT_CRAWLS = 5
 
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
