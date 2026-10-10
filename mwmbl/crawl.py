@@ -38,6 +38,7 @@ from mwmbl.crawler.env_vars import (
     CRAWLER_WORKERS,
     MWMBL_API_KEY,
     MWMBL_CONTACT_INFO,
+    MWMBL_SERVER,
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
@@ -51,11 +52,17 @@ from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.utils import prune_request_cache
 
 BATCH_QUEUE_KEY = "batch-queue"
-REMOTE_SERVER = "https://api.mwmbl.org"
+REMOTE_SERVER = MWMBL_SERVER
 
 _curated_domains_cache: set[str] = set()
 _curated_domains_fetched_at: float = 0.0
 CURATED_DOMAINS_CACHE_SECONDS = 300.0
+
+_promoted_domains_cache: list[str] = []
+_promoted_domains_fetched_at: float | None = None
+# The server republishes the list once a day, so there is no point asking more often than this.
+PROMOTED_DOMAINS_CACHE_SECONDS = 3600.0
+PROMOTED_DOMAINS_LIMIT = 1000
 
 # How many of a term's new items must be expected to survive in the main index before we
 # submit the term at all. See count_new_index_entries for where the expectation comes from.
@@ -88,6 +95,37 @@ def _fetch_curated_domains() -> set[str]:
     except Exception:
         logger.exception("Failed to fetch curated domains, using cached value")
     return _curated_domains_cache
+
+
+def _fetch_promoted_domains() -> list[str]:
+    """The domains the server promotes for crawling, best first.
+
+    These are the seed domains: those Staan returned for seed crawls, scored by how much a
+    crawl is still finding new pages on them times how often Staan returns them. A domain
+    scoring zero has nothing new left, as far as the server knows, so it is not promoted.
+    The endpoint needs a crawl-scoped API key, so a crawler without a key has none.
+    """
+    global _promoted_domains_cache, _promoted_domains_fetched_at
+    if not MWMBL_API_KEY.strip():
+        return []
+    now = time.monotonic()
+    if _promoted_domains_fetched_at is not None and now - _promoted_domains_fetched_at < PROMOTED_DOMAINS_CACHE_SECONDS:
+        return _promoted_domains_cache
+    try:
+        response = requests.get(
+            f"{REMOTE_SERVER}/api/v2/combined-search/seed-domains",
+            params={"limit": PROMOTED_DOMAINS_LIMIT},
+            timeout=10,
+            headers={"User-Agent": USER_AGENT, "X-API-Key": MWMBL_API_KEY},
+        )
+        response.raise_for_status()
+        _promoted_domains_cache = [d["domain"] for d in response.json() if d["score"] > 0.0]
+        logger.info(f"Fetched {len(_promoted_domains_cache)} promoted domains")
+    except Exception:
+        logger.exception("Failed to fetch promoted domains, using cached value")
+    # Set on failure too: a key without the crawl scope would otherwise ask on every batch.
+    _promoted_domains_fetched_at = now
+    return _promoted_domains_cache
 
 
 def count_new_index_entries(term: str, new_items: list[Document], remote_items: list[Document]) -> int:
@@ -182,7 +220,9 @@ class Crawler:
     def url_queue(self):
         """Lazy initialization of URL queue."""
         if self._url_queue is None:
-            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains)
+            self._url_queue = RedisURLQueue(
+                self.redis, _fetch_curated_domains, get_promoted_domains_function=_fetch_promoted_domains
+            )
         return self._url_queue
 
     def check_redis(self):

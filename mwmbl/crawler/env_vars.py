@@ -14,6 +14,10 @@ CRAWL_DELAY_SECONDS = float(os.environ.get("CRAWL_DELAY_SECONDS", "0.0"))
 # API configuration
 MWMBL_API_KEY = os.environ.get("MWMBL_API_KEY", "")
 
+# The Mwmbl server the crawler takes its domain lists from and posts its results to.
+# Overridden to run a crawler against a local server.
+MWMBL_SERVER = os.environ.get("MWMBL_SERVER", "https://api.mwmbl.org")
+
 # Contact information configuration - required for responsible crawling
 MWMBL_CONTACT_INFO = os.environ.get("MWMBL_CONTACT_INFO", "CHANGE_ME@example.com")
 
