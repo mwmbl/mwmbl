@@ -64,6 +64,10 @@ class CombinedSearchUsageResponse(Schema):
     monthly_limit: int
 
 
+class CombinedSearchPreference(Schema):
+    enabled: bool
+
+
 class MembershipCheckoutRequest(Schema):
     tier: MembershipTier
     success_url: Optional[str] = None

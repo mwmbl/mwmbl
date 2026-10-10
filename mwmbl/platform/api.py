@@ -57,6 +57,7 @@ from mwmbl.platform.schemas import (
     BulkDecisionRequest,
     CheckoutRequest,
     CheckoutResponse,
+    CombinedSearchPreference,
     CombinedSearchUsageResponse,
     ConfirmEmail,
     CreateApiKeyRequest,
@@ -1365,6 +1366,34 @@ def get_combined_search_usage(request):
         monthly_usage=get_monthly_combined_search_count(request.user.id),
         monthly_limit=membership.combined_search_monthly_limit(tier),
     )
+
+
+@router.get(
+    "/combined-search/preference",
+    auth=JWTAuth(),
+    response=CombinedSearchPreference,
+    summary="Get Combined Search preference",
+    description="Returns whether the user has Combined Search switched on in the mwmbl.org interface. "
+    "It does not affect calls to the Combined Search API.",
+    tags=["Membership"],
+)
+def get_combined_search_preference(request):
+    return CombinedSearchPreference(enabled=request.user.combined_search_enabled)
+
+
+@router.put(
+    "/combined-search/preference",
+    auth=JWTAuth(),
+    response=CombinedSearchPreference,
+    summary="Set Combined Search preference",
+    description="Switches Combined Search on or off for the user in the mwmbl.org interface. "
+    "It does not affect calls to the Combined Search API.",
+    tags=["Membership"],
+)
+def set_combined_search_preference(request, body: CombinedSearchPreference):
+    request.user.combined_search_enabled = body.enabled
+    request.user.save(update_fields=["combined_search_enabled"])
+    return CombinedSearchPreference(enabled=request.user.combined_search_enabled)
 
 
 @router.post(
