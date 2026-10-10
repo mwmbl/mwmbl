@@ -536,7 +536,7 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
         "query": "tokio",
         "seed_urls": [STAAN_RESULT.url],
         "new_seed_urls": [STAAN_RESULT.url],
-        "domains": ["tokio.rs"],
+        "domains": {"tokio.rs": 1},
     }
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
 

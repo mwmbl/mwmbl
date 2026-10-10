@@ -35,7 +35,7 @@ from logging import getLogger
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from ninja import Router, Schema
+from ninja import Query, Router, Schema
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from pydantic import Field
@@ -50,6 +50,7 @@ from mwmbl.indexer.seed_crawl import (
     get_seed_crawl_summary,
     start_seed_crawl,
 )
+from mwmbl.indexer.seed_domains import published_seed_domains
 from mwmbl.membership import combined_search_monthly_limit
 from mwmbl.models import Membership, UserBilling
 from mwmbl.quota import (
@@ -59,7 +60,7 @@ from mwmbl.quota import (
     increment_monthly_combined_search,
     increment_monthly_combined_search_api_if_below,
 )
-from mwmbl.search_auth import authenticate_user
+from mwmbl.search_auth import CrawlApiKeyAuth, authenticate_user
 from mwmbl.search_setup import index_path
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
@@ -103,6 +104,36 @@ class NewPage(Schema):
     extract: str
 
 
+class SeedCrawlDomain(Schema):
+    domain: str
+    newly_discovered: bool = Field(description="Whether this crawl was the first to meet the domain.")
+    pages_indexed: int = Field(description="New pages this crawl has added from the domain so far.", examples=[50])
+    new_page_score: float = Field(
+        description="`pages_indexed` as a share of the most a crawl takes from one domain "
+        f"({settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN:,} pages), from 0 to 1.",
+        examples=[0.5],
+    )
+    recent_new_page_score: float = Field(
+        description="The average `new_page_score` of the domain's last "
+        f"{settings.SEED_DOMAIN_RECENT_CRAWLS} finished crawls, by anyone. It falls as the crawls "
+        "exhaust the domain.",
+        examples=[0.3],
+    )
+    staan_results: int = Field(description="EUSP results for the domain across everyone's seed crawls.")
+    score: float = Field(description="`recent_new_page_score` times `staan_results`: how worth crawling the domain is.")
+
+
+class SeedDomainResponse(Schema):
+    domain: str
+    new_page_score: float = Field(
+        description=f"The average share of a crawl's per-domain budget that the domain's last "
+        f"{settings.SEED_DOMAIN_RECENT_CRAWLS} seed crawls found to be new pages, from 0 to 1.",
+        examples=[0.3],
+    )
+    staan_results: int = Field(description="EUSP results for the domain across all seed crawls.")
+    score: float = Field(description="`new_page_score` times `staan_results`.", examples=[1.2])
+
+
 class SeedCrawlSummaryResponse(Schema):
     query: str
     status: str = Field(
@@ -115,6 +146,14 @@ class SeedCrawlSummaryResponse(Schema):
         description="Pages fetched so far, by every crawl of this query, including ones that added nothing."
     )
     pages_indexed: int = Field(description="Pages the crawl has added to the Mwmbl index so far.", examples=[42])
+    progress: float = Field(
+        description="How far through the latest crawl of this query, from 0 (queued) to 1 (done or failed).",
+        examples=[0.25],
+    )
+    domains: list[SeedCrawlDomain] = Field(
+        description="The domains EUSP returned, which the latest crawl stays within, with what it has "
+        "found on each, most new pages first. Empty until the crawl starts."
+    )
 
 
 class SeedCrawlResponse(SeedCrawlSummaryResponse):
@@ -319,3 +358,18 @@ def init_router(ranker) -> None:
         if summary is None:
             raise HttpError(404, "No seed crawl for this query.")
         return summary
+
+    @router.get(
+        "seed-domains",
+        response=list[SeedDomainResponse],
+        auth=CrawlApiKeyAuth(),
+        summary="Seed domains, best first",
+        description="The domains EUSP has returned for seed crawls, ordered by `score`: how likely "
+        "a crawl of the domain is to add new pages to the index, times how often EUSP returns it. "
+        "For crawlers deciding where to go next; requires a crawl-scoped API key in `X-API-Key`.\n\n"
+        "The list is republished at most once every "
+        f"{settings.SEED_DOMAINS_PUBLISH_SECONDS // 3600} hours, so that it cannot reveal what any "
+        "one search returned.",
+    )
+    def seed_domains(request, limit: int = Query(100, ge=1, le=settings.SEED_DOMAINS_PUBLISHED)):
+        return published_seed_domains()[:limit]

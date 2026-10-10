@@ -19,6 +19,8 @@ running, and at most SEED_CRAWL_MAX_QUEUED wait, so nobody can fill the queue.
 
 What it added is recorded in Redis against the user and the query, where
 GET /api/v2/combined-search/new-pages (and /new-pages/count) reads it, and counted on the user for their stats.
+That record also says how far along the crawl is, and what it found on each of Staan's
+domains, which are scored for crawlers as seed domains - see mwmbl.indexer.seed_domains.
 """
 
 import hashlib
@@ -39,7 +41,8 @@ from django_redis import get_redis_connection
 
 from mwmbl.crawler.retrieve import crawl_batch
 from mwmbl.indexer.index_batches import index_new_documents
-from mwmbl.models import MwmblUser
+from mwmbl.indexer.seed_domains import new_page_score, record_seed_domain_crawls, register_seed_domains
+from mwmbl.models import MwmblUser, SeedDomain
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
 from mwmbl.utils import bare_host
@@ -79,6 +82,10 @@ def _pages_key(user_id: int, query: str) -> str:
 
 def _counted_urls_key(user_id: int, query: str) -> str:
     return f"{_record_key(user_id, query)}:urls"
+
+
+def _domain_pages_key(user_id: int, query: str) -> str:
+    return f"{_record_key(user_id, query)}:domain-pages"
 
 
 def _active_key(user_id: int) -> str:
@@ -124,7 +131,9 @@ def start_seed_crawl(
         return CrawlOutcome.ALREADY_RUNNING
 
     record_key = _record_key(user_id, query)
-    domains = sorted({bare_host(document.url) for document in allowed})
+    # Each domain with the number of Staan results it had, which the seed domains count.
+    staan_results_per_domain = Counter(bare_host(document.url) for document in allowed)
+    domains = dict(sorted(staan_results_per_domain.items()))
     new_seed_urls = [url for url in seed_urls if url in new_staan_urls]
     job = {
         "user_id": user_id,
@@ -134,11 +143,19 @@ def start_seed_crawl(
         "domains": domains,
     }
     # An earlier crawl's pages are kept: the new one adds to them, and the user's total
-    # already includes them.
+    # already includes them. Its progress and domains are this crawl's alone.
+    record = {
+        "status": STATUS_QUEUED,
+        "query": query,
+        "started_at": _now(),
+        "rounds": 0,
+        "domains": json.dumps(domains),
+    }
     pipeline = redis.pipeline()
-    pipeline.hset(record_key, mapping={"status": STATUS_QUEUED, "query": query, "started_at": _now()})
+    pipeline.hset(record_key, mapping=record)
     pipeline.hsetnx(record_key, "pages_crawled", 0)
-    pipeline.hdel(record_key, "finished_at")
+    pipeline.hdel(record_key, "finished_at", "crawl_started_at", "discovered")
+    pipeline.delete(_domain_pages_key(user_id, query))
     pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
     pipeline.lpush(QUEUE_KEY, json.dumps(job))
     pipeline.execute()
@@ -168,40 +185,55 @@ def run_next_seed_crawl(index_path: str) -> bool:
     # Postgres has long since closed.
     close_old_connections()
     job = json.loads(popped[1])
-    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["new_seed_urls"], job["domains"], index_path)
+    # Jobs queued before seed domains listed their domains without Staan's result counts.
+    domains = job["domains"] if isinstance(job["domains"], dict) else dict.fromkeys(job["domains"], 1)
+    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["new_seed_urls"], domains, index_path)
     return True
 
 
 def run_seed_crawl(
-    user_id: int, query: str, seed_urls: list[str], new_seed_urls: list[str], domains: list[str], index_path: str
+    user_id: int, query: str, seed_urls: list[str], new_seed_urls: list[str], domains: dict[str, int], index_path: str
 ) -> None:
     redis = get_redis_connection("default")
     record_key = _record_key(user_id, query)
-    redis.hset(record_key, "status", STATUS_CRAWLING)
+    redis.hset(record_key, mapping={"status": STATUS_CRAWLING, "crawl_started_at": _now()})
+    # A query's Staan results count towards its domains once per user, however often they
+    # crawl it, so nobody can raise a domain's score by repeating a query.
+    first_crawl_of_query = bool(redis.hsetnx(record_key, "staan_results_counted", 1))
     try:
-        _crawl_and_record(user_id, query, seed_urls, set(new_seed_urls), domains, index_path, redis)
+        discovered = register_seed_domains(user_id, domains, count_staan_results=first_crawl_of_query)
+        redis.hset(record_key, "discovered", json.dumps(sorted(discovered)))
+        domain_pages = _crawl_and_record(
+            user_id, query, seed_urls, set(new_seed_urls), list(domains), index_path, redis
+        )
+        # Only a finished crawl is recorded: a failed one's counts would understate its domains.
+        record_seed_domain_crawls({domain: domain_pages[domain] for domain in domains})
         status = STATUS_DONE
     except Exception:
         # Recorded rather than retried: a retry would start again from the seeds, fetching
         # every site a second time. The worker carries on with the next crawl.
         logger.exception("Seed crawl for user %d failed", user_id)
         status = STATUS_FAILED
-    finally:
-        redis.delete(_active_key(user_id))
 
+    # The user is freed only once the status is written, so a crawl they queue straight away
+    # cannot have its fresh record overwritten with this one's outcome.
     pipeline = redis.pipeline()
     pipeline.hset(record_key, mapping={"status": status, "finished_at": _now()})
     pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
+    pipeline.delete(_active_key(user_id))
     pipeline.execute()
 
 
 def _crawl_and_record(
     user_id: int, query: str, seed_urls: list[str], new_seed_urls: set[str], domains: list[str], index_path: str, redis
-):
+) -> Counter:
+    """Crawl, index and record what is new, returning how many new pages each domain gave."""
     record_key = _record_key(user_id, query)
     pages_key = _pages_key(user_id, query)
     counted_urls_key = _counted_urls_key(user_id, query)
+    domain_pages_key = _domain_pages_key(user_id, query)
     ttl = settings.SEED_CRAWL_RECORD_TTL_SECONDS
+    domain_pages = Counter()
 
     for num_crawled, documents in crawl_within_domains(seed_urls, set(domains), redis):
         indexed = index_new_documents(documents, index_path)
@@ -217,20 +249,27 @@ def _crawl_and_record(
         first_counted = pipeline.execute()
         new_documents = [document for document, added in zip(candidates, first_counted) if added]
         logger.info("Seed crawl for user %d added %d new pages", user_id, len(new_documents))
+        round_domain_pages = Counter(bare_host(document.url) for document in new_documents)
+        domain_pages.update(round_domain_pages)
 
         pipeline = redis.pipeline()
         pipeline.hincrby(record_key, "pages_crawled", num_crawled)
+        pipeline.hincrby(record_key, "rounds", 1)
         if new_documents:
             pages = [{"url": doc.url, "title": doc.title, "extract": doc.extract} for doc in new_documents]
             pipeline.rpush(pages_key, *[json.dumps(page) for page in pages])
             pipeline.expire(pages_key, ttl)
             pipeline.expire(counted_urls_key, ttl)
+            for domain, count in round_domain_pages.items():
+                pipeline.hincrby(domain_pages_key, domain, count)
+            pipeline.expire(domain_pages_key, ttl)
         pipeline.execute()
 
         if new_documents:
             MwmblUser.objects.filter(id=user_id).update(
                 seed_search_pages_indexed=F("seed_search_pages_indexed") + len(new_documents)
             )
+    return domain_pages
 
 
 def crawl_within_domains(seed_urls: list[str], domains: set[str], redis):
@@ -307,6 +346,14 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
     if not record:
         return None
     fields = {key.decode(): value.decode() for key, value in record.items()}
+    domain_pages = {key.decode(): int(value) for key, value in redis.hgetall(_domain_pages_key(user_id, query)).items()}
+    # Records written before seed domains existed have no domains; they expire within a week.
+    domains = list(json.loads(fields.get("domains", "{}")))
+    # Absent until the worker has registered the crawl's domains, and with it whether each is
+    # new, so there are no domains to report until then.
+    if "discovered" not in fields:
+        domains = []
+    discovered = json.loads(fields.get("discovered", "[]"))
     return {
         "query": fields["query"],
         "status": fields["status"],
@@ -314,7 +361,50 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
         "finished_at": fields.get("finished_at"),
         "pages_crawled": int(fields["pages_crawled"]),
         "pages_indexed": redis.llen(_pages_key(user_id, query)),
+        "progress": _progress(fields),
+        "domains": _domain_results(domains, discovered, domain_pages),
     }
+
+
+def _progress(fields: dict[str, str]) -> float:
+    """How far through its crawl a record is, from 0 to 1.
+
+    A crawl ends at whichever comes first of its last round - at most one per page of a
+    domain's budget - and its time limit, so its progress is the further along of the two.
+    It jumps to 1 when the frontier runs dry before either.
+    """
+    if fields["status"] == STATUS_QUEUED:
+        return 0.0
+    if fields["status"] != STATUS_CRAWLING:
+        return 1.0
+    # A record left crawling by a worker killed before progress was recorded has neither
+    # field; it expires within a week.
+    rounds_progress = int(fields.get("rounds", 0)) / settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN
+    crawl_started_at = fields.get("crawl_started_at", fields["started_at"])
+    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(crawl_started_at)
+    time_progress = elapsed.total_seconds() / settings.SEED_CRAWL_MAX_SECONDS
+    return min(1.0, max(rounds_progress, time_progress))
+
+
+def _domain_results(domains: list[str], discovered: list[str], domain_pages: dict[str, int]) -> list[dict]:
+    """What this crawl found on each of its domains, with their seed domain scores, best first.
+
+    A domain only has scores once the worker has started the crawl and registered it.
+    """
+    seed_domains = SeedDomain.objects.filter(domain__in=domains).order_by("domain")
+    results = [
+        {
+            "domain": seed_domain.domain,
+            "newly_discovered": seed_domain.domain in discovered,
+            "pages_indexed": domain_pages.get(seed_domain.domain, 0),
+            "new_page_score": new_page_score(domain_pages.get(seed_domain.domain, 0)),
+            "recent_new_page_score": seed_domain.new_page_score,
+            "staan_results": seed_domain.staan_results,
+            "score": seed_domain.score,
+        }
+        for seed_domain in seed_domains
+    ]
+    return sorted(results, key=lambda result: result["pages_indexed"], reverse=True)
 
 
 def get_seed_crawl(user_id: int, query: str) -> dict | None:

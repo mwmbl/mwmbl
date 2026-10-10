@@ -8,11 +8,13 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.indexer import index_batches, seed_crawl
+from mwmbl.indexer import index_batches, seed_crawl, seed_domains
 from mwmbl.indexer.index_batches import index_new_documents
+from mwmbl.models import ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
 
 User = get_user_model()
@@ -166,7 +168,7 @@ def test_only_staan_results_missing_from_the_index_are_seeds(redis_cache, monkey
     # Not retrieved, but Combined Search's write found the index already held it.
     assert job["new_seed_urls"] == []
     # Every Staan domain is crawlable, including those of results the index already had.
-    assert job["domains"] == ["rust-lang.github.io", "tokio.rs"]
+    assert job["domains"] == {"rust-lang.github.io": 1, "tokio.rs": 1}
 
 
 def test_blacklisted_staan_results_are_neither_seeds_nor_domains(redis_cache, monkeypatch):
@@ -176,7 +178,7 @@ def test_blacklisted_staan_results_are_neither_seeds_nor_domains(redis_cache, mo
 
     [job] = _queued_jobs(redis_cache)
     assert SEED not in job["seed_urls"]
-    assert job["domains"] == ["rust-lang.github.io"]
+    assert job["domains"] == {"rust-lang.github.io": 1}
 
 
 def test_nothing_to_crawl_starts_nothing(redis_cache, monkeypatch):
@@ -227,7 +229,7 @@ def _run(user, index_path, seed_urls=(SEED,), new_seed_urls=()):
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
     # Crawl only the seeds and domain given, whatever start_seed_crawl made of STAAN_RESULTS.
     seed_crawl.get_redis_connection("default").delete(seed_crawl.QUEUE_KEY)
-    seed_crawl.run_seed_crawl(user.id, "tokio", list(seed_urls), list(new_seed_urls), ["tokio.rs"], index_path)
+    seed_crawl.run_seed_crawl(user.id, "tokio", list(seed_urls), list(new_seed_urls), {"tokio.rs": 1}, index_path)
     return seed_crawl.get_seed_crawl(user.id, "tokio")
 
 
@@ -372,6 +374,201 @@ def test_the_users_stats_report_their_seed_search_total(user):
 
     assert response.status_code == 200
     assert response.json()["seed_search_pages_indexed"] == 12
+
+
+# ---------------------------------------------------------------------------
+# Progress and seed domains
+# ---------------------------------------------------------------------------
+
+
+def test_a_queued_crawl_has_no_progress_and_no_domains_yet(redis_cache, monkeypatch, db):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set())
+
+    summary = seed_crawl.get_seed_crawl_summary(1, "tokio")
+
+    assert summary["progress"] == 0.0
+    assert summary["domains"] == []
+
+
+@pytest.mark.django_db
+def test_progress_counts_rounds_against_a_domains_page_limit(redis_cache, user, settings):
+    settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 4
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    record_key = seed_crawl._record_key(user.id, "tokio")
+    redis_cache.hset(record_key, mapping={"status": "crawling", "crawl_started_at": seed_crawl._now(), "rounds": 1})
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["progress"] == pytest.approx(0.25, abs=0.01)
+
+
+@pytest.mark.django_db
+def test_a_finished_crawl_reports_its_domains_with_their_scores(fake_web, redis_cache, user, index_path):
+    record = _run(user, index_path)
+
+    assert record["progress"] == 1.0
+    assert record["domains"] == [
+        {
+            "domain": "tokio.rs",
+            "newly_discovered": True,
+            "pages_indexed": 3,
+            "new_page_score": 0.03,
+            "recent_new_page_score": 0.03,
+            "staan_results": 1,
+            "score": 0.03,
+        }
+    ]
+
+
+@pytest.mark.django_db
+def test_the_user_who_first_crawls_a_domain_is_its_discoverer(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+
+    record = _run(other, index_path)
+
+    [domain] = record["domains"]
+    assert domain["newly_discovered"] is False
+    assert domain["staan_results"] == 2
+    assert SeedDomain.objects.get(domain="tokio.rs").discovered_by == user
+
+
+@pytest.mark.django_db
+def test_a_domain_the_crawls_have_exhausted_loses_its_score(fake_web, redis_cache, user, index_path, settings):
+    settings.SEED_DOMAIN_RECENT_CRAWLS = 2
+    _run(user, index_path)
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.03
+
+    # The pages are no longer new, so these crawls add none.
+    _run(user, index_path)
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.015
+    _run(user, index_path)
+    seed_domain = SeedDomain.objects.get(domain="tokio.rs")
+    assert seed_domain.new_page_score == 0.0
+    assert seed_domain.score == 0.0
+
+
+@pytest.mark.django_db
+def test_a_failed_crawl_does_not_score_its_domains(fake_web, redis_cache, user, index_path, monkeypatch):
+    def failing_crawl_batch(urls, num_threads, delay_seconds, redis):
+        raise ConnectionError("Redis went away")
+
+    monkeypatch.setattr(seed_crawl, "crawl_batch", failing_crawl_batch)
+
+    _run(user, index_path)
+
+    assert SeedDomain.objects.get(domain="tokio.rs").staan_results == 1
+    assert not SeedDomainCrawl.objects.exists()
+
+
+@pytest.mark.django_db
+def test_progress_by_time_is_capped_at_one(redis_cache, user):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    long_ago = "2020-01-01T00:00:00+00:00"
+    redis_cache.hset(
+        seed_crawl._record_key(user.id, "tokio"), mapping={"status": "crawling", "crawl_started_at": long_ago}
+    )
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["progress"] == 1.0
+
+
+@pytest.mark.django_db
+def test_domains_are_not_reported_until_the_crawl_has_registered_them(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+    # A crawl of a fresh query, picked up by the worker but not yet registered.
+    seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
+    redis_cache.hset(seed_crawl._record_key(user.id, "rust"), "status", "crawling")
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "rust")["domains"] == []
+
+
+@pytest.mark.django_db
+def test_crawling_a_query_again_reports_only_the_new_crawls_domains(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+
+    record = _run(user, index_path)
+
+    [domain] = record["domains"]
+    assert domain["newly_discovered"] is False
+    assert domain["pages_indexed"] == 0
+    assert domain["recent_new_page_score"] == 0.015
+
+
+@pytest.mark.django_db
+def test_a_querys_staan_results_count_once_per_user(fake_web, redis_cache, user, index_path):
+    tokio_results = [*STAAN_RESULTS, Document("Tokio docs", "https://tokio.rs/docs", "", source=DocumentSource.STAAN)]
+
+    for _ in range(2):
+        seed_crawl.start_seed_crawl(user.id, "tokio", [], tokio_results, set())
+        job = json.loads(seed_crawl.get_redis_connection("default").rpop(seed_crawl.QUEUE_KEY))
+        seed_crawl.run_seed_crawl(user.id, "tokio", [SEED], [], job["domains"], index_path)
+
+    assert SeedDomain.objects.get(domain="tokio.rs").staan_results == 2
+    assert SeedDomain.objects.get(domain="rust-lang.github.io").staan_results == 1
+
+
+@pytest.mark.django_db
+def test_new_pages_reports_progress_and_domains(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+    token = str(RefreshToken.for_user(user).access_token)
+
+    response = Client().get("/api/v2/combined-search/new-pages/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    assert response.status_code == 200
+    assert response.json()["progress"] == 1.0
+    assert [domain["domain"] for domain in response.json()["domains"]] == ["tokio.rs"]
+    assert "discovered_by" not in response.json()["domains"][0]
+
+
+SEED_DOMAINS_URL = "/api/v2/combined-search/seed-domains"
+
+
+def _api_key(user, scope):
+    raw, hashed = generate_api_key()
+    ApiKey.objects.create(user=user, key=hashed, name="seed-domains", scopes=[scope])
+    return raw
+
+
+def _seed_domains(user, query=""):
+    return Client().get(f"{SEED_DOMAINS_URL}{query}", HTTP_X_API_KEY=_api_key(user, ApiKey.Scope.CRAWL))
+
+
+@pytest.mark.django_db
+def test_the_seed_domains_endpoint_lists_the_best_first_without_their_discoverers(redis_cache, user):
+    SeedDomain.objects.create(
+        domain="low.example.com", discovered_by=user, new_page_score=0.1, staan_results=1, score=0.1
+    )
+    SeedDomain.objects.create(
+        domain="high.example.com", discovered_by=user, new_page_score=0.5, staan_results=4, score=2
+    )
+
+    response = _seed_domains(user, "?limit=1")
+
+    assert response.status_code == 200
+    assert response.json() == [{"domain": "high.example.com", "new_page_score": 0.5, "staan_results": 4, "score": 2.0}]
+
+
+@pytest.mark.django_db
+def test_the_seed_domains_endpoint_requires_a_crawl_scoped_key(redis_cache, user):
+    search_key = _api_key(user, ApiKey.Scope.SEARCH)
+
+    assert Client().get(SEED_DOMAINS_URL).status_code == 401
+    assert Client().get(SEED_DOMAINS_URL, HTTP_X_API_KEY=search_key).status_code == 401
+
+
+@pytest.mark.django_db
+def test_seed_domains_are_published_in_batches(redis_cache, user):
+    SeedDomain.objects.create(domain="old.example.com", new_page_score=0.1, staan_results=1, score=0.1)
+    assert [domain["domain"] for domain in _seed_domains(user).json()] == ["old.example.com"]
+
+    # What a crawl changes is not shown until the list is next published.
+    SeedDomain.objects.create(domain="new.example.com", new_page_score=0.5, staan_results=1, score=0.5)
+    SeedDomain.objects.filter(domain="old.example.com").update(score=0.0)
+    assert _seed_domains(user).json() == [
+        {"domain": "old.example.com", "new_page_score": 0.1, "staan_results": 1, "score": 0.1}
+    ]
+
+    cache.delete(seed_domains.PUBLISHED_KEY)
+    assert [domain["domain"] for domain in _seed_domains(user).json()] == ["new.example.com", "old.example.com"]
 
 
 def test_index_new_documents_returns_only_urls_the_index_lacked(index_path, monkeypatch):
