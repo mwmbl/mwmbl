@@ -132,7 +132,8 @@ def start_seed_crawl(
 
     record_key = _record_key(user_id, query)
     # Each domain with the number of Staan results it had, which the seed domains count.
-    domains = dict(sorted(Counter(bare_host(document.url) for document in allowed).items()))
+    staan_results_per_domain = Counter(bare_host(document.url) for document in allowed)
+    domains = dict(sorted(staan_results_per_domain.items()))
     new_seed_urls = [url for url in seed_urls if url in new_staan_urls]
     job = {
         "user_id": user_id,
@@ -184,7 +185,9 @@ def run_next_seed_crawl(index_path: str) -> bool:
     # Postgres has long since closed.
     close_old_connections()
     job = json.loads(popped[1])
-    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["new_seed_urls"], job["domains"], index_path)
+    # Jobs queued before seed domains listed their domains without Staan's result counts.
+    domains = job["domains"] if isinstance(job["domains"], dict) else dict.fromkeys(job["domains"], 1)
+    run_seed_crawl(job["user_id"], job["query"], job["seed_urls"], job["new_seed_urls"], domains, index_path)
     return True
 
 
@@ -194,8 +197,11 @@ def run_seed_crawl(
     redis = get_redis_connection("default")
     record_key = _record_key(user_id, query)
     redis.hset(record_key, mapping={"status": STATUS_CRAWLING, "crawl_started_at": _now()})
+    # A query's Staan results count towards its domains once per user, however often they
+    # crawl it, so nobody can raise a domain's score by repeating a query.
+    first_crawl_of_query = bool(redis.hsetnx(record_key, "staan_results_counted", 1))
     try:
-        discovered = register_seed_domains(user_id, domains)
+        discovered = register_seed_domains(user_id, domains, count_staan_results=first_crawl_of_query)
         redis.hset(record_key, "discovered", json.dumps(sorted(discovered)))
         domain_pages = _crawl_and_record(
             user_id, query, seed_urls, set(new_seed_urls), list(domains), index_path, redis
@@ -208,12 +214,13 @@ def run_seed_crawl(
         # every site a second time. The worker carries on with the next crawl.
         logger.exception("Seed crawl for user %d failed", user_id)
         status = STATUS_FAILED
-    finally:
-        redis.delete(_active_key(user_id))
 
+    # The user is freed only once the status is written, so a crawl they queue straight away
+    # cannot have its fresh record overwritten with this one's outcome.
     pipeline = redis.pipeline()
     pipeline.hset(record_key, mapping={"status": status, "finished_at": _now()})
     pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
+    pipeline.delete(_active_key(user_id))
     pipeline.execute()
 
 
@@ -342,7 +349,10 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
     domain_pages = {key.decode(): int(value) for key, value in redis.hgetall(_domain_pages_key(user_id, query)).items()}
     # Records written before seed domains existed have no domains; they expire within a week.
     domains = list(json.loads(fields.get("domains", "{}")))
-    # Absent until the worker has started the crawl and registered its domains.
+    # Absent until the worker has registered the crawl's domains, and with it whether each is
+    # new, so there are no domains to report until then.
+    if "discovered" not in fields:
+        domains = []
     discovered = json.loads(fields.get("discovered", "[]"))
     return {
         "query": fields["query"],
@@ -367,8 +377,11 @@ def _progress(fields: dict[str, str]) -> float:
         return 0.0
     if fields["status"] != STATUS_CRAWLING:
         return 1.0
-    rounds_progress = int(fields["rounds"]) / settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN
-    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(fields["crawl_started_at"])
+    # A record left crawling by a worker killed before progress was recorded has neither
+    # field; it expires within a week.
+    rounds_progress = int(fields.get("rounds", 0)) / settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN
+    crawl_started_at = fields.get("crawl_started_at", fields["started_at"])
+    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(crawl_started_at)
     time_progress = elapsed.total_seconds() / settings.SEED_CRAWL_MAX_SECONDS
     return min(1.0, max(rounds_progress, time_progress))
 

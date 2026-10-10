@@ -460,6 +460,65 @@ def test_a_failed_crawl_does_not_score_its_domains(fake_web, redis_cache, user, 
 
 
 @pytest.mark.django_db
+def test_progress_by_time_is_capped_at_one(redis_cache, user):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    long_ago = "2020-01-01T00:00:00+00:00"
+    redis_cache.hset(
+        seed_crawl._record_key(user.id, "tokio"), mapping={"status": "crawling", "crawl_started_at": long_ago}
+    )
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["progress"] == 1.0
+
+
+@pytest.mark.django_db
+def test_domains_are_not_reported_until_the_crawl_has_registered_them(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+    # A crawl of a fresh query, picked up by the worker but not yet registered.
+    seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
+    redis_cache.hset(seed_crawl._record_key(user.id, "rust"), "status", "crawling")
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "rust")["domains"] == []
+
+
+@pytest.mark.django_db
+def test_crawling_a_query_again_reports_only_the_new_crawls_domains(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+
+    record = _run(user, index_path)
+
+    [domain] = record["domains"]
+    assert domain["newly_discovered"] is False
+    assert domain["pages_indexed"] == 0
+    assert domain["recent_new_page_score"] == 0.015
+
+
+@pytest.mark.django_db
+def test_a_querys_staan_results_count_once_per_user(fake_web, redis_cache, user, index_path):
+    tokio_results = [*STAAN_RESULTS, Document("Tokio docs", "https://tokio.rs/docs", "", source=DocumentSource.STAAN)]
+
+    for _ in range(2):
+        seed_crawl.start_seed_crawl(user.id, "tokio", [], tokio_results, set())
+        job = json.loads(seed_crawl.get_redis_connection("default").rpop(seed_crawl.QUEUE_KEY))
+        seed_crawl.run_seed_crawl(user.id, "tokio", [SEED], [], job["domains"], index_path)
+
+    assert SeedDomain.objects.get(domain="tokio.rs").staan_results == 2
+    assert SeedDomain.objects.get(domain="rust-lang.github.io").staan_results == 1
+
+
+@pytest.mark.django_db
+def test_new_pages_reports_progress_and_domains(fake_web, redis_cache, user, index_path):
+    _run(user, index_path)
+    token = str(RefreshToken.for_user(user).access_token)
+
+    response = Client().get("/api/v2/combined-search/new-pages/count?q=tokio", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    assert response.status_code == 200
+    assert response.json()["progress"] == 1.0
+    assert [domain["domain"] for domain in response.json()["domains"]] == ["tokio.rs"]
+    assert "discovered_by" not in response.json()["domains"][0]
+
+
+@pytest.mark.django_db
 def test_the_seed_domains_endpoint_lists_the_best_first_without_their_discoverers(user):
     SeedDomain.objects.create(
         domain="low.example.com", discovered_by=user, new_page_score=0.1, staan_results=1, score=0.1

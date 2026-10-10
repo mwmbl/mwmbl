@@ -24,10 +24,11 @@ def new_page_score(pages_indexed: int) -> float:
     return pages_indexed / settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN
 
 
-def register_seed_domains(user_id: int, staan_results: dict[str, int]) -> set[str]:
-    """Count a seed crawl's Staan results against their domains, returning the domains it discovered.
+def register_seed_domains(user_id: int, staan_results: dict[str, int], count_staan_results: bool) -> set[str]:
+    """Register a seed crawl's domains, returning those it discovered.
 
-    staan_results maps each domain to how many of the query's Staan results it had.
+    staan_results maps each domain to how many of the query's Staan results it had; they are
+    added to the domains' totals when count_staan_results is set.
     """
     known = set(SeedDomain.objects.filter(domain__in=staan_results).values_list("domain", flat=True))
     discovered = set(staan_results) - known
@@ -37,11 +38,12 @@ def register_seed_domains(user_id: int, staan_results: dict[str, int]) -> set[st
             [SeedDomain(domain=domain, discovered_by_id=user_id) for domain in sorted(discovered)],
             ignore_conflicts=True,
         )
-        for domain, count in staan_results.items():
-            SeedDomain.objects.filter(domain=domain).update(
-                staan_results=F("staan_results") + count,
-                score=F("new_page_score") * (F("staan_results") + count),
-            )
+        if count_staan_results:
+            for domain, count in staan_results.items():
+                SeedDomain.objects.filter(domain=domain).update(
+                    staan_results=F("staan_results") + count,
+                    score=F("new_page_score") * (F("staan_results") + count),
+                )
     return discovered
 
 
