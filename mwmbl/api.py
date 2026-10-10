@@ -20,13 +20,16 @@ typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from ninja import Field
 from ninja_extra import NinjaExtraAPI, api_controller, http_get, http_post
 from ninja_extra.permissions import AllowAny
 from ninja_jwt.controller import TokenObtainPairController, TokenVerificationController
-from ninja_jwt.schema import TokenObtainPairInputSchema
+from ninja_jwt.exceptions import AuthenticationFailed, InvalidToken, TokenError
+from ninja_jwt.schema import TokenObtainPairInputSchema, TokenRefreshInputSchema
 from ninja_jwt.schema_control import SchemaControl
 from ninja_jwt.settings import api_settings
+from ninja_jwt.tokens import RefreshToken
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
@@ -64,6 +67,30 @@ class MwmblTokenController(TokenVerificationController, TokenObtainPairControlle
     def obtain_token(self, user_token: MwmblTokenObtainSchema):
         user_token.check_user_authentication_rule()
         return user_token.to_response_schema()
+
+    @http_post(
+        "/refresh",
+        response=TokenRefreshInputSchema.get_response_schema(),
+        url_name="token_refresh",
+        operation_id="token_refresh",
+        summary="Refresh JWT token pair",
+        description=(
+            "Exchange a refresh token for a new access token and a new refresh token. "
+            "Each refresh token can only be used once."
+        ),
+    )
+    def refresh_token(self, refresh_token: TokenRefreshInputSchema):
+        # ninja_jwt only checks the token itself, so re-apply the login rule here,
+        # otherwise deactivated or deleted users could refresh indefinitely
+        try:
+            token = RefreshToken(refresh_token.refresh)
+        except TokenError as e:
+            raise InvalidToken(str(e)) from e
+        user_id = token[api_settings.USER_ID_CLAIM]
+        user = get_user_model().objects.filter(**{api_settings.USER_ID_FIELD: user_id}).first()
+        if user is None or not api_settings.USER_AUTHENTICATION_RULE(user):
+            raise AuthenticationFailed("No active account found for the given token")
+        return refresh_token.to_response_schema()
 
 
 api = NinjaExtraAPI(

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "ninja_extra",
+    "ninja_jwt.token_blacklist",
     "debug_toolbar",
     "background_task",
 ]
@@ -240,6 +242,12 @@ def strip_query_string(event):
 # Django ninja-jwt settings
 NINJA_JWT = {
     "USER_AUTHENTICATION_RULE": require_email_confirmation,
+    # Refresh tokens rotate on every use, so this is an inactivity limit: users who
+    # visit at least once a year stay logged in indefinitely.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365),
+    "ROTATE_REFRESH_TOKENS": True,
+    # Each refresh token works once, so a leaked token dies when its owner next refreshes
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Database configuration (shared across all environments via DATABASE_URL env var)

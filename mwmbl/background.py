@@ -350,3 +350,9 @@ def retrain_domain_moderation_model():
     model, so the reload and the pending-queue rescore both take effect immediately.
     """
     call_command("train_domain_moderation_model")
+
+
+@background(schedule=0)
+def flush_expired_tokens():
+    """Delete expired JWT refresh tokens from the blacklist tables, which gain a row per refresh."""
+    call_command("flushexpiredtokens")
