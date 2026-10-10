@@ -85,8 +85,18 @@ def user(db):
     return User.objects.create_user(username="seeder", email="seed@example.com", password="x")
 
 
-def _crawl(seed_urls, domains):
-    return [round_ for round_ in seed_crawl.crawl_within_domains(seed_urls, set(domains), redis=None)]
+def _crawl(seed_urls, domains, is_new=lambda url: True):
+    """Run a crawl to its end, telling it that the pages is_new picks were new."""
+    rounds = seed_crawl.crawl_within_domains(seed_urls, set(domains), redis=None)
+    crawled = []
+    new_urls = None
+    while True:
+        try:
+            num_crawled, documents = rounds.send(new_urls)
+        except StopIteration:
+            return crawled
+        crawled.append((num_crawled, documents))
+        new_urls = {document.url for document in documents if is_new(document.url)}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +136,31 @@ def test_each_domain_stops_at_its_page_limit(fake_web, settings):
     fetched = [url for batch in fake_web for url in batch]
     assert fetched == [SEED, "https://rust-lang.github.io/async-book/", "https://tokio.rs/tutorial"]
     assert sum(num_crawled for num_crawled, _ in rounds) == 3
+
+
+def test_a_domain_is_dropped_once_its_fetches_stop_finding_new_pages(fake_web, monkeypatch, settings):
+    settings.SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 2
+    # An endless site: every page links to the next.
+    monkeypatch.setitem(WEB, SEED, _page("Page 0", ["https://tokio.rs/1"]))
+    for n in range(1, 20):
+        monkeypatch.setitem(WEB, f"https://tokio.rs/{n}", _page(f"Page {n}", [f"https://tokio.rs/{n + 1}"]))
+
+    _crawl([SEED], ["tokio.rs"], is_new=lambda url: False)
+
+    fetched = [url for batch in fake_web for url in batch]
+    assert fetched == [SEED, "https://tokio.rs/1"]
+
+
+def test_a_new_page_resets_a_domains_run_of_stale_fetches(fake_web, monkeypatch, settings):
+    settings.SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 2
+    monkeypatch.setitem(WEB, SEED, _page("Page 0", ["https://tokio.rs/1"]))
+    for n in range(1, 20):
+        monkeypatch.setitem(WEB, f"https://tokio.rs/{n}", _page(f"Page {n}", [f"https://tokio.rs/{n + 1}"]))
+
+    _crawl([SEED], ["tokio.rs"], is_new=lambda url: url == "https://tokio.rs/1")
+
+    fetched = [url for batch in fake_web for url in batch]
+    assert fetched == [SEED, "https://tokio.rs/1", "https://tokio.rs/2", "https://tokio.rs/3"]
 
 
 def test_a_failed_fetch_adds_no_document(fake_web):
@@ -211,6 +246,18 @@ def test_a_user_has_one_crawl_at_a_time(redis_cache, monkeypatch):
     assert len(_queued_jobs(redis_cache)) == 2
 
 
+@pytest.mark.django_db
+def test_a_query_already_crawled_is_not_crawled_again(fake_web, redis_cache, user, index_path, worker):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    worker(index_path)
+
+    outcome = seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+
+    assert outcome == seed_crawl.CrawlOutcome.ALREADY_CRAWLED
+    assert _queued_jobs(redis_cache) == []
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
 def test_nothing_is_queued_once_the_queue_is_full(redis_cache, monkeypatch, settings):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     settings.SEED_CRAWL_MAX_QUEUED = 1
@@ -231,6 +278,11 @@ def _run(user, index_path, seed_urls=(SEED,), new_seed_urls=()):
     seed_crawl.get_redis_connection("default").delete(seed_crawl.QUEUE_KEY)
     seed_crawl.run_seed_crawl(user.id, "tokio", list(seed_urls), list(new_seed_urls), {"tokio.rs": 1}, index_path)
     return seed_crawl.get_seed_crawl(user.id, "tokio")
+
+
+def _mark_failed(user, query="tokio"):
+    """Mark the user's crawl of the query failed, the one case in which it is crawled again."""
+    seed_crawl.get_redis_connection("default").hset(seed_crawl._record_key(user.id, query), "status", "failed")
 
 
 @pytest.mark.django_db
@@ -284,6 +336,7 @@ def test_a_failed_crawl_is_recorded_and_not_retried(fake_web, redis_cache, user,
 @pytest.mark.django_db
 def test_crawling_a_query_again_keeps_its_pages_and_counts_none_twice(fake_web, redis_cache, user, index_path):
     _run(user, index_path)
+    _mark_failed(user)
 
     record = _run(user, index_path)
     user.refresh_from_db()
@@ -484,6 +537,7 @@ def test_domains_are_not_reported_until_the_crawl_has_registered_them(fake_web, 
 @pytest.mark.django_db
 def test_crawling_a_query_again_reports_only_the_new_crawls_domains(fake_web, redis_cache, user, index_path):
     _run(user, index_path)
+    _mark_failed(user)
 
     record = _run(user, index_path)
 
@@ -501,6 +555,7 @@ def test_a_querys_staan_results_count_once_per_user(fake_web, redis_cache, user,
         seed_crawl.start_seed_crawl(user.id, "tokio", [], tokio_results, set())
         job = json.loads(seed_crawl.get_redis_connection("default").rpop(seed_crawl.QUEUE_KEY))
         seed_crawl.run_seed_crawl(user.id, "tokio", [SEED], [], job["domains"], index_path)
+        _mark_failed(user)
 
     assert SeedDomain.objects.get(domain="tokio.rs").staan_results == 2
     assert SeedDomain.objects.get(domain="rust-lang.github.io").staan_results == 1
