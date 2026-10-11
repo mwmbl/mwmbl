@@ -25,8 +25,10 @@ domains, which are scored for crawlers as seed domains - see mwmbl.indexer.seed_
 
 import hashlib
 import json
+import threading
 import time
 from collections import Counter, deque
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import StrEnum
 from http import HTTPStatus
@@ -89,6 +91,10 @@ def _domain_pages_key(user_id: int, query: str) -> str:
     return f"{_record_key(user_id, query)}:domain-pages"
 
 
+def _alive_key(user_id: int, query: str) -> str:
+    return f"{_record_key(user_id, query)}:alive"
+
+
 def _active_key(user_id: int) -> str:
     return f"seed-crawl:{user_id}:active"
 
@@ -121,9 +127,13 @@ def start_seed_crawl(
 
     redis = get_redis_connection("default")
     record_key = _record_key(user_id, query)
+    # A crawl whose worker died holds the user's lock until it expires, hours later.
+    active_query = get_active_seed_crawl_query(user_id)
+    if active_query is not None and active_query != query:
+        _fail_if_dead(redis, user_id, active_query)
     # Pages a crawl adds need not rank for the query, so its seeds would mostly be the same
     # again: a query is crawled once while its record lasts, unless that crawl failed.
-    status = redis.hget(record_key, "status")
+    status = _fail_if_dead(redis, user_id, query)
     if status in (STATUS_QUEUED.encode(), STATUS_CRAWLING.encode()):
         return CrawlOutcome.ALREADY_RUNNING
     if status == STATUS_DONE.encode():
@@ -204,32 +214,81 @@ def run_seed_crawl(
 ) -> None:
     redis = get_redis_connection("default")
     record_key = _record_key(user_id, query)
-    redis.hset(record_key, mapping={"status": STATUS_CRAWLING, "crawl_started_at": _now()})
-    # A query's Staan results count towards its domains once per user, however often they
-    # crawl it, so nobody can raise a domain's score by repeating a query.
-    first_crawl_of_query = bool(redis.hsetnx(record_key, "staan_results_counted", 1))
-    try:
-        discovered = register_seed_domains(user_id, domains, count_staan_results=first_crawl_of_query)
-        redis.hset(record_key, "discovered", json.dumps(sorted(discovered)))
-        domain_pages = _crawl_and_record(
-            user_id, query, seed_urls, set(new_seed_urls), list(domains), index_path, redis
-        )
-        # Only a finished crawl is recorded: a failed one's counts would understate its domains.
-        record_seed_domain_crawls({domain: domain_pages[domain] for domain in domains})
-        status = STATUS_DONE
-    except Exception:
-        # Recorded rather than retried: a retry would start again from the seeds, fetching
-        # every site a second time. The worker carries on with the next crawl.
-        logger.exception("Seed crawl for user %d failed", user_id)
-        status = STATUS_FAILED
+    with _heartbeat(redis, _alive_key(user_id, query)):
+        redis.hset(record_key, mapping={"status": STATUS_CRAWLING, "crawl_started_at": _now()})
+        # A query's Staan results count towards its domains once per user, however often they
+        # crawl it, so nobody can raise a domain's score by repeating a query.
+        first_crawl_of_query = bool(redis.hsetnx(record_key, "staan_results_counted", 1))
+        try:
+            discovered = register_seed_domains(user_id, domains, count_staan_results=first_crawl_of_query)
+            redis.hset(record_key, "discovered", json.dumps(sorted(discovered)))
+            domain_pages = _crawl_and_record(
+                user_id, query, seed_urls, set(new_seed_urls), list(domains), index_path, redis
+            )
+            # Only a finished crawl is recorded: a failed one's counts would understate its domains.
+            record_seed_domain_crawls({domain: domain_pages[domain] for domain in domains})
+            status = STATUS_DONE
+        except Exception:
+            # Recorded rather than retried: a retry would start again from the seeds, fetching
+            # every site a second time. The worker carries on with the next crawl.
+            logger.exception("Seed crawl for user %d failed", user_id)
+            status = STATUS_FAILED
 
+        _finish(redis, user_id, query, status)
+
+
+def _finish(redis, user_id: int, query: str, status: str) -> None:
     # The user is freed only once the status is written, so a crawl they queue straight away
     # cannot have its fresh record overwritten with this one's outcome.
+    record_key = _record_key(user_id, query)
     pipeline = redis.pipeline()
     pipeline.hset(record_key, mapping={"status": status, "finished_at": _now()})
     pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
-    pipeline.delete(_active_key(user_id))
     pipeline.execute()
+    # Should the lock have expired, it may now be a later crawl's, which is not this one to free.
+    if get_active_seed_crawl_query(user_id) == query:
+        redis.delete(_active_key(user_id))
+
+
+@contextmanager
+def _heartbeat(redis, alive_key: str):
+    """Keep alive_key set while the block runs, from a thread of its own.
+
+    A thread rather than a write per round, because one round's fetches can take far longer
+    than a heartbeat: only the death of the whole process should stop it.
+    """
+    interval = settings.SEED_CRAWL_HEARTBEAT_SECONDS
+    stopped = threading.Event()
+
+    def beat():
+        while not stopped.is_set():
+            redis.set(alive_key, 1, ex=3 * interval)
+            stopped.wait(interval)
+
+    redis.set(alive_key, 1, ex=3 * interval)
+    thread = threading.Thread(target=beat, name="seed-crawl-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join()
+        redis.delete(alive_key)
+
+
+def _fail_if_dead(redis, user_id: int, query: str) -> bytes | None:
+    """The status of the user's crawl of the query, first marking it failed if its worker died.
+
+    A worker killed mid-crawl - by a deploy retiring its container, or the OOM killer - would
+    otherwise leave the crawl reading as crawling for the week its record lasts, and the
+    user unable to start another until their lock expired.
+    """
+    status = redis.hget(_record_key(user_id, query), "status")
+    if status != STATUS_CRAWLING.encode() or redis.exists(_alive_key(user_id, query)):
+        return status
+    logger.warning("Seed crawl for user %d stopped without finishing; marking it failed", user_id)
+    _finish(redis, user_id, query, STATUS_FAILED)
+    return STATUS_FAILED.encode()
 
 
 def _crawl_and_record(
@@ -371,6 +430,7 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
     thousands.
     """
     redis = get_redis_connection("default")
+    _fail_if_dead(redis, user_id, query)
     record = redis.hgetall(_record_key(user_id, query))
     if not record:
         return None

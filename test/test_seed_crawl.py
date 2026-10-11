@@ -280,6 +280,13 @@ def _run(user, index_path, seed_urls=(SEED,), new_seed_urls=()):
     return seed_crawl.get_seed_crawl(user.id, "tokio")
 
 
+def _mark_crawling(user, query="tokio", **fields):
+    """Mark the user's crawl of the query as running, on a worker that is still alive."""
+    redis = seed_crawl.get_redis_connection("default")
+    redis.hset(seed_crawl._record_key(user.id, query), mapping={"status": "crawling", **fields})
+    redis.set(seed_crawl._alive_key(user.id, query), 1)
+
+
 def _mark_failed(user, query="tokio"):
     """Mark the user's crawl of the query failed, the one case in which it is crawled again."""
     seed_crawl.get_redis_connection("default").hset(seed_crawl._record_key(user.id, query), "status", "failed")
@@ -331,6 +338,63 @@ def test_a_failed_crawl_is_recorded_and_not_retried(fake_web, redis_cache, user,
     assert record["finished_at"] is not None
     assert _queued_jobs(redis_cache) == []
     assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+@pytest.mark.django_db
+def test_a_crawl_says_it_is_alive_until_it_finishes(fake_web, redis_cache, user, index_path, monkeypatch):
+    alive_during_rounds = []
+    crawl_batch = seed_crawl.crawl_batch
+
+    def crawl_batch_checking_heartbeat(urls, num_threads, delay_seconds, redis):
+        alive_during_rounds.append(bool(redis_cache.exists(seed_crawl._alive_key(user.id, "tokio"))))
+        return crawl_batch(urls, num_threads, delay_seconds, redis)
+
+    monkeypatch.setattr(seed_crawl, "crawl_batch", crawl_batch_checking_heartbeat)
+
+    record = _run(user, index_path)
+
+    assert alive_during_rounds == [True, True, True]
+    assert record["status"] == "done"
+    assert not redis_cache.exists(seed_crawl._alive_key(user.id, "tokio"))
+
+
+@pytest.mark.django_db
+def test_a_crawl_whose_worker_died_is_reported_failed_and_frees_the_user(redis_cache, user, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    _mark_crawling(user, crawl_started_at=seed_crawl._now())
+    # The worker is killed mid-crawl, so nothing renews its heartbeat.
+    redis_cache.delete(seed_crawl._alive_key(user.id, "tokio"))
+
+    summary = seed_crawl.get_seed_crawl_summary(user.id, "tokio")
+
+    assert summary["status"] == "failed"
+    assert summary["finished_at"] is not None
+    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+    assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+@pytest.mark.django_db
+def test_a_dead_crawl_does_not_stop_the_user_crawling_another_query(redis_cache, user, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    redis_cache.hset(seed_crawl._record_key(user.id, "tokio"), "status", "crawling")
+
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "failed"
+
+
+@pytest.mark.django_db
+def test_a_crawl_on_a_live_worker_keeps_running(redis_cache, user, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    _mark_crawling(user, crawl_started_at=seed_crawl._now())
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "crawling"
+    assert (
+        seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
+        == seed_crawl.CrawlOutcome.ALREADY_RUNNING
+    )
 
 
 @pytest.mark.django_db
@@ -448,8 +512,7 @@ def test_a_queued_crawl_has_no_progress_and_no_domains_yet(redis_cache, monkeypa
 def test_progress_counts_rounds_against_a_domains_page_limit(redis_cache, user, settings):
     settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 4
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    record_key = seed_crawl._record_key(user.id, "tokio")
-    redis_cache.hset(record_key, mapping={"status": "crawling", "crawl_started_at": seed_crawl._now(), "rounds": 1})
+    _mark_crawling(user, crawl_started_at=seed_crawl._now(), rounds=1)
 
     assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["progress"] == pytest.approx(0.25, abs=0.01)
 
@@ -464,10 +527,10 @@ def test_a_finished_crawl_reports_its_domains_with_their_scores(fake_web, redis_
             "domain": "tokio.rs",
             "newly_discovered": True,
             "pages_indexed": 3,
-            "new_page_score": 0.03,
-            "recent_new_page_score": 0.03,
+            "new_page_score": 0.15,
+            "recent_new_page_score": 0.15,
             "staan_results": 1,
-            "score": 0.03,
+            "score": 0.15,
         }
     ]
 
@@ -489,11 +552,11 @@ def test_the_user_who_first_crawls_a_domain_is_its_discoverer(fake_web, redis_ca
 def test_a_domain_the_crawls_have_exhausted_loses_its_score(fake_web, redis_cache, user, index_path, settings):
     settings.SEED_DOMAIN_RECENT_CRAWLS = 2
     _run(user, index_path)
-    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.03
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.15
 
     # The pages are no longer new, so these crawls add none.
     _run(user, index_path)
-    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.015
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.075
     _run(user, index_path)
     seed_domain = SeedDomain.objects.get(domain="tokio.rs")
     assert seed_domain.new_page_score == 0.0
@@ -516,10 +579,7 @@ def test_a_failed_crawl_does_not_score_its_domains(fake_web, redis_cache, user, 
 @pytest.mark.django_db
 def test_progress_by_time_is_capped_at_one(redis_cache, user):
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    long_ago = "2020-01-01T00:00:00+00:00"
-    redis_cache.hset(
-        seed_crawl._record_key(user.id, "tokio"), mapping={"status": "crawling", "crawl_started_at": long_ago}
-    )
+    _mark_crawling(user, crawl_started_at="2020-01-01T00:00:00+00:00")
 
     assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["progress"] == 1.0
 
@@ -544,7 +604,7 @@ def test_crawling_a_query_again_reports_only_the_new_crawls_domains(fake_web, re
     [domain] = record["domains"]
     assert domain["newly_discovered"] is False
     assert domain["pages_indexed"] == 0
-    assert domain["recent_new_page_score"] == 0.015
+    assert domain["recent_new_page_score"] == 0.075
 
 
 @pytest.mark.django_db
