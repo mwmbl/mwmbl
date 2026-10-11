@@ -87,7 +87,7 @@ class CombinedSearchResponse(SearchResponse):
         default=None,
         description="What `crawl=true` did: `scheduled` a crawl, or none because EUSP returned "
         "nothing to crawl (`no_results`), every EUSP result is already in the index "
-        "(`already_indexed`), one of your crawls is still queued or running (`already_running`), "
+        "(`already_indexed`), you have already crawled this query (`already_crawled`), one of your crawls is still queued or running (`already_running`), "
         "or the crawl queue is full (`queue_full`). Null without `crawl=true`.",
         examples=["scheduled"],
     )
