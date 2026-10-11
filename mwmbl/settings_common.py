@@ -320,9 +320,6 @@ SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 20
 SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
 # A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
 SEED_CRAWL_MAX_SECONDS = 15 * 60
-# How often a running crawl says it is alive. One that misses three in a row died with its
-# worker - a deploy retiring the old container, say - and is reported failed.
-SEED_CRAWL_HEARTBEAT_SECONDS = 10
 # Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.
 SEED_CRAWL_MAX_QUEUED = 10
 SEED_CRAWL_THREADS = 8

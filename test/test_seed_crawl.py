@@ -4,6 +4,8 @@ rest of Combined Search, in test_combined_search.py.
 """
 
 import json
+import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,7 @@ STAAN_RESULTS = [
     Document("Tokio", SEED, "An async runtime.", source=DocumentSource.STAAN),
     Document("Async book", "https://rust-lang.github.io/async-book/", "Async Rust.", source=DocumentSource.STAAN),
 ]
+WORKER = "worker-1"
 
 
 def _page(title, links=()):
@@ -69,7 +72,7 @@ def fake_web(monkeypatch, settings):
 def worker(monkeypatch):
     """The worker, minus its connection cleanup, which would close the test's transaction."""
     monkeypatch.setattr(seed_crawl, "close_old_connections", lambda: None)
-    return seed_crawl.run_next_seed_crawl
+    return lambda index_path: seed_crawl.run_next_seed_crawl(index_path, WORKER)
 
 
 @pytest.fixture
@@ -281,10 +284,17 @@ def _run(user, index_path, seed_urls=(SEED,), new_seed_urls=()):
 
 
 def _mark_crawling(user, query="tokio", **fields):
-    """Mark the user's crawl of the query as running, on a worker that is still alive."""
+    """Mark the user's crawl of the query as running."""
     redis = seed_crawl.get_redis_connection("default")
     redis.hset(seed_crawl._record_key(user.id, query), mapping={"status": "crawling", **fields})
-    redis.set(seed_crawl._alive_key(user.id, query), 1)
+
+
+def _claim(redis_cache, worker_id=WORKER):
+    """Have the worker take the next queued crawl and start it, as it would before dying."""
+    raw_job = redis_cache.brpoplpush(seed_crawl.QUEUE_KEY, seed_crawl._claimed_key(worker_id), timeout=1)
+    job = json.loads(raw_job)
+    redis_cache.hset(seed_crawl._record_key(job["user_id"], job["query"]), "status", "crawling")
+    return raw_job
 
 
 def _mark_failed(user, query="tokio"):
@@ -341,60 +351,124 @@ def test_a_failed_crawl_is_recorded_and_not_retried(fake_web, redis_cache, user,
 
 
 @pytest.mark.django_db
-def test_a_crawl_says_it_is_alive_until_it_finishes(fake_web, redis_cache, user, index_path, monkeypatch):
-    alive_during_rounds = []
+def test_a_crawl_is_claimed_by_its_worker_until_it_finishes(
+    fake_web, redis_cache, user, index_path, worker, monkeypatch
+):
+    claims_during_rounds = []
     crawl_batch = seed_crawl.crawl_batch
 
-    def crawl_batch_checking_heartbeat(urls, num_threads, delay_seconds, redis):
-        alive_during_rounds.append(bool(redis_cache.exists(seed_crawl._alive_key(user.id, "tokio"))))
+    def crawl_batch_checking_claim(urls, num_threads, delay_seconds, redis):
+        claims_during_rounds.append(redis_cache.llen(seed_crawl._claimed_key(WORKER)))
         return crawl_batch(urls, num_threads, delay_seconds, redis)
 
-    monkeypatch.setattr(seed_crawl, "crawl_batch", crawl_batch_checking_heartbeat)
+    monkeypatch.setattr(seed_crawl, "crawl_batch", crawl_batch_checking_claim)
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
 
-    record = _run(user, index_path)
+    worker(index_path)
 
-    assert alive_during_rounds == [True, True, True]
-    assert record["status"] == "done"
-    assert not redis_cache.exists(seed_crawl._alive_key(user.id, "tokio"))
+    assert claims_during_rounds == [1, 1, 1]
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "done"
+    assert not redis_cache.exists(seed_crawl._claimed_key(WORKER))
 
 
 @pytest.mark.django_db
-def test_a_crawl_whose_worker_died_is_reported_failed_and_frees_the_user(redis_cache, user, monkeypatch):
+def test_a_restarted_worker_fails_the_crawl_it_died_running(redis_cache, user, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    _mark_crawling(user, crawl_started_at=seed_crawl._now())
-    # The worker is killed mid-crawl, so nothing renews its heartbeat.
-    redis_cache.delete(seed_crawl._alive_key(user.id, "tokio"))
+    _claim(redis_cache)
+
+    seed_crawl._fail_abandoned_crawls(redis_cache, WORKER)
 
     summary = seed_crawl.get_seed_crawl_summary(user.id, "tokio")
-
     assert summary["status"] == "failed"
     assert summary["finished_at"] is not None
     assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+    assert not redis_cache.exists(seed_crawl._claimed_key(WORKER))
     assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
 
 
 @pytest.mark.django_db
-def test_a_dead_crawl_does_not_stop_the_user_crawling_another_query(redis_cache, user, monkeypatch):
+def test_another_workers_crawl_is_left_running_while_its_user_is_locked(redis_cache, user, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    redis_cache.hset(seed_crawl._record_key(user.id, "tokio"), "status", "crawling")
+    # The old container's worker, still crawling while a deploy brings this one up.
+    _claim(redis_cache, worker_id="old-container")
 
-    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
-    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "failed"
+    seed_crawl._fail_abandoned_crawls(redis_cache, WORKER)
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "crawling"
+    assert redis_cache.llen(seed_crawl._claimed_key("old-container")) == 1
 
 
 @pytest.mark.django_db
-def test_a_crawl_on_a_live_worker_keeps_running(redis_cache, user, monkeypatch):
+def test_another_workers_crawl_is_failed_once_its_users_lock_has_gone(redis_cache, user, monkeypatch):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
     seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    _mark_crawling(user, crawl_started_at=seed_crawl._now())
+    _claim(redis_cache, worker_id="killed-container")
+    # The lock outlasts any crawl, so once it has expired the crawl is no longer running.
+    redis_cache.delete(seed_crawl._active_key(user.id))
 
-    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "crawling"
-    assert (
-        seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
-        == seed_crawl.CrawlOutcome.ALREADY_RUNNING
-    )
+    seed_crawl._fail_abandoned_crawls(redis_cache, WORKER)
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "failed"
+    assert not redis_cache.exists(seed_crawl._claimed_key("killed-container"))
+
+
+@pytest.mark.django_db
+def test_a_crawl_that_finished_before_its_worker_died_stays_done(fake_web, redis_cache, user, index_path, worker):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    [raw_job] = redis_cache.lrange(seed_crawl.QUEUE_KEY, 0, -1)
+    worker(index_path)
+    # Killed after writing the outcome but before dropping its claim.
+    redis_cache.lpush(seed_crawl._claimed_key(WORKER), raw_job)
+
+    seed_crawl._fail_abandoned_crawls(redis_cache, WORKER)
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "done"
+    assert not redis_cache.exists(seed_crawl._claimed_key(WORKER))
+
+
+@pytest.mark.django_db
+def test_an_earlier_crawls_claim_does_not_fail_a_later_crawl_of_the_query(redis_cache, user, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    _claim(redis_cache)
+    seed_crawl._finish(redis_cache, user.id, "tokio", "failed")
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+
+    seed_crawl._fail_abandoned_crawls(redis_cache, WORKER)
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "queued"
+    assert seed_crawl.get_active_seed_crawl_query(user.id) == "tokio"
+
+
+@pytest.fixture
+def sigterm_handler_restored():
+    handler = signal.getsignal(signal.SIGTERM)
+    yield
+    signal.signal(signal.SIGTERM, handler)
+
+
+@pytest.mark.django_db
+def test_a_worker_stopped_mid_crawl_fails_its_crawl_and_exits(
+    fake_web, redis_cache, user, index_path, worker, settings, monkeypatch, sigterm_handler_restored
+):
+    settings.DATA_PATH = str(Path(index_path).parent)
+    settings.INDEX_NAME = Path(index_path).name
+    monkeypatch.setattr(seed_crawl.socket, "gethostname", lambda: WORKER)
+
+    def crawl_batch_stopped_by_a_deploy(urls, num_threads, delay_seconds, redis):
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr(seed_crawl, "crawl_batch", crawl_batch_stopped_by_a_deploy)
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+
+    with pytest.raises(SystemExit):
+        seed_crawl.run_seed_crawl_worker()
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["status"] == "failed"
+    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+    assert not redis_cache.exists(seed_crawl._claimed_key(WORKER))
 
 
 @pytest.mark.django_db

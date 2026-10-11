@@ -11,6 +11,7 @@ atomically.
 import json
 import threading
 from pathlib import Path
+from unittest.mock import ANY
 from urllib.parse import urlparse
 
 import pytest
@@ -532,6 +533,7 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
     assert body["crawl_outcome"] == "scheduled"
     job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
     assert job == {
+        "id": ANY,
         "user_id": user.id,
         "query": "tokio",
         "seed_urls": [STAAN_RESULT.url],
