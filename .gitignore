@@ -229,4 +229,8 @@ devdata/external-cache-engb.tinysearch
 !devdata/judge_train/eval_manifest.json
 devdata/moderation_bakeoff/
 
+# Used for local Fedora installs that have a custom xdgboost to bypass an upstream bug
 vendor/
+
+# Local coverage
+coverage.json
