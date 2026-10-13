@@ -85,7 +85,6 @@ dev = [
     "pytest-django>=4.5.2",
     "pytest-asyncio>=0.23.0",
     "pytest-httpx>=0.30.0",
-    "pytest-cov>=4.0.0",
     "blockbuster>=1.5.0",
     "fakeredis>=2.30.1",
     "maturin>=1.5,<2.0",
@@ -115,7 +114,7 @@ log_cli = true
 log_cli_level = "INFO"
 DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = "--reuse-db -m 'not live and not slow' --cov=mwmbl --cov-report=json --cov-report=term-missing"
+addopts = "--reuse-db -m 'not live and not slow'"
 asyncio_mode = "auto"
 # DTZ cannot see this one: at the point of assignment `timezone.now()` and
 # `datetime.utcnow()` look the same to a linter, and only Django knows the column is aware.
