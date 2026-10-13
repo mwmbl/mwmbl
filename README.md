@@ -1,6 +1,7 @@
 # Mwmbl - the Open Source and Non-Profit Web Search Engine
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
+[![Coverage](https://blueheron786.github.io/mwmbl/badges/coverage.svg)](https://github.com/blueheron786/mwmbl/actions)
 
 **No ads, no tracking, no profit**
 
