@@ -789,3 +789,68 @@ def test_a_crawl_left_running_before_crawls_were_leased_is_reported_failed_and_c
 
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "failed"
     assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+@pytest.mark.django_db
+def test_a_crawl_whose_record_has_expired_is_dropped_and_the_next_one_claimed(
+    fake_web, redis_cache, user, index_path, worker
+):
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    seed_crawl.queue_seed_crawl(other.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    redis_cache.delete(seed_crawl._record_key(user.id, "tokio"))
+
+    worker(index_path)
+
+    assert redis_cache.zcard(seed_crawl.READY_KEY) == 0
+    assert not redis_cache.exists(seed_crawl._record_key(user.id, "tokio"))
+    assert seed_crawl.get_seed_crawl(other.id, "tokio")["status"] == "done"
+
+
+@pytest.mark.django_db
+def test_an_active_crawl_whose_record_has_expired_blocks_nothing(redis_cache, user, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    redis_cache.delete(seed_crawl._record_key(user.id, "tokio"))
+    redis_cache.delete(seed_crawl.READY_KEY)
+
+    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+@pytest.mark.django_db
+def test_the_users_active_crawl_expires_with_its_record(redis_cache, user, settings):
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    ttl = redis_cache.ttl(seed_crawl._active_key(user.id))
+
+    assert 0 < ttl <= settings.SEED_CRAWL_RECORD_TTL_SECONDS
+
+
+@pytest.mark.django_db
+def test_a_crawl_out_of_attempts_gives_way_to_the_next_due(redis_cache, user, settings):
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    settings.SEED_CRAWL_LEASE_SECONDS = 0
+    settings.SEED_CRAWL_MAX_ATTEMPTS = 1
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    _claim(redis_cache)
+    seed_crawl.queue_seed_crawl(other.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    record_key, _ = _claim(redis_cache)
+
+    assert record_key.decode() == seed_crawl._record_key(other.id, "tokio")
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "failed"
+    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+
+
+@pytest.mark.django_db
+def test_a_done_crawl_stays_done_if_scoring_its_domains_fails(fake_web, redis_cache, user, index_path, monkeypatch):
+    def fail(pages_indexed):
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(seed_crawl, "record_seed_domain_crawls", fail)
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    _run_rounds(index_path)
+
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "done"
