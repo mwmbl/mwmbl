@@ -84,6 +84,10 @@ jobs:
       #----------------------------------------------
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       #----------------------------------------------
       # install dependencies
@@ -114,19 +118,15 @@ jobs:
       #----------------------------------------------
       - name: Check the crawler entry point imports standalone
         run: uv run python -c "from mwmbl.crawl import run"
-      - name: Run tests with coverage
+      - name: Run Python and Rust tests with coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
           TEST_REDIS_URL: redis://localhost:6379/15
-        run: |
-          uv run pytest \
-            --cov=mwmbl \
-            --cov-report=term-missing \
-            --cov-report=xml
+        run: make coverage
       - name: Upload coverage to Codecov
         if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage.xml
+          files: ./coverage/python.xml,./coverage/rust.lcov
           fail_ci_if_error: false

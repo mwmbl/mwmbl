@@ -29,6 +29,10 @@ DATABASE_URL   ?=
 REDIS_URL      ?= redis://127.0.0.1:6379
 # A Redis database the tests flush, so keep it apart from REDIS_URL's.
 TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
+# Python tests that cross into the mwmbl_rank extension, run against the instrumented build.
+RUST_COVERAGE_TESTS ?= test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
+	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py
+CARGO_HOME     ?= $(HOME)/.cargo
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 
@@ -39,7 +43,8 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks patch-xgboost migrate test test-file coverage coverage-quick run run-background \
+.PHONY: help install install-hooks patch-xgboost migrate test test-file coverage coverage-python coverage-rust \
+        coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
@@ -48,7 +53,9 @@ help:
 	@echo "  migrate        Apply Django migrations"
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
-	@echo "  coverage       Run tests with coverage report (terminal + HTML)"
+	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
+	@echo "  coverage-python Run Python tests with terminal, XML, and HTML coverage reports"
+	@echo "  coverage-rust  Run Rust unit tests and write an LCOV report (needs cargo-llvm-cov)"
 	@echo "  coverage-quick Run tests with coverage report (terminal only, faster)"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
@@ -91,9 +98,35 @@ test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
 
-coverage:
+coverage: coverage-python coverage-rust
+	uv run python scripts/combine_coverage.py coverage/python.xml coverage/rust.lcov
+
+coverage-python:
+	@mkdir -p coverage
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
-		uv run pytest --cov=mwmbl --cov-report=term-missing --cov-report=html --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
+		uv run pytest --cov=mwmbl --cov-report=term-missing --cov-report=xml:coverage/python.xml \
+		--cov-report=html:coverage/python-html --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
+
+coverage-rust:
+	@PATH="$(CARGO_HOME)/bin:$(PATH)" cargo llvm-cov --version >/dev/null 2>&1 || { \
+		echo "cargo-llvm-cov is required: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov --locked"; \
+		exit 1; \
+	}
+	@mkdir -p coverage
+	@set -eu; \
+		PATH="$(CARGO_HOME)/bin:$(PATH)"; \
+		export PATH PYO3_PYTHON="$(CURDIR)/.venv/bin/python"; \
+		eval "$$(cd mwmbl_rank && cargo llvm-cov show-env --sh)"; \
+		cargo llvm-cov clean --manifest-path mwmbl_rank/Cargo.toml --workspace; \
+		cargo test --manifest-path mwmbl_rank/Cargo.toml --lib; \
+		uv run --no-sync maturin develop; \
+		DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+			uv run --no-sync pytest $(RUST_COVERAGE_TESTS); \
+		cargo llvm-cov report \
+			--manifest-path mwmbl_rank/Cargo.toml \
+			--lcov \
+			--output-path "$(CURDIR)/coverage/rust.lcov" \
+			--ignore-filename-regex '(/vendor/|/.cargo/registry/)'
 
 coverage-quick:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
