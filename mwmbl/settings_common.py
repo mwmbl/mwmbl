@@ -316,6 +316,8 @@ STAAN_TIMEOUT_SECONDS = 5
 # Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
 # following links within Staan's domains - see mwmbl.indexer.seed_crawl.
 SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 100
+# A domain is dropped from a crawl after this many fetches in a row that added no new page.
+SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
 # A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
 SEED_CRAWL_MAX_SECONDS = 15 * 60
 # Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.

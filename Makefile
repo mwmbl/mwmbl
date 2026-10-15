@@ -39,7 +39,7 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks patch-xgboost migrate test test-file run run-background \
+.PHONY: help install install-hooks patch-xgboost migrate test test-file coverage coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
@@ -48,6 +48,8 @@ help:
 	@echo "  migrate        Apply Django migrations"
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
+	@echo "  coverage       Run tests with coverage report (terminal + HTML)"
+	@echo "  coverage-quick Run tests with coverage report (terminal only, faster)"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
 	@echo ""
@@ -88,6 +90,14 @@ test:
 test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
+
+coverage:
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+		uv run pytest --cov=mwmbl --cov-report=term-missing --cov-report=html --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
+
+coverage-quick:
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+		uv run pytest --cov=mwmbl --cov-report=term-missing --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
 
 run:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
