@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -115,10 +114,19 @@ jobs:
       #----------------------------------------------
       - name: Check the crawler entry point imports standalone
         run: uv run python -c "from mwmbl.crawl import run"
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
           TEST_REDIS_URL: redis://localhost:6379/15
         run: |
-          uv run pytest
+          uv run pytest \
+            --cov=mwmbl \
+            --cov-report=term-missing \
+            --cov-report=xml
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
