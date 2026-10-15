@@ -472,6 +472,35 @@ def test_a_worker_stopped_mid_crawl_fails_its_crawl_and_exits(
 
 
 @pytest.mark.django_db
+def test_a_running_worker_fails_a_dead_workers_crawl_once_its_users_lock_has_gone(
+    redis_cache, user, monkeypatch, sigterm_handler_restored
+):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    monkeypatch.setattr(seed_crawl.socket, "gethostname", lambda: WORKER)
+    monkeypatch.setattr(seed_crawl, "ABANDONED_CRAWL_SWEEP_SECONDS", 0)
+    summaries_seen_by_each_crawl = []
+
+    def run_next_seed_crawl(index_path, worker_id):
+        summaries_seen_by_each_crawl.append(seed_crawl.get_seed_crawl_summary(user.id, "tokio"))
+        if len(summaries_seen_by_each_crawl) == 1:
+            # A container killed mid-crawl while this worker was already running, whose
+            # user's lock then expires.
+            seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+            _claim(redis_cache, worker_id="killed-container")
+            redis_cache.delete(seed_crawl._active_key(user.id))
+        else:
+            raise seed_crawl.WorkerStopping
+
+    monkeypatch.setattr(seed_crawl, "run_next_seed_crawl", run_next_seed_crawl)
+
+    with pytest.raises(SystemExit):
+        seed_crawl.run_seed_crawl_worker()
+
+    assert summaries_seen_by_each_crawl[1]["status"] == "failed"
+    assert not redis_cache.exists(seed_crawl._claimed_key("killed-container"))
+
+
+@pytest.mark.django_db
 def test_crawling_a_query_again_keeps_its_pages_and_counts_none_twice(fake_web, redis_cache, user, index_path):
     _run(user, index_path)
     _mark_failed(user)

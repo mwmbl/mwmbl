@@ -72,6 +72,9 @@ class CrawlOutcome(StrEnum):
 QUEUE_KEY = "seed-crawl:queue"
 # Under the Redis client's five-second socket timeout, which a longer blocking pop would trip.
 QUEUE_POLL_SECONDS = 1
+# How often a running worker looks for crawls that other, dead workers abandoned. A crawl
+# only becomes abandoned when its user's lock expires, which nothing else notices.
+ABANDONED_CRAWL_SWEEP_SECONDS = 60
 
 
 def _record_key(user_id: int, query: str) -> str:
@@ -207,7 +210,8 @@ def run_seed_crawl_worker() -> None:
     on its way out; one that is killed outright - by the OOM killer, say - fails it when it
     next starts, which a container restarted in place does under the same hostname. Neither
     touches another worker's crawls while that worker may still be running, which during a
-    deploy the old container's is.
+    deploy the old container's is. A killed container that never comes back leaves its crawls
+    to whichever worker next sweeps for them once they can no longer be running.
     """
     index_path = str(Path(settings.DATA_PATH) / settings.INDEX_NAME)
     # The container's hostname, so a container restarted in place is the same worker.
@@ -216,8 +220,13 @@ def run_seed_crawl_worker() -> None:
     signal.signal(signal.SIGTERM, _stop)
     try:
         _fail_abandoned_crawls(redis, worker_id)
+        last_sweep = time.monotonic()
         while True:
             run_next_seed_crawl(index_path, worker_id)
+            # Between crawls, so a busy worker still sweeps, at worst a crawl's length late.
+            if time.monotonic() - last_sweep >= ABANDONED_CRAWL_SWEEP_SECONDS:
+                _fail_other_workers_abandoned_crawls(redis, worker_id)
+                last_sweep = time.monotonic()
     except WorkerStopping:
         logger.info("Seed crawl worker stopping")
         _fail_claimed_crawls(redis, _claimed_key(worker_id))
@@ -248,15 +257,22 @@ def run_next_seed_crawl(index_path: str, worker_id: str) -> bool:
 
 
 def _fail_abandoned_crawls(redis, worker_id: str) -> None:
-    """Fail the crawls whose workers died before they finished.
+    """Fail the crawls whose workers died before they finished, as a worker does on starting.
 
-    This worker's own were claimed by its previous run, so are certainly abandoned. Another
-    worker's are only once the user's lock has gone: it outlasts the longest wait plus the
-    crawl, so a crawl that has lost it can no longer be running. That catches the crawls of
-    a container that was killed rather than stopped, and never came back.
+    This worker's own were claimed by its previous run, so are certainly abandoned.
+    """
+    _fail_claimed_crawls(redis, _claimed_key(worker_id))
+    _fail_other_workers_abandoned_crawls(redis, worker_id)
+
+
+def _fail_other_workers_abandoned_crawls(redis, worker_id: str) -> None:
+    """Fail other workers' crawls that can no longer be running.
+
+    Another worker's crawl is abandoned once the user's lock has gone: it outlasts the longest
+    wait plus the crawl, so a crawl that has lost it can no longer be running. That catches
+    the crawls of a container that was killed rather than stopped, and never came back.
     """
     own_key = _claimed_key(worker_id)
-    _fail_claimed_crawls(redis, own_key)
     for claimed_key in redis.scan_iter(match=_claimed_key("*")):
         if claimed_key.decode() == own_key:
             continue
