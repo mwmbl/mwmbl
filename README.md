@@ -2,6 +2,8 @@
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
 
+[![codecov](https://codecov.io/gh/mwmbl/mwmbl/graph/badge.svg)](https://codecov.io/gh/mwmbl/mwmbl)
+
 **No ads, no tracking, no profit**
 
 [Mwmbl](https://mwmbl.org) is a non-profit, open source search engine
