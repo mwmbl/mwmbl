@@ -65,11 +65,27 @@ def fake_web(monkeypatch, settings):
     return rounds
 
 
-@pytest.fixture
-def worker(monkeypatch):
-    """The worker, minus its connection cleanup, which would close the test's transaction."""
+@pytest.fixture(autouse=True)
+def no_connection_cleanup(monkeypatch):
+    """The worker's connection cleanup would close the test's transaction."""
     monkeypatch.setattr(seed_crawl, "close_old_connections", lambda: None)
-    return seed_crawl.run_next_seed_crawl
+
+
+def _run_rounds(index_path):
+    """Run the worker until no crawl is due, returning whether any was.
+
+    The fake web has no delay between a domain's fetches, so a crawl is due again as soon as
+    its round is done.
+    """
+    ran = False
+    while seed_crawl.run_next_seed_crawl_round(index_path):
+        ran = True
+    return ran
+
+
+@pytest.fixture
+def worker():
+    return _run_rounds
 
 
 @pytest.fixture
@@ -86,17 +102,14 @@ def user(db):
 
 
 def _crawl(seed_urls, domains, is_new=lambda url: True):
-    """Run a crawl to its end, telling it that the pages is_new picks were new."""
-    rounds = seed_crawl.crawl_within_domains(seed_urls, set(domains), redis=None)
+    """Run a crawl's rounds to the end, telling it that the pages is_new picks were new."""
+    frontier = seed_crawl.Frontier.from_seeds(seed_urls, set(domains))
     crawled = []
-    new_urls = None
-    while True:
-        try:
-            num_crawled, documents = rounds.send(new_urls)
-        except StopIteration:
-            return crawled
-        crawled.append((num_crawled, documents))
-        new_urls = {document.url for document in documents if is_new(document.url)}
+    while batch := frontier.next_batch():
+        documents = seed_crawl.crawl_round(frontier, batch, redis=None)
+        crawled.append((len(batch), documents))
+        frontier.record_round(batch, {document.url for document in documents if is_new(document.url)})
+    return crawled
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +200,19 @@ def test_links_with_a_query_string_are_not_followed(fake_web):
 
 
 def _queued_jobs(redis_cache):
-    return [json.loads(job) for job in reversed(redis_cache.lrange(seed_crawl.QUEUE_KEY, 0, -1))]
+    """The crawls queued or running, oldest first, with their seeds as yet unfetched."""
+    jobs = []
+    for record_key in redis_cache.zrange(seed_crawl.READY_KEY, 0, -1):
+        record = {key.decode(): value.decode() for key, value in redis_cache.hgetall(record_key).items()}
+        frontier = seed_crawl.Frontier.from_json(record["frontier"])
+        jobs.append(
+            {
+                "seed_urls": [url for queue in frontier.queues.values() for url in queue],
+                "new_seed_urls": json.loads(record["new_seed_urls"]),
+                "domains": json.loads(record["domains"]),
+            }
+        )
+    return jobs
 
 
 def test_only_staan_results_missing_from_the_index_are_seeds(redis_cache, monkeypatch):
@@ -273,10 +298,10 @@ def test_nothing_is_queued_once_the_queue_is_full(redis_cache, monkeypatch, sett
 
 
 def _run(user, index_path, seed_urls=(SEED,), new_seed_urls=()):
-    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
-    # Crawl only the seeds and domain given, whatever start_seed_crawl made of STAAN_RESULTS.
-    seed_crawl.get_redis_connection("default").delete(seed_crawl.QUEUE_KEY)
-    seed_crawl.run_seed_crawl(user.id, "tokio", list(seed_urls), list(new_seed_urls), {"tokio.rs": 1}, index_path)
+    """Crawl from the seeds within tokio.rs to the end, as the user's crawl of "tokio"."""
+    outcome = seed_crawl.queue_seed_crawl(user.id, "tokio", list(seed_urls), list(new_seed_urls), {"tokio.rs": 1})
+    assert outcome == seed_crawl.CrawlOutcome.SCHEDULED
+    _run_rounds(index_path)
     return seed_crawl.get_seed_crawl(user.id, "tokio")
 
 
@@ -464,10 +489,10 @@ def test_a_finished_crawl_reports_its_domains_with_their_scores(fake_web, redis_
             "domain": "tokio.rs",
             "newly_discovered": True,
             "pages_indexed": 3,
-            "new_page_score": 0.03,
-            "recent_new_page_score": 0.03,
+            "new_page_score": 0.15,
+            "recent_new_page_score": 0.15,
             "staan_results": 1,
-            "score": 0.03,
+            "score": 0.15,
         }
     ]
 
@@ -489,11 +514,13 @@ def test_the_user_who_first_crawls_a_domain_is_its_discoverer(fake_web, redis_ca
 def test_a_domain_the_crawls_have_exhausted_loses_its_score(fake_web, redis_cache, user, index_path, settings):
     settings.SEED_DOMAIN_RECENT_CRAWLS = 2
     _run(user, index_path)
-    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.03
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.15
 
     # The pages are no longer new, so these crawls add none.
+    _mark_failed(user)
     _run(user, index_path)
-    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.015
+    assert SeedDomain.objects.get(domain="tokio.rs").new_page_score == 0.075
+    _mark_failed(user)
     _run(user, index_path)
     seed_domain = SeedDomain.objects.get(domain="tokio.rs")
     assert seed_domain.new_page_score == 0.0
@@ -529,7 +556,9 @@ def test_domains_are_not_reported_until_the_crawl_has_registered_them(fake_web, 
     _run(user, index_path)
     # A crawl of a fresh query, picked up by the worker but not yet registered.
     seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
-    redis_cache.hset(seed_crawl._record_key(user.id, "rust"), "status", "crawling")
+    redis_cache.hset(
+        seed_crawl._record_key(user.id, "rust"), mapping={"status": "crawling", "crawl_started_at": seed_crawl._now()}
+    )
 
     assert seed_crawl.get_seed_crawl_summary(user.id, "rust")["domains"] == []
 
@@ -544,17 +573,16 @@ def test_crawling_a_query_again_reports_only_the_new_crawls_domains(fake_web, re
     [domain] = record["domains"]
     assert domain["newly_discovered"] is False
     assert domain["pages_indexed"] == 0
-    assert domain["recent_new_page_score"] == 0.015
+    assert domain["recent_new_page_score"] == 0.075
 
 
 @pytest.mark.django_db
-def test_a_querys_staan_results_count_once_per_user(fake_web, redis_cache, user, index_path):
+def test_a_querys_staan_results_count_once_per_user(fake_web, redis_cache, user, index_path, worker):
     tokio_results = [*STAAN_RESULTS, Document("Tokio docs", "https://tokio.rs/docs", "", source=DocumentSource.STAAN)]
 
     for _ in range(2):
         seed_crawl.start_seed_crawl(user.id, "tokio", [], tokio_results, set())
-        job = json.loads(seed_crawl.get_redis_connection("default").rpop(seed_crawl.QUEUE_KEY))
-        seed_crawl.run_seed_crawl(user.id, "tokio", [SEED], [], job["domains"], index_path)
+        worker(index_path)
         _mark_failed(user)
 
     assert SeedDomain.objects.get(domain="tokio.rs").staan_results == 2
@@ -643,3 +671,121 @@ def test_index_new_documents_counts_nothing_the_blacklist_drops(index_path, monk
     indexed = index_new_documents([Document("Tokio", SEED, "Tokio.")], index_path)
 
     assert indexed == (set(), set())
+
+
+# ---------------------------------------------------------------------------
+# Workers that die, stall or take turns
+# ---------------------------------------------------------------------------
+
+
+def _claim(redis_cache):
+    """Claim the crawl due soonest as a worker would, but run none of it."""
+    return redis_cache.eval(
+        seed_crawl._CLAIM_SCRIPT,
+        1,
+        seed_crawl.READY_KEY,
+        seed_crawl.time.time(),
+        seed_crawl.settings.SEED_CRAWL_LEASE_SECONDS,
+        seed_crawl.settings.SEED_CRAWL_MAX_ATTEMPTS,
+        seed_crawl._now(),
+    )
+
+
+@pytest.mark.django_db
+def test_a_crawl_whose_worker_died_is_resumed_once_its_lease_runs_out(
+    fake_web, redis_cache, user, index_path, worker, settings
+):
+    settings.SEED_CRAWL_LEASE_SECONDS = 0
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    # A worker claims the crawl and dies before writing anything.
+    _claim(redis_cache)
+
+    worker(index_path)
+
+    record = seed_crawl.get_seed_crawl(user.id, "tokio")
+    assert record["status"] == "done"
+    assert record["pages_indexed"] == 3
+
+
+@pytest.mark.django_db
+def test_a_crawl_is_not_claimed_again_while_its_lease_lasts(fake_web, redis_cache, user, index_path, worker):
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    _claim(redis_cache)
+
+    assert worker(index_path) is False
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "crawling"
+
+
+@pytest.mark.django_db
+def test_a_worker_that_lost_its_claim_writes_nothing(redis_cache, user, settings):
+    settings.SEED_CRAWL_LEASE_SECONDS = 0
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    record_key, stale_token = _claim(redis_cache)
+    # Too slow: another worker has claimed the crawl since.
+    _claim(redis_cache)
+
+    seed_crawl._finish(redis_cache, record_key.decode(), stale_token, user.id, "failed")
+
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "crawling"
+    assert seed_crawl.get_active_seed_crawl_query(user.id) == "tokio"
+
+
+@pytest.mark.django_db
+def test_a_round_that_keeps_killing_its_workers_fails_the_crawl(redis_cache, user, settings, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_LEASE_SECONDS = 0
+    settings.SEED_CRAWL_MAX_ATTEMPTS = 2
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    assert _claim(redis_cache) is not None
+    assert _claim(redis_cache) is not None
+    assert _claim(redis_cache) is None
+
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "failed"
+    assert redis_cache.zcard(seed_crawl.READY_KEY) == 0
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+@pytest.mark.django_db
+def test_queued_crawls_run_one_after_another_oldest_first(fake_web, redis_cache, user, index_path, worker):
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    seed_crawl.queue_seed_crawl(other.id, "tokio", ["https://tokio.rs/tutorial/spawning"], [], {"tokio.rs": 1})
+
+    worker(index_path)
+
+    # The first crawl to the end, then the second.
+    assert fake_web == [
+        [SEED],
+        ["https://tokio.rs/tutorial"],
+        ["https://tokio.rs/tutorial/spawning"],
+        ["https://tokio.rs/tutorial/spawning"],
+    ]
+    assert seed_crawl.get_seed_crawl(other.id, "tokio")["status"] == "done"
+
+
+@pytest.mark.django_db
+def test_a_crawls_rounds_are_spaced_by_the_domain_delay(fake_web, redis_cache, user, index_path, settings, monkeypatch):
+    settings.SEED_CRAWL_DOMAIN_DELAY_SECONDS = 60
+    sleeps = []
+    monkeypatch.setattr(seed_crawl.time, "sleep", sleeps.append)
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    seed_crawl.run_next_seed_crawl_round(index_path)
+    seed_crawl.run_next_seed_crawl_round(index_path)
+
+    assert sleeps == [pytest.approx(60, abs=1)]
+
+
+@pytest.mark.django_db
+def test_a_crawl_left_running_before_crawls_were_leased_is_reported_failed_and_can_be_redone(
+    redis_cache, user, monkeypatch
+):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    redis_cache.hset(
+        seed_crawl._record_key(user.id, "tokio"),
+        mapping={"status": "crawling", "query": "tokio", "started_at": seed_crawl._now(), "pages_crawled": 4},
+    )
+
+    assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "failed"
+    assert seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED

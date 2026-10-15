@@ -315,18 +315,23 @@ STAAN_TIMEOUT_SECONDS = 5
 
 # Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
 # following links within Staan's domains - see mwmbl.indexer.seed_crawl.
-SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 100
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 20
 # A domain is dropped from a crawl after this many fetches in a row that added no new page.
 SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
 # A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
 SEED_CRAWL_MAX_SECONDS = 15 * 60
-# Crawls waiting for the worker, across all users, beyond which crawl=true queues nothing.
+# Crawls queued or running, across all users, beyond which crawl=true queues nothing.
 SEED_CRAWL_MAX_QUEUED = 10
 SEED_CRAWL_THREADS = 8
 # The least time between two fetches from one domain.
 SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
 # Queries are private, so a user's record of what their crawl added is not kept for long.
 SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
+# How long a worker has to finish a crawl's round before another may claim it. Far longer
+# than a round takes - one fetch per domain, each with a three-second timeout, then indexing.
+SEED_CRAWL_LEASE_SECONDS = 120
+# Claims of one round, by workers that died before finishing it, after which the crawl fails.
+SEED_CRAWL_MAX_ATTEMPTS = 3
 # A seed domain's new-page score averages only its most recent crawls, so a domain the
 # crawls have saturated drops down the list rather than living off its first crawl.
 SEED_DOMAIN_RECENT_CRAWLS = 5
