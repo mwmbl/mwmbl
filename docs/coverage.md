@@ -64,12 +64,17 @@ ranking, crawling, moderation, and external-source adapters over tests that only
 call trivial accessors.
 
 The baseline when this workflow was introduced was 70.83% Python, 66.36% Rust,
-and 70.42% combined; including the extension-boundary tests lifts Rust to 91.6% and
-the combined figure to 72.7%. The largest actionable Python gaps were `platform/api.py`,
-`views.py`, moderation training, crawler retrieval, and crawler application
-behavior. Standalone ranking-evaluation reports also account for many misses;
-test maintained reports through their parsing and scoring functions, and delete
-obsolete reports rather than hiding them from coverage.
+and 70.42% combined. Including the extension-boundary tests lifted Rust to 91.6%,
+and new Python tests for views, the crawler, moderation training, Super Search
+sources and the platform API lifted Python to 80.1% and the combined figure to 81.2%.
+
+What remains uncovered is mostly not worth a test:
+
+- standalone `rankeval/` report and experiment scripts (about 1,100 lines at 0%);
+  test the ones that are still run through their parsing and scoring functions, and
+  delete the rest rather than hiding them from coverage;
+- modules nothing imports - `database.py`, `retry.py`, `indexer/links.py`,
+  `indexer/dedupe.py` and `indexer/domains/*` - which should be deleted, not tested.
 
 ## CI and badges
 
