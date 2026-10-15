@@ -125,6 +125,21 @@ markers = [
     "slow: heavy CPU (e.g. XGBoost feature selection); excluded from the default run. Run with -m slow.",
 ]
 
+[tool.coverage.run]
+source = ["mwmbl"]
+omit = [
+    "mwmbl/migrations/*",
+    "mwmbl/asgi.py",
+    "mwmbl/wsgi.py",
+    "mwmbl/database.py",
+    "mwmbl/indexer/domains/*",
+    "mwmbl/indexer/fsqueue.py",
+    "mwmbl/indexer/links.py",
+    "mwmbl/indexer/paths.py",
+    "mwmbl/management/commands/train_*.py",
+    "mwmbl/management/commands/backfill_*.py",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"
