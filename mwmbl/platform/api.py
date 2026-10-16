@@ -1212,8 +1212,8 @@ def get_current_user(request):
     description=(
         "Returns the authenticated user's contribution stats: how many results they "
         "have indexed, broken down per day for the last 30 days, how many Seed Searches "
-        "(Combined Search with `crawl=true`) they have made, and how many new pages those "
-        "searches and their crawls have added to the index, both in all."
+        "(Combined Search with `crawl=true`) they have made, how many sites their seed crawls were the "
+        "first to find, and how many new pages those crawls have added to the index, all in all."
     ),
     tags=["Users"],
 )
@@ -1224,6 +1224,7 @@ def get_current_user_stats(request):
         **stats,
         "seed_search_pages_indexed": user.seed_search_pages_indexed,
         "seed_searches": user.seed_searches,
+        "seed_sites_discovered": user.discovered_seed_domains.count(),
     }
 
 
