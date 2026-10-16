@@ -128,5 +128,6 @@ jobs:
         if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/python.xml,./coverage/rust.lcov
           fail_ci_if_error: false
