@@ -15,6 +15,8 @@ class MwmblUser(AbstractUser):
     # all time. A total on the user rather than a UserStats column, because a UserStats row
     # created for it would enter the crawl leaderboards with no crawl results behind it.
     seed_search_pages_indexed = models.IntegerField(default=0)
+    # How many searches the user has made with Seed Search on (Combined Search with crawl=true), all time.
+    seed_searches = models.IntegerField(default=0)
 
     # On for new accounts. Accounts created before this field existed start off (see the migration).
     combined_search_enabled = models.BooleanField(default=True)

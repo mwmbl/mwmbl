@@ -444,14 +444,35 @@ def test_new_pages_are_added_to_the_users_total(fake_web, redis_cache, user, ind
 
 
 @pytest.mark.django_db
+def test_seeds_the_search_found_new_are_not_counted_again_by_the_crawl(fake_web, redis_cache, user, index_path):
+    _index_staan_snippet_of_the_seed(index_path)
+    _run(user, index_path, new_seed_urls=[SEED])
+    user.refresh_from_db()
+
+    assert SEED in [page["url"] for page in seed_crawl.get_seed_crawl(user.id, "tokio")["pages"]]
+    assert user.seed_search_pages_indexed == 2
+
+
+@pytest.mark.django_db
+def test_recording_a_seed_search_adds_to_the_users_totals(user):
+    seed_crawl.record_seed_search(user.id, 3)
+    seed_crawl.record_seed_search(user.id, 0)
+    user.refresh_from_db()
+
+    assert user.seed_searches == 2
+    assert user.seed_search_pages_indexed == 3
+
+
+@pytest.mark.django_db
 def test_the_users_stats_report_their_seed_search_total(user):
-    User.objects.filter(id=user.id).update(seed_search_pages_indexed=12)
+    User.objects.filter(id=user.id).update(seed_search_pages_indexed=12, seed_searches=4)
     token = str(RefreshToken.for_user(user).access_token)
 
     response = Client().get("/api/v1/platform/user/stats", HTTP_AUTHORIZATION=f"Bearer {token}")
 
     assert response.status_code == 200
     assert response.json()["seed_search_pages_indexed"] == 12
+    assert response.json()["seed_searches"] == 4
 
 
 # ---------------------------------------------------------------------------
