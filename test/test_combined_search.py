@@ -530,14 +530,12 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
 
     assert body["crawl_scheduled"] is True
     assert body["crawl_outcome"] == "scheduled"
-    job = json.loads(redis_cache.rpop(seed_crawl.QUEUE_KEY))
-    assert job == {
-        "user_id": user.id,
-        "query": "tokio",
-        "seed_urls": [STAAN_RESULT.url],
-        "new_seed_urls": [STAAN_RESULT.url],
-        "domains": {"tokio.rs": 1},
-    }
+    record_key = seed_crawl._record_key(user.id, "tokio")
+    assert redis_cache.zrange(seed_crawl.READY_KEY, 0, -1) == [record_key.encode()]
+    record = {key.decode(): value.decode() for key, value in redis_cache.hgetall(record_key).items()}
+    assert seed_crawl.Frontier.from_json(record["frontier"]).queues == {"tokio.rs": [STAAN_RESULT.url]}
+    assert json.loads(record["new_seed_urls"]) == [STAAN_RESULT.url]
+    assert json.loads(record["domains"]) == {"tokio.rs": 1}
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
 
 
@@ -549,7 +547,7 @@ def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cach
 
     assert body["crawl_scheduled"] is False
     assert body["crawl_outcome"] is None
-    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
+    assert redis_cache.zcard(seed_crawl.READY_KEY) == 0
 
 
 @pytest.mark.django_db
@@ -562,7 +560,7 @@ def test_no_crawl_when_the_index_already_has_every_staan_result(
 
     assert body["crawl_scheduled"] is False
     assert body["crawl_outcome"] == "already_indexed"
-    assert redis_cache.llen(seed_crawl.QUEUE_KEY) == 0
+    assert redis_cache.zcard(seed_crawl.READY_KEY) == 0
 
 
 @pytest.mark.django_db

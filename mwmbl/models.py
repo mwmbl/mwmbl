@@ -16,6 +16,9 @@ class MwmblUser(AbstractUser):
     # created for it would enter the crawl leaderboards with no crawl results behind it.
     seed_search_pages_indexed = models.IntegerField(default=0)
 
+    # On for new accounts. Accounts created before this field existed start off (see the migration).
+    combined_search_enabled = models.BooleanField(default=True)
+
 
 class UserCuration(models.Model):
     """
