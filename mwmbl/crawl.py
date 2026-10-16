@@ -304,7 +304,6 @@ class Crawler:
                         logger.info(f"Submission is off, not posting {len(result_items)} results")
                     else:
                         results = Results(
-                            api_key=MWMBL_API_KEY,
                             results=result_items,
                             crawler_version=CRAWLER_VERSION,
                             device_name=get_device_name(data_path),
@@ -313,7 +312,7 @@ class Crawler:
                         if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
                             results_url += "?dry_run=true"
                         logger.info(f"Posting {len(result_items)} results to {results_url}")
-                        response = requests.post(results_url, json=results.dict())
+                        response = requests.post(results_url, json=results.dict(), headers={"X-API-Key": MWMBL_API_KEY})
                         logger.info(f"Response: {response.text}")
                         response.raise_for_status()
 

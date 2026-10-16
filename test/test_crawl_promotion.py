@@ -176,6 +176,13 @@ def test_run_indexing_submits_results_that_beat_the_remote_index(fake_redis):
     assert submitted_urls == [STRONG.url]
 
 
+def test_run_indexing_sends_the_api_key_in_the_header(fake_redis):
+    post = run_indexing_with(fake_redis, [STRONG], [MEDIUM])
+
+    assert post.call_args.kwargs["headers"] == {"X-API-Key": "test-api-key"}
+    assert post.call_args.kwargs["json"]["api_key"] is None
+
+
 def test_run_indexing_keeps_quiet_about_results_the_remote_index_beats(fake_redis):
     post = run_indexing_with(fake_redis, [MEDIUM], [STRONG])
 
