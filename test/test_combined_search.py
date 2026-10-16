@@ -555,6 +555,30 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
 
 
 @pytest.mark.django_db
+def test_a_seed_search_counts_itself_and_its_pages_in_the_users_totals(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources(new_urls=("https://a.example/", "https://b.example/", "https://c.example/"))
+
+    _crawl(client, access_token)
+    user.refresh_from_db()
+
+    assert user.seed_search_pages_indexed == 3
+    assert user.seed_searches == 1
+
+
+@pytest.mark.django_db
+def test_a_search_without_the_crawl_flag_credits_nothing(client, user, access_token, fresh_quota, stub_sources):
+    stub_sources(new_urls=("https://a.example/",))
+
+    _get(client, access_token)
+    user.refresh_from_db()
+
+    assert user.seed_search_pages_indexed == 0
+    assert user.seed_searches == 0
+
+
+@pytest.mark.django_db
 def test_no_crawl_without_the_flag(client, access_token, fresh_quota, redis_cache, crawl_sources):
     crawl_sources()
 
