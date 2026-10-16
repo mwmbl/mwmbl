@@ -131,13 +131,13 @@ omit = [
     "mwmbl/migrations/*",
     "mwmbl/asgi.py",
     "mwmbl/wsgi.py",
-    "mwmbl/database.py",
-    "mwmbl/indexer/domains/*",
-    "mwmbl/indexer/fsqueue.py",
-    "mwmbl/indexer/links.py",
     "mwmbl/indexer/paths.py",
-    "mwmbl/management/commands/train_*.py",
-    "mwmbl/management/commands/backfill_*.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
 ]
 
 [tool.ruff]
