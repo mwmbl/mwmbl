@@ -29,7 +29,7 @@ take minutes, and in series with the periodic tasks they would hold up the usage
 the Polar report. One crawl runs at a time, each user has at most one
 queued or running, and at most SEED_CRAWL_MAX_QUEUED are, so nobody can fill the queue.
 
-The new pages a search and its crawl added are counted on the user for their stats, and what it found on
+The new pages a crawl added are counted on the user for their stats, and what it found on
 each of Staan's domains is scored for crawlers as seed domains - see
 mwmbl.indexer.seed_domains.
 """
@@ -218,18 +218,9 @@ def crawl_round(frontier: Frontier, batch: list[str], redis) -> list[Document]:
     return documents
 
 
-def credit_seed_search_pages(user_id: int, count: int) -> None:
-    """Add pages a Seed Search or its crawl put into the index to the user's all-time total."""
-    if count:
-        MwmblUser.objects.filter(id=user_id).update(seed_search_pages_indexed=F("seed_search_pages_indexed") + count)
-
-
-def record_seed_search(user_id: int, pages_added: int) -> None:
-    """Count a search made with Seed Search on, and the new pages it wrote to the index, for the user's stats."""
-    MwmblUser.objects.filter(id=user_id).update(
-        seed_searches=F("seed_searches") + 1,
-        seed_search_pages_indexed=F("seed_search_pages_indexed") + pages_added,
-    )
+def record_seed_search(user_id: int) -> None:
+    """Count a search made with Seed Search on, for the user's stats."""
+    MwmblUser.objects.filter(id=user_id).update(seed_searches=F("seed_searches") + 1)
 
 
 def start_seed_crawl(
@@ -515,9 +506,10 @@ def _run_round(redis, record_key: str, token: int, fields: dict[str, str], index
         return
     logger.info("Seed crawl for user %d added %d new pages", user_id, len(new_documents))
     # After the round is recorded, so a round run twice is not counted twice.
-    # Not the new seeds: the search that queued this crawl wrote them, and credited them then.
-    crawled_pages = [document for document in new_documents if document.url not in new_seed_urls]
-    credit_seed_search_pages(user_id, len(crawled_pages))
+    if new_documents:
+        MwmblUser.objects.filter(id=user_id).update(
+            seed_search_pages_indexed=F("seed_search_pages_indexed") + len(new_documents)
+        )
 
 
 def _finish(
