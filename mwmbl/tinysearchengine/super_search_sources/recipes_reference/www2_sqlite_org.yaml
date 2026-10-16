@@ -1,0 +1,19 @@
+name: www2_sqlite_org
+domain: www2.sqlite.org
+field: programming
+request:
+  url: https://www2.sqlite.org/search
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: div.nounderline
+  base_url: https://www2.sqlite.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

@@ -1,25 +1,47 @@
 """
-Script that updates data in a background process.
+Background work that runs outside the request path.
 
-Also contains Django Background Tasks for periodic quota maintenance:
+Django Background Tasks for periodic maintenance:
   - sync_search_counts: syncs Redis monthly counters → DB once per hour
+  - report_usage_to_polar: reports billable usage overage to Polar once per hour
+  - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
+  - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
+  - count_index_urls: counts the unique URLs and domains in the index once a week
 """
+
 import logging
 import sys
-from datetime import datetime, timezone
-from logging import getLogger, basicConfig
+from datetime import datetime, timedelta, timezone
+from logging import basicConfig, getLogger
 from pathlib import Path
 from time import sleep
 
 from background_task import background
 from django.conf import settings
 from django.core.cache import cache
+from django.core.management import call_command
+from django.db import transaction
+from redis import Redis
 
-from mwmbl.indexer import index_batches, historical
-from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.models import OldIndex, UsageBucket
-from mwmbl.quota import MONTHLY_TTL, _monthly_key, get_all_monthly_keys
+from mwmbl import pricing
+from mwmbl.count_urls import count_urls_step, get_redis
+from mwmbl.crawler.stats import StatsManager
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
+from mwmbl.indexer.purge_blacklisted import purge_documents
+from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
+from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
+from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
+from mwmbl.moderation.model import reset_model_cache
+from mwmbl.moderation.suggest import refresh_suggestion
+from mwmbl.quota import (
+    MONTHLY_TTL,
+    _combined_search_api_monthly_key,
+    _monthly_key,
+    get_all_combined_search_api_monthly_keys,
+    get_all_monthly_keys,
+)
 from mwmbl.tinysearchengine.copy_index import copy_pages
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 NUM_PAGES_TO_COPY = 1024
 
@@ -27,24 +49,7 @@ NUM_PAGES_TO_COPY = 1024
 basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = getLogger(__name__)
 
-
-def run(data_path: str):
-    logger.info("Started background process")
-
-    historical.run()
-    index_path = Path(data_path) / settings.INDEX_NAME
-    batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
-
-    while True:
-        try:
-            batch_cache.retrieve_batches(num_batches=10000)
-        except Exception:
-            logger.exception("Error retrieving batches")
-        try:
-            index_batches.run(batch_cache, index_path)
-        except Exception:
-            logger.exception("Error indexing batches")
-        sleep(10)
+stats_manager = StatsManager(Redis.from_url(settings.REDIS_URL, decode_responses=True))
 
 
 def copy_all_indexes(new_index_path):
@@ -63,7 +68,7 @@ def copy_all_indexes(new_index_path):
 
         # Update the start page
         old_index_info.last_page_copied = end_page
-        old_index_info.last_copied_time = datetime.utcnow()
+        old_index_info.last_copied_time = datetime.now(timezone.utc)
         old_index_info.save()
 
         logger.info(f"Copied pages from {old_index_info.index_path} to {new_index_path} up to page {end_page}")
@@ -88,6 +93,7 @@ def copy_indexes_continuously():
 # Periodic quota maintenance tasks (Django Background Tasks)
 # ---------------------------------------------------------------------------
 
+
 @background(schedule=0)
 def sync_search_counts():
     """
@@ -100,34 +106,253 @@ def sync_search_counts():
     so Postgres stays current as a durable backup.
     """
     now = datetime.now(timezone.utc)
+    buckets = list(UsageBucket.objects.filter(year=now.year, month=now.month))
+    # Standard search and keyed Combined Search have a counter each, stored in their own field.
+    counters = [
+        (_monthly_key, get_all_monthly_keys, "count"),
+        (_combined_search_api_monthly_key, get_all_combined_search_api_monthly_keys, "combined_search_count"),
+    ]
+    for key_for, get_all_keys, field in counters:
+        # Step 1: seed Redis from Postgres, taking the max of the two values.
+        # Postgres may lag behind (up to one sync interval), so if Redis already has
+        # a higher count we keep it. If Redis was cleared (restart), the Postgres
+        # value restores the baseline; any requests made since the restart are
+        # already counted in Redis and will be included via max().
+        for bucket in buckets:
+            stored_count = getattr(bucket, field)
+            key = key_for(bucket.user_id, year=now.year, month=now.month)
+            if not cache.add(key, stored_count, timeout=MONTHLY_TTL):
+                # Key already exists — only update if the Postgres value is higher
+                current = cache.get(key, default=0)
+                if stored_count > current:
+                    cache.set(key, stored_count, timeout=MONTHLY_TTL)
 
-    # Step 1: seed Redis from Postgres, taking the max of the two values.
-    # Postgres may lag behind (up to one sync interval), so if Redis already has
-    # a higher count we keep it. If Redis was cleared (restart), the Postgres
-    # value restores the baseline; any requests made since the restart are
-    # already counted in Redis and will be included via max().
-    for bucket in UsageBucket.objects.filter(year=now.year, month=now.month):
-        key = _monthly_key(bucket.user_id, year=now.year, month=now.month)
-        if not cache.add(key, bucket.count, timeout=MONTHLY_TTL):
-            # Key already exists — only update if the Postgres value is higher
-            current = cache.get(key, default=0)
-            if bucket.count > current:
-                cache.set(key, bucket.count, timeout=MONTHLY_TTL)
-
-    # Step 2: sync live Redis counters back to Postgres
-    for key in get_all_monthly_keys():
-        # key format: search:monthly:{user_id}:{year}:{month}
-        try:
-            parts = key.split(":")
-            user_id = int(parts[2])
-            year = int(parts[3])
-            month = int(parts[4])
-            count = cache.get(key, default=0)
-            UsageBucket.objects.update_or_create(
-                user_id=user_id, year=year, month=month,
-                defaults={"count": count},
-            )
-        except Exception:
-            logger.exception("Error syncing search count for key %s", key)
+        # Step 2: sync live Redis counters back to Postgres
+        for key in get_all_keys():
+            # key format: {prefix}:monthly:{user_id}:{year}:{month}
+            try:
+                parts = key.split(":")
+                user_id = int(parts[2])
+                year = int(parts[3])
+                month = int(parts[4])
+                count = cache.get(key, default=0)
+                UsageBucket.objects.update_or_create(
+                    user_id=user_id,
+                    year=year,
+                    month=month,
+                    defaults={field: count},
+                )
+            except Exception:
+                logger.exception("Error syncing search count for key %s", key)
 
 
+# ---------------------------------------------------------------------------
+# Index statistics (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+
+@background(schedule=0)
+def count_index_urls():
+    """
+    Read the next slice of the index into the weekly count of its unique URLs.
+
+    Each run stops after INDEX_COUNT_SECONDS_PER_RUN, so the hours-long scan is spread
+    over many runs rather than blocking the hourly tasks queued behind it.
+
+    It never raises. django-background-tasks only repeats a task that succeeds, and after
+    MAX_ATTEMPTS failures it deletes the row, so one bad spell - Redis down, the index
+    missing - would stop the count until the next deploy rescheduled it. The scan's state
+    is in Redis, so the next run just tries again.
+    """
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    try:
+        count_urls_step(get_redis(), index_path, settings.INDEX_COUNT_SECONDS_PER_RUN)
+    except Exception:
+        logger.exception("Error counting the URLs in the index")
+
+
+# ---------------------------------------------------------------------------
+# Blacklisted-domain maintenance (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+
+@background(schedule=0)
+def refresh_blacklist_snapshot():
+    """
+    Rebuild the blacklist snapshot that the search workers filter against.
+
+    This is the only place the multi-megabyte remote blocklists are downloaded and
+    parsed. Search workers only ever read the ~11 MB hash array this publishes to Redis,
+    so no query ever waits on a blocklist fetch. See mwmbl.indexer.blacklist_snapshot.
+    """
+    refresh_snapshot()
+
+
+@background(schedule=0)
+def purge_blacklisted_from_queue():
+    """
+    Remove the documents that retrieval filtered out from the index itself.
+
+    Retrieval already guarantees these are never shown; this closes the loop so the same
+    documents are not re-filtered on every future query. The queue is best-effort, and
+    that is fine: anything lost is re-queued the next time a query surfaces it.
+    """
+    documents = drain_purge_queue(settings.BLACKLIST_PURGE_BATCH_SIZE)
+    if not documents:
+        return
+
+    blacklist = get_snapshot_blacklist()
+    index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+    with TinyIndex(Document, str(index_path), "w") as index:
+        removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
+
+    num_removed = sum(removed_by_domain.values())
+    stats_manager.record_blacklisted_removed(num_removed)
+
+    logger.info(
+        "Purged %d documents from the index across %d domains; %d still queued",
+        num_removed,
+        len(removed_by_domain),
+        queue_size(),
+    )
+
+
+@background(schedule=0)
+def report_usage_to_polar():
+    """
+    Reports each user's billable overage (requests beyond the free 2,000/month)
+    and keyed Combined Search requests to Polar as usage events, once per hour.
+
+    Only the delta since the last report is sent (UsageBucket.reported_overage
+    tracks how much has already been ingested), so re-runs are idempotent and a
+    failed batch simply gets resent (larger) on the next run rather than risking
+    double-counting.
+    """
+    from polar_sdk import Polar
+
+    now = datetime.now(timezone.utc)
+
+    events = []
+    buckets_to_update = []
+    for bucket in UsageBucket.objects.filter(year=now.year, month=now.month).select_related("user__billing"):
+        billing = getattr(bucket.user, "billing", None)
+        if not billing or not billing.polar_customer_id:
+            continue  # no Polar customer yet — nothing to report
+
+        total_overage = pricing.billable_overage(bucket.count)
+        search_delta = total_overage - bucket.reported_overage
+        # Keyed Combined Search has no free allowance, so every request is billable. It is
+        # its own event so that Polar can meter and price it apart from standard search.
+        combined_search_delta = bucket.combined_search_count - bucket.reported_combined_search
+        if search_delta <= 0 and combined_search_delta <= 0:
+            continue
+
+        for name, delta in [("search_request", search_delta), ("combined_search_request", combined_search_delta)]:
+            if delta > 0:
+                events.append(
+                    {
+                        "name": name,
+                        "external_customer_id": str(bucket.user.id),
+                        "metadata": {"quantity": delta},
+                    }
+                )
+        bucket.reported_overage = max(total_overage, bucket.reported_overage)
+        bucket.reported_combined_search = max(bucket.combined_search_count, bucket.reported_combined_search)
+        buckets_to_update.append(bucket)
+
+    if not events:
+        return
+
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            polar.events.ingest(request={"events": events})
+    except Exception:
+        logger.exception("Error reporting usage to Polar")
+        return
+
+    UsageBucket.objects.bulk_update(buckets_to_update, ["reported_overage", "reported_combined_search"])
+
+
+# ---------------------------------------------------------------------------
+# Domain moderation suggestions (Django Background Tasks)
+# ---------------------------------------------------------------------------
+
+
+@background(schedule=0)
+def enrich_domain_submission(domain: str):
+    """Crawl a submitted domain and store the suggestion the moderation queue will read.
+
+    All of the cost of a suggestion lives here rather than on the moderator's request: three
+    page fetches, the deterministic checks, and the model. Scheduled by a post_save receiver
+    when a submission is created (mwmbl.signals).
+
+    Idempotent by design - the queue only asks for a suggestion, never for a fresh crawl - so
+    a domain whose evidence is still fresh is left alone. That matters because 615 of 6,949
+    distinct submitted domains have been submitted more than once.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.MODERATION_EVIDENCE_MAX_AGE_DAYS)
+    existing = DomainEvidence.objects.filter(domain=domain).first()
+    if (
+        existing is not None
+        and existing.state == DomainEvidence.State.READY
+        and existing.fetched_at
+        and existing.fetched_at > cutoff
+    ):
+        logger.info("Evidence for %s is still fresh, skipping crawl", domain)
+        return
+
+    redis = Redis.from_url(settings.REDIS_URL)
+    try:
+        crawl = crawl_domain(domain, redis)
+    except Exception as exception:
+        logger.exception("Failed to crawl %s for moderation", domain)
+        store_failure(domain, type(exception).__name__)
+        return
+
+    # One transaction, because the row is only useful once both halves are in it. Committing
+    # READY with no suggestion on it - a deploy restarting the worker in between would do it -
+    # leaves a row the freshness check above then skips for a month, so the queue would show
+    # "not assessed yet" for a domain that has in fact been crawled. Scoring failures are left
+    # to propagate: the transaction rolls back and the task runner retries, which is a better
+    # answer than recording a crawl that did happen as a crawl failure.
+    with transaction.atomic():
+        evidence = store_evidence(domain, crawl)
+        refresh_suggestion(evidence)
+    logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action, evidence.confidence or 0.0)
+
+
+@background(schedule=0)
+def rescore_pending_submissions():
+    """Recompute stored suggestions for everything still awaiting moderation.
+
+    Run after a retrain. Without it a new model would only ever affect submissions made after
+    it shipped, leaving the existing queue scored by its predecessor. No crawling is involved
+    - the page text is already stored - so the whole backlog re-scores in seconds.
+    """
+    reset_model_cache()
+    pending_domains = set(DomainSubmission.objects.filter(status="PENDING").values_list("name", flat=True))
+    queryset = DomainEvidence.objects.filter(domain__in=pending_domains, state=DomainEvidence.State.READY)
+
+    rescored = 0
+    for evidence in queryset.iterator():
+        refresh_suggestion(evidence)
+        rescored += 1
+    logger.info("Rescored %d pending submissions", rescored)
+
+
+@background(schedule=0)
+def retrain_domain_moderation_model():
+    """Retrain the moderation suggester on the decisions made since the last run.
+
+    Safe to automate because the gate, not a human, is what stops a regression: the new model
+    is only published if its cold-start PR-AUC clears the lower bound of the incumbent's
+    bootstrap interval. It runs in this worker, which is also the only process that loads the
+    model, so the reload and the pending-queue rescore both take effect immediately.
+    """
+    call_command("train_domain_moderation_model")
+
+
+@background(schedule=0)
+def flush_expired_tokens():
+    """Delete expired JWT refresh tokens from the blacklist tables, which gain a row per refresh."""
+    call_command("flushexpiredtokens")

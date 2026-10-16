@@ -1,0 +1,19 @@
+name: journals_plos_org
+domain: journals.plos.org
+field: academia
+request:
+  url: https://plos.org
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: span.post-list__post-title
+  base_url: https://journals.plos.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: research
+  expect_title_contains: research

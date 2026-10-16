@@ -1,0 +1,31 @@
+{% extends "admin/index.html" %}
+
+{% comment %} Wired up as admin.site.index_template. A file named admin/index.html here would not
+   win: django.contrib.admin comes before mwmbl in INSTALLED_APPS, so the app-directories
+   loader finds Django's copy first. A distinct name sidesteps that, and lets this template
+   extend the original rather than duplicate it. {% endcomment %}
+
+{% block content %}
+  {{ block.super }}
+  <div class="module">
+    <table>
+      <caption>Status</caption>
+      <tr>
+        <th scope="row"><a href="{% url 'blacklist_status' %}">Blacklist status</a></th>
+        <td>The published snapshot, the purge queue and the tasks that maintain them.</td>
+      </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'search_traffic' %}">Search traffic</a></th>
+        <td>Requests per endpoint and per day, and the user agents that sent them.</td>
+      </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'index_count' %}">Index count</a></th>
+        <td>Progress of the weekly scan counting unique URLs in the index, and its results.</td>
+      </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'paying_users' %}">Paying users</a></th>
+        <td>API users and members, their quotas, usage and what they pay, and Seed Search usage.</td>
+      </tr>
+    </table>
+  </div>
+{% endblock %}

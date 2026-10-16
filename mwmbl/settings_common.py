@@ -9,7 +9,9 @@ https://docs.djangoproject.com/en/4.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
+
 import os
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -29,58 +31,59 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'django.contrib.humanize',
-    'django.contrib.postgres',
-    'mwmbl',
-    'django_htmx',
-    'django_vite',
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
-    'ninja_extra',
-    'debug_toolbar',
-    'background_task',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "django.contrib.humanize",
+    "django.contrib.postgres",
+    "mwmbl",
+    "django_htmx",
+    "django_vite",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "ninja_extra",
+    "ninja_jwt.token_blacklist",
+    "debug_toolbar",
+    "background_task",
 ]
 
 MIDDLEWARE = [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-
+    "django.middleware.security.SecurityMiddleware",
+    "mwmbl.traffic_middleware.SearchTrafficMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
     "allauth.account.middleware.AccountMiddleware",
 ]
 
-ROOT_URLCONF = 'mwmbl.urls'
+ROOT_URLCONF = "mwmbl.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'mwmbl.wsgi.application'
+WSGI_APPLICATION = "mwmbl.wsgi.application"
 
 
 # Password validation
@@ -88,16 +91,16 @@ WSGI_APPLICATION = 'mwmbl.wsgi.application'
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -105,9 +108,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -117,7 +120,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 DJANGO_VITE_DEV_MODE = False
 
@@ -125,17 +128,15 @@ DJANGO_VITE_DEV_MODE = False
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTHENTICATION_BACKENDS = [
     # Accepts username or email in the username field — used by the JWT token endpoint
-    'mwmbl.auth.UsernameOrEmailBackend',
-
+    "mwmbl.auth.UsernameOrEmailBackend",
     # Needed for Django's permission system (has_perm, has_module_perms) used by the admin
-    'django.contrib.auth.backends.ModelBackend',
-
+    "django.contrib.auth.backends.ModelBackend",
     # allauth backend for allauth's own views (social auth, email confirmation, etc.)
-    'allauth.account.auth_backends.AuthenticationBackend',
+    "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 
@@ -187,16 +188,25 @@ FOOTER_LINKS = [
         "icon": "ph-discord-logo-bold",
         "href": "https://discord.gg/2BGSUYFdkD",
     },
-
-
 ]
 
-BATCH_DIR_NAME = 'batches'
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
 
-SETUP_DATABASE = True
+# Gates database initialisation and background task scheduling; False for the crawler and tests.
+HAS_DATABASE = True
+
+# Whether this container runs the django-background-tasks queue and the seed crawl worker
+# (see mwmbl.main). Note the distinction from HAS_DATABASE above: that gates *scheduling*
+# the tasks, this gates *running* them.
+#
+# Opt-in rather than on by default because beta shares its database, index and Redis with
+# production. Exactly one deployment should run the queue, and it should be production:
+# the tasks report billable usage to Polar and write to the index, so a beta container
+# picking up the same rows would do both against production. Turn it on with
+# `dokku config:set <app> RUN_BACKGROUND_TASKS=true`.
+RUN_BACKGROUND_TASKS = os.environ.get("RUN_BACKGROUND_TASKS", "false").lower() == "true"
 
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
@@ -228,18 +238,25 @@ def strip_query_string(event):
             del event["request"]["query_string"]
     return event
 
+
 # Django ninja-jwt settings
 NINJA_JWT = {
     "USER_AUTHENTICATION_RULE": require_email_confirmation,
+    # Refresh tokens rotate on every use, so this is an inactivity limit: users who
+    # visit at least once a year stay logged in indefinitely.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365),
+    "ROTATE_REFRESH_TOKENS": True,
+    # Each refresh token works once, so a leaked token dies when its owner next refreshes
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
 # Apply PostgreSQL's default: if no database name is given in the URL, fall back to
 # the username (matching libpq's behaviour so that postgres://user@ works).
 _db = dj_database_url.config()
-if _db and not _db.get('NAME'):
-    _db['NAME'] = _db.get('USER', '')
-DATABASES = {'default': _db}
+if _db and not _db.get("NAME"):
+    _db["NAME"] = _db.get("USER", "")
+DATABASES = {"default": _db}
 
 # Redis configuration
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
@@ -262,9 +279,177 @@ INTERNAL_IPS = [
     "127.0.0.1",
 ]
 
-RUST_MODEL_PATH = Path(__file__).parent / 'resources' / "model.xgb"
+RUST_MODEL_PATH = Path(__file__).parent / "resources" / "model.xgb"
 
 POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
 POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")
-POLAR_PRODUCT_ID_STARTER = os.environ.get("POLAR_PRODUCT_ID_STARTER", "")
-POLAR_PRODUCT_ID_PRO = os.environ.get("POLAR_PRODUCT_ID_PRO", "")
+POLAR_PRODUCT_ID_USAGE = os.environ.get("POLAR_PRODUCT_ID_USAGE", "")
+POLAR_PRODUCT_ID_SPROUT = os.environ.get("POLAR_PRODUCT_ID_SPROUT", "")
+POLAR_PRODUCT_ID_SAPLING = os.environ.get("POLAR_PRODUCT_ID_SAPLING", "")
+POLAR_PRODUCT_ID_CANOPY = os.environ.get("POLAR_PRODUCT_ID_CANOPY", "")
+POLAR_SERVER = os.environ.get("POLAR_SERVER", "sandbox")
+
+GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "")
+
+CURRENT_AGREEMENT_VERSIONS = {
+    "TERMS_OF_SERVICE_GUI": "v2026-04-A",
+    "TERMS_OF_SERVICE_API": "v2026-04-A",
+}
+
+# Combined Search - the v2 endpoint that pools the Mwmbl index, Staan and Wikipedia and
+# ranks the union with its own LTR model. Gated behind login, like Super Search, which it is
+# meant to replace. Monthly limits for web (JWT) callers, keyed by
+# mwmbl.membership.MembershipTier value; "free" is signed-in users without a membership.
+COMBINED_SEARCH_MONTHLY_LIMITS = {"free": 30, "sprout": 300, "sapling": 1_500, "canopy": 1_500}
+# Its own model artifact, so Combined Search can be retrained on the pooled candidate set
+# without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
+COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"
+
+# Staan, the external web-search provider Combined Search pools in. Results are cached in
+# the external results index - see mwmbl.tinysearchengine.staan.
+STAAN_SEARCH_API_KEY = os.environ.get("STAAN_SEARCH_API_KEY", "")
+STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/search/web")
+# en-gb because Combined Search's ordering was tuned on en-gb results, for a UK searcher.
+STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
+STAAN_TIMEOUT_SECONDS = 5
+
+# Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
+# following links within Staan's domains - see mwmbl.indexer.seed_crawl.
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 20
+# A domain is dropped from a crawl after this many fetches in a row that added no new page.
+SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
+# A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
+SEED_CRAWL_MAX_SECONDS = 15 * 60
+# Crawls queued or running, across all users, beyond which crawl=true queues nothing.
+SEED_CRAWL_MAX_QUEUED = 10
+SEED_CRAWL_THREADS = 8
+# The least time between two fetches from one domain.
+SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
+# Queries are private, so a user's record of what their crawl added is not kept for long.
+SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
+# How long a worker has to finish a crawl's round before another may claim it. Far longer
+# than a round takes - one fetch per domain, each with a three-second timeout, then indexing.
+SEED_CRAWL_LEASE_SECONDS = 120
+# Claims of one round, by workers that died before finishing it, after which the crawl fails.
+SEED_CRAWL_MAX_ATTEMPTS = 3
+# A seed domain's new-page score averages only its most recent crawls, so a domain the
+# crawls have saturated drops down the list rather than living off its first crawl.
+SEED_DOMAIN_RECENT_CRAWLS = 5
+# The seed domain list crawlers read is republished at most this often, so it cannot be
+# diffed to learn what one private query returned - see mwmbl.indexer.seed_domains.
+SEED_DOMAINS_PUBLISH_SECONDS = 24 * 60 * 60
+SEED_DOMAINS_PUBLISHED = 1000
+
+# Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
+# Without a key, or when a request fails or times out, Combined Search serves the LTR's
+# order instead.
+JEV_API_KEY = os.environ.get("JEV_API_KEY", "")
+JEV_URL = "https://api.typesafe.ai/v1/systemone"
+# The model version the composite weights were tuned on: a new version means re-tuning them.
+JEV_MODEL = "jev-1.13.0"
+# Jev takes about 0.6s at p50 and runs after Staan, so a slow call has to give up quickly.
+JEV_TIMEOUT_SECONDS = 1.5
+
+# Super Search
+SUPER_SEARCH_MONTHLY_LIMIT = 100
+SUPER_SEARCH_TOP_K = 10  # promote sources in top-K seen so far for crawling
+SUPER_SEARCH_DEADLINE_SECONDS = 10.0
+SUPER_SEARCH_PER_SOURCE_TIMEOUT = 2.0
+SUPER_SEARCH_MAX_CONCURRENT_PER_HOST = 4
+SUPER_SEARCH_MAX_LINKS_PER_PAGE = 3
+SUPER_SEARCH_RESULTS_PER_SOURCE = 10
+SUPER_SEARCH_FINAL_RESULTS_LIMIT = 100
+SUPER_SEARCH_CRAWL_WORKERS = 8  # threads in the dedicated crawl pool
+# Fine-tuned relevance judge (dir with model.onnx + tokenizer.json; see
+# devdata/judge_train/RESULTS.md). If the artifact is missing, Super Search
+# falls back to LTR final ranking and top-K-survival bandit rewards.
+SUPER_SEARCH_JUDGE_MODEL_DIR = os.environ.get(
+    "SUPER_SEARCH_JUDGE_MODEL_DIR",
+    str(Path(__file__).parent.parent / "devdata" / "judge_train" / "models" / "minilm-both-v1" / "onnx"),
+)
+
+# Super Search source selection (xgb contextual bandit over cosine-profile features)
+SUPER_SEARCH_SOURCES_TO_QUERY = 10  # max sources queried per search
+SUPER_SEARCH_PROJECTION_DIM = 64  # feature-hashing / random-projection dimension
+SUPER_SEARCH_PROFILE_DECAY = 0.1  # decaying-mean weight for per-site content profiles
+SUPER_SEARCH_QVEC_CACHE_TTL = 3600  # seconds to cache a query's projected vectors
+SUPER_SEARCH_FORCE_INCLUDE = []  # source names always queried (high-value sources), like always_on
+
+# XGBoost contextual-bandit source model. The runtime dir receives online
+# retrains (background task); before the first retrain, serving uses the
+# repo-bundled warm-start artifact in super_search_select/artifacts/xgb.
+SUPER_SEARCH_XGB_MODEL_DIR = os.environ.get(
+    "SUPER_SEARCH_XGB_MODEL_DIR", str(Path(__file__).parent.parent / "devdata" / "super_search_xgb")
+)
+SUPER_SEARCH_XGB_EPSILON = 0.1  # epsilon-greedy exploration rate
+SUPER_SEARCH_XGB_MIN_TRAIN_ROWS = 2000  # (source, reward) pairs required before an online retrain
+SUPER_SEARCH_XGB_TRAIN_WINDOW_DAYS = 90  # impression window for online retrains
+SOURCE_PROVENANCE_MAX_DEPTH = 3  # max crawl hops a Super Search source propagates to descendant pages
+
+# Blacklisted-domain filtering on the search path. Set BLACKLIST_FILTER_AT_RETRIEVAL to
+# False to turn retrieval-time filtering off without a rollback; the index-time filter in
+# index_documents() is unaffected.
+BLACKLIST_FILTER_AT_RETRIEVAL = os.environ.get("BLACKLIST_FILTER_AT_RETRIEVAL", "true").lower() != "false"
+BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300  # how often a worker checks Redis for a new snapshot
+BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60  # how often the snapshot is rebuilt from the remote lists
+BLACKLIST_PURGE_INTERVAL_SECONDS = 300  # how often the purge queue is drained
+BLACKLIST_PURGE_BATCH_SIZE = 1000  # documents removed from the index per purge run
+
+# Counting the unique URLs in the index means reading all of it, which takes hours. It is
+# done a slice at a time so it never holds up the rest of the task queue - see
+# mwmbl.count_urls.
+INDEX_COUNT_INTERVAL_DAYS = 7  # how often a new scan of the index starts
+INDEX_COUNT_RUN_INTERVAL_SECONDS = 300  # how often a slice of the scan runs
+INDEX_COUNT_SECONDS_PER_RUN = 120  # how long each slice reads pages for; keep well under MAX_RUN_TIME
+# How far ahead approving a domain submission schedules a snapshot rebuild. Approvers work
+# through submissions in batches, so the delay collapses a batch into one rebuild rather
+# than one per approval - see mwmbl.signals.
+BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS = 600
+
+# Results from external search providers - Wikipedia today, others later - are cached in a
+# TinyIndex of their own (see mwmbl.indexer.external_cache). Entries are namespaced by
+# source, so providers share the file without sharing entries. A dedicated file rather than
+# the search index because a cache entry competing with real documents for a shared page
+# evicts them - #359 measured that as a net NDCG loss - and because a separate file never
+# enters the candidate pool for anyone else's query.
+EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower() != "false"
+
+# Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
+# the request path that reaches for Redis, and the CI test job runs none.
+SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
+# The default TTL, for any provider that does not name its own below. Wikipedia articles
+# move rarely, which is what justifies six months.
+EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks
+# A provider that turns over faster gets its own, read by external_cache.is_fresh. A general
+# web-search index moves far faster than an encyclopedia, so six months of Staan results
+# would be six months of stale answers. One scalar per provider rather than a dict keyed by
+# DocumentSource: the settings module must not import the indexer, which would pull the Rust
+# extension in at settings-import time.
+EXTERNAL_CACHE_STAAN_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week
+# A query a provider has nothing for is worth remembering too, or it is re-fetched forever.
+# Shorter, because a result appearing is a likelier change than an existing one moving.
+EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+# Domain moderation suggestions. The model is loaded only by the background worker that
+# enriches submissions - the queue reads the stored suggestion - so a missing artifact
+# degrades to the deterministic checks rather than affecting any moderator request.
+#
+# Retrained models are stored in Postgres (mwmbl.models.ModerationModelArtifact), because a
+# container filesystem is neither shared between workers nor kept across a deploy. This
+# directory holds the read-only warm start used until the first retrain publishes one.
+DOMAIN_MODERATION_MODEL_DIR = os.environ.get(
+    "DOMAIN_MODERATION_MODEL_DIR", str(Path(__file__).parent / "moderation" / "artifacts")
+)
+MODERATION_PAGES_PER_DOMAIN = 3  # homepage plus two, shown to the moderator and read by the model
+# Both measured on held-out decisions rather than picked as round numbers. At 0.75 a suggested
+# rejection is right 81% of the time overall and 88% for submitters with no track record; at
+# 0.25 a suggested approval is wrong 6% of the time overall. Between the two the suggestion is
+# UNSURE, which the queue surfaces as needing a human.
+#
+# The approve side is *also* withheld entirely for submitters with no track record, where it
+# would otherwise be wrong 44% of the time - see mwmbl.moderation.suggest. That, rather than
+# these two numbers, is where the asymmetry between approving and rejecting lives.
+MODERATION_REJECT_THRESHOLD = 0.75
+MODERATION_APPROVE_THRESHOLD = 0.25
+MODERATION_EVIDENCE_MAX_AGE_DAYS = 30  # refetch rather than reuse evidence older than this
+MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60  # monthly; the gate guards each publish

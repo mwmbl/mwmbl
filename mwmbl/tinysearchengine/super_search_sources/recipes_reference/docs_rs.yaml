@@ -1,0 +1,19 @@
+name: docs_rs
+domain: docs.rs
+field: programming
+request:
+  url: https://docs.rs/releases/search
+  params:
+    query: '{query}'
+response:
+  format: html
+  results: ul li
+  base_url: https://docs.rs
+  fields:
+    title: div.name
+    url:
+      selector: a.release
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

@@ -1,0 +1,17 @@
+name: help_archive_org
+domain: help.archive.org
+field: other
+request:
+  url: https://help.archive.org/wp-json/wp/v2/search
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title
+    url: url
+smoke:
+  query: wayback
+  expect_title_contains: Wayback

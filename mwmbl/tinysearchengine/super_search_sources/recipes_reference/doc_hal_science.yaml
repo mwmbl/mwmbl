@@ -1,0 +1,22 @@
+name: doc_hal_science
+domain: doc.hal.science
+field: academia
+request:
+  url: https://api.archives-ouvertes.fr/search
+  params:
+    q: "{query}"
+    rows: "{limit}"
+    fl: docid,title_s,uri_s
+    sort: "submitType_s desc"
+    wt: json
+response:
+  format: json
+  results: response.docs
+  fields:
+    title: title_s
+    extract: "abstract_s"
+    url:
+      template: "https://doc.hal.science/{docid}"
+smoke:
+  query: machine learning
+  expect_title_contains: learning

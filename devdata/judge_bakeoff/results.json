@@ -1,0 +1,50 @@
+[
+  {
+    "judge": "term_overlap",
+    "spearman_overall": 0.208,
+    "spearman_relevance": 0.216,
+    "per_query_spearman": 0.17,
+    "auc_rel2": 0.583,
+    "ndcg@10": 0.559,
+    "ndcg@10_random": 0.391,
+    "source_within_query_spearman": 0.143,
+    "source_best_agree@1": 0.553,
+    "source_eligible_queries": 237
+  },
+  {
+    "judge": "nomic_cosine",
+    "spearman_overall": 0.364,
+    "spearman_relevance": 0.382,
+    "per_query_spearman": 0.326,
+    "auc_rel2": 0.694,
+    "ndcg@10": 0.618,
+    "ndcg@10_random": 0.391,
+    "source_within_query_spearman": 0.114,
+    "source_best_agree@1": 0.544,
+    "source_eligible_queries": 237
+  },
+  {
+    "judge": "minilm_ce",
+    "spearman_overall": 0.372,
+    "spearman_relevance": 0.384,
+    "per_query_spearman": 0.349,
+    "auc_rel2": 0.689,
+    "ndcg@10": 0.695,
+    "ndcg@10_random": 0.391,
+    "source_within_query_spearman": 0.136,
+    "source_best_agree@1": 0.557,
+    "source_eligible_queries": 237
+  },
+  {
+    "judge": "jina_turbo_ce",
+    "spearman_overall": 0.358,
+    "spearman_relevance": 0.372,
+    "per_query_spearman": 0.323,
+    "auc_rel2": 0.684,
+    "ndcg@10": 0.637,
+    "ndcg@10_random": 0.391,
+    "source_within_query_spearman": 0.224,
+    "source_best_agree@1": 0.595,
+    "source_eligible_queries": 237
+  }
+]

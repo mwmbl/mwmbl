@@ -2,18 +2,14 @@
 Estimate the number of unique URLs in the index by fitting
 a Binomial distribution to the data.
 """
+
 from collections import Counter
 from pathlib import Path
 from random import Random
 
-import numpy as np
 from pydistinct.ensemble_estimators import median_estimator
-from pydistinct.stats_estimators import bootstrap_estimator, goodmans_estimator, smoothed_jackknife_estimator, \
-    horvitz_thompson_estimator
-from scipy.optimize import curve_fit, differential_evolution
-from scipy.stats import binom, poisson, betabinom
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 random = Random(1)
 

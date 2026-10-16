@@ -6,8 +6,35 @@
 
 use xgb::{parameters, Booster, DMatrix};
 
-use crate::features::{get_features_with_regex, NUM_FEATURES};
+use crate::features::{
+    get_features_with_regex, MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES,
+};
 use crate::text::{tokenize, build_query_regex};
+
+/// What Staan said about a record's URL for its query.
+///
+/// Keyed on the URL, not on where the record came from, so an index copy of a page Staan
+/// also returned carries Staan's rank too.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StaanRank {
+    /// Staan was never asked about this query, as for most extension and curation rows.
+    NotAsked,
+    /// Staan was asked and did not return this URL.
+    NotReturned,
+    /// Staan returned this URL at this 0-based rank.
+    Rank(u32),
+}
+
+impl StaanRank {
+    /// The `in_staan` and `staan_rank` columns, NaN where XGBoost should treat them as missing.
+    fn features(self) -> [f32; 2] {
+        match self {
+            StaanRank::NotAsked => [f32::NAN, f32::NAN],
+            StaanRank::NotReturned => [0.0, f32::NAN],
+            StaanRank::Rank(rank) => [1.0, rank as f32],
+        }
+    }
+}
 
 /// A single document record passed from Python.
 #[derive(Debug, Clone)]
@@ -17,10 +44,29 @@ pub struct DocumentRecord {
     pub title: String,
     pub extract: String,
     pub score: f32,
+    /// Only read by a pipeline with provider features.
+    pub staan_rank: StaanRank,
+    /// This record is Staan's own result, so it is exempt from the majority-terms filter:
+    /// Staan matches semantically, and a low term overlap says less about its results than
+    /// about the index's. An index copy of the same URL is not exempt.
+    pub from_staan: bool,
 }
 
+/// Width of a feature row: the shared features, plus Staan's when `provider_features`.
+pub fn num_features(provider_features: bool) -> usize {
+    if provider_features {
+        NUM_FEATURES + PROVIDER_FEATURE_NAMES.len()
+    } else {
+        NUM_FEATURES
+    }
+}
+
+/// The booster attribute recording whether a model was trained with provider features, so a
+/// loaded model knows the row width it scores.
+const PROVIDER_FEATURES_ATTRIBUTE: &str = "mwmbl_provider_features";
+
 /// Extract features for a slice of document records.
-/// Returns a flat row-major Vec<f32> of shape (n_rows × NUM_FEATURES).
+/// Returns a flat row-major Vec<f32> of shape (n_rows × num_features(provider_features)).
 ///
 /// Optimisation: tokenizes each unique query only once, so a batch where many
 /// records share the same query (typical in LTR datasets) avoids redundant work.
@@ -31,7 +77,7 @@ struct QueryCache {
     re_url: Option<regex::Regex>,
 }
 
-pub fn extract_features_batch(records: &[DocumentRecord]) -> Vec<f32> {
+pub fn extract_features_batch(records: &[DocumentRecord], provider_features: bool) -> Vec<f32> {
     use std::collections::HashMap;
 
     // Build a per-query cache of tokenized terms and compiled regexes.
@@ -39,7 +85,7 @@ pub fn extract_features_batch(records: &[DocumentRecord]) -> Vec<f32> {
     // regardless of how many records share that query.
     let mut query_cache: HashMap<&str, QueryCache> = HashMap::new();
 
-    let mut flat: Vec<f32> = Vec::with_capacity(records.len() * NUM_FEATURES);
+    let mut flat: Vec<f32> = Vec::with_capacity(records.len() * num_features(provider_features));
     for rec in records {
         let entry = query_cache.entry(rec.query.as_str()).or_insert_with(|| {
             let terms = tokenize(&rec.query.to_lowercase());
@@ -60,6 +106,9 @@ pub fn extract_features_batch(records: &[DocumentRecord]) -> Vec<f32> {
             entry.re_url.as_ref(),
         );
         flat.extend_from_slice(&row);
+        if provider_features {
+            flat.extend_from_slice(&rec.staan_rank.features());
+        }
     }
     flat
 }
@@ -81,6 +130,9 @@ pub struct XGBPipeline {
     pub min_child_weight: Option<f32>,
     pub gamma: Option<f32>,
     pub subsample: Option<f32>,
+    /// Append Staan's ranking (PROVIDER_FEATURE_NAMES) to every row. Set at construction for
+    /// training, and read back from the model by load_model.
+    pub provider_features: bool,
     booster: Option<Booster>,
 }
 
@@ -98,6 +150,7 @@ impl XGBPipeline {
             min_child_weight: None,
             gamma: None,
             subsample: None,
+            provider_features: false,
             booster: None,
         }
     }
@@ -111,6 +164,7 @@ impl XGBPipeline {
         min_child_weight: Option<f32>,
         gamma: Option<f32>,
         subsample: Option<f32>,
+        provider_features: bool,
     ) -> Self {
         XGBPipeline {
             threshold,
@@ -121,6 +175,7 @@ impl XGBPipeline {
             min_child_weight,
             gamma,
             subsample,
+            provider_features,
             booster: None,
         }
     }
@@ -129,7 +184,13 @@ impl XGBPipeline {
     ///
     /// `records`: list of document records (query + document fields)
     /// `labels`: relevance labels (float); binarised at `self.threshold` before training
-    pub fn fit(&mut self, records: &[DocumentRecord], labels: &[f32]) -> Result<(), String> {
+    /// `weights`: optional per-row sample weights (default: all rows weighted equally)
+    pub fn fit(
+        &mut self,
+        records: &[DocumentRecord],
+        labels: &[f32],
+        weights: Option<&[f32]>,
+    ) -> Result<(), String> {
         use std::time::Instant;
 
         eprintln!("[XGBPipeline::fit] Starting fit() with {} records", records.len());
@@ -144,6 +205,15 @@ impl XGBPipeline {
                 labels.len()
             ));
         }
+        if let Some(w) = weights {
+            if w.len() != records.len() {
+                return Err(format!(
+                    "weights length ({}) != records length ({})",
+                    w.len(),
+                    records.len()
+                ));
+            }
+        }
 
         // Binarise labels at threshold (ThresholdPredictor logic)
         let t0 = Instant::now();
@@ -157,7 +227,7 @@ impl XGBPipeline {
 
         // Extract features
         let t1 = Instant::now();
-        let flat_features = extract_features_batch(records);
+        let flat_features = extract_features_batch(records, self.provider_features);
         let n_rows = records.len();
         eprintln!("[XGBPipeline::fit] Feature extraction done in {:.2?}: {} rows × {} features = {} values",
             t1.elapsed(), n_rows, flat_features.len() / n_rows.max(1), flat_features.len());
@@ -171,6 +241,10 @@ impl XGBPipeline {
         let t3 = Instant::now();
         dmat.set_labels(&binary_labels)
             .map_err(|e| format!("Failed to set labels: {}", e))?;
+        if let Some(w) = weights {
+            dmat.set_weights(w)
+                .map_err(|e| format!("Failed to set weights: {}", e))?;
+        }
         eprintln!("[XGBPipeline::fit] DMatrix::set_labels done in {:.2?}", t3.elapsed());
 
         // Build learning parameters (objective: binary:logistic)
@@ -231,6 +305,8 @@ impl XGBPipeline {
         }
         eprintln!("[XGBPipeline::fit] Training loop done in {:.2?}", t6.elapsed());
 
+        booster.set_attribute(PROVIDER_FEATURES_ATTRIBUTE, &self.provider_features.to_string())
+            .map_err(|e| format!("Failed to set provider features attribute: {}", e))?;
         self.booster = Some(booster);
         eprintln!("[XGBPipeline::fit] fit() complete");
         Ok(())
@@ -246,14 +322,27 @@ impl XGBPipeline {
             return Ok(vec![]);
         }
 
-        let flat_features = extract_features_batch(records);
+        let flat_features = extract_features_batch(records, self.provider_features);
         let n_rows = records.len();
+        let row_width = num_features(self.provider_features);
 
         let dmat = DMatrix::from_dense(&flat_features, n_rows)
             .map_err(|e| format!("Failed to create DMatrix: {}", e))?;
 
-        let predictions = booster.predict(&dmat)
+        let mut predictions = booster.predict(&dmat)
             .map_err(|e| format!("XGBoost prediction failed: {}", e))?;
+
+        // Replicate the heuristic ranker's majority-terms filter: drop any result that
+        // matches no more than half the query terms. match_terms (the max matched terms
+        // over fields) and num_terms are already in the extracted feature matrix, so this
+        // reuses the computed features rather than recomputing them. Staan's own results are
+        // exempt (see DocumentRecord::from_staan).
+        for (i, pred) in predictions.iter_mut().enumerate() {
+            let row = &flat_features[i * row_width..(i + 1) * row_width];
+            if !records[i].from_staan && row[MATCH_TERMS_INDEX] <= row[NUM_TERMS_INDEX] / 2.0 {
+                *pred = 0.0;
+            }
+        }
 
         Ok(predictions)
     }
@@ -267,9 +356,15 @@ impl XGBPipeline {
     }
 
     /// Load a model from a file path (XGBoost binary format).
+    ///
+    /// The model's own attribute sets `provider_features`; a model trained before the
+    /// attribute existed has none and uses the shared features only.
     pub fn load_model(&mut self, path: &str) -> Result<(), String> {
         let booster = Booster::load(path)
             .map_err(|e| format!("Failed to load model: {}", e))?;
+        let attribute = booster.get_attribute(PROVIDER_FEATURES_ATTRIBUTE)
+            .map_err(|e| format!("Failed to read provider features attribute: {}", e))?;
+        self.provider_features = attribute.as_deref() == Some("true");
         self.booster = Some(booster);
         Ok(())
     }
@@ -288,7 +383,7 @@ impl XGBPipeline {
     ) -> Result<Self, String> {
         let mut pipeline = XGBPipeline::with_params(
             threshold, scale_pos_weight, reg_lambda, num_rounds,
-            max_depth, min_child_weight, gamma, subsample,
+            max_depth, min_child_weight, gamma, subsample, false,
         );
         pipeline.load_model(path)?;
         Ok(pipeline)
@@ -306,14 +401,107 @@ mod tests {
             title: format!("Rust Programming Example {}", i),
             extract: "A great systems language".to_string(),
             score: i as f32 * 0.1,
+            staan_rank: StaanRank::NotAsked,
+            from_staan: false,
         }).collect()
+    }
+
+    fn record(url: &str, title: &str, staan_rank: StaanRank, from_staan: bool) -> DocumentRecord {
+        DocumentRecord {
+            query: "rust programming".to_string(),
+            url: url.to_string(),
+            title: title.to_string(),
+            extract: String::new(),
+            score: 1.0,
+            staan_rank,
+            from_staan,
+        }
     }
 
     #[test]
     fn test_extract_features_batch_shape() {
         let records = make_records(5);
-        let flat = extract_features_batch(&records);
+        let flat = extract_features_batch(&records, false);
         assert_eq!(flat.len(), 5 * NUM_FEATURES);
+    }
+
+    #[test]
+    fn test_provider_features_are_appended() {
+        let records = vec![
+            record("https://a.com/", "Rust", StaanRank::NotAsked, false),
+            record("https://b.com/", "Rust", StaanRank::NotReturned, false),
+            record("https://c.com/", "Rust", StaanRank::Rank(3), true),
+        ];
+        let shared = extract_features_batch(&records, false);
+        let flat = extract_features_batch(&records, true);
+        let width = num_features(true);
+        assert_eq!(width, NUM_FEATURES + 2);
+        assert_eq!(flat.len(), 3 * width);
+
+        let rows: Vec<&[f32]> = flat.chunks(width).collect();
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(&row[..NUM_FEATURES], &shared[i * NUM_FEATURES..(i + 1) * NUM_FEATURES]);
+        }
+        assert!(rows[0][NUM_FEATURES].is_nan() && rows[0][NUM_FEATURES + 1].is_nan());
+        assert_eq!(rows[1][NUM_FEATURES], 0.0);
+        assert!(rows[1][NUM_FEATURES + 1].is_nan());
+        assert_eq!(&rows[2][NUM_FEATURES..], &[1.0, 3.0]);
+    }
+
+    #[test]
+    fn test_staan_results_are_exempt_from_the_term_filter() {
+        let records = make_records(20);
+        let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        pipeline.fit(&records, &vec![1.0; 20], None).expect("fit should succeed");
+
+        // Neither matches a query term; only Staan's own result survives the filter, not
+        // an index copy that Staan also returned.
+        let test = vec![
+            record("https://example.com/cooking", "Cooking Recipes", StaanRank::Rank(0), true),
+            record("https://example.com/cooking", "Cooking Recipes", StaanRank::Rank(0), false),
+        ];
+        let preds = pipeline.predict(&test).expect("predict should succeed");
+        assert!(preds[0] > 0.0, "Staan's result should keep its prediction");
+        assert_eq!(preds[1], 0.0, "the index copy should still be filtered");
+    }
+
+    #[test]
+    fn test_provider_features_survive_save_and_load() {
+        let mut records = make_records(20);
+        for (i, rec) in records.iter_mut().enumerate() {
+            rec.staan_rank = if i % 2 == 0 { StaanRank::Rank(i as u32 / 2) } else { StaanRank::NotReturned };
+        }
+        let labels: Vec<f32> = (0..20).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        let mut trained = XGBPipeline::with_params(0.0, 0.1, 2.0, 10, None, None, None, None, true);
+        trained.fit(&records, &labels, None).expect("fit should succeed");
+
+        let path = std::env::temp_dir().join(format!("mwmbl-rank-provider-{}.xgb", std::process::id()));
+        let path = path.to_str().unwrap();
+        trained.save_model(path).expect("save should succeed");
+
+        let mut loaded = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        loaded.load_model(path).expect("load should succeed");
+        std::fs::remove_file(path).unwrap();
+
+        assert!(loaded.provider_features);
+        assert_eq!(loaded.predict(&records).unwrap(), trained.predict(&records).unwrap());
+    }
+
+    #[test]
+    fn test_a_model_without_provider_features_loads_without_them() {
+        let records = make_records(20);
+        let labels: Vec<f32> = (0..20).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        let mut trained = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        trained.fit(&records, &labels, None).expect("fit should succeed");
+        let path = std::env::temp_dir().join(format!("mwmbl-rank-shared-{}.xgb", std::process::id()));
+        let path = path.to_str().unwrap();
+        trained.save_model(path).expect("save should succeed");
+
+        let mut loaded = XGBPipeline::with_params(0.0, 0.1, 2.0, 10, None, None, None, None, true);
+        loaded.load_model(path).expect("load should succeed");
+        std::fs::remove_file(path).unwrap();
+
+        assert!(!loaded.provider_features);
     }
 
     #[test]
@@ -322,13 +510,86 @@ mod tests {
         let labels: Vec<f32> = (0..20).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
 
         let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 10);
-        pipeline.fit(&records, &labels).expect("fit should succeed");
+        pipeline.fit(&records, &labels, None).expect("fit should succeed");
 
         let preds = pipeline.predict(&records).expect("predict should succeed");
         assert_eq!(preds.len(), 20);
         for &p in &preds {
             assert!(p >= 0.0 && p <= 1.0, "Prediction {} out of [0,1]", p);
         }
+    }
+
+    #[test]
+    fn test_predict_filters_too_few_match_terms() {
+        // Train on records that all match the query, then predict on a mix of
+        // matching and non-matching documents. Non-matching docs (match_terms <=
+        // num_terms / 2) must be forced to 0.0 regardless of the model output.
+        let records = make_records(20);
+        let labels: Vec<f32> = vec![1.0; 20];
+        let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        pipeline.fit(&records, &labels, None).expect("fit should succeed");
+
+        let test = vec![
+            // Matches both query terms ("rust programming") -> kept.
+            DocumentRecord {
+                query: "rust programming".to_string(),
+                url: "https://example.com/rust".to_string(),
+                title: "Rust Programming".to_string(),
+                extract: "rust programming language".to_string(),
+                score: 1.0,
+                staan_rank: StaanRank::NotAsked,
+                from_staan: false,
+            },
+            // Matches no query terms -> filtered to 0.0.
+            DocumentRecord {
+                query: "rust programming".to_string(),
+                url: "https://example.com/cooking".to_string(),
+                title: "Cooking Recipes".to_string(),
+                extract: "how to bake bread".to_string(),
+                score: 1.0,
+                staan_rank: StaanRank::NotAsked,
+                from_staan: false,
+            },
+        ];
+
+        let preds = pipeline.predict(&test).expect("predict should succeed");
+        assert_eq!(preds.len(), 2);
+        assert!(preds[0] > 0.0, "matching doc should keep its prediction");
+        assert_eq!(preds[1], 0.0, "non-matching doc should be filtered to 0.0");
+    }
+
+    #[test]
+    fn test_fit_with_weights() {
+        let records = make_records(20);
+        let labels: Vec<f32> = (0..20).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+
+        // Equal explicit weights must reproduce the unweighted model exactly.
+        let mut unweighted = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        unweighted.fit(&records, &labels, None).expect("fit should succeed");
+        let mut weighted = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        weighted.fit(&records, &labels, Some(&vec![1.0; 20])).expect("fit should succeed");
+        let base = unweighted.predict(&records).expect("predict should succeed");
+        let same = weighted.predict(&records).expect("predict should succeed");
+        assert_eq!(base, same, "weight=1.0 for every row must match unweighted training");
+
+        // Near-zero weight on all negative rows must push predictions up.
+        let skew: Vec<f32> = labels.iter().map(|&l| if l > 0.0 { 1.0 } else { 1e-3 }).collect();
+        let mut skewed = XGBPipeline::new(0.0, 0.1, 2.0, 10);
+        skewed.fit(&records, &labels, Some(&skew)).expect("fit should succeed");
+        let up = skewed.predict(&records).expect("predict should succeed");
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        assert!(mean(&up) > mean(&base),
+            "down-weighting negatives should raise mean prediction ({} vs {})",
+            mean(&up), mean(&base));
+    }
+
+    #[test]
+    fn test_fit_rejects_mismatched_weights() {
+        let records = make_records(10);
+        let labels = vec![1.0; 10];
+        let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 5);
+        let result = pipeline.fit(&records, &labels, Some(&vec![1.0; 3]));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -344,7 +605,7 @@ mod tests {
         let records = make_records(10);
         let labels: Vec<f32> = vec![1.0; 10];
         let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 5);
-        pipeline.fit(&records, &labels).expect("fit should succeed");
+        pipeline.fit(&records, &labels, None).expect("fit should succeed");
 
         let preds = pipeline.predict(&[]).expect("empty predict should succeed");
         assert_eq!(preds.len(), 0);

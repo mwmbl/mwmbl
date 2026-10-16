@@ -1,0 +1,1253 @@
+{
+ "99percentinvisible_org": [
+  "why are cities designed for cars",
+  "history of the shopping mall",
+  "brutalist architecture",
+  "curb cut effect",
+  "flag design principles",
+  "invisible design in everyday objects",
+  "history of revolving doors"
+ ],
+ "acoup_blog": [
+  "were roman legions effective",
+  "logistics of ancient armies",
+  "sparta myth debunked",
+  "how accurate is lord of the rings warfare",
+  "premodern farming and peasants",
+  "siege warfare history",
+  "byzantine army tactics"
+ ],
+ "addons_mozilla_org": [
+  "firefox ad blocker",
+  "dark mode extension firefox",
+  "tab manager addon",
+  "firefox privacy extensions",
+  "youtube downloader addon",
+  "grammar checker firefox",
+  "vertical tabs firefox"
+ ],
+ "archive_org": [
+  "wayback machine old website",
+  "public domain books download",
+  "old radio shows archive",
+  "vintage software emulator",
+  "grateful dead live recordings",
+  "old newspapers digitized",
+  "defunct website snapshot"
+ ],
+ "arxiv": [
+  "transformer attention paper",
+  "diffusion models survey",
+  "graph neural networks",
+  "quantum error correction",
+  "reinforcement learning from human feedback",
+  "dark matter detection preprint",
+  "large language model reasoning"
+ ],
+ "asciinema_org": [
+  "terminal session recording",
+  "vim workflow demo",
+  "tmux tutorial recording",
+  "docker cli demo",
+  "command line screencast",
+  "shell scripting demo terminal",
+  "kubernetes kubectl demo"
+ ],
+ "bulbapedia_bulbagarden_net": [
+  "charizard evolution level",
+  "pokemon type chart weakness",
+  "how to catch mewtwo",
+  "eevee evolutions all",
+  "pokemon emerald gym leaders",
+  "shiny odds pokemon",
+  "garchomp best moveset"
+ ],
+ "ccrma_stanford_edu": [
+  "digital signal processing audio",
+  "physical modeling synthesis",
+  "faust audio programming",
+  "computer music research",
+  "fft audio analysis tutorial",
+  "waveguide synthesis",
+  "psychoacoustics research"
+ ],
+ "changelog_complete_org": [
+  "debian packaging blog",
+  "linux system administration essays",
+  "haskell in production blog",
+  "decentralized messaging protocols",
+  "backup strategies linux",
+  "nncp store and forward",
+  "old computers still useful"
+ ],
+ "codeblog_jonskeet_uk": [
+  "c# datetime pitfalls",
+  "string formatting c#",
+  "nullable reference types explained",
+  "c# async await internals",
+  "noda time date library",
+  "c# equality comparisons",
+  "stack overflow famous answers c#"
+ ],
+ "community_grafana_com": [
+  "grafana dashboard variable",
+  "prometheus data source error",
+  "grafana alerting rules",
+  "loki log queries",
+  "grafana panel repeat",
+  "influxdb flux query grafana",
+  "grafana provisioning dashboards"
+ ],
+ "conferences_oreilly_com": [
+  "oscon conference",
+  "strata data conference",
+  "oreilly velocity conference",
+  "software architecture conference",
+  "oreilly ai conference speakers",
+  "open source convention schedule",
+  "fluent web conference"
+ ],
+ "creativecommons_org": [
+  "creative commons license types",
+  "cc by sa meaning",
+  "can i use cc images commercially",
+  "attribution requirements creative commons",
+  "public domain vs cc0",
+  "creative commons music license",
+  "share alike license explained"
+ ],
+ "cyber_harvard_edu": [
+  "internet governance research",
+  "digital privacy policy",
+  "berkman klein center",
+  "content moderation research",
+  "surveillance capitalism studies",
+  "internet law and society",
+  "algorithmic accountability policy"
+ ],
+ "db_cs_cmu_edu": [
+  "database systems course cmu",
+  "andy pavlo lectures",
+  "how database storage engines work",
+  "query optimizer research",
+  "in memory database papers",
+  "advanced database systems course",
+  "database group seminar talks"
+ ],
+ "devblogs_microsoft_com": [
+  "c# 12 new features",
+  "visual studio performance tips",
+  "dotnet 8 release notes",
+  "typescript roadmap microsoft",
+  "windows terminal customization",
+  "azure sdk updates",
+  "old new thing raymond chen"
+ ],
+ "developer_mozilla_org": [
+  "css grid layout guide",
+  "javascript array map",
+  "fetch api tutorial",
+  "html semantic elements",
+  "css flexbox align items",
+  "web api localstorage",
+  "regular expressions javascript reference"
+ ],
+ "diff_wikimedia_org": [
+  "wikimedia community news",
+  "wikipedia edit-a-thon",
+  "wikimedia foundation projects update",
+  "wiki loves monuments",
+  "wikipedia volunteer stories",
+  "wikimedia research showcase",
+  "commons photo campaign"
+ ],
+ "directory_fsf_org": [
+  "free software alternatives",
+  "gpl licensed video editor",
+  "free software directory",
+  "gnu project software list",
+  "open source accounting software",
+  "libre office alternatives",
+  "free software email client"
+ ],
+ "discourse_llvm_org": [
+  "llvm pass development",
+  "clang frontend question",
+  "mlir dialect design",
+  "llvm ir optimization discussion",
+  "lld linker performance",
+  "llvm backend target",
+  "clang static analyzer false positive"
+ ],
+ "discourse_matplotlib_org": [
+  "matplotlib subplot spacing",
+  "colorbar position matplotlib",
+  "matplotlib animation save",
+  "log scale axis matplotlib",
+  "matplotlib tight layout issue",
+  "custom legend matplotlib",
+  "3d surface plot matplotlib"
+ ],
+ "discourse_mc_stan_org": [
+  "stan divergent transitions",
+  "hierarchical model stan",
+  "brms random effects",
+  "stan prior choice recommendation",
+  "non centered parameterization",
+  "cmdstanpy vs pystan",
+  "posterior predictive checks stan"
+ ],
+ "discourse_osgeo_org": [
+  "qgis plugin development",
+  "gdal raster conversion",
+  "postgis spatial query",
+  "geoserver wms setup",
+  "open source gis tools",
+  "osgeo foundation projects",
+  "grass gis workflow"
+ ],
+ "discuss_python_org": [
+  "python pep discussion",
+  "python packaging future",
+  "python steering council",
+  "removing gil python",
+  "python typing proposal",
+  "cpython performance improvements",
+  "python governance"
+ ],
+ "doc_hal_science": [
+  "hal open archive",
+  "french research papers",
+  "deposit paper hal",
+  "hal open science repository",
+  "cnrs publications archive",
+  "these en ligne hal",
+  "open access french science"
+ ],
+ "docs_djangoproject_com": [
+  "django models foreign key",
+  "django rest framework vs forms",
+  "django migrations tutorial",
+  "django queryset filter",
+  "django authentication views",
+  "django settings best practices",
+  "django class based views"
+ ],
+ "docs_rs": [
+  "tokio crate docs",
+  "serde deserialize example",
+  "rust clap derive api",
+  "rayon parallel iterator docs",
+  "actix web documentation",
+  "rust rand crate usage",
+  "sqlx query macro docs"
+ ],
+ "duckduckgo_com": [
+  "private search engine",
+  "weather tomorrow",
+  "convert 5km to miles",
+  "define serendipity",
+  "news headlines today",
+  "restaurants near me",
+  "currency converter usd eur"
+ ],
+ "dynamicecology_wordpress_com": [
+  "ecology faculty job market",
+  "how to review ecology papers",
+  "ecology grad school advice",
+  "statistical methods ecology debate",
+  "zombie ideas in ecology",
+  "ecology blogging academia",
+  "tenure track ecology advice"
+ ],
+ "engineering_nyu_edu": [
+  "nyu tandon admissions",
+  "cybersecurity masters nyu",
+  "nyu engineering research labs",
+  "tandon school of engineering programs",
+  "nyu robotics research",
+  "engineering phd nyu",
+  "nyu tandon faculty"
+ ],
+ "f_droid_org": [
+  "open source android apps",
+  "f droid app store",
+  "newpipe android",
+  "foss keyboard android",
+  "android app without google play",
+  "privacy friendly android apps",
+  "osmand offline maps app"
+ ],
+ "forum_freecodecamp_org": [
+  "freecodecamp certification projects",
+  "javascript calculator project help",
+  "responsive web design feedback",
+  "stuck on freecodecamp challenge",
+  "portfolio page project review",
+  "learn to code career change",
+  "freecodecamp python course"
+ ],
+ "forum_godotengine_org": [
+  "godot player movement script",
+  "godot signals tutorial",
+  "gdscript vs c# godot",
+  "godot tilemap collision",
+  "godot export android",
+  "godot shader help",
+  "godot multiplayer setup"
+ ],
+ "forum_obsidian_md": [
+  "obsidian daily notes workflow",
+  "obsidian sync between devices",
+  "dataview plugin query",
+  "obsidian zettelkasten setup",
+  "obsidian mobile performance",
+  "obsidian templater examples",
+  "obsidian graph view tips"
+ ],
+ "forums_factorio_com": [
+  "factorio train signals explained",
+  "factorio main bus design",
+  "factorio mod suggestions",
+  "factorio oil setup ratio",
+  "factorio megabase tips",
+  "factorio biters defense",
+  "factorio blueprint sharing"
+ ],
+ "futilitycloset_com": [
+  "curious historical anecdotes",
+  "chess puzzles unusual",
+  "strange coincidences history",
+  "lateral thinking puzzles",
+  "odd inventions history",
+  "mathematical curiosities",
+  "forgotten historical figures"
+ ],
+ "gamehistory_org": [
+  "video game preservation",
+  "lost video game prototypes",
+  "history of arcade games",
+  "unreleased games found",
+  "video game source code preservation",
+  "gaming history foundation",
+  "classic game development history"
+ ],
+ "genius_com": [
+  "bohemian rhapsody lyrics",
+  "kendrick lamar lyrics meaning",
+  "song lyrics annotations",
+  "hotel california meaning",
+  "taylor swift lyrics",
+  "rap lyrics explained",
+  "verified artist annotations"
+ ],
+ "gis_stackexchange_com": [
+  "qgis attribute table join",
+  "coordinate reference system transform",
+  "buffer analysis arcgis",
+  "shapefile to geojson conversion",
+  "raster interpolation methods",
+  "spatial join python geopandas",
+  "dem hillshade generation"
+ ],
+ "github": [
+  "fastapi example project",
+  "terraform aws modules",
+  "markdown to pdf converter library",
+  "rust web scraping crate",
+  "dotfiles neovim config",
+  "open source rss reader",
+  "yolo object detection code"
+ ],
+ "grist_org": [
+  "climate solutions journalism",
+  "environmental justice news",
+  "clean energy transition",
+  "sustainable agriculture reporting",
+  "climate policy analysis",
+  "heat pumps adoption",
+  "carbon offsets investigation"
+ ],
+ "guardian": [
+  "uk election results",
+  "premier league match report",
+  "climate protest london",
+  "nhs waiting lists news",
+  "ukraine war latest",
+  "budget announcement reaction",
+  "gaza ceasefire talks"
+ ],
+ "gutenberg": [
+  "pride and prejudice full text",
+  "free ebooks classic literature",
+  "sherlock holmes stories download",
+  "moby dick read online",
+  "public domain poetry",
+  "dickens novels free",
+  "frankenstein original text"
+ ],
+ "hackaday_com": [
+  "diy oscilloscope project",
+  "esp32 home automation hack",
+  "3d printer firmware mod",
+  "retro computer restoration",
+  "custom mechanical keyboard build",
+  "reverse engineering firmware",
+  "raspberry pi cluster project"
+ ],
+ "hacks_mozilla_org": [
+  "webassembly performance",
+  "rust in firefox",
+  "css developments browser",
+  "web speech api tutorial",
+  "firefox devtools features",
+  "wasm rust javascript interop",
+  "progressive web apps mozilla"
+ ],
+ "help_archive_org": [
+  "how to upload to archive org",
+  "borrow books internet archive",
+  "archive org account help",
+  "wayback machine save page",
+  "internet archive lending library rules",
+  "download from archive org",
+  "archive org api documentation"
+ ],
+ "hn": [
+  "show hn side projects",
+  "why startups fail",
+  "postgres vs mysql discussion",
+  "remote work productivity",
+  "yc application advice",
+  "self hosted alternatives",
+  "programmer burnout"
+ ],
+ "home_cern": [
+  "large hadron collider experiments",
+  "what is antimatter",
+  "higgs boson discovery",
+  "cern visit tours",
+  "particle accelerator how it works",
+  "cern open data",
+  "atlas experiment cern"
+ ],
+ "homepage": [
+  "spotify",
+  "ikea",
+  "duolingo",
+  "national trust",
+  "raspberry pi",
+  "wise",
+  "airbnb"
+ ],
+ "hyperallergic_com": [
+  "contemporary art exhibitions review",
+  "museum labor controversy",
+  "art world news",
+  "banksy authenticity debate",
+  "indigenous art repatriation",
+  "art fair criticism",
+  "brooklyn artist studios"
+ ],
+ "imdb": [
+  "oppenheimer cast",
+  "best movies 2023",
+  "breaking bad episodes",
+  "denis villeneuve films",
+  "top rated horror movies",
+  "who plays wednesday addams",
+  "movies like inception"
+ ],
+ "indieweb_org": [
+  "own your data website",
+  "webmentions setup",
+  "indieauth login",
+  "personal website principles",
+  "pesos vs posse",
+  "microformats h-card",
+  "syndicate to social media own site"
+ ],
+ "insideclimatenews_org": [
+  "exxon climate documents",
+  "sea level rise reporting",
+  "climate lawsuit updates",
+  "fossil fuel industry investigation",
+  "arctic warming research news",
+  "clean water act rollback",
+  "climate refugees reporting"
+ ],
+ "itch_io": [
+  "free indie games",
+  "horror games indie",
+  "game jam entries",
+  "visual novel games",
+  "pixel art platformer",
+  "experimental art games",
+  "tabletop rpg pdf itch"
+ ],
+ "journals_plos_org": [
+  "plos one open access paper",
+  "genomics study open access",
+  "malaria vaccine trial results",
+  "plos biology research",
+  "epidemiology open access study",
+  "reproducibility crisis biology",
+  "plos computational biology"
+ ],
+ "lexi_lambda_github_io": [
+  "parse don't validate",
+  "haskell type safety essay",
+  "climbing the type system ladder",
+  "functional programming effects",
+  "typed programming language design",
+  "haskell newtype patterns",
+  "algebraic effects explained"
+ ],
+ "link_springer_com": [
+  "springer journal article access",
+  "machine learning journal springer",
+  "psychology peer reviewed springer",
+  "mathematics lecture notes springer",
+  "chemistry springer paper",
+  "medicine systematic review springer",
+  "materials science journal article"
+ ],
+ "longreads_com": [
+  "best longform journalism",
+  "long reads essay picks",
+  "narrative nonfiction stories",
+  "profile pieces best",
+  "true crime longform",
+  "memoir essays online",
+  "investigative feature stories"
+ ],
+ "makham_itch_io": [
+  "makham games",
+  "indie developer games itch",
+  "makham game jam",
+  "small experimental indie games",
+  "makham new release",
+  "free games by makham",
+  "makham itch page"
+ ],
+ "markodenic_com": [
+  "css tips and tricks",
+  "web development tips beginners",
+  "html useful features",
+  "javascript one liners",
+  "developer portfolio advice",
+  "css loading animation",
+  "frontend interview tips"
+ ],
+ "mathbabe_org": [
+  "weapons of math destruction",
+  "algorithms and inequality",
+  "big data ethics blog",
+  "occupy wall street math",
+  "predatory lending algorithms",
+  "data science hype criticism",
+  "value added teacher model critique"
+ ],
+ "mathenchant_wordpress_com": [
+  "recreational mathematics essays",
+  "surreal numbers explained",
+  "mathematical proofs beauty",
+  "combinatorics puzzles essay",
+  "history of zero mathematics",
+  "infinity paradoxes math",
+  "james propp math blog"
+ ],
+ "minecraft_wiki": [
+  "minecraft enchantment list",
+  "how to make a beacon",
+  "villager trading guide",
+  "redstone repeater recipe",
+  "minecraft potion brewing",
+  "nether portal setup",
+  "minecraft biomes list"
+ ],
+ "musicbrainz_org": [
+  "album release discography",
+  "artist recording metadata",
+  "beatles albums list",
+  "song credits database",
+  "record label releases",
+  "cover versions of songs",
+  "music catalog numbers"
+ ],
+ "mwmbl": [
+  "how to descale a kettle",
+  "cheap flights to lisbon",
+  "symptoms of dehydration",
+  "best hiking boots",
+  "wedding speech ideas",
+  "how long to boil eggs",
+  "diy shelf brackets"
+ ],
+ "nhs": [
+  "chest pain when breathing",
+  "ibuprofen dosage adults",
+  "symptoms of type 2 diabetes",
+  "how to lower blood pressure",
+  "chickenpox in children",
+  "sertraline side effects",
+  "when to worry about a mole"
+ ],
+ "openstreetmap_org": [
+  "map of amsterdam",
+  "cycle paths near me",
+  "hiking trails map",
+  "street map berlin",
+  "public toilets map",
+  "cafe locations city centre",
+  "footpath route planner"
+ ],
+ "phys_org": [
+  "new exoplanet discovery",
+  "battery technology breakthrough",
+  "quantum computing news",
+  "fossil discovery news",
+  "nanomaterials research news",
+  "climate model study",
+  "superconductor research update"
+ ],
+ "pluralistic_net": [
+  "cory doctorow enshittification",
+  "big tech monopoly criticism",
+  "drm and right to repair",
+  "interoperability mandate",
+  "surveillance advertising critique",
+  "platform decay essay",
+  "copyright maximalism"
+ ],
+ "propublica_org": [
+  "nursing home investigation",
+  "irs tax avoidance wealthy",
+  "police misconduct database",
+  "hospital billing investigation",
+  "supreme court ethics report",
+  "workplace safety violations",
+  "political dark money investigation"
+ ],
+ "pypi": [
+  "requests python package",
+  "async http client python",
+  "python excel library",
+  "pydantic",
+  "python image resize package",
+  "cli argument parser python",
+  "timezone handling python library"
+ ],
+ "quantamagazine_org": [
+  "new math proof explained",
+  "quantum gravity theories",
+  "protein folding breakthrough",
+  "prime numbers pattern discovery",
+  "neuroscience of memory",
+  "complexity theory advances",
+  "origin of life research"
+ ],
+ "reactos_org": [
+  "windows compatible open source os",
+  "reactos hardware support",
+  "run windows apps without windows",
+  "reactos development status",
+  "reactos vs wine",
+  "open source windows alternative",
+  "reactos installation guide"
+ ],
+ "reallifemag_com": [
+  "technology and everyday life essay",
+  "social media identity essay",
+  "digital culture criticism",
+  "smartphone attention essay",
+  "online dating culture critique",
+  "algorithmic feeds essay",
+  "internet aesthetics essay"
+ ],
+ "rosettacode_org": [
+  "fizzbuzz in all languages",
+  "quicksort implementation comparison",
+  "fibonacci different languages",
+  "towers of hanoi code",
+  "sieve of eratosthenes examples",
+  "99 bottles of beer program",
+  "matrix multiplication implementations"
+ ],
+ "rubygems_org": [
+  "rails gem versions",
+  "ruby http client gem",
+  "rspec gem",
+  "sidekiq background jobs gem",
+  "ruby json parser gem",
+  "devise authentication gem",
+  "nokogiri gem install"
+ ],
+ "semiengineering_com": [
+  "chip design verification challenges",
+  "advanced packaging semiconductors",
+  "euv lithography progress",
+  "chiplet architecture trends",
+  "semiconductor supply chain analysis",
+  "3nm process node",
+  "hardware security vulnerabilities chips"
+ ],
+ "simonwillison_net": [
+  "llm cli tool",
+  "datasette tutorial",
+  "prompt injection explained",
+  "sqlite tricks",
+  "python web scraping til",
+  "django co-creator blog",
+  "ai tools for coding blog"
+ ],
+ "slashdot_org": [
+  "tech news discussion",
+  "linux kernel release news",
+  "programmer news comments",
+  "open source lawsuit news",
+  "nerd news site",
+  "technology policy debate",
+  "ask slashdot career"
+ ],
+ "sourceforge_net": [
+  "download open source software windows",
+  "audacity download",
+  "7zip download",
+  "filezilla ftp client",
+  "open source project hosting",
+  "keepass password manager download",
+  "portable apps download"
+ ],
+ "spectrum_ieee_org": [
+  "robotics engineering news",
+  "semiconductor industry analysis",
+  "ai hardware chips article",
+  "engineering career trends",
+  "electric vehicle battery engineering",
+  "brain computer interface progress",
+  "power grid modernization"
+ ],
+ "stackexchange": [
+  "python list comprehension syntax",
+  "undo last git commit",
+  "cors error fetch api",
+  "segfault in c pointer",
+  "javascript sort array of objects",
+  "sql join two tables",
+  "docker container exit code 137"
+ ],
+ "stratechery_com": [
+  "aggregation theory",
+  "apple business model analysis",
+  "netflix strategy analysis",
+  "tech platform economics",
+  "google antitrust analysis",
+  "microsoft openai partnership analysis",
+  "meta strategy essay"
+ ],
+ "techcrunch_com": [
+  "startup funding round news",
+  "tech layoffs latest",
+  "new app launch coverage",
+  "venture capital trends",
+  "y combinator demo day",
+  "fintech startup news",
+  "acquisition rumors tech"
+ ],
+ "technicshistory_com": [
+  "history of the telegraph",
+  "early electrical engineering history",
+  "invention of the transistor",
+  "history of radio technology",
+  "telephone network history",
+  "vacuum tube era computing",
+  "engineering history essays"
+ ],
+ "the_president_europarl_europa_eu": [
+  "european parliament president",
+  "roberta metsola speeches",
+  "ep president agenda",
+  "european parliament president statements",
+  "president of european parliament role",
+  "metsola press releases",
+  "european parliament leadership"
+ ],
+ "theanarchistlibrary_org": [
+  "anarchist theory texts",
+  "kropotkin mutual aid",
+  "emma goldman essays",
+  "anarchism and organization",
+  "situationist texts",
+  "david graeber essays",
+  "anarcho syndicalism reading"
+ ],
+ "thebulletin_org": [
+  "doomsday clock time",
+  "nuclear weapons policy analysis",
+  "biosecurity risks analysis",
+  "ai existential risk essay",
+  "nuclear arms control treaty",
+  "climate tipping points analysis",
+  "disruptive technologies risk"
+ ],
+ "theconversation_com": [
+  "expert analysis current events",
+  "academic explains news topic",
+  "research based journalism",
+  "why do we dream research",
+  "vaccine hesitancy explained by experts",
+  "economics of inflation explained",
+  "psychology of misinformation"
+ ],
+ "thehill_com": [
+  "senate vote count today",
+  "white house press briefing",
+  "congress budget negotiations",
+  "campaign polling numbers",
+  "supreme court ruling reaction congress",
+  "house speaker vote",
+  "capitol hill hearings"
+ ],
+ "theintercept_com": [
+  "nsa surveillance leak",
+  "drone warfare documents",
+  "whistleblower revelations",
+  "national security journalism",
+  "police surveillance technology investigation",
+  "government secrecy reporting",
+  "snowden documents"
+ ],
+ "towardsdatascience_com": [
+  "pandas dataframe tutorial",
+  "gradient descent explained",
+  "feature engineering techniques",
+  "time series forecasting python",
+  "clustering algorithms comparison",
+  "neural network from scratch",
+  "a b testing guide data science"
+ ],
+ "unherd_com": [
+  "contrarian political commentary",
+  "culture war essays uk",
+  "post liberalism essay",
+  "critique of identity politics",
+  "populism analysis essay",
+  "lockdown policy criticism",
+  "britain cultural commentary"
+ ],
+ "usa_streetsblog_org": [
+  "pedestrian deaths crisis",
+  "bike lane advocacy",
+  "transit funding news",
+  "highway expansion criticism",
+  "vision zero cities",
+  "parking minimums reform",
+  "walkable cities policy"
+ ],
+ "users_rust_lang_org": [
+  "borrow checker error help",
+  "lifetime annotation confusion",
+  "rust async runtime question",
+  "cargo workspace setup",
+  "rust trait object vs generic",
+  "unsafe rust when justified",
+  "rust error handling patterns"
+ ],
+ "waxy_org": [
+  "internet culture curiosities",
+  "ai art ethics debate",
+  "weird web finds",
+  "creative coding projects",
+  "internet history preservation",
+  "meme origins research",
+  "andy baio blog"
+ ],
+ "webaim_org": [
+  "wcag contrast checker",
+  "screen reader testing guide",
+  "accessible forms labels",
+  "alt text best practices",
+  "keyboard navigation accessibility",
+  "aria landmarks guide",
+  "web accessibility evaluation tools"
+ ],
+ "webkit_org": [
+  "safari new css features",
+  "webkit javascript engine",
+  "webkit feature status",
+  "safari technology preview",
+  "webkit rendering pipeline",
+  "jsc javascriptcore internals",
+  "webkit standards positions"
+ ],
+ "wiki_archiveteam_org": [
+  "dying website rescue",
+  "geocities archive project",
+  "how to archive a website",
+  "warrior archiveteam",
+  "deathwatch websites shutting down",
+  "wget warc archiving",
+  "yahoo groups archive"
+ ],
+ "wiki_archlinux_org": [
+  "arch linux installation guide",
+  "pacman commands",
+  "systemd service configuration",
+  "arch linux wifi setup",
+  "xorg configuration arch",
+  "arch aur helper",
+  "grub bootloader arch"
+ ],
+ "wikidata_official": [
+  "octopus energy",
+  "ryanair",
+  "greenpeace",
+  "university of cambridge",
+  "taylor swift",
+  "mozilla foundation",
+  "deutsche bahn"
+ ],
+ "wikidata_org": [
+  "structured data knowledge base",
+  "sparql query wikidata",
+  "wikidata item property",
+  "linked open data entities",
+  "wikidata api query",
+  "notable people born in city data",
+  "wikidata lexeme"
+ ],
+ "wikisource_org": [
+  "original historical documents text",
+  "us constitution full text",
+  "shakespeare plays original text",
+  "historical speeches transcript",
+  "public domain translations",
+  "magna carta text",
+  "declaration of independence text"
+ ],
+ "wiktionary": [
+  "etymology of word",
+  "define ubiquitous",
+  "plural of octopus",
+  "synonyms for happy",
+  "word pronunciation ipa",
+  "latin root words",
+  "archaic english words meaning"
+ ],
+ "www2_sqlite_org": [
+  "sqlite create table syntax",
+  "sqlite json functions",
+  "sqlite full text search",
+  "sqlite pragma statements",
+  "sqlite window functions",
+  "sqlite wal mode",
+  "sqlite date functions"
+ ],
+ "www_bellingcat_com": [
+  "open source investigation techniques",
+  "geolocation verification tutorial",
+  "mh17 investigation findings",
+  "osint tools list",
+  "chemical weapons attack investigation",
+  "tracking flight data investigation",
+  "satellite imagery analysis conflict"
+ ],
+ "www_centauri_dreams_org": [
+  "interstellar travel concepts",
+  "breakthrough starshot updates",
+  "exoplanet habitability analysis",
+  "solar sail missions",
+  "fermi paradox discussion",
+  "proxima centauri planets",
+  "deep space propulsion concepts"
+ ],
+ "www_cis_upenn_edu": [
+  "upenn computer science courses",
+  "programming languages research upenn",
+  "penn engineering cis faculty",
+  "formal verification research",
+  "upenn nets program",
+  "cis 120 course materials",
+  "penn research groups computer science"
+ ],
+ "www_cs_princeton_edu": [
+  "princeton algorithms course",
+  "princeton cs faculty research",
+  "cos 226 course materials",
+  "princeton theory of computation",
+  "sedgewick algorithms",
+  "princeton cs phd admissions",
+  "princeton systems research"
+ ],
+ "www_cs_utexas_edu": [
+  "ut austin computer science",
+  "utcs faculty research",
+  "cs 429 course utexas",
+  "texas cs phd program",
+  "ut austin ai research",
+  "utcs undergraduate advising",
+  "austin villa robocup"
+ ],
+ "www_csmonitor_com": [
+  "balanced international news analysis",
+  "monitor daily news briefing",
+  "global affairs perspective",
+  "nonpartisan news coverage",
+  "points of progress good news",
+  "middle east analysis csm",
+  "education reform coverage"
+ ],
+ "www_esa_int": [
+  "esa mars express mission",
+  "ariane rocket launch schedule",
+  "european astronaut corps",
+  "esa earth observation satellites",
+  "juice jupiter mission",
+  "esa gaia star map",
+  "copernicus programme data"
+ ],
+ "www_etymonline_com": [
+  "origin of the word quarantine",
+  "etymology of nice",
+  "where does ok come from",
+  "history of the word robot",
+  "etymology dictionary online",
+  "origin of phrase deadline",
+  "word origins latin greek"
+ ],
+ "www_euronews_com": [
+  "european union news today",
+  "france pension protests",
+  "eu parliament vote news",
+  "european weather forecast",
+  "germany energy crisis news",
+  "eu migration policy news",
+  "eurovision news"
+ ],
+ "www_gov_uk": [
+  "renew uk passport",
+  "self assessment tax return",
+  "universal credit eligibility",
+  "driving licence renewal",
+  "uk visa requirements",
+  "register to vote uk",
+  "statutory sick pay rules"
+ ],
+ "www_hcn_org": [
+  "western water rights",
+  "public lands management news",
+  "colorado river drought",
+  "wildfire policy west",
+  "tribal sovereignty land news",
+  "rural west journalism",
+  "mining on public lands"
+ ],
+ "www_howtogeek_com": [
+  "how to screenshot on windows",
+  "what is svchost exe",
+  "speed up slow pc",
+  "excel keyboard shortcuts",
+  "android hidden features",
+  "wifi router placement tips",
+  "windows 11 taskbar customization"
+ ],
+ "www_johndcook_com": [
+  "numerical computing tips",
+  "probability distribution relationships",
+  "bayesian statistics consulting blog",
+  "floating point arithmetic pitfalls",
+  "random number generation testing",
+  "applied math consulting",
+  "regular expressions math notation"
+ ],
+ "www_legislation_gov_uk": [
+  "data protection act 2018 text",
+  "employment rights act full text",
+  "uk statutory instruments",
+  "housing act legislation",
+  "equality act 2010 sections",
+  "road traffic act text",
+  "companies act 2006"
+ ],
+ "www_loopinsight_com": [
+  "apple event commentary",
+  "iphone review analysis",
+  "mac software news",
+  "apple earnings commentary",
+  "ios update analysis",
+  "apple design philosophy",
+  "dalrymple apple news"
+ ],
+ "www_lrb_co_uk": [
+  "london review of books essay",
+  "literary criticism long essay",
+  "book review contemporary fiction",
+  "lrb diary column",
+  "political essay literary magazine",
+  "biography review essay",
+  "poetry review lrb"
+ ],
+ "www_math_columbia_edu": [
+  "columbia math department courses",
+  "peter woit not even wrong",
+  "columbia math phd program",
+  "algebraic geometry seminar columbia",
+  "columbia math faculty",
+  "graduate topology course notes",
+  "columbia undergraduate math major"
+ ],
+ "www_medievalists_net": [
+  "medieval daily life",
+  "how did medieval people bathe",
+  "medieval food recipes",
+  "black death history",
+  "medieval manuscripts digitized",
+  "knights templar history",
+  "medieval women work"
+ ],
+ "www_motherjones_com": [
+  "private prison investigation",
+  "gun lobby reporting",
+  "climate denial funding investigation",
+  "labor rights reporting",
+  "voting rights investigation",
+  "corporate influence politics",
+  "immigration detention conditions"
+ ],
+ "www_neh_gov": [
+  "humanities grants application",
+  "neh fellowship deadlines",
+  "digital humanities funding",
+  "national humanities medal",
+  "neh summer stipends",
+  "preservation grants archives",
+  "humanities research funding us"
+ ],
+ "www_nist_gov": [
+  "password guidelines nist",
+  "cybersecurity framework nist",
+  "post quantum cryptography standards",
+  "nist time server",
+  "measurement standards si units",
+  "nist ai risk management framework",
+  "encryption standards fips"
+ ],
+ "www_nybooks_com": [
+  "new york review of books essay",
+  "intellectual essay politics culture",
+  "book review literary criticism",
+  "nyrb long form review",
+  "history book review essay",
+  "philosophy book review",
+  "art criticism essay"
+ ],
+ "www_pewresearch_org": [
+  "social media usage statistics",
+  "religious landscape survey",
+  "political polarization data",
+  "teens and technology survey",
+  "immigration attitudes poll",
+  "demographic trends us",
+  "news consumption habits study"
+ ],
+ "www_popsci_com": [
+  "how do vaccines work explainer",
+  "best science gadgets",
+  "space news popular science",
+  "diy science projects",
+  "future technology predictions",
+  "animal behavior explainer",
+  "why is the sky blue science"
+ ],
+ "www_poynter_org": [
+  "fact checking resources",
+  "journalism ethics guidance",
+  "media literacy education",
+  "politifact methodology",
+  "newsroom training resources",
+  "misinformation research journalism",
+  "local news sustainability"
+ ],
+ "www_sciencenews_org": [
+  "latest physics research news",
+  "genetics discovery news",
+  "astronomy findings this week",
+  "science news for students",
+  "medical research news",
+  "paleontology discovery news",
+  "chemistry breakthrough news"
+ ],
+ "www_sigarch_org": [
+  "computer architecture blog",
+  "isca conference papers",
+  "hardware accelerator research",
+  "moore's law future architecture",
+  "risc v research directions",
+  "memory hierarchy research",
+  "architecture career advice"
+ ],
+ "www_sigops_org": [
+  "operating systems research",
+  "sosp conference",
+  "distributed systems papers",
+  "kernel design research",
+  "systems phd advice",
+  "osdi papers",
+  "operating systems history"
+ ],
+ "www_space_com": [
+  "spacex launch today",
+  "full moon tonight name",
+  "james webb telescope images",
+  "meteor shower when to watch",
+  "iss visible tonight",
+  "mars rover latest news",
+  "solar eclipse viewing guide"
+ ],
+ "www_springer_com": [
+  "springer book series",
+  "publish with springer",
+  "springer nature journals list",
+  "academic book proposal springer",
+  "springer open access fees",
+  "textbook springer graduate",
+  "springer editorial contacts"
+ ],
+ "www_springernature_com": [
+  "springer nature open research",
+  "nature portfolio journals",
+  "springer nature publishing policies",
+  "research data policy springer",
+  "springer nature careers",
+  "open access agreements springer nature",
+  "springer nature impact report"
+ ],
+ "www_stanford_edu": [
+  "stanford admissions requirements",
+  "stanford online courses",
+  "stanford research centers",
+  "stanford faculty directory",
+  "stanford campus map",
+  "stanford academic calendar",
+  "stanford graduate programs"
+ ],
+ "www_thestranger_com": [
+  "seattle events this weekend",
+  "seattle city council election",
+  "capitol hill seattle news",
+  "seattle music scene",
+  "seattle restaurant reviews",
+  "washington state politics coverage",
+  "seattle arts coverage"
+ ],
+ "www_whitehouse_gov": [
+  "executive orders list",
+  "white house press releases",
+  "presidential proclamations",
+  "state of the union transcript",
+  "white house budget proposal",
+  "administration policy fact sheet",
+  "president public schedule"
+ ]
+}

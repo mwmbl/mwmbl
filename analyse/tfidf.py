@@ -1,6 +1,7 @@
 """
 Estimate word and document frequencies from a sample of the index.
 """
+
 import json
 import os
 from collections import Counter
@@ -30,9 +31,9 @@ def get_frequencies():
     for term, count in document_counts.most_common(200):
         print(f"{term}: {count}")
 
-    with open(DOCUMENT_COUNTS_PATH, 'w') as f:
+    with open(DOCUMENT_COUNTS_PATH, "w") as f:
         json.dump(document_counts, f, indent=2)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     get_frequencies()

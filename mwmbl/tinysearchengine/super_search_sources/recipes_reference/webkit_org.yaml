@@ -1,0 +1,19 @@
+name: webkit_org
+domain: webkit.org
+field: programming
+request:
+  url: https://webkit.org/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h2
+  base_url: https://webkit.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: music
+  expect_title_contains: music

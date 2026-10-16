@@ -1,0 +1,20 @@
+name: www_medievalists_net
+domain: www.medievalists.net
+field: history
+request:
+  url: https://www.medievalists.net/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: medieval
+  expect_title_contains: medieval

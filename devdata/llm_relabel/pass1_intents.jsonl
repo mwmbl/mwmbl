@@ -1,0 +1,849 @@
+{"query": "aidan gallagher", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "anna friel", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "bedrock meaning", "intent": "informational", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "blinds", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "burger van near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "carry on henry", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "cast of stranger things", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "castle cary", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "chairs for elderly people", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "characters in toy story", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "claire danes", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "clueless film", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "coaches to stansted", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "constipation", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "creatine loading phase", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "declan donnelly", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "destination wedding", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "direct line home insurance", "intent": "navigational", "haiku_sources": ["wikidata_official"], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "dollars to pounds", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dosage of sertraline", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "drawing", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "enhancers dna", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fa cup fixtures", "intent": "tool", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "facebook login", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "fifa world cup rankings", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "flopsy bunny", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "gabapentin", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "gardening express", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "gateshead council", "intent": "local", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "openstreetmap_org", "mwmbl"]}
+{"query": "glentoran fc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "golf r", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hailey welch", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "hitched", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "hollie davidson referee", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "how many days until christmas", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "https://www.comparethemarket.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "hub by premier inn", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "indeed jobs", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "internet deals", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ironing board", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "janeiro cream", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "jellycat marshmallow", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "jobs at amazon", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kim wilde", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "lando norris age", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "liverpool transfer news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "locking wheel nut", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "maps liverpool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "matalan christmas jumpers", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "matches tonight", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mateta ac milan", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "max verstappen retirement cause", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "mental health", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "michael palin", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "morocco fc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "motability customer service", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "motel one edinburgh", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mubadala citi dc open", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "obelisk egypt", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "paks", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "paris marathon 2026", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "philippines", "intent": "informational", "haiku_sources": ["mwmbl"], "sources": ["mwmbl"]}
+{"query": "piecewise function", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "playstation 5", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pok\u00e9mon cards", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "queen camilla", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ranks in the raf", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "reddit", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "reiss discount code", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "restaurants glasgow", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "riptide lyrics", "intent": "entity", "haiku_sources": ["genius_com"], "sources": ["genius_com", "mwmbl"]}
+{"query": "ruth jones", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "safety signs", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sandals resorts", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "secret santa gifts", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "senator car", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "series s xbox", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "solvera jewellery", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "speed checker", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "storehouse", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "studio uk", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "stv news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "sunderland a.f.c", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "superman", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "takeaways bradford", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "taxi", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "the pickup", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "timescape festival", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tracker season 3 episode 10", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "trainline share price", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "trump venezuela", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "vegas hero", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "veo", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "virgin media", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "vscode", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "warren gatland", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "weather in lanzarote", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "whitakers keighley", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "wikipedia", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "zero day attack", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "craigavon", "intent": "navigational", "haiku_sources": ["wikidata_official"], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "mango returns", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hole in heart", "intent": "entity", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "sharks", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "frances cain", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "versailles tv show cast", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "football", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kempsey church", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "aldi pet event", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "oakley", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "wordle help", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "millyard downhill bike", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "robertsbridge", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "disorder lyrics", "intent": "entity", "haiku_sources": ["genius_com"], "sources": ["genius_com", "mwmbl"]}
+{"query": "cast of under salt marsh", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ninja", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "linen pants", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "thursday murders club books", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "elio", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "sportage motability", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "formula 1 today", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "moranos", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mounjaro uk", "intent": "entity", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "register with gp", "intent": "transactional", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "iisu", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "gg d\u1ecbch", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "results premier league", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mobland", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "streetmap uk", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "sisters and seekers", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "alaska", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bennett sister", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "spanish to english translation", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "gerrymandering", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "reform manifesto", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "f.c. famalic\u00e3o games", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "expresso", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "heath ledger", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "adults weekend butlins", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ringworm", "intent": "entity", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "dashboard confessional", "intent": "entity", "haiku_sources": ["musicbrainz_org"], "sources": ["musicbrainz_org", "mwmbl"]}
+{"query": "ck3 all under heaven", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "discord", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "happy wheels", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "alton towers opening times", "intent": "local", "haiku_sources": [], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "nutmeg", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "england cricket", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "eccles bus crash today", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "vistaprint", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "prince harry", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pokopia switch 1", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "depopulation", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "deeleys lincoln", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "symphony hall seating plan", "intent": "local", "haiku_sources": [], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "sweden", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "slots games", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "house of guinness cast", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "https://www.matalan.co.uk/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "resident alien", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "robbie williams tour", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "clubelo", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "itv player", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "service history check", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bank", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "trac jobs", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "london eye tickets", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "amish", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tarot film", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "15kg in stone", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "findation", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "trailberg outlet", "intent": "local", "haiku_sources": [], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "barcelona kit 25/26", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fatface", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "2022 eurovision", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "strands answers today", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "restaurant", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "clothing rack", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lower back stretches", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "https://www.grammarly.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "vle jpa", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "discount code sports direct", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "howdens", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "cinema glasgow", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "internet speed test", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pricedup", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tps login", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "uptown girl westlife", "intent": "entity", "haiku_sources": ["musicbrainz_org"], "sources": ["musicbrainz_org", "mwmbl"]}
+{"query": "grok", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "epl table", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "rymans near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "quizlet", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "meatball recipe", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "last of us season 2", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "regtransfers", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "travel supermarket", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "krakow thermal baths", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "o'briens", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "livingston fc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "characters in hamlet", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "shein", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "wingstop coventry", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "cape verde holidays", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "odyssey", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ronaldo contract", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "times table games", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "namesake", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "greece time", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "prizes wimbledon 2025", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "lego", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "scotlands people", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "mot and tax check", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "berberine", "intent": "entity", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "jailbirds meaning", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "delta force ps5", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sage", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "jeans jacket", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "11am est to uk", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "experian", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "bromley fc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "edinburgh evening news", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "gladiator", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "gianluigi donnarumma", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lta tournament software", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "veganism", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "radcliffe camera", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "5.6 feet in cm", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "momoai", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "august bank holiday 2026", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "glencore", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "anthony hopkins", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "holland and barrett", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "watchmen", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "backmarket uk", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "yorkshire show 2025", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "daddy", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "slim chickens", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dicaprio one battle after another", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "wage", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "uganda airlines", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "quotes about self", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "oil", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "red eye", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "hiddleston night manager", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "cardiff", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "chargeback meaning", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "trainline promo code", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plates", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "downton abbey", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "rating of stranger things", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "linesman", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "login discord", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "irwin mitchell reviews", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "alcaraz", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "classic fm", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "dollar to rand", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "g\u00fctersloh", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "spoilers emmerdale", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "ryder cup 2025", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "canada hockey", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "evening news and star", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "deviantart", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "parkopedia london", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "lively bars near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "soursop", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bodies cast", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "asia cup final", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "synergy", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pensions news", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "dykes hall pharmacy", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "woolwich", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "hansa studios", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "parks near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "express", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "3d models", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "golden retriever puppies", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "apprenticeship", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "clint eastwood", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "cellar door movie", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "seneca", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "john travolta", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "bungalows for sale near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "fiverr", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "tesco jobs", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "scores last night", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ladybird", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "burton power", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "held anne michaels", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "filmyfly", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "lola cakes", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "susie mccabe mastermind", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fcsb", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "gunnersbury park", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "ukraine latest news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "bandaged", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "aww meaning", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "car tax changes 2026", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "brompton", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lunar client", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "windsor castle tickets", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "edf", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "holiday dresses", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "b&m near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "idrlabs", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "walnut sideboard", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "cast of steal", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "grinters", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "primark liverpool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "panels for living room", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "runcorn", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "jon jones", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stainless steel pots", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "wallpaper", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "aperol spritz", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "shades of purple", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "formspring", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "recorder instrument", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "weekend at bernie's", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "innovation", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "music maker", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sterling k brown", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "leestock", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "argyle socks", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "palace of holyroodhouse", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "statuses", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "with joy", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plans and elevations maths genie", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "range", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sussex direct", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "tiktok sign up", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "ltt", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bob lazar", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "evil under the sun", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "2025", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "abba costumes", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "motorhead phil campbell", "intent": "entity", "haiku_sources": ["musicbrainz_org"], "sources": ["musicbrainz_org", "mwmbl"]}
+{"query": "mcast", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "louis russell", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sanjeev bhaskar taskmaster", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "target", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "strands help", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "payments on account", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "handlestore", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "tintagel weather", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "guys and dolls", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "yours", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "nissan cube", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "football results today", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "groke", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bournemouth hotels", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "https www sephora com beauty contact us", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "https://www.instagram.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "curling olympics", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "women's euros 2025", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "starlink", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "baba meaning", "intent": "informational", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "shorts and t shirt set", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "moderna", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "browning guns", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "supermarket near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "jet2", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "footasylum aberdeen", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "coop live manchester", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "killdozer_tv", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tom hardy", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "off license near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "paris", "intent": "navigational", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "wikidata_official", "homepage", "mwmbl"]}
+{"query": "elordi girlfriend", "intent": "ambiguous", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "death of a unicorn", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "clockwork", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "kids jokes", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "banana bread recipe", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "http://hotmail.com", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "dollhouse wallpaper", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "paybyphone customer service", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plant", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mel brooks", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ousmane dembele stats this season", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "steam", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "italian brainrot", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "doorbell camera wireless", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "(tylenol)", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "espresso cups", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "action for happiness", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ofcom", "intent": "entity", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "power automate", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "game fair 2025", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "baselift", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "anne robinson", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "harrods afternoon tea", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "e.g", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "findlay cosmo", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dancing queen lyrics", "intent": "entity", "haiku_sources": ["genius_com"], "sources": ["genius_com", "mwmbl"]}
+{"query": "mediastinum", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "peter kyle", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "scaler for teeth", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "voa", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "vanessa redgrave", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "states of america map", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "vsd", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "lasso rope", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "booster seat height", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "grease", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "june 2025", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "number day 2026", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "vape", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plantur 39", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hello in portuguese", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "finery", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "freudian meaning", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "keira knightley movies", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "heart", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "giggles meaning", "intent": "informational", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "simple online pharmacy", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hoppers", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "spaceballs 2", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "points on driving licence", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "turkey", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "stock market", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "wifi speed test", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "poole", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "2025 quiz", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "html to pdf converter", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sheffield united", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "classroom of the elite season 4", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "airbnb", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "ring doorbell", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bank holidays 2025", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "vmd", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "city lit", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "mixer shower valve", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "heartstopper", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "kill bill", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "guardians of the galaxy vol. 3", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ofgem", "intent": "entity", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "garfield movie", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "tonight's lotto results", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "chanel", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "today's football", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "seats and sofas worcester", "intent": "transactional", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "dune", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "hastings direct", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "leeds united fixtures", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "fortnite", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "players bolton", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "echo show 5", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "nyx", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stationary meaning", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "civil service pensions", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "mastantuono", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sports bra", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sydney marathon results", "intent": "news", "haiku_sources": [], "sources": ["guardian", "mwmbl"]}
+{"query": "pneumothorax", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "tottenham fc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "new zealand vs england", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "husky", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "heights review", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "palestine action judgment", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "kickstarter", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "hobbycraft stafford", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "oil for my car", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "listeria", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "mini fridge", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "anderson tendulkar trophy", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "shower", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "air france", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "us open results", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "lotto", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "wetransfer link", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "christian horner news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "easyjet", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "q3 langley", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "calculator app free", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "linkedin", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "warren james", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sim only deals", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bluey", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "argyle jumper", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stars in their eyes", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "legends", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "tax calculator", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "girlfriend avril lavigne", "intent": "ambiguous", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "uk", "intent": "navigational", "haiku_sources": [], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "fortune hotel", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "usd to php", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fresha", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "townhouse nails", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "stores open near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "https://www.crunchyroll.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "pamela killings", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "transfers from alicante airport to benidorm", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "funding", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "111 online", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "electrical store near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "dyson", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "edinburgh fringe", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "julianne moore movies", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "http:////create.roblox.com/dashboard/creations/experiences/7", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "bloodlines supernatural", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "symptoms of pneumonia", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "github", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "vitamin d", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "opening times for sainsbury's", "intent": "local", "haiku_sources": [], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "tinder", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "legends imdb", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "repairs and maintenance", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lateral", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "g7 pro controller", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kingler", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hubble telescope", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lower left back pain", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "from", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "edf login", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "hastings babel restaurant closure", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "http://ladbrokes.com", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "disease synonym", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "33k after tax", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "exeter", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "noel edmonds", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "tutors and exams", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ballard", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "skins characters", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "universities in ireland", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "severance", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "thames clipper", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "mufc vs leeds", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "movies", "intent": "transactional", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "thunderball history", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dartford crossing pay", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "nepal", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "graphics card", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "against crossword clue", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "myo2", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "smith machine", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "natalia grace documentary", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "vaultbag", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "parkside tools", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "eilish no 2", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "vanguard", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "equalizer 4", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "mobile phone insurance", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "epl", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "airport transfers", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "manufacturers near me", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "pharmacy", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "united score", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "league of gentlemen", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "cornwall", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "florian wirtz", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "maine coon for sale", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "egg", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "chelsea news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "games to play", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plex", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "smrekova koliba", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "ladders999", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "supercell store", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "games for free", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "nkotb", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "joe wilkinson", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "squid game season 3", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "nations rugby", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "tube map pdf", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "myflixer", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "mcrae training", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "surgeons hall edinburgh", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "chow", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dishwasher liquid", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "casey affleck movies", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "osprey", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "newport weather", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "women's six nations", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "transferwise", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "exemption form", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "trolley problem game", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "amitriptyline", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "firefighter costume", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "german to english", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "cenazandotti", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sheffield snow", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "physics paper 1", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "sevilla", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "greggs app", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "hippodrome circus great yarmouth", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "tonies", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bondsman synonym", "intent": "tool", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "severn trent apprenticeships", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "nkdc", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bournemouth pavilion", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "duty of candor", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "glare", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "oppenheimer death", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "= 5.55600 kilometres", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "odegaard", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ukraine president", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "arnold palmer invitational", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "claude", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "mumps symptoms", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "crocs size guide", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "waystone", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "costa teguise", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "women's rugby today", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "tanologist", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "petrol prices", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stella rimington net worth", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "https://www.monopolygo.com", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "sweaty betty", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "italian to english", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ifeye", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tate liverpool", "intent": "navigational", "haiku_sources": ["wikidata_official"], "sources": ["wikidata_official", "homepage", "mwmbl"]}
+{"query": "fury vs usyk", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "coopers", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "night agent", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "crossing guards command nyt", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "verruca", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "gtr car", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "milan to lake como", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "newcastle", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kristen stewart", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "feet and inches to cm", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "spalled", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ulez check", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "plans to prosper you", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "neopets", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "eclipse season", "intent": "informational", "haiku_sources": ["quantamagazine_org"], "sources": ["quantamagazine_org", "mwmbl"]}
+{"query": "order birth certificate online", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "himalayas", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "gareth gates", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hard techno djs", "intent": "informational", "haiku_sources": ["hn"], "sources": ["hn", "mwmbl"]}
+{"query": "centredevils", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kardashian kloset", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "wagon and horses lancaster", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "101", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "zenith cars", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "melville grove liverpool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "cricinfo", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "empire biscuits", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "expedition 33 builds", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lidl", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "ownership change", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "beads for bracelet making", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "food", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "online piano", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "nottingham forest fixtures", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "piercing", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "yodel webchat", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "turned out nice again", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "golf", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "off white", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "marks and spencer guildford", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "squirrel", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "in flight", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "vs code download", "intent": "transactional", "haiku_sources": ["github"], "sources": ["github", "mwmbl"]}
+{"query": "insomnia", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "albanian currency", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tour of britain 2025", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "brassic", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "sportage car", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "doorbells without subscription", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "scoresinlive", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "byron bay", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "london underground map", "intent": "tool", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "daysoft", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "dylan sprouse", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "canola oil bad for you", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "uswitch", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "cbbc games", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "finders international reviews", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "vs3", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "auction sniper", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "prices candles uk", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "meta", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "armstrong siddeley", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "jackie sandler movies", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "https://www.nowtv.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "swimming pool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "original factory shop", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "https://offer.ndors.org.uk", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "borderlands 4", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ready or not", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "andorra", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "lettuce know", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "dreams ottoman bed", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stateside", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "bny jobs", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pancakes without eggs", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "curtains", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ideas pk", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "curseforge bedrock mods", "intent": "transactional", "haiku_sources": ["github"], "sources": ["github", "mwmbl"]}
+{"query": "//settings/content/sound", "intent": "tool", "haiku_sources": ["developer_mozilla_org"], "sources": ["developer_mozilla_org", "mwmbl"]}
+{"query": "loss meme", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pottery barn uk", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "dexterity", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "rosenior chelsea", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "2025 cost of living payment", "intent": "informational", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "curacao", "intent": "entity", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "trafford centre", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "original source shower gel", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "liverpool", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "andrew garfield", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "world book day costumes", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ssdd", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kimi antonelli", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stockeld park wowcher", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "rugrats", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "restaurants liverpool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "kirkcaldy swimming pool", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "potty", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "walkers shortbread", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "medicine for diarrhea", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "actimel", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "laila ali", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "25kg in stone", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "bupa", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "silence suzuka", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "pottery cafe fulham", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "bedrock", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "reg check", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pounds to usd", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "(sic)", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "snag leggings", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "26000 inr to gbp", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "emirates", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "series online", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "off campus series", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "impetigo", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "gold earrings", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "hailey love on the spectrum", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "garnacho", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "stansted express", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "register to vote uk", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "hillarys", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "bristol hippodrome", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "hotmail sign up", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "airport", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "trickers shoes", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "sharon osbourne today", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "lena dunham", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "knives out 3 cast", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "copilot", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "vauxhall meriva", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "2025 grand slam of darts", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "township", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ai checker", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fleetwood mac members", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "twitter", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "boden clothing", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "storm floris scotland", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "kick", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "seaton tramway", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "flywire payment tracking", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "gullet", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "kay burley", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "alan carr dad", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "vs355", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "rinkoff bakery", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "fryer tuck barry", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "doncaster", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "mayfair witches", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "f.c. alverca standings", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "donnarumma", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "zoe sugg", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "barron trump height in feet", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pricecharting", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "grok imagine", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "renewal of passport uk", "intent": "transactional", "haiku_sources": ["www_gov_uk"], "sources": ["www_gov_uk", "mwmbl"]}
+{"query": "fitbit", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "365 mail", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "murders in the building", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "outlander", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "lewis pullman", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "house of the dragon", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "http://releasesky.com", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "atlas 3i", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "apple watch series 11", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "lions", "intent": "ambiguous", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "michael owen", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "west ham news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "cupboard", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "five guys", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "downton abbey movie", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "barclaycard", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "burger king", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "inheritance tv show", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "nationstates", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "pizza gogo", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "spears of the emperor", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "zelda", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "under armour", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "agents of s.h.i.e.l.d. season 7", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "raducanu", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "oil heater", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "angel has fallen", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "https://www.youtube.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "delivery companies", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "barrett's esophagus symptoms", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "boohoo", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "pittsburgh pirates", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "world cup groups 2026", "intent": "informational", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "fabianski", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "selena quintanilla", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "championship table 24/25", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "partridge", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "wembley stadium", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "tesla model y awd price", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tombola", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "mescal glasgow", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "strictly come dancing", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "petsforhomes", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "rescue dawn", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "dvla vehicle check", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "tesco", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "plates private", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "allen key set", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "testwise", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "pregnancy announcement", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "nintendo switch 2", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "fromsoftware", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "trilogy active", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "five nights at freddy's", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "https://www.netflix.com/", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "tabby stoecker", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "slayer pizzeria menu", "intent": "transactional", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "comorbidities", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "us news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "nigel farage tax avoidance", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "checkerboard", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "che adams", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "currys pc world", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "http://discoveryplus.com/samsung", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "belladrum 2026", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "cypress point golf", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "powerpoint", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "everything everything", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "english to welsh translation", "intent": "tool", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "ivabradine", "intent": "informational", "haiku_sources": ["nhs"], "sources": ["nhs", "mwmbl"]}
+{"query": "outdoor furniture", "intent": "transactional", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "recall on tower air fryers", "intent": "informational", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "echo", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "benson boone", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ruskin square car park", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "wilko", "intent": "navigational", "haiku_sources": ["homepage"], "sources": ["homepage", "wikidata_official", "mwmbl"]}
+{"query": "wayne rooney", "intent": "entity", "haiku_sources": ["imdb"], "sources": ["imdb", "mwmbl"]}
+{"query": "ambrose king centre", "intent": "local", "haiku_sources": ["openstreetmap_org"], "sources": ["openstreetmap_org", "mwmbl"]}
+{"query": "genk", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}
+{"query": "utilities meaning", "intent": "informational", "haiku_sources": ["wiktionary"], "sources": ["wiktionary", "mwmbl"]}
+{"query": "uk extreme heat", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "crete news", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "strikes in spain", "intent": "news", "haiku_sources": ["guardian"], "sources": ["guardian", "mwmbl"]}
+{"query": "wirtz", "intent": "entity", "haiku_sources": [], "sources": ["mwmbl"]}

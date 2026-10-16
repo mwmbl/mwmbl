@@ -1,0 +1,19 @@
+name: sourceforge_net
+domain: sourceforge.net
+field: technology
+request:
+  url: https://sourceforge.net/directory/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: li.project-oss
+  base_url: https://sourceforge.net
+  fields:
+    title: a.result-heading-title
+    url:
+      selector: a.result-heading-title
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

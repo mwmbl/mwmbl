@@ -1,0 +1,19 @@
+name: www_springer_com
+domain: www.springer.com
+field: academia
+request:
+  url: https://link.springer.com/search
+  params:
+    query: '{query}'
+response:
+  format: html
+  results: div.app-author-list.app-author-list--truncated
+  base_url: https://www.springer.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: research
+  expect_title_contains: research

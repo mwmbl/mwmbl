@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Targeted NDCG comparison for the newly-added Super Search sources.
+
+The full-sample compare_search_modes dilutes the effect of a few high-value
+sources across thousands of unrelated queries. This script instead evaluates only
+the *in-coverage* test queries — those whose gold results include a URL on a new
+source's domain — where source selection can actually change the ranking. For each
+such query it scores three arms (standard / SS baseline / SS + new sources) with
+the same gold→NDCG method as rankeval.evaluation.evaluate.
+
+It also evaluates Super Search as a *fallback*: Super Search is only invoked when
+standard search comes up short (returns ``<= --fallback-threshold`` results),
+otherwise the standard ranking is kept. This models the intended production usage —
+Super Search rescues queries where standard search fails — rather than replacing
+every ranking. The fallback arms are derived post-hoc from the per-query results of
+the other arms (``fallback@n`` for a query = the Super Search NDCG when standard
+returns ``<= n`` results, else the standard NDCG), so they add no extra model runs.
+
+Standard search uses the **remote** production index (``api.mwmbl.org``) by default,
+not the tiny local dev index: the gate counts standard results, and the local index
+returns ``<= 3`` for almost every in-coverage query (their answers live on external
+domains it does not hold), which would make the fallback fire on everything. Pass
+``--standard-index local`` to reproduce the original local-index standard arm.
+
+Run:
+  DATABASE_URL="postgres://daoud@" DJANGO_SETTINGS_MODULE=mwmbl.settings_dev \
+      uv run python scripts/super_search_new_sources_eval.py --max-queries 80
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+import django
+import numpy as np
+import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
+django.setup()
+
+from django.conf import settings  # noqa: E402
+from sklearn.metrics import ndcg_score  # noqa: E402
+
+from mwmbl.rankeval.evaluation.evaluate import CLICK_PROPORTIONS, NUM_RESULTS_FOR_EVAL  # noqa: E402
+from mwmbl.rankeval.evaluation.evaluate_ranker import DummyCompleter  # noqa: E402
+from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
+from mwmbl.rankeval.evaluation.remote_index import RemoteIndex  # noqa: E402
+from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RUST_MODEL_PATH  # noqa: E402
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline  # noqa: E402
+from mwmbl.tinysearchengine.ltr_rank import LTRRanker, score_documents  # noqa: E402
+from mwmbl.tinysearchengine.mmr_rank import MMRRanker  # noqa: E402
+from mwmbl.tinysearchengine.super_search_select.registry import get_meta  # noqa: E402
+
+NEW_SOURCES = ["www_gov_uk", "imdb"]
+
+
+def _standard_ranker_and_model(use_local: bool):
+    """Standard search ranker (LTR + MMR + 3 wiki) and its raw LTR model.
+
+    Returning the model too lets us score standard's top result for the relevance-
+    score fallback trigger (the ranker's output Documents carry only the index score,
+    not the LTR relevance). Remote = production index at api.mwmbl.org.
+    """
+    if use_local:
+        from mwmbl.search_setup import ltr_model, ranker  # local index + LTR + MMR + wiki
+
+        return ranker, ltr_model
+    ltr_model = RustXGBPipeline.from_model_path(str(RUST_MODEL_PATH))
+    return MMRRanker(LTRRanker(RemoteIndex(), DummyCompleter(), ltr_model, True, 3)), ltr_model
+
+
+def _registrable(host: str) -> str:
+    for prefix in ("www.", "m."):
+        if host.startswith(prefix):
+            host = host[len(prefix) :]
+    labels = host.split(".")
+    return ".".join(labels[-2:]) if len(labels) > 2 else host
+
+
+def _host(url: str) -> str:
+    try:
+        return urlparse(str(url)).netloc.lower().split("@")[-1].split(":")[0]
+    except ValueError:
+        return ""
+
+
+def _ndcg(predicted_urls: list[str], gold_scores: dict[str, float]) -> float:
+    top = predicted_urls[:NUM_RESULTS_FOR_EVAL]
+    y_true = [gold_scores.get(u, 0.0) for u in top] + [0.0] * (NUM_RESULTS_FOR_EVAL - len(top))
+    y_pred = list(range(NUM_RESULTS_FOR_EVAL, 0, -1))
+    return ndcg_score([y_true], [y_pred])
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-queries", type=int, default=80)
+    parser.add_argument(
+        "--standard-index",
+        choices=["remote", "local"],
+        default="remote",
+        help="Index for the standard-search arm and the fallback gate "
+        "(default remote = api.mwmbl.org production index).",
+    )
+    parser.add_argument(
+        "--fallback-thresholds",
+        type=int,
+        nargs="+",
+        default=[1, 3, 5],
+        help="Fall back to Super Search when standard returns <= threshold results. Evaluated post-hoc for each value.",
+    )
+    parser.add_argument(
+        "--score-thresholds",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Relevance-score trigger: fall back when standard's top-result "
+        "LTR score < threshold. Default: deciles of the observed score "
+        "distribution (data-driven sweep).",
+    )
+    args = parser.parse_args()
+
+    df = pd.read_csv(RANKINGS_DATASET_TEST_PATH)
+    new_domains = {_registrable(get_meta(n).domain.lower()) for n in NEW_SOURCES}
+
+    # In-coverage queries: a gold URL of theirs sits on one of the new domains.
+    covered = {q for q, u in zip(df["query"], df["url"]) if _registrable(_host(u)) in new_domains}
+    queries = sorted(covered)
+    rng = np.random.default_rng(0)
+    rng.shuffle(queries)
+    queries = queries[: args.max_queries]
+    print(f"{len(covered)} in-coverage test queries; evaluating {len(queries)}")
+
+    # Gold score dicts per query (same construction as evaluate.py).
+    gold = {}
+    for q in queries:
+        rows = df[df["query"] == q][["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
+        rows["score"] = CLICK_PROPORTIONS[: len(rows)]
+        gold[q] = rows.set_index("url")["score"].to_dict()
+
+    print(f"standard-search index: {args.standard_index}")
+    per_query = {"standard": {}, "ss-baseline": {}, "ss+new": {}}
+    standard_count = {}  # number of results standard returned (count-based gate)
+    standard_top_score = {}  # LTR relevance of standard's top result (score-based gate)
+
+    # Standard arm: handled directly (not via the generic loop) so we can read the
+    # ranker's Documents and re-score the top one with the LTR model.
+    std_ranker, ltr_model = _standard_ranker_and_model(args.standard_index == "local")
+    print("\n--- arm standard ---")
+    for i, q in enumerate(queries):
+        results = std_ranker.search(q, [])
+        per_query["standard"][q] = _ndcg([r.url for r in results], gold[q])
+        standard_count[q] = len(results)
+        standard_top_score[q] = score_documents(ltr_model, q, results[:1])[0] if results else float("-inf")
+        if (i + 1) % 20 == 0:
+            print(f"  {i + 1}/{len(queries)}")
+
+    ss_arms = [
+        ("ss-baseline", lambda: SuperSearchRankingModel(selection_key=""), []),
+        ("ss+new", lambda: SuperSearchRankingModel(selection_key="+".join(NEW_SOURCES)), NEW_SOURCES),
+    ]
+    for name, make_model, force in ss_arms:
+        settings.SUPER_SEARCH_FORCE_INCLUDE = force
+        model = make_model()
+        print(f"\n--- arm {name} ---")
+        for i, q in enumerate(queries):
+            per_query[name][q] = _ndcg(model.predict(q), gold[q])
+            if (i + 1) % 20 == 0:
+                print(f"  {i + 1}/{len(queries)}")
+    settings.SUPER_SEARCH_FORCE_INCLUDE = []
+
+    # Fallback arms, derived post-hoc: keep standard unless it returned <= n results,
+    # in which case fall back to the corresponding always-Super-Search arm.
+    for n in sorted(args.fallback_thresholds):
+        for ss_name in ("ss-baseline", "ss+new"):
+            per_query[f"fallback@{n}/{ss_name}"] = {
+                q: (per_query[ss_name][q] if standard_count[q] <= n else per_query["standard"][q]) for q in queries
+            }
+
+    print("\n" + "=" * 60)
+    print(f"{'arm':24} {'mean NDCG':>10}")
+    for name in per_query:
+        print(f"{name:24} {np.mean(list(per_query[name].values())):>10.4f}")
+
+    print(f"\nfallback fire rate (standard <= n results), of {len(queries)} queries:")
+    for n in sorted(args.fallback_thresholds):
+        fired = sum(c <= n for c in standard_count.values())
+        print(f"  n={n}: {fired:3d} fired ({fired / len(queries):.0%})")
+
+    base = per_query["ss-baseline"]
+    new = per_query["ss+new"]
+    wins = sum(new[q] > base[q] + 1e-9 for q in queries)
+    losses = sum(new[q] < base[q] - 1e-9 for q in queries)
+    delta = np.mean([new[q] - base[q] for q in queries])
+    print(
+        f"\nss+new vs ss-baseline: mean Δ {delta:+.4f} | better {wins}, worse {losses}, "
+        f"same {len(queries) - wins - losses}"
+    )
+
+    # The headline fallback question: does gating Super Search behind standard-search
+    # failure beat serving standard search alone, on this in-coverage subset?
+    std = per_query["standard"]
+    print("\nfallback vs standard-always (paired, same queries):")
+    for n in sorted(args.fallback_thresholds):
+        for ss_name in ("ss-baseline", "ss+new"):
+            fb = per_query[f"fallback@{n}/{ss_name}"]
+            d = np.mean([fb[q] - std[q] for q in queries])
+            w = sum(fb[q] > std[q] + 1e-9 for q in queries)
+            worse = sum(fb[q] < std[q] - 1e-9 for q in queries)
+            print(f"  fallback@{n}/{ss_name:11} mean Δ {d:+.4f} | better {w}, worse {worse}")
+
+    # Why the fallback nets ~0: show, for the queries it fires on, whether Super
+    # Search actually rescues them. If standard and Super Search both score ~0 on the
+    # starved queries, the result-count gate is selecting queries SS cannot help.
+    nmax = max(args.fallback_thresholds)
+    fired = sorted([q for q in queries if standard_count[q] <= nmax], key=lambda q: standard_count[q])
+    print(f"\nfired queries at n={nmax} (standard count, NDCG: standard / ss-baseline / ss+new):")
+    for q in fired:
+        print(f"  cnt={standard_count[q]:2d}  {std[q]:.3f} / {base[q]:.3f} / {new[q]:.3f}  {q!r}")
+
+    # ---- Relevance-score trigger: fall back when standard's top result is weak ----
+    # Result count is a poor proxy for "standard failed" (see above). A relevance
+    # signal — the LTR score of standard's top result — should target the queries
+    # where standard is *confidently wrong* rather than merely sparse.
+    finite = sorted(s for s in standard_top_score.values() if np.isfinite(s))
+    n_empty = len(queries) - len(finite)
+    print(f"\nstandard top-result LTR score distribution ({n_empty} queries with no results → -inf, always fire):")
+    if finite:
+        pcts = [0, 10, 25, 50, 75, 90, 100]
+        print("  " + "   ".join(f"p{p}={v:+.3f}" for p, v in zip(pcts, np.percentile(finite, pcts))))
+
+    if args.score_thresholds is not None:
+        score_thresholds = args.score_thresholds
+    elif finite:
+        score_thresholds = sorted(set(round(float(t), 3) for t in np.percentile(finite, [10, 20, 30, 40, 50])))
+    else:
+        score_thresholds = []
+
+    print("\nrelevance-score fallback (fire when standard top score < threshold), paired vs standard-always:")
+    print(f"  {'arm':26} {'fired':>11} {'mean NDCG':>10} {'Δ vs std':>9} {'better/worse':>13}")
+    for t in score_thresholds:
+        n_fired = sum(standard_top_score[q] < t for q in queries)
+        for ss_name in ("ss-baseline", "ss+new"):
+            fb = {q: (per_query[ss_name][q] if standard_top_score[q] < t else std[q]) for q in queries}
+            d = np.mean([fb[q] - std[q] for q in queries])
+            w = sum(fb[q] > std[q] + 1e-9 for q in queries)
+            worse = sum(fb[q] < std[q] - 1e-9 for q in queries)
+            label = f"score<{t:+.3f}/{ss_name}"
+            print(
+                f"  {label:26} {n_fired:3d} ({n_fired / len(queries):3.0%}) "
+                f"{np.mean(list(fb.values())):>10.4f} {d:>+9.4f} {w:>5}/{worse:<5}"
+            )
+
+
+if __name__ == "__main__":
+    main()

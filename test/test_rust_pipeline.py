@@ -7,6 +7,7 @@ These tests require the mwmbl_rank Rust extension to be built:
 Run with:
     pytest test/test_rust_pipeline.py -v
 """
+
 import os
 import tempfile
 
@@ -18,11 +19,12 @@ import pytest
 pytest.importorskip("mwmbl_rank", reason="mwmbl_rank Rust extension not built")
 
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
-
+from mwmbl_rank import NUM_FEATURES, PROVIDER_FEATURE_NAMES
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def make_dataframe(n: int = 30, seed: int = 42) -> pd.DataFrame:
     """Create a synthetic DataFrame with the columns expected by RustXGBPipeline."""
@@ -53,13 +55,15 @@ def make_dataframe(n: int = 30, seed: int = 42) -> pd.DataFrame:
     rows = []
     for i in range(n):
         idx = i % len(queries)
-        rows.append({
-            "query": queries[idx],
-            "url": urls[idx],
-            "title": titles[idx],
-            "extract": extracts[idx],
-            "score": float(rng.uniform(0, 2)),
-        })
+        rows.append(
+            {
+                "query": queries[idx],
+                "url": urls[idx],
+                "title": titles[idx],
+                "extract": extracts[idx],
+                "score": float(rng.uniform(0, 2)),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -71,6 +75,7 @@ def make_labels(n: int = 30, seed: int = 42) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestRustXGBPipelineBasic:
     def test_instantiation(self):
@@ -152,14 +157,14 @@ class TestRustXGBPipelineFitPredict:
     def test_predict_with_null_title(self, trained_pipeline):
         pipeline, X, _ = trained_pipeline
         X_null = X.copy()
-        X_null.loc[0, 'title'] = None
+        X_null.loc[0, "title"] = None
         preds = pipeline.predict(X_null)
         assert not np.any(np.isnan(preds))
 
     def test_predict_with_null_extract(self, trained_pipeline):
         pipeline, X, _ = trained_pipeline
         X_null = X.copy()
-        X_null.loc[0, 'extract'] = None
+        X_null.loc[0, "extract"] = None
         preds = pipeline.predict(X_null)
         assert not np.any(np.isnan(preds))
 
@@ -186,8 +191,7 @@ class TestRustXGBPipelinePersistence:
             loaded_preds = loaded.predict(X)
 
             np.testing.assert_allclose(
-                original_preds, loaded_preds, atol=1e-5,
-                err_msg="Predictions differ after save/load"
+                original_preds, loaded_preds, atol=1e-5, err_msg="Predictions differ after save/load"
             )
         finally:
             os.unlink(model_path)
@@ -246,15 +250,15 @@ class TestRustXGBPipelineNDCG:
         # Use the devdata CSV if available, otherwise use synthetic data
         devdata_path = "devdata/rankeval/learning-to-rank.csv"
         if os.path.exists(devdata_path):
-            dataset = pd.read_csv(devdata_path, lineterminator='\n')
-            dataset['title'] = dataset['title'].fillna('')
-            dataset['extract'] = dataset['extract'].fillna('')
-            X = dataset[['query', 'url', 'title', 'extract', 'score']]
-            y = dataset['gold_standard_rank'].fillna(0).astype(float)
+            dataset = pd.read_csv(devdata_path, lineterminator="\n")
+            dataset["title"] = dataset["title"].fillna("")
+            dataset["extract"] = dataset["extract"].fillna("")
+            X = dataset[["query", "url", "title", "extract", "score"]]
+            y = dataset["gold_standard_rank"].fillna(0).astype(float)
         else:
             # Synthetic: create data where higher score → higher relevance
             X = make_dataframe(50)
-            y = X['score'].values.astype(np.float32)
+            y = X["score"].values.astype(np.float32)
 
         pipeline = RustXGBPipeline(num_rounds=50)
         pipeline.fit(X, y)
@@ -263,3 +267,52 @@ class TestRustXGBPipelineNDCG:
         # Compute NDCG over the whole dataset (single group)
         score = ndcg_score([y.tolist()], [preds.tolist()])
         assert score > 0.5, f"NDCG {score:.3f} is not above 0.5"
+
+
+class TestRustXGBPipelineProviderFeatures:
+    """Combined Search's pipeline appends Staan's ranking to the shared features."""
+
+    def test_provider_features_are_appended(self):
+        records = make_dataframe(3).to_dict("records")
+        records[0] |= {"staan_asked": True, "staan_rank": 2}
+        records[1] |= {"staan_asked": True, "staan_rank": None}
+
+        rows = np.array(RustXGBPipeline()._inner.extract_features(records, True))
+
+        assert rows.shape == (3, NUM_FEATURES + len(PROVIDER_FEATURE_NAMES))
+        np.testing.assert_array_equal(rows[:, :NUM_FEATURES], RustXGBPipeline()._inner.extract_features(records))
+        np.testing.assert_array_equal(rows[0, NUM_FEATURES:], [1.0, 2.0])
+        assert rows[1, NUM_FEATURES] == 0.0 and np.isnan(rows[1, NUM_FEATURES + 1])
+        assert np.isnan(rows[2, NUM_FEATURES:]).all()
+
+    def test_a_loaded_model_knows_it_uses_provider_features(self):
+        X = make_dataframe(30)
+        X["staan_asked"] = True
+        X["staan_rank"] = [float(i % 10) if i % 3 else np.nan for i in range(30)]
+        pipeline = RustXGBPipeline(num_rounds=10, provider_features=True)
+        pipeline.fit(X, make_labels(30))
+
+        with tempfile.NamedTemporaryFile(suffix=".xgb", delete=False) as f:
+            model_path = f.name
+        try:
+            pipeline.save_model(model_path)
+            loaded = RustXGBPipeline.from_model_path(model_path)
+        finally:
+            os.unlink(model_path)
+
+        assert loaded.provider_features
+        np.testing.assert_allclose(loaded.predict(X), pipeline.predict(X), atol=1e-5)
+
+    def test_a_standard_model_loads_without_provider_features(self):
+        pipeline = RustXGBPipeline(num_rounds=10)
+        pipeline.fit(make_dataframe(20), make_labels(20))
+
+        with tempfile.NamedTemporaryFile(suffix=".xgb", delete=False) as f:
+            model_path = f.name
+        try:
+            pipeline.save_model(model_path)
+            loaded = RustXGBPipeline(provider_features=True).load_model(model_path)
+        finally:
+            os.unlink(model_path)
+
+        assert not loaded.provider_features

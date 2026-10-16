@@ -1,0 +1,19 @@
+name: mathbabe_org
+domain: mathbabe.org
+field: programming
+request:
+  url: https://mathbabe.org
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h2
+  base_url: https://mathbabe.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

@@ -1,0 +1,17 @@
+name: users_rust_lang_org
+domain: users.rust-lang.org
+field: programming
+request:
+  url: https://users.rust-lang.org/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://users.rust-lang.org/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

@@ -1,8 +1,8 @@
-![banner](docs/assets/images/banner_mwmbl.svg)
-
-# Mwmbl - the Open Source Web Search Engine
+# Mwmbl - the Open Source and Non-Profit Web Search Engine
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
+
+[![codecov](https://codecov.io/gh/mwmbl/mwmbl/graph/badge.svg)](https://codecov.io/gh/mwmbl/mwmbl)
 
 **No ads, no tracking, no profit**
 
@@ -11,14 +11,15 @@ where the community determines the rankings. We aim to be a
 replacement for commercial search engines such as Google and
 Bing.
 
-![mwmbl](https://user-images.githubusercontent.com/1283077/218265959-be4220b4-dcf0-47ab-acd3-f06df0883b52.gif)
+<a href="https://mwmbl.org">
+<img width="1806" height="927" alt="image" src="https://github.com/user-attachments/assets/a4f0bda4-b73e-4ca9-9a13-3eb6544af34f" />
+</a>
 
-We have our own index powered by our community. Our index is currently
-much smaller than those of commercial search engines, with around 500
-million unique URLs and 2.5 million results in the index (as of mid 2025 - [more stats](https://mwmbl.org/stats/)). The
-quality is a long way's off from matching the commercial engines at the moment, but
-you can help change that by joining us! We aim to have 1 billion unique URLs indexed by the end of 2025
-and more than 10 billion by the end of 2026.
+We have our own index powered by our community - while the index itself
+is centralised, the crawling is distributed across servers run by our volunteers.
+
+Our index is currently much smaller than those of commercial search engines, but
+you can help change that by joining us!
 
 
 Community
@@ -39,26 +40,26 @@ Documentation
 
 All documentation is at [https://book.mwmbl.org](https://book.mwmbl.org).
 
+Development coverage
+====================
+
+`make coverage` measures the Python and Rust code and prints a combined,
+executable-line-weighted percentage. See [the coverage guide](docs/coverage.md)
+for prerequisites, exclusions, and CI details.
+
 
 Crawling
 ========
 
-Crawling is distributed across the community, while indexing is
-centralised on the main server.
-
 If you have spare computer power and bandwidth, for now the best way you can help is
 by running our [command line
-crawler](https://github.com/mwmbl/crawler-script) with as many threads
-as you can spare.
-Some documentation about the new crawler can be found in its [README.md](./mwmbl/crawler/README.md).
+crawler](https://book.mwmbl.org/page/community/#running-the-mwmbl-crawler-with-docker-compose).
 
 If you have Firefox you can help out by [installing our
 extension](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/). This
-will crawl the web in the background. It does not use or access any of
-your personal data. Instead it crawls a set of URLs sent from our
-central server. After extracting a summary of each page, it batches
-these up and sends the data to the central server to be stored and
-indexed.
+retrieves search results from commercial search engines to use to evaluate our own ranking.
+It does not use or access any of
+your personal data.
 
 Why a non-profit search engine?
 ===============================
@@ -141,7 +142,7 @@ How to contribute
 
 There are multiple ways to help:
  - [Help us crawl the
-   web](https://addons.mozilla.org/en-GB/firefox/addon/mwmbl-web-crawler/)
+   web](https://book.mwmbl.org/page/community/#running-the-mwmbl-crawler-with-docker-compose)
  - [Donate some money](https://opencollective.com/mwmbl) towards
    hosting costs and supporting our volunteers
  - Give feedback/suggestions
@@ -158,6 +159,26 @@ Development
 ### Local Testing
 
 For trying out the service locally see the section in the Mwmbl [book](https://book.mwmbl.org/page/developers/).
+
+### Code style and checks
+
+Python code is formatted and linted with [ruff](https://docs.astral.sh/ruff/) and type checked
+with [ty](https://github.com/astral-sh/ty). Both are configured in `pyproject.toml` and pinned in
+the `dev` dependency group, so everyone runs the same versions.
+
+Install the git hooks once, after `uv sync`:
+
+    make install-hooks
+
+From then on every commit is formatted and checked. To run the same checks by hand:
+
+    make check     # format check + lint + type check, exactly what CI runs
+    make fix       # reformat and apply the safe lint fixes
+
+ty is gated on error-level diagnostics only. There is a large warning backlog - Django's
+`Model.objects` is invisible to ty, which has no django-stubs plugin support - so the rules with
+pre-existing violations are downgraded to warnings in `[tool.ty.rules]`. Run `make typecheck-all`
+to see the whole backlog, and promote a rule back to `error` once its count reaches zero.
 
 ### Using Dokku
 
@@ -186,4 +207,3 @@ Acknowledgements
 ================
 
 Many thanks to [Mohamed Alm](https://github.com/theonlyalm) for security consultations and recommendations.
-

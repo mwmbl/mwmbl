@@ -1,18 +1,15 @@
 """
 Database storing info on URLs
 """
+
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from logging import getLogger
-from pathlib import Path
 from typing import Optional
 
 from django.conf import settings
-from psycopg2.extras import execute_values
 from pybloomfilter import BloomFilter
-
-from mwmbl.utils import batch
 
 # URL database configuration constants
 # Client has one hour to crawl a URL that has been assigned to them, or it will be reassigned
@@ -30,17 +27,24 @@ class URLStatus(Enum):
     """
     URL state update is idempotent and can only progress forwards.
     """
-    NEW = 0                   # One user has identified this URL
-    QUEUED = 5                # The URL has been queued for crawling
-    ASSIGNED = 10             # The crawler has given the URL to a user to crawl
-    ERROR_TIMEOUT = 20        # Timeout while retrieving
-    ERROR_404 = 30            # 404 response
-    ERROR_OTHER = 40          # Some other error
+
+    NEW = 0  # One user has identified this URL
+    QUEUED = 5  # The URL has been queued for crawling
+    ASSIGNED = 10  # The crawler has given the URL to a user to crawl
+    ERROR_TIMEOUT = 20  # Timeout while retrieving
+    ERROR_404 = 30  # 404 response
+    ERROR_OTHER = 40  # Some other error
     ERROR_ROBOTS_DENIED = 50  # Robots disallow this page
-    CRAWLED = 100             # At least one user has crawled the URL
+    CRAWLED = 100  # At least one user has crawled the URL
 
 
-CRAWLED_STATUSES = {URLStatus.CRAWLED, URLStatus.ERROR_TIMEOUT, URLStatus.ERROR_404, URLStatus.ERROR_OTHER, URLStatus.ERROR_ROBOTS_DENIED}
+CRAWLED_STATUSES = {
+    URLStatus.CRAWLED,
+    URLStatus.ERROR_TIMEOUT,
+    URLStatus.ERROR_404,
+    URLStatus.ERROR_OTHER,
+    URLStatus.ERROR_ROBOTS_DENIED,
+}
 
 
 @dataclass
@@ -57,15 +61,17 @@ class URLDatabase:
         self.urls = {}
 
     def __enter__(self):
-        month_date = datetime.utcnow()
+        month_date = datetime.now(timezone.utc)
 
         for i in range(3):
             # Start from current month and go back two months
-            month_date = datetime(month_date.year, month_date.month, 1)
+            month_date = datetime(month_date.year, month_date.month, 1, tzinfo=timezone.utc)
             urls_path = settings.URLS_BLOOM_FILTER_PATH.format(month=month_date.month, year=month_date.year)
             month_date = self._construct_bloom_filter(i, month_date, urls_path)
 
-        self._construct_bloom_filter(3, datetime(2024, 1, 1), settings.URLS_BLOOM_FILTER_FALLBACK_PATH)
+        self._construct_bloom_filter(
+            3, datetime(2024, 1, 1, tzinfo=timezone.utc), settings.URLS_BLOOM_FILTER_FALLBACK_PATH
+        )
         logger.info(f"Initialised URL crawled DB with dates {self.urls.keys()}")
         return self
 
@@ -90,7 +96,8 @@ class URLDatabase:
         Update URLs with the most recent crawl date, if they've been crawled before, or None otherwise.
         Update the most recent URL status in the database.
         """
-        most_recent_urls = next(iter(self.urls.values()))
+        most_recent_date = next(iter(self.urls.keys()))
+        most_recent_urls = self.urls[most_recent_date]
         new_urls = []
         for url in found_urls:
             found_date = None
@@ -101,6 +108,16 @@ class URLDatabase:
 
             if url.status in CRAWLED_STATUSES:
                 most_recent_urls.add(url.url)
+                # The URL has just been crawled (or failed): mark it as crawled at the
+                # time of the crawl so it isn't immediately re-queued. Without this, a
+                # first-time crawl has found_date=None (it wasn't in any bloom filter
+                # before this batch), so queue_urls treats it as never-crawled and hands
+                # it out again. The bloom filters only record the month, which is too
+                # coarse to use here: on the 31st, the start of the month is already 30
+                # days ago, which is exactly the re-queue threshold. The crawl timestamp
+                # is aware UTC, and so is everything else last_crawled is compared
+                # against (the bloom filter dates, and the clock in queue_urls).
+                found_date = url.timestamp
 
             new_urls.append(FoundURL(url.url, url.user_id_hash, url.status, url.timestamp, found_date))
         return new_urls

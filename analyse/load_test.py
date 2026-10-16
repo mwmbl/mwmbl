@@ -8,7 +8,7 @@ import requests
 
 NUM_THREADS = 5
 
-QUERIES_PATH = Path(__file__).parent.parent / 'devdata' / 'rankeval-2024-06' / 'queries.csv'
+QUERIES_PATH = Path(__file__).parent.parent / "devdata" / "rankeval-2024-06" / "queries.csv"
 QUERY_URL = "http://localhost:5000/?q={query}"
 
 
@@ -24,7 +24,9 @@ def run():
         times = pool.map(run_query, query_sample)
 
     print("Num threads\tNum queries\tMean seconds\tStd seconds\tMin seconds\tMax seconds")
-    print(f"{NUM_THREADS}\t{len(query_sample)}\t{np.mean(times):.4f}\t{np.std(times):.4f}\t{np.min(times):.4f}\t{np.max(times):.4f}")
+    print(
+        f"{NUM_THREADS}\t{len(query_sample)}\t{np.mean(times):.4f}\t{np.std(times):.4f}\t{np.min(times):.4f}\t{np.max(times):.4f}"
+    )
 
 
 def run_query(query):
@@ -36,6 +38,5 @@ def run_query(query):
     return (end_time - start_time).total_seconds()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
-

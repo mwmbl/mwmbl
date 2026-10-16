@@ -1,0 +1,19 @@
+name: asciinema_org
+domain: asciinema.org
+field: technology
+request:
+  url: https://asciinema.org/search
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h3
+  base_url: https://asciinema.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: docker
+  expect_title_contains: docker

@@ -2,14 +2,15 @@
 Filesystem-based queue that uses os.rename as an atomic operation to ensure
 that items are handled correctly.
 """
+
 import gzip
 import json
 import os
 from abc import ABC
 from enum import Enum
-from typing import Union, Any
-from uuid import uuid4
 from pathlib import Path
+from typing import Any, Union
+from uuid import uuid4
 
 from zstandard import ZstdCompressor, ZstdDecompressor
 
@@ -21,11 +22,11 @@ class FSQueueError(Exception):
 
 
 class FSState(Enum):
-    CREATING = 'creating'
-    READY = 'ready'
-    LOCKED = 'locked'
-    DONE = 'done'
-    ERROR = 'error'
+    CREATING = "creating"
+    READY = "ready"
+    LOCKED = "locked"
+    DONE = "done"
+    ERROR = "error"
 
 
 class Serializer(ABC):
@@ -42,28 +43,28 @@ class ZstdJsonSerializer(Serializer):
         self.decompressor = ZstdDecompressor()
 
     def serialize(self, item) -> bytes:
-        return self.compressor.compress(json.dumps(item).encode('utf8'))
+        return self.compressor.compress(json.dumps(item).encode("utf8"))
 
     def deserialize(self, serialized_item: bytes):
-        return json.loads(self.decompressor.decompress(serialized_item).decode('utf8'))
+        return json.loads(self.decompressor.decompress(serialized_item).decode("utf8"))
 
 
 class GzipJsonRowSerializer(Serializer):
     def serialize(self, items: list[object]) -> bytes:
         json_items = [json.dumps(item) for item in items]
-        return gzip.compress('\n'.join(json_items).encode('utf8'))
+        return gzip.compress("\n".join(json_items).encode("utf8"))
 
     def deserialize(self, serialized_items: bytes) -> list[object]:
-        lines = gzip.decompress(serialized_items).decode('utf8')
-        return [json.loads(line) for line in lines.strip().split('\n')]
+        lines = gzip.decompress(serialized_items).decode("utf8")
+        return [json.loads(line) for line in lines.strip().split("\n")]
 
 
 class GzipJsonBlobSerializer(Serializer):
     def serialize(self, items: Any) -> bytes:
-        return gzip.compress(json.dumps(items).encode('utf8'))
+        return gzip.compress(json.dumps(items).encode("utf8"))
 
     def deserialize(self, serialized_items: bytes) -> Any:
-        data = gzip.decompress(serialized_items).decode('utf8')
+        data = gzip.decompress(serialized_items).decode("utf8")
         return json.loads(data)
 
 
@@ -76,7 +77,7 @@ class FSQueue:
         if not os.path.isdir(self.directory):
             raise ValueError("Given path is not a directory")
 
-        if '/' in name:
+        if "/" in name:
             raise ValueError("Name should not contain '/'")
 
         os.makedirs(os.path.join(self.directory, self.name), exist_ok=True)
@@ -97,7 +98,7 @@ class FSQueue:
         Push a new item into the ready state
         """
         item_id = str(uuid4())
-        with open(self._get_path(FSState.CREATING, item_id), 'wb') as output_file:
+        with open(self._get_path(FSState.CREATING, item_id), "wb") as output_file:
             output_file.write(self.serializer.serialize(item))
 
         self._move(item_id, FSState.CREATING, FSState.READY)
@@ -121,12 +122,12 @@ class FSQueue:
                 print("File not found", path.name)
                 continue
 
-            with open(self._get_path(FSState.LOCKED, path.name), 'rb') as item_file:
+            with open(self._get_path(FSState.LOCKED, path.name), "rb") as item_file:
                 print("Opening file", path.name)
                 try:
                     return path.name, self.serializer.deserialize(item_file.read())
                 except Exception as e:
-                    raise FSQueueError(path.name, 'Error deserializing item') from e
+                    raise FSQueueError(path.name, "Error deserializing item") from e
 
     def done(self, item_id: str):
         """
@@ -146,4 +147,3 @@ class FSQueue:
         for path in paths:
             # Try and lock the file
             self._move(path.name, FSState.LOCKED, FSState.READY)
-

@@ -1,0 +1,21 @@
+name: theanarchistlibrary_org
+domain: theanarchistlibrary.org
+field: philosophy
+request:
+  url: https://theanarchistlibrary.org/search
+  params:
+    q: "{query}"
+response:
+  format: html
+  results: "div.amw-listing-item"
+  fields:
+    title:
+      selector: "a.list-group-item strong"
+    url:
+      selector: "a.list-group-item"
+      attr: href
+    extract:
+      selector: "a.list-group-item"
+smoke:
+  query: theory
+  expect_title_contains: Theory

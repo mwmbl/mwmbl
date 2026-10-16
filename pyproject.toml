@@ -34,7 +34,14 @@ dependencies = [
     "numpy==1.23.2",
     "objgraph>=3.6.1",
     "psutil>=6.0.0",
-    "xgboost>=2.1.0",
+    # xgboost's Linux wheels bundle a CUDA-enabled libxgboost.so and pull in
+    # nvidia-nccl-cu12, together ~600MB installed. Since 3.1.3 that applies to
+    # arm64 as well, which is what doubled the crawler image. Nothing here trains
+    # or predicts on a GPU - serving goes through the Rust extension's own
+    # libxgboost - so take the CPU-only build wherever it is published (Linux and
+    # Windows). The macOS wheel has no CUDA in it to begin with.
+    "xgboost-cpu>=2.1.0; sys_platform != 'darwin'",
+    "xgboost>=2.1.0; sys_platform == 'darwin'",
     "pydistinct>=0.6.4",
     "django-ninja-jwt>=5.3.3",
     "sentry-sdk>=2.13.0",
@@ -45,7 +52,15 @@ dependencies = [
     "scalar-ninja>=0.3.0",
     "django-background-tasks>=1.2.8",
     "django-redis>=5.4.0",
-    "polar-sdk>=0.10.0",
+    "polar-sdk==0.31.7",
+    "httpx>=0.27.0",
+    "defusedxml>=0.7.0",
+    # Used by the Super Search recipe engine (super_search_sources/recipe.py),
+    # which is imported at app startup — must be a core dep, not indexer-only.
+    "beautifulsoup4==4.10.0",
+    "onnxruntime>=1.27.0",
+    "tokenizers>=0.23.1",
+    "standardwebhooks>=1.0.1",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +68,6 @@ indexer = [
     "ujson==4.3.0",
     "warcio==1.7.4",
     "idna==3.3",
-    "beautifulsoup4==4.10.0",
     "langdetect==1.0.9",
     "pyarrow==6.0.0",
     "pyspark==3.2.0",
@@ -62,17 +76,31 @@ indexer = [
 
 [project.scripts]
 mwmbl-tinysearchengine = "mwmbl.main:run"
-mwmbl-crawl = "mwmbl.crawl:run"
+mwmbl-crawl = "mwmbl.crawl:main"
 
 [dependency-groups]
 dev = [
     "pytest>=7.0.1",
     "pytest-mock>=3.10.0",
     "pytest-django>=4.5.2",
+    "pytest-asyncio>=0.23.0",
+    "pytest-httpx>=0.30.0",
+    "pytest-cov>=5.0.0",
+    "blockbuster>=1.5.0",
     "fakeredis>=2.30.1",
     "maturin>=1.5,<2.0",
     "patchelf>=0.17.2.4",
+    "ruff>=0.16.6",
+    "ty>=0.0.78",
+    "pre-commit>=4.6.2",
 ]
+
+[tool.uv]
+# pydistinct declares xgboost as a dependency but never imports it - its four modules
+# use numpy, scipy and statsmodels only. On Linux that stale requirement is enough to
+# drag the CUDA wheel and nvidia-nccl-cu12 back in, undoing the xgboost-cpu switch
+# above, so confine every xgboost request to macOS where the wheel is CPU-only anyway.
+override-dependencies = ["xgboost>=2.1.0; sys_platform == 'darwin'"]
 
 [tool.maturin]
 python-source = "."
@@ -87,4 +115,100 @@ log_cli = true
 log_cli_level = "INFO"
 DJANGO_SETTINGS_MODULE = "mwmbl.settings_test"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = "--reuse-db"
+addopts = "--reuse-db -m 'not live and not slow'"
+asyncio_mode = "auto"
+# DTZ cannot see this one: at the point of assignment `timezone.now()` and
+# `datetime.utcnow()` look the same to a linter, and only Django knows the column is aware.
+filterwarnings = ["error:.*received a naive datetime:RuntimeWarning"]
+markers = [
+    "live: hits real external endpoints; excluded from the default run. Run with -m live (used by the weekly Super Search smoke workflow).",
+    "slow: heavy CPU (e.g. XGBoost feature selection); excluded from the default run. Run with -m slow.",
+]
+
+[tool.coverage.run]
+source = ["mwmbl"]
+omit = [
+    "mwmbl/migrations/*",
+    "mwmbl/asgi.py",
+    "mwmbl/wsgi.py",
+    "mwmbl/indexer/paths.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["devdata", "front-end", "test_env"]
+
+[tool.ruff.lint]
+select = ["DTZ", "E", "F", "I"]
+# The formatter owns line length. E501 only ever fires on things it cannot split -
+# long string literals, URLs and markdown tables in API docs - where wrapping hurts.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Django settings modules build their config with star imports from a base module.
+"mwmbl/settings*.py" = ["F403", "F405"]
+# These modules must call django.setup() (or pytest.importorskip) before the imports
+# that reach Django models or the Rust extension, so those imports cannot be at the top.
+"analyse/analyse_crawled_links.py" = ["E402"]
+"mwmbl/crawl.py" = ["E402"]
+"mwmbl/rankeval/evaluation/compare_ltr_models.py" = ["E402"]
+"test/test_rust_features.py" = ["E402"]
+"scripts/combined_search_haiku/*.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mwmbl", "mwmbl_rank"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+exclude = ["devdata", "front-end", "test_env", "scripts/train", "**/migrations"]
+
+# ty is gated on CI and on commit, so every rule that has pre-existing violations is
+# downgraded to "warn" here: the baseline is green and a NEW category of error fails the
+# build. `make typecheck-warnings` lists everything still outstanding.
+#
+# Tighten these back to "error" one rule at a time as the counts come down. The counts
+# below are the baseline at the time ty was introduced (2026-09-07).
+[tool.ty.rules]
+# 415, of which ~279 are Django's `Model.objects` - ty has no django-stubs plugin support,
+# so the default manager is invisible to it. Not fixable in this repo today.
+unresolved-attribute = "warn"
+# 138. Mostly Django/numpy/pandas dynamism plus genuinely loose annotations.
+invalid-argument-type = "warn"
+# 37.
+invalid-assignment = "warn"
+# 31. Optional ML extras (torch, transformers, sentence-transformers), the pybloomfilter
+# native module, and scripts that import their siblings by bare module name.
+unresolved-import = "warn"
+# 19.
+not-iterable = "warn"
+# 12.
+not-subscriptable = "warn"
+# 10.
+unsupported-operator = "warn"
+# 9.
+invalid-parameter-default = "warn"
+# 8.
+invalid-method-override = "warn"
+# 6.
+no-matching-overload = "warn"
+# 4.
+invalid-return-type = "warn"
+# 2.
+invalid-type-form = "warn"
+# 0 - clean, and kept blocking. Calling something with the wrong number of arguments is
+# always a bug, and ty catches it across modules where a test never would.
+too-many-positional-arguments = "error"
+missing-argument = "error"
+# 1.
+empty-body = "warn"
+# 1.
+call-non-callable = "warn"

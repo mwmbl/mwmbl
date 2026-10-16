@@ -1,13 +1,13 @@
 """
 Evaluate ranking where we only use Wikipedia as the index.
 """
+
 import urllib
 
 import requests
 from joblib import Memory
 
 from mwmbl.rankeval.evaluation.evaluate import evaluate
-from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import WIKI_SEARCH_API_URL, get_wiki_url
 
 memory = Memory(location="devdata/cache")
@@ -20,7 +20,7 @@ def fetch_results(query: str) -> list[str]:
     print("Getting url", url)
     results = requests.get(url).json()
     print("Results", results)
-    return [get_wiki_url(result['title']) for result in results['query']['search']]
+    return [get_wiki_url(result["title"]) for result in results["query"]["search"]]
 
 
 class WikiModel:

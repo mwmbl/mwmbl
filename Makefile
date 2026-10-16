@@ -1,16 +1,22 @@
 # Mwmbl development Makefile
 #
 # Prerequisites:
-#   - uv (https://github.com/astral-sh/uv)
-#   - PostgreSQL running locally with peer auth for the current user
-#   - Redis running locally on the default port (6379)
+# - uv (https://github.com/astral-sh/uv)
+# - PostgreSQL
+# - Redis running on the configured REDIS_URL (default: 127.0.0.1:6379)
 #
 # Quick start:
-#   createdb mwmbl          # one-time setup for dev DB
-#   createdb mwmbl_test     # one-time setup for test DB
-#   make migrate            # apply all migrations
-#   make test               # run the full test suite
-#   make run                # start the dev server
+#   Set DATABASE_URL to a PostgreSQL database you can use for development.
+#   The PostgreSQL user must have CREATEDB so Django can create the test database.
+#
+#   If PostgreSQL is running in Docker but Mwmbl is running directly on the host,
+#	use 127.0.0.1 (or localhost) and the published port. The Docker container name
+#	is only resolvable from containers on the same Docker network.
+#
+#   make install			# one-time setup for dev/test DBs
+#   make migrate			# apply all migrations
+#   make test				# run the full test suite
+#   make run				# start the dev server
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -21,9 +27,14 @@
 # These have no defaults — you must set them in your environment or on the command line.
 DATABASE_URL   ?=
 REDIS_URL      ?= redis://127.0.0.1:6379
+# A Redis database the tests flush, so keep it apart from REDIS_URL's.
+TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
+# Python tests that cross into the mwmbl_rank extension, run against the instrumented build.
+RUST_COVERAGE_TESTS ?= test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
+	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py
+CARGO_HOME     ?= $(HOME)/.cargo
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
-TEST_SETTINGS          := mwmbl.settings_test
 
 # ---------------------------------------------------------------------------
 # Targets
@@ -32,16 +43,33 @@ TEST_SETTINGS          := mwmbl.settings_test
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install patch-xgboost migrate test test-file run run-background lint
+.PHONY: help install install-hooks patch-xgboost migrate test test-file coverage coverage-python coverage-rust \
+        coverage-quick run run-background \
+        check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
 	@echo "Available targets:"
 	@echo "  install        Install all dependencies with uv"
 	@echo "  migrate        Apply Django migrations"
-	@echo "  test           Run the full test suite (set DATABASE_URL to your test DB)"
+	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
+	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
+	@echo "  coverage-python Run Python tests with terminal, XML, and HTML coverage reports"
+	@echo "  coverage-rust  Run Rust unit tests and write an LCOV report (needs cargo-llvm-cov)"
+	@echo "  coverage-quick Run tests with coverage report (terminal only, faster)"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
+	@echo ""
+	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
+	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
+	@echo "  format         Reformat the code with ruff"
+	@echo "  format-check   Check formatting without writing (CI gate)"
+	@echo "  lint           Run ruff lint checks"
+	@echo "  lint-fix       Run ruff lint checks, applying safe fixes"
+	@echo "  typecheck      Run ty, failing only on error-level diagnostics (CI gate)"
+	@echo "  typecheck-all  Run ty showing the full warning backlog, never fails"
+	@echo "  locked         Check uv.lock is up to date with pyproject.toml (CI gate)"
+	@echo "  install-hooks  Install the pre-commit hooks into .git/hooks"
 
 install:
 	uv sync
@@ -63,12 +91,46 @@ migrate:
 		uv run python manage.py migrate --settings=$(DJANGO_SETTINGS_MODULE)
 
 test:
-	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(PYTEST_ARGS)
 
 test-file:
-	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
+
+coverage: coverage-python coverage-rust
+	uv run python scripts/combine_coverage.py coverage/python.xml coverage/rust.lcov
+
+coverage-python:
+	@mkdir -p coverage
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+		uv run pytest --cov=mwmbl --cov-report=term-missing --cov-report=xml:coverage/python.xml \
+		--cov-report=html:coverage/python-html --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
+
+coverage-rust:
+	@PATH="$(CARGO_HOME)/bin:$(PATH)" cargo llvm-cov --version >/dev/null 2>&1 || { \
+		echo "cargo-llvm-cov is required: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov --locked"; \
+		exit 1; \
+	}
+	@mkdir -p coverage
+	@set -eu; \
+		PATH="$(CARGO_HOME)/bin:$(PATH)"; \
+		export PATH PYO3_PYTHON="$(CURDIR)/.venv/bin/python"; \
+		eval "$$(cd mwmbl_rank && cargo llvm-cov show-env --sh)"; \
+		cargo llvm-cov clean --manifest-path mwmbl_rank/Cargo.toml --workspace; \
+		cargo test --manifest-path mwmbl_rank/Cargo.toml --lib; \
+		uv run --no-sync maturin develop; \
+		DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+			uv run --no-sync pytest $(RUST_COVERAGE_TESTS); \
+		cargo llvm-cov report \
+			--manifest-path mwmbl_rank/Cargo.toml \
+			--lcov \
+			--output-path "$(CURDIR)/coverage/rust.lcov" \
+			--ignore-filename-regex '(/vendor/|/.cargo/registry/)'
+
+coverage-quick:
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+		uv run pytest --cov=mwmbl --cov-report=term-missing --ignore=mwmbl_rank/vendor $(PYTEST_ARGS)
 
 run:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
@@ -77,3 +139,53 @@ run:
 run-background:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
 		uv run python manage.py process_tasks --settings=$(DJANGO_SETTINGS_MODULE)
+
+# ---------------------------------------------------------------------------
+# Checks
+#
+# `make check` is exactly what CI and the pre-commit hook run. Keep the three
+# targets below in sync with .pre-commit-config.yaml and .github/workflows/ci.yml.
+# ---------------------------------------------------------------------------
+
+# `locked` comes first on purpose: every other target below shells out to `uv run`,
+# which relocks uv.lock in place when pyproject.toml has moved on, and a lockfile that
+# has just been rewritten always passes `uv lock --check`.
+check: locked format-check lint typecheck
+
+fix: format lint-fix
+
+format:
+	uv run ruff format
+
+format-check:
+	uv run ruff format --check
+
+lint:
+	uv run ruff check
+
+lint-fix:
+	uv run ruff check --fix
+
+# Most rules are downgraded to "warn" in pyproject.toml (see [tool.ty.rules]) because
+# they have a large pre-existing baseline - notably Django's `Model.objects`, which ty
+# cannot see. Print the error-level diagnostics only, and fail on those alone, so the
+# warning backlog does not bury a real regression.
+typecheck:
+	@output=$$(uv run ty check --exit-zero-on-warning --output-format concise 2>&1); \
+		status=$$?; \
+		echo "$$output" | grep -E ' error\[' || true; \
+		echo "$$output" | tail -n 1; \
+		exit $$status
+
+# The full backlog, warnings included. Advisory: never fails the build.
+typecheck-all:
+	uv run ty check --exit-zero-on-warning
+
+# The Docker images install with `uv sync --frozen`, which takes uv.lock exactly as
+# committed, so a pyproject.toml edited without relocking would leave them building the
+# old dependency set while CI and the tests run the new one.
+locked:
+	uv lock --check
+
+install-hooks:
+	uv run pre-commit install

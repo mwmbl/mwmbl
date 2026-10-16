@@ -1,0 +1,19 @@
+name: engineering_nyu_edu
+domain: engineering.nyu.edu
+field: academia
+request:
+  url: https://engineering.nyu.edu/search
+  params:
+    search: '{query}'
+response:
+  format: html
+  results: h3.mb-2
+  base_url: https://engineering.nyu.edu
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: research
+  expect_title_contains: research

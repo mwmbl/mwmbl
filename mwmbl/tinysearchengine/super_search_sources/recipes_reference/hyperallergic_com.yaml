@@ -1,0 +1,22 @@
+name: hyperallergic_com
+domain: hyperallergic.com
+field: art-design
+request:
+  url: https://hyperallergic.com/
+  params:
+    s: "{query}"
+response:
+  format: html
+  results: "article"
+  base_url: https://hyperallergic.com
+  fields:
+    title:
+      selector: "h3"
+    extract:
+      selector: "p"
+    url:
+      selector: "a.gh-card-link"
+      attr: href
+smoke:
+  query: artists
+  expect_title_contains: Artists

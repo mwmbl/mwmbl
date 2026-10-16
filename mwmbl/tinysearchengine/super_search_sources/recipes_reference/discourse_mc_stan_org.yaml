@@ -1,0 +1,19 @@
+# Stan statistical modeling forum via Discourse API
+name: discourse_mc_stan_org
+domain: discourse.mc-stan.org
+field: science
+request:
+  url: https://discourse.mc-stan.org/search.json
+  params:
+    q: "{query}"
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    extract: fancy_title
+    url:
+      template: "https://discourse.mc-stan.org/t/{slug}/{id}"
+smoke:
+  query: prior
+  expect_title_contains: prior

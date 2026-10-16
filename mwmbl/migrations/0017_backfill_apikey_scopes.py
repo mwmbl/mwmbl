@@ -8,9 +8,8 @@ def set_crawl_scope(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0016_apikey_scopes_name_mwmbluser_tier'),
+        ("mwmbl", "0016_apikey_scopes_name_mwmbluser_tier"),
     ]
 
     operations = [

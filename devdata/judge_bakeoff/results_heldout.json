@@ -1,0 +1,98 @@
+[
+  {
+    "judge": "term_overlap",
+    "spearman_overall": 0.201,
+    "spearman_relevance": 0.214,
+    "per_query_spearman": 0.169,
+    "auc_rel2": 0.585,
+    "ndcg@10": 0.558,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.181,
+    "source_best_agree@1": 0.568,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "nomic_cosine",
+    "spearman_overall": 0.355,
+    "spearman_relevance": 0.377,
+    "per_query_spearman": 0.334,
+    "auc_rel2": 0.693,
+    "ndcg@10": 0.617,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.161,
+    "source_best_agree@1": 0.568,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "minilm_ce",
+    "spearman_overall": 0.366,
+    "spearman_relevance": 0.38,
+    "per_query_spearman": 0.351,
+    "auc_rel2": 0.689,
+    "ndcg@10": 0.692,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.165,
+    "source_best_agree@1": 0.576,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "jina_turbo_ce",
+    "spearman_overall": 0.351,
+    "spearman_relevance": 0.367,
+    "per_query_spearman": 0.324,
+    "auc_rel2": 0.684,
+    "ndcg@10": 0.636,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.23,
+    "source_best_agree@1": 0.602,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "ft_minilm-both-v1_torch",
+    "spearman_overall": 0.624,
+    "spearman_relevance": 0.651,
+    "per_query_spearman": 0.598,
+    "auc_rel2": 0.87,
+    "ndcg@10": 0.809,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.396,
+    "source_best_agree@1": 0.686,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "ft_minilm-pairs-v1_torch",
+    "spearman_overall": 0.232,
+    "spearman_relevance": 0.242,
+    "per_query_spearman": 0.217,
+    "auc_rel2": 0.652,
+    "ndcg@10": 0.546,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.222,
+    "source_best_agree@1": 0.602,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "ft_minilm-pointwise-v1_torch",
+    "spearman_overall": 0.672,
+    "spearman_relevance": 0.693,
+    "per_query_spearman": 0.659,
+    "auc_rel2": 0.878,
+    "ndcg@10": 0.828,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.33,
+    "source_best_agree@1": 0.644,
+    "source_eligible_queries": 118
+  },
+  {
+    "judge": "ft_jina-turbo-both-v1_torch",
+    "spearman_overall": 0.577,
+    "spearman_relevance": 0.611,
+    "per_query_spearman": 0.551,
+    "auc_rel2": 0.857,
+    "ndcg@10": 0.813,
+    "ndcg@10_random": 0.379,
+    "source_within_query_spearman": 0.278,
+    "source_best_agree@1": 0.636,
+    "source_eligible_queries": 118
+  }
+]

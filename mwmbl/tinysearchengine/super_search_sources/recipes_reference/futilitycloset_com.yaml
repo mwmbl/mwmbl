@@ -1,0 +1,20 @@
+name: futilitycloset_com
+domain: www.futilitycloset.com
+field: history
+request:
+  url: https://www.futilitycloset.com/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: history
+  expect_title_contains: history

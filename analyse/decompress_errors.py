@@ -1,6 +1,7 @@
 """
 Create some data, compress it, randomly corrupt it, and then decompress it.
 """
+
 from collections import defaultdict
 from random import Random
 
@@ -14,7 +15,7 @@ def test_compress_decompress():
     for i in range(10000):
         compressor = ZstdCompressor()
         decompressor = ZstdDecompressor()
-        random_string = (''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(4096))).encode('utf8')
+        random_string = ("".join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(4096))).encode("utf8")
         compressed_data = compressor.compress(random_string)
 
         # Corrupt the data
@@ -27,7 +28,7 @@ def test_compress_decompress():
         corrupted_data = bytes(compressed_data_array)
 
         try:
-            decompressed_data = decompressor.decompress(corrupted_data)
+            decompressor.decompress(corrupted_data)
         except Exception as e:
             error_type_counts[f"{type(e)}: {str(e)}"] += 1
             continue

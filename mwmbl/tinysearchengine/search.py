@@ -5,11 +5,17 @@ from typing import Optional
 from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
-from mwmbl.format import format_result
-from mwmbl.models import ApiKey, MwmblUser
-from mwmbl.quota import check_rate_limit, get_monthly_count, increment_monthly
+from mwmbl import pricing
+from mwmbl.format import format_result, format_result_v2
+from mwmbl.models import MwmblUser
+from mwmbl.quota import (
+    check_rate_limit,
+    get_monthly_combined_search_api_count,
+    get_monthly_count,
+    increment_monthly,
+)
 from mwmbl.search_auth import SearchApiKeyAuth
-from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.indexer import TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 
 logger = getLogger(__name__)
@@ -17,16 +23,19 @@ logger = getLogger(__name__)
 
 SCORE_THRESHOLD = 0.25
 
-# Module-level router used by the unified v1 API
-router = Router(tags=["Search"])
+# Module-level routers
+router = Router(tags=["Search"])  # v1
+v2_router = Router(tags=["Search"])  # v2
 
 
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class TextSegment(Schema):
     """A fragment of a title or extract, optionally highlighted."""
+
     value: str
     is_bold: bool
 
@@ -42,6 +51,7 @@ class TextSegment(Schema):
 
 class SearchResult(Schema):
     """A single formatted search result returned by the main search endpoint."""
+
     url: str
     title: list[TextSegment]
     extract: list[TextSegment]
@@ -67,32 +77,37 @@ class SearchResult(Schema):
         }
 
 
+class SearchHit(Schema):
+    url: str
+    title: str
+    title_highlights: list[str]
+    content: str
+    content_highlights: list[str]
+    engine: str
+    score: float
+
+
 class SearchResponse(Schema):
-    """Response from the authenticated search endpoint, including usage metadata."""
-    results: list[SearchResult]
+    """Search response with optional Mwmbl usage metadata."""
+
+    query: str
+    number_of_results: int
+    results: list[SearchHit]
     monthly_usage: int | None = None
     monthly_limit: int | None = None
-
-    class Config:
-        json_schema_extra = {
-            "examples": [
-                {
-                    "results": [],
-                    "monthly_usage": 42,
-                    "monthly_limit": 1000,
-                }
-            ]
-        }
 
 
 class RawDocument(Schema):
     """A raw, unformatted document as stored in the index."""
+
     title: str
     url: str
     extract: str
     score: Optional[float] = None
     term: Optional[str] = None
     state: Optional[int] = None
+    user_ids: Optional[list[int]] = None
+    last_crawled: Optional[int] = None
 
     class Config:
         json_schema_extra = {
@@ -111,6 +126,7 @@ class RawDocument(Schema):
 
 class RawSearchResponse(Schema):
     """Response from the raw search endpoint."""
+
     query: str
     results: list[RawDocument]
 
@@ -150,10 +166,10 @@ _COMPLETE_RESPONSE_SCHEMA = {
             "type": "array",
             "description": (
                 "List of suggestion strings. Each entry is one of:\n"
-                "- A completed query term, e.g. `\"python tutorial\"`.\n"
-                "- A direct-navigation URL prefixed with `\"go: \"`, "
-                "e.g. `\"go: docs.python.org/3/tutorial\"`.\n"
-                "- A Google fallback prefixed with `\"search: google.com \"` "
+                '- A completed query term, e.g. `"python tutorial"`.\n'
+                '- A direct-navigation URL prefixed with `"go: "`, '
+                'e.g. `"go: docs.python.org/3/tutorial"`.\n'
+                '- A Google fallback prefixed with `"search: google.com "` '
                 "when no index results exist."
             ),
             "items": {"type": "string"},
@@ -190,35 +206,31 @@ _COMPLETE_RESPONSE_SCHEMA = {
 # Upgrade message helper
 # ---------------------------------------------------------------------------
 
-def _upgrade_message(tier: str) -> str:
-    if tier == MwmblUser.Tier.FREE:
+
+def _upgrade_message(max_monthly_spend_cents: int) -> str:
+    if max_monthly_spend_cents <= 0:
         return (
-            "Upgrade to Starter (10,000 requests/month) or Pro (50,000 requests/month) "
-            "at https://mwmbl.org/pricing."
+            "Increase your monthly spend limit at https://mwmbl.org/pricing to continue "
+            "past the free 2,000 requests/month (billed at $5.00 per 1,000 additional queries)."
         )
-    if tier == MwmblUser.Tier.STARTER:
-        return "Upgrade to Pro (50,000 requests/month) at https://mwmbl.org/pricing."
-    return ""  # Pro — no upgrade available
+    return "Increase your monthly spend limit at https://mwmbl.org/pricing to allow more requests this month."
 
 
 # ---------------------------------------------------------------------------
-# Route registration
+# Route registration helpers
 # ---------------------------------------------------------------------------
 
-def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
-    """Register search routes on the given router or API instance."""
+
+def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the v1 search endpoint: returns a plain list of SearchResult."""
 
     @r.get(
         "",
-        response=SearchResponse,
+        response=list[SearchResult],
         auth=None,
         summary="Search",
         description=(
             "Search the Mwmbl index and return formatted results.\n\n"
-            "Unauthenticated requests are accepted but return `monthly_usage` and "
-            "`monthly_limit` as `null`. To track usage against a quota, pass a valid "
-            "search-scoped API key in the `X-API-Key` header. "
-            "Obtain a key via `POST /api/v1/platform/api-keys/`.\n\n"
             "Results are ranked using a heuristic ranker that considers title, extract, "
             "domain authority, and query-term match quality. "
             "Each result's `title` and `extract` are returned as a list of text segments "
@@ -229,9 +241,6 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n\n"
-            "The response includes `monthly_usage` (requests used this month) and "
-            "`monthly_limit` (your plan's monthly cap); both are `null` for "
-            "unauthenticated requests.\n\n"
             "**Query parameter:** `s` — the search query string (required)."
         ),
         openapi_extra={
@@ -246,6 +255,51 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         },
     )
     def search(request, s: str):
+        results = ranker.search(s, [])
+        return [format_result(result, s) for result in results]
+
+
+def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the v2 search endpoint: returns SearchResponse with optional quota info."""
+
+    @r.get(
+        "",
+        response=SearchResponse,
+        auth=None,
+        summary="Search",
+        description=(
+            "Search the Mwmbl index and return results in SearXNG-compatible format.\n\n"
+            "Unauthenticated requests are accepted but return `monthly_usage` and "
+            "`monthly_limit` as `null`. To track usage against a quota, pass a valid "
+            "search-scoped API key in the `X-API-Key` header. "
+            "Obtain a key via `POST /api/v1/platform/api-keys/`.\n\n"
+            "Results are ranked using a heuristic ranker that considers title, content, "
+            "domain authority, and query-term match quality. "
+            "The response follows the SearXNG JSON format: each result has a plain-text "
+            "`title` and `content`, an `engine` field indicating the result source, "
+            "a `score` (1/position), and SearXNG standard fields.\n\n"
+            "The `engine` field indicates where the result originated:\n"
+            "- `mwmbl` — organically crawled by the Mwmbl crawler\n"
+            "- `wikipedia` — sourced from Wikipedia\n"
+            "- `google` — originally suggested via Google\n"
+            "- `user` — submitted directly by a user\n\n"
+            "The response includes `monthly_usage` (requests used this month) and "
+            "`monthly_limit` (your plan's monthly cap); both are `null` for "
+            "unauthenticated requests.\n\n"
+            "**Query parameter:** `q` — the search query string (required)."
+        ),
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "q",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string", "example": "python tutorial"},
+                }
+            ]
+        },
+    )
+    def search(request, q: str):
         raw_key = request.headers.get("X-API-Key")
         api_key = None
         if raw_key:
@@ -255,7 +309,11 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
         if api_key is not None:
             user: MwmblUser = api_key.user
-            monthly_limit = MwmblUser.TIER_MONTHLY_LIMITS[user.tier]
+            billing = getattr(user, "billing", None)
+            spend_cents = billing.max_monthly_spend_cents if billing else 0
+            monthly_limit = pricing.effective_monthly_request_cap(
+                spend_cents, get_monthly_combined_search_api_count(user.id)
+            )
 
             if not check_rate_limit(user.id):
                 raise HttpError(
@@ -265,13 +323,11 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
             current_count = get_monthly_count(user.id)
             if current_count >= monthly_limit:
-                upgrade_msg = _upgrade_message(user.tier)
                 msg = (
-                    f"Monthly quota exceeded: your {user.get_tier_display()} plan allows "
-                    f"{monthly_limit:,} requests per month and you have used {current_count:,}."
+                    f"Monthly quota exceeded: your account allows {monthly_limit:,} requests "
+                    f"per month at your current spend limit and you have used {current_count:,}. "
+                    f"{_upgrade_message(spend_cents)}"
                 )
-                if upgrade_msg:
-                    msg += f" {upgrade_msg}"
                 raise HttpError(429, msg)
 
             monthly_usage = increment_monthly(user.id)
@@ -279,12 +335,19 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_limit = None
             monthly_usage = None
 
-        results = ranker.search(s, [])
+        raw_results = ranker.search(q, [])
+        formatted = [format_result_v2(r, i + 1, q) for i, r in enumerate(raw_results)]
         return SearchResponse(
-            results=[format_result(result, s) for result in results],
+            query=q,
+            number_of_results=len(formatted),
+            results=formatted,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
+
+
+def _register_common_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
+    """Register the /complete and /raw endpoints (shared between v1 and v2)."""
 
     @r.get(
         "/complete",
@@ -295,10 +358,10 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "The response is a two-element list:\n"
             "1. The original query string (echoed back).\n"
             "2. A list of suggestion strings. Each suggestion is either:\n"
-            "   - A completed query term (e.g. `\"python tutorial\"`).\n"
-            "   - A direct URL prefixed with `\"go: \"` when the partial query "
-            "matches a URL in the index (e.g. `\"go: docs.python.org/3/tutorial\"`).\n"
-            "   - A Google search suggestion prefixed with `\"search: google.com \"` "
+            '   - A completed query term (e.g. `"python tutorial"`).\n'
+            '   - A direct URL prefixed with `"go: "` when the partial query '
+            'matches a URL in the index (e.g. `"go: docs.python.org/3/tutorial"`).\n'
+            '   - A Google search suggestion prefixed with `"search: google.com "` '
             "when no index results are found.\n\n"
             "**Query parameter:** `q` — the partial query string (required)."
         ),
@@ -313,9 +376,7 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             ],
             "responses": {
                 "200": {
-                    "description": (
-                        "A two-element list: the echoed query string and a list of suggestions."
-                    ),
+                    "description": ("A two-element list: the echoed query string and a list of suggestions."),
                     "content": {
                         "application/json": {
                             "schema": _COMPLETE_RESPONSE_SCHEMA,
@@ -346,7 +407,7 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
                         }
                     },
                 }
-            }
+            },
         },
     )
     def complete(request, q: str):
@@ -388,13 +449,44 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         return {"query": s, "results": [dataclasses.asdict(result) for result in results]}
 
 
+def _register_page_route(r: Router | NinjaAPI, tiny_index: TinyIndex):
+    """Register the /page/{n} endpoint that exposes the index one page at a time."""
+
+    @r.get(
+        "/page/{n}",
+        response=list[list],
+        auth=None,
+        summary="Raw index page",
+        description=(
+            "Return the decompressed contents of page `n` of the index.\n\n"
+            "Each page is a list of documents, and each document is the tuple it is stored "
+            "as: `[title, url, extract, score, term, state, ...]`. Pages are numbered from 0; "
+            "`GET /page/{n}` for every `n` below the index's page count retrieves the whole "
+            "index. Useful for analysing how well the index is packed, or for taking a copy."
+        ),
+    )
+    def page(request, n: int):
+        if not 0 <= n < tiny_index.num_pages:
+            raise HttpError(404, f"Page {n} is not in an index of {tiny_index.num_pages} pages")
+        return tiny_index._get_page_tuples(n)
+
+
 def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"search-{version}")
-    _register_routes(api, ranker)
+    _register_search_v1(api, ranker)
+    _register_common_routes(api, ranker)
     return api
 
 
-def init_router(ranker: HeuristicRanker):
-    """Initialise the module-level router with the given ranker (called from urls.py)."""
-    _register_routes(router, ranker)
+def init_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
+    """Initialise the v1 module-level router (called from urls.py)."""
+    _register_search_v1(router, ranker)
+    _register_common_routes(router, ranker)
+    _register_page_route(router, tiny_index)
+
+
+def init_v2_router(ranker: HeuristicRanker):
+    """Initialise the v2 module-level router (called from urls.py)."""
+    _register_search_v2(v2_router, ranker)
+    _register_common_routes(v2_router, ranker)

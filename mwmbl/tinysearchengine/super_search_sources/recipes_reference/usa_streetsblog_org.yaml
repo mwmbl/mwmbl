@@ -1,0 +1,17 @@
+name: usa_streetsblog_org
+domain: usa.streetsblog.org
+field: news-politics
+request:
+  url: https://usa.streetsblog.org/wp-json/wp/v2/search
+  params:
+    search: '{query}'
+    per_page: '{limit}'
+response:
+  format: json
+  results: ''
+  fields:
+    title: title
+    url: url
+smoke:
+  query: history
+  expect_title_contains: history

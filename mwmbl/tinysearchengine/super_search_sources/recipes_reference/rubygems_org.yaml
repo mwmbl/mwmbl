@@ -1,0 +1,18 @@
+name: rubygems_org
+domain: rubygems.org
+field: technology
+request:
+  url: https://rubygems.org/api/v1/search.json
+  params:
+    query: '{query}'
+response:
+  format: json
+  results: ''
+  fields:
+    title: name
+    extract: info
+    url:
+      template: https://rubygems.org/gems/{name}
+smoke:
+  query: rails
+  expect_title_contains: rails

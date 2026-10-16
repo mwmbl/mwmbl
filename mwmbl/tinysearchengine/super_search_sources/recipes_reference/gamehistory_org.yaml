@@ -1,0 +1,20 @@
+name: gamehistory_org
+domain: gamehistory.org
+field: gaming
+request:
+  url: https://gamehistory.org/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: mario
+  expect_title_contains: mario

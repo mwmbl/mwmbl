@@ -8,6 +8,7 @@ Check search API behaviour with an API key:
   1. Usage value increases with each successful request
   2. Rate limiting kicks in and returns 429 when exceeded
 """
+
 import os
 import sys
 import time
@@ -47,9 +48,7 @@ def check_usage_increases() -> None:
         print(f"  Request {i + 1}: monthly_usage={usage}, monthly_limit={limit}")
         assert usage is not None, "monthly_usage should not be null when using an API key"
         if prev_usage is not None:
-            assert usage > prev_usage, (
-                f"monthly_usage did not increase: was {prev_usage}, now {usage}"
-            )
+            assert usage > prev_usage, f"monthly_usage did not increase: was {prev_usage}, now {usage}"
         prev_usage = usage
         # Small pause to avoid triggering rate limit between checks
         time.sleep(0.3)
@@ -109,9 +108,7 @@ def check_subscription_usage(expected_usage: int) -> None:
     print(f"  plan={plan}, monthly_usage={usage}, monthly_limit={limit}")
     assert usage is not None, "monthly_usage missing from subscription response"
     assert limit is not None, "monthly_limit missing from subscription response"
-    assert usage >= expected_usage, (
-        f"subscription monthly_usage ({usage}) is less than search usage ({expected_usage})"
-    )
+    assert usage >= expected_usage, f"subscription monthly_usage ({usage}) is less than search usage ({expected_usage})"
     print(f"  PASS: subscription usage ({usage}) >= search usage ({expected_usage})\n")
 
 

@@ -4,28 +4,27 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0013_searchresultvote'),
+        ("mwmbl", "0013_searchresultvote"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='searchresultvote',
-            name='mwmbl_searchresultvote_user_url_query_unique',
+            model_name="searchresultvote",
+            name="mwmbl_searchresultvote_user_url_query_unique",
         ),
         migrations.RenameIndex(
-            model_name='searchresultvote',
-            new_name='mwmbl_searc_url_03d737_idx',
-            old_name='mwmbl_search_url_b8e7b8_idx',
+            model_name="searchresultvote",
+            new_name="mwmbl_searc_url_03d737_idx",
+            old_name="mwmbl_search_url_b8e7b8_idx",
         ),
         migrations.RenameIndex(
-            model_name='searchresultvote',
-            new_name='mwmbl_searc_timesta_b8940f_idx',
-            old_name='mwmbl_search_timesta_b8e7b8_idx',
+            model_name="searchresultvote",
+            new_name="mwmbl_searc_timesta_b8940f_idx",
+            old_name="mwmbl_search_timesta_b8e7b8_idx",
         ),
         migrations.AlterUniqueTogether(
-            name='searchresultvote',
-            unique_together={('user', 'url', 'query')},
+            name="searchresultvote",
+            unique_together={("user", "url", "query")},
         ),
     ]

@@ -1,0 +1,19 @@
+name: webaim_org
+domain: webaim.org
+field: tech
+request:
+  url: https://webaim.org/search/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h3
+  base_url: https://webaim.org
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

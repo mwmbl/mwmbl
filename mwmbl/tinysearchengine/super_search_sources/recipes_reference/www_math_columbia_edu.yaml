@@ -1,0 +1,17 @@
+name: www_math_columbia_edu
+domain: www.math.columbia.edu
+field: academia
+request:
+  url: https://www.math.columbia.edu/wp-json/wp/v2/search
+  params:
+    search: '{query}'
+    per_page: '{limit}'
+response:
+  format: json
+  results: ''
+  fields:
+    title: title
+    url: url
+smoke:
+  query: research
+  expect_title_contains: research

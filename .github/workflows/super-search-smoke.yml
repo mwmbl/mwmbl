@@ -1,0 +1,55 @@
+name: Super Search smoke (live)
+
+# Runs the Super Search recipe smoke tests against the REAL external endpoints
+# (Wiktionary, archive.org, Project Gutenberg) to catch sites changing their
+# response format or blocking us. These tests are marked `live` and excluded
+# from the normal CI run, so they only execute here (weekly) and on demand.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # 06:00 UTC every Monday
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_mwmbl
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Install project with maturin
+        run: uv run maturin develop
+      - name: Create test directories and files
+        run: mkdir -p /tmp/test_mwmbl_data
+      - name: Run live smoke tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
+          DJANGO_SETTINGS_MODULE: mwmbl.settings_test
+        run: uv run pytest -m live test/test_super_search_smoke.py

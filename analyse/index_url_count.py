@@ -1,12 +1,13 @@
 """
 Count unique URLs in the index.
 """
-from mwmbl.tinysearchengine import TinyIndex, Document
+
+from mwmbl.tinysearchengine import Document, TinyIndex
 
 
 def run():
     urls = set()
-    with TinyIndex(Document, 'data/index.tinysearch') as index:
+    with TinyIndex(Document, "data/index.tinysearch") as index:
         for i in range(index.num_pages):
             print("Page", i)
             page = index.get_page(i)
@@ -15,5 +16,5 @@ def run():
     print("URLs", len(urls))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

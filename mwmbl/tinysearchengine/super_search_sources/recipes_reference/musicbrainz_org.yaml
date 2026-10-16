@@ -1,0 +1,20 @@
+name: musicbrainz_org
+domain: musicbrainz.org
+field: music
+request:
+  url: https://musicbrainz.org/ws/2/artist
+  params:
+    query: "{query}"
+    limit: "{limit}"
+    fmt: json
+response:
+  format: json
+  results: artists
+  fields:
+    title: name
+    extract: comment
+    url:
+      template: "https://musicbrainz.org/artist/{id}"
+smoke:
+  query: beatles
+  expect_title_contains: Beatles

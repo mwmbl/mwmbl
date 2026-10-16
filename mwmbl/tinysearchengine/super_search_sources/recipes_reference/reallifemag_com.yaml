@@ -1,0 +1,17 @@
+name: reallifemag_com
+domain: reallifemag.com
+field: news-politics
+request:
+  url: https://reallifemag.com/wp-json/wp/v2/search
+  params:
+    search: '{query}'
+    per_page: '{limit}'
+response:
+  format: json
+  results: ''
+  fields:
+    title: title
+    url: url
+smoke:
+  query: history
+  expect_title_contains: history

@@ -1,12 +1,16 @@
 """
 Authentication for the search API using the X-API-Key header.
 """
-import hashlib
 
+import hashlib
+from datetime import datetime, timezone
+
+from asgiref.sync import sync_to_async
 from django.core.cache import cache
+from ninja.errors import HttpError
 from ninja.security import APIKeyHeader
 
-from mwmbl.models import ApiKey
+from mwmbl.models import ApiKey, MwmblUser
 
 CACHE_TTL = 3600  # 1 hour; explicit invalidation handles all mutation paths
 
@@ -30,7 +34,9 @@ def invalidate_user_api_key_cache(user_id: int) -> None:
 class SearchApiKeyAuth(APIKeyHeader):
     param_name = "X-API-Key"
 
-    def authenticate(self, request, key: str):
+    def authenticate(self, request, key: str | None):
+        if not key:
+            return None
         key_hash = hashlib.sha256(key.encode()).hexdigest()
         cache_key = _cache_key(key_hash)
 
@@ -46,5 +52,57 @@ class SearchApiKeyAuth(APIKeyHeader):
         except ApiKey.DoesNotExist:
             return None
 
+        # Only on a cache miss, which is also what makes this affordable: a hot key is
+        # served from cache for CACHE_TTL, so a busy caller costs one UPDATE an hour
+        # rather than one per request. The stored time is therefore accurate to the hour,
+        # which is the granularity "last used" is read at anyway.
+        ApiKey.objects.filter(pk=api_key.pk).update(last_used=datetime.now(timezone.utc))
+
         cache.set(cache_key, api_key, CACHE_TTL)
         return api_key
+
+
+class CrawlApiKeyAuth(APIKeyHeader):
+    """A crawl-scoped key in X-API-Key, for endpoints only trusted crawlers may use."""
+
+    param_name = "X-API-Key"
+
+    def authenticate(self, request, key: str | None):
+        if not key:
+            return None
+        key_hash = hashlib.sha256(key.encode()).hexdigest()
+        api_key = ApiKey.objects.filter(key=key_hash, scopes__contains=[ApiKey.Scope.CRAWL]).first()
+        if api_key is not None:
+            ApiKey.objects.filter(pk=api_key.pk).update(last_used=datetime.now(timezone.utc))
+        return api_key
+
+
+async def authenticate_user(request) -> MwmblUser:
+    """Resolve the requesting user from either an X-API-Key header or a JWT.
+
+    Returns the user on success; raises ``HttpError(401)`` otherwise. Database
+    lookups are off-loaded via ``sync_to_async`` so this can be awaited from
+    async views.
+    """
+    raw_key = request.headers.get("X-API-Key")
+    if raw_key:
+        api_key = await sync_to_async(SearchApiKeyAuth().authenticate)(request, raw_key)
+        if api_key is None:
+            raise HttpError(401, "Invalid API key.")
+        return await sync_to_async(lambda: api_key.user)()
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        # Defer JWT validation and user lookup to ninja-jwt rather than decoding
+        # the token by hand: this respects the configured token classes, user-id
+        # claim/field, and the is_active check.
+        from ninja_jwt.authentication import AsyncJWTAuth
+        from ninja_jwt.exceptions import AuthenticationFailed, TokenError
+
+        token = auth_header[len("Bearer ") :]
+        try:
+            return await AsyncJWTAuth().async_jwt_authenticate(request, token)
+        except (TokenError, AuthenticationFailed):
+            raise HttpError(401, "Invalid token.")
+
+    raise HttpError(401, "Authentication required: X-API-Key or Bearer token.")

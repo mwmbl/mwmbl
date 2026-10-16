@@ -2,10 +2,37 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
+  # Formatting, linting and type checking. Deliberately independent of the test job:
+  # it needs neither the Rust toolchain nor a database, so it gives fast feedback.
+  # `make check` here is exactly what .pre-commit-config.yaml runs on commit.
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      #----------------------------------------------
+      # Install the dependencies but not the project itself: building it means building
+      # the Rust extension, which these checks do not need. ty resolves the first-party
+      # `mwmbl` package from the source tree either way.
+      #----------------------------------------------
+      - name: Install dependencies
+        run: uv sync --group dev --no-install-project
+      - name: Check formatting, lint and types
+        run: make check
+
   test:
     runs-on: ubuntu-latest
     
@@ -22,6 +49,15 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
     
     steps:
       #----------------------------------------------
@@ -48,27 +84,50 @@ jobs:
       #----------------------------------------------
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       #----------------------------------------------
       # install dependencies
+      #
+      # Retried for the same reason as in .github/actions/setup-project: building the
+      # Rust extension downloads a prebuilt libxgboost.so, and a reset connection there
+      # panics the build script rather than being retried by it.
       #----------------------------------------------
       - name: Install dependencies
-        run: uv sync --group dev
+        run: .github/scripts/retry.sh uv sync --group dev
       #----------------------------------------------
       # build and install the project with maturin
       # (compiles the Rust extension and installs the package)
       #----------------------------------------------
       - name: Install project with maturin
-        run: uv run maturin develop
+        run: .github/scripts/retry.sh uv run maturin develop
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------
       - name: Create test directories and files
         run: |
           mkdir -p /tmp/test_mwmbl_data
-      - name: Run tests
+      #----------------------------------------------
+      # The crawler container runs mwmbl-crawl with no DJANGO_SETTINGS_MODULE and no
+      # database - mwmbl.crawl configures Django itself. Import it with that environment
+      # (this step deliberately sets neither) so an import reaching Django models before
+      # django.setup() fails here rather than in the running container.
+      #----------------------------------------------
+      - name: Check the crawler entry point imports standalone
+        run: uv run python -c "from mwmbl.crawl import run"
+      - name: Run Python and Rust tests with coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
-        run: |
-          uv run pytest
+          TEST_REDIS_URL: redis://localhost:6379/15
+        run: make coverage
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/python.xml,./coverage/rust.lcov
+          fail_ci_if_error: false

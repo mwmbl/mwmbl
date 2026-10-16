@@ -1,0 +1,20 @@
+name: quantamagazine_org
+domain: www.quantamagazine.org
+field: science
+request:
+  url: https://www.quantamagazine.org/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: quantum physics
+  expect_title_contains: quantum

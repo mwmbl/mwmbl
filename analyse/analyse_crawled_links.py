@@ -5,7 +5,6 @@ from collections import Counter
 from urllib.parse import urlparse
 
 import django
-from django.conf import settings
 
 django.setup()
 
@@ -15,14 +14,11 @@ from mwmbl.crawler.batch import HashedBatch
 CRAWL_GLOB = "./devdata/batches/**/2024-05-25/**/*.json.gz"
 
 
-
-
 def get_urls():
     for path in glob.glob(CRAWL_GLOB, recursive=True):
         print("Getting data from path", path)
         data = json.load(gzip.open(path))
         batch = HashedBatch.parse_obj(data)
-        user = batch.user_id_hash
         for item in batch.items:
             if item.content is not None:
                 yield item.url, item.content.links, item.content.extra_links
@@ -50,6 +46,7 @@ def run():
     print("Source counts", source_counts.most_common())
     print("Link counts", link_counts.most_common())
     print("Extra counts", extra_counts.most_common())
+
 
 if __name__ == "__main__":
     run()

@@ -1,39 +1,35 @@
-import os
 from pathlib import Path
 
 from django.conf import settings
-from django.core.cache import cache
-from redis import Redis
 
-from mwmbl.indexer.batch_cache import BatchCache
-from mwmbl.models import DomainSubmission
-from mwmbl.redis_url_queue import RedisURLQueue
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.jev_rank import JevRanker
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
-from mwmbl.tinysearchengine.ltr_rank import LTRRanker
-from mwmbl.tinysearchengine.rank import DomainLimitingRanker, HeuristicAndWikiRanker
+from mwmbl.tinysearchengine.ltr_rank import CombinedLTRRanker, LTRRanker
+from mwmbl.tinysearchengine.mmr_rank import MMRRanker
 
-CURATED_DOMAINS_CACHE_KEY = "curated-domains"
-CURATED_DOMAINS_CACHE_TIMEOUT = 300
+# Pull the blacklist snapshot in at worker startup rather than letting the first query
+# pay for the ~11 MB Redis read. Subsequent refreshes happen on a daemon thread.
+get_snapshot_blacklist()
 
-
-def get_curated_domains() -> set[str]:
-    curated_domains = cache.get(CURATED_DOMAINS_CACHE_KEY)
-    if curated_domains is None:
-        curated_domains = set(DomainSubmission.objects.filter(status="APPROVED").values_list('name', flat=True))
-        cache.set(CURATED_DOMAINS_CACHE_KEY, curated_domains, CURATED_DOMAINS_CACHE_TIMEOUT)
-    return curated_domains
-
-
-redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
-queued_batches = RedisURLQueue(redis, get_curated_domains)
 completer = Completer()
 index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
 tiny_index.__enter__()
 
-_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
-ranker = DomainLimitingRanker(LTRRanker(tiny_index, completer, _model, include_wiki=True, num_wiki_results=3))
+ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
+# Diversity is applied by the wrapping MMRRanker, which demotes (rather than drops)
+# same-domain / near-duplicate results. Unwrap to disable diversity.
+# num_wiki_results is left at its default on purpose - see NUM_WIKI_RESULTS. Serving
+# passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
+# pool a size it had never been fitted to.
+ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
 
-batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
+# Combined Search gets its own model and its own ranker, so retraining on the pooled
+# Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
+# Staan's ranking as features, which only CombinedLTRRanker supplies. Jev orders the final
+# list from the model's output, without MMR.
+combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
+combined_ranker = JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))

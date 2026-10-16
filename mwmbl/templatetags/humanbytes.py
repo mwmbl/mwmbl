@@ -1,14 +1,15 @@
 """
 https://stackoverflow.com/a/63839503/660902
 """
+
 from django.template import Library
 
 
 class HumanBytes:
     METRIC_LABELS = ["B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
     BINARY_LABELS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
-    PRECISION_OFFSETS = [0.5, 0.05, 0.005, 0.0005] # PREDEFINED FOR SPEED.
-    PRECISION_FORMATS = ["{}{:.0f} {}", "{}{:.1f} {}", "{}{:.2f} {}", "{}{:.3f} {}"] # PREDEFINED FOR SPEED.
+    PRECISION_OFFSETS = [0.5, 0.05, 0.005, 0.0005]  # PREDEFINED FOR SPEED.
+    PRECISION_FORMATS = ["{}{:.0f} {}", "{}{:.1f} {}", "{}{:.2f} {}", "{}{:.3f} {}"]  # PREDEFINED FOR SPEED.
 
     @staticmethod
     def format(num: int | float, metric: bool = False, precision: int = 1) -> str:
@@ -27,7 +28,7 @@ class HumanBytes:
         unit_step_thresh = unit_step - HumanBytes.PRECISION_OFFSETS[precision]
 
         is_negative = num < 0
-        if is_negative:   # Faster than ternary assignment or always running abs().
+        if is_negative:  # Faster than ternary assignment or always running abs().
             num = abs(num)
 
         for unit in unit_labels:

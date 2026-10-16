@@ -1,0 +1,685 @@
+{
+  "mwmbl": {
+    "field": "general",
+    "description": "Mwmbl's own crawled web index \u2014 general web pages on any topic."
+  },
+  "hn": {
+    "field": "tech",
+    "description": "Hacker News \u2014 tech, startups, programming, and science links/discussion."
+  },
+  "github": {
+    "field": "code",
+    "description": "GitHub \u2014 source-code repositories and software projects."
+  },
+  "stackexchange": {
+    "field": "qa",
+    "description": "Stack Exchange \u2014 Q&A across programming and many technical topics."
+  },
+  "arxiv": {
+    "field": "academia",
+    "description": "arXiv \u2014 academic preprints in physics, CS, maths, biology, etc."
+  },
+  "pypi": {
+    "field": "code",
+    "description": "PyPI \u2014 the Python package index."
+  },
+  "imdb": {
+    "field": "entertainment",
+    "description": "IMDb \u2014 films, TV shows, actors, and entertainment."
+  },
+  "nhs": {
+    "field": "health",
+    "description": "NHS \u2014 authoritative UK consumer health: conditions, symptoms, treatments, medicines and dosages."
+  },
+  "wikidata_official": {
+    "field": "navigational",
+    "description": "Official website of a named brand, company, organisation or person (resolved via Wikidata)."
+  },
+  "homepage": {
+    "field": "navigational",
+    "description": "Best-guess official homepage for a brand or site name \u2014 for navigational brand queries."
+  },
+  "guardian": {
+    "field": "news",
+    "description": "The Guardian \u2014 UK/world news, politics, sport and current events."
+  },
+  "99percentinvisible_org": {
+    "field": "art-design",
+    "description": "art-design site (99percentinvisible.org)",
+    "domain": "99percentinvisible.org"
+  },
+  "acoup_blog": {
+    "field": "history",
+    "description": "history site (acoup.blog)",
+    "domain": "acoup.blog"
+  },
+  "addons_mozilla_org": {
+    "field": "tech",
+    "description": "Official Mozilla Firefox add-on marketplace with thousands of browser extensions.",
+    "domain": "addons.mozilla.org"
+  },
+  "archive_org": {
+    "field": "tech",
+    "description": "tech site (archive.org)",
+    "domain": "archive.org"
+  },
+  "asciinema_org": {
+    "field": "programming",
+    "description": "Terminal session recording platform with thousands of shared command tutorials.",
+    "domain": "asciinema.org"
+  },
+  "bulbapedia_bulbagarden_net": {
+    "field": "gaming",
+    "description": "gaming site (bulbapedia.bulbagarden.net)",
+    "domain": "bulbapedia.bulbagarden.net"
+  },
+  "ccrma_stanford_edu": {
+    "field": "academia",
+    "description": "academia site (ccrma.stanford.edu)",
+    "domain": "ccrma.stanford.edu"
+  },
+  "changelog_complete_org": {
+    "field": "programming",
+    "description": "programming site (changelog.complete.org)",
+    "domain": "changelog.complete.org"
+  },
+  "codeblog_jonskeet_uk": {
+    "field": "programming",
+    "description": "Jon Skeet's technical blog on C# and programming; medium HN popularity suggests valuable developer content.",
+    "domain": "codeblog.jonskeet.uk"
+  },
+  "community_grafana_com": {
+    "field": "programming",
+    "description": "Grafana community forum; medium HN popularity with active discussions about monitoring and analytics.",
+    "domain": "community.grafana.com"
+  },
+  "conferences_oreilly_com": {
+    "field": "business-finance",
+    "description": "business-finance site (conferences.oreilly.com)",
+    "domain": "conferences.oreilly.com"
+  },
+  "creativecommons_org": {
+    "field": "business-finance",
+    "description": "business-finance site (creativecommons.org)",
+    "domain": "creativecommons.org"
+  },
+  "cyber_harvard_edu": {
+    "field": "academia",
+    "description": "Harvard Berkman Klein Center for Internet and Society; medium HN popularity with cybersecurity and tech policy content.",
+    "domain": "cyber.harvard.edu"
+  },
+  "db_cs_cmu_edu": {
+    "field": "academia",
+    "description": "Carnegie Mellon database research group; medium HN popularity with research papers and resources.",
+    "domain": "db.cs.cmu.edu"
+  },
+  "devblogs_microsoft_com": {
+    "field": "programming",
+    "description": "Official Microsoft developer blog with extensive technical content.",
+    "domain": "devblogs.microsoft.com"
+  },
+  "developer_mozilla_org": {
+    "field": "programming",
+    "description": "programming site (developer.mozilla.org)",
+    "domain": "developer.mozilla.org"
+  },
+  "diff_wikimedia_org": {
+    "field": "tech",
+    "description": "Wikimedia diff view and diffing tools documentation.",
+    "domain": "diff.wikimedia.org"
+  },
+  "directory_fsf_org": {
+    "field": "programming",
+    "description": "Free Software Foundation directory of free and open source software.",
+    "domain": "directory.fsf.org"
+  },
+  "discourse_llvm_org": {
+    "field": "programming",
+    "description": "LLVM compiler project discussion forum with extensive technical content.",
+    "domain": "discourse.llvm.org"
+  },
+  "discourse_matplotlib_org": {
+    "field": "programming",
+    "description": "Matplotlib visualization library community forum.",
+    "domain": "discourse.matplotlib.org"
+  },
+  "discourse_mc_stan_org": {
+    "field": "science",
+    "description": "science site (discourse.mc-stan.org)",
+    "domain": "discourse.mc-stan.org"
+  },
+  "discourse_osgeo_org": {
+    "field": "tech",
+    "description": "Open Source Geospatial Foundation discussion forum.",
+    "domain": "discourse.osgeo.org"
+  },
+  "discuss_python_org": {
+    "field": "programming",
+    "description": "Official Python language discussion and development forum.",
+    "domain": "discuss.python.org"
+  },
+  "doc_hal_science": {
+    "field": "academia",
+    "description": "academia site (doc.hal.science)",
+    "domain": "doc.hal.science"
+  },
+  "docs_djangoproject_com": {
+    "field": "programming",
+    "description": "Django web framework official comprehensive documentation.",
+    "domain": "docs.djangoproject.com"
+  },
+  "docs_rs": {
+    "field": "programming",
+    "description": "Docs.rs Rust crate documentation hosting.",
+    "domain": "docs.rs"
+  },
+  "duckduckgo_com": {
+    "field": "tech",
+    "description": "tech site (duckduckgo.com)",
+    "domain": "duckduckgo.com"
+  },
+  "dynamicecology_wordpress_com": {
+    "field": "science",
+    "description": "science site (dynamicecology.wordpress.com)",
+    "domain": "dynamicecology.wordpress.com"
+  },
+  "engineering_nyu_edu": {
+    "field": "academia",
+    "description": "NYU engineering school site with substantial educational and research content.",
+    "domain": "engineering.nyu.edu"
+  },
+  "f_droid_org": {
+    "field": "tech",
+    "description": "Free and open-source Android app repository with extensive software catalog.",
+    "domain": "f-droid.org"
+  },
+  "forum_freecodecamp_org": {
+    "field": "education",
+    "description": "education site (forum.freecodecamp.org)",
+    "domain": "forum.freecodecamp.org"
+  },
+  "forum_godotengine_org": {
+    "field": "programming",
+    "description": "programming site (forum.godotengine.org)",
+    "domain": "forum.godotengine.org"
+  },
+  "forum_obsidian_md": {
+    "field": "tech",
+    "description": "Note-taking app community forum with knowledge management and productivity content.",
+    "domain": "forum.obsidian.md"
+  },
+  "forums_factorio_com": {
+    "field": "gaming",
+    "description": "gaming site (forums.factorio.com)",
+    "domain": "forums.factorio.com"
+  },
+  "futilitycloset_com": {
+    "field": "history",
+    "description": "history site (www.futilitycloset.com)",
+    "domain": "www.futilitycloset.com"
+  },
+  "gamehistory_org": {
+    "field": "gaming",
+    "description": "Academic resource and reference for video game history research.",
+    "domain": "gamehistory.org"
+  },
+  "genius_com": {
+    "field": "music",
+    "description": "music site (genius.com)",
+    "domain": "genius.com"
+  },
+  "gis_stackexchange_com": {
+    "field": "science",
+    "description": "science site (gis.stackexchange.com)",
+    "domain": "gis.stackexchange.com"
+  },
+  "grist_org": {
+    "field": "news-politics",
+    "description": "Environmental news nonprofit covering climate and sustainability issues.",
+    "domain": "grist.org"
+  },
+  "gutenberg": {
+    "field": "books-literature",
+    "description": "books-literature site (www.gutenberg.org)",
+    "domain": "www.gutenberg.org"
+  },
+  "hackaday_com": {
+    "field": "tech",
+    "description": "Electronics and hardware hacking blog with projects and tutorials.",
+    "domain": "hackaday.com"
+  },
+  "hacks_mozilla_org": {
+    "field": "programming",
+    "description": "programming site (hacks.mozilla.org)",
+    "domain": "hacks.mozilla.org"
+  },
+  "help_archive_org": {
+    "field": "other",
+    "description": "other site (help.archive.org)",
+    "domain": "help.archive.org"
+  },
+  "home_cern": {
+    "field": "science",
+    "description": "CERN's official homepage with extensive scientific research and educational content.",
+    "domain": "home.cern"
+  },
+  "hyperallergic_com": {
+    "field": "art-design",
+    "description": "art-design site (hyperallergic.com)",
+    "domain": "hyperallergic.com"
+  },
+  "indieweb_org": {
+    "field": "tech",
+    "description": "IndieWeb movement documentation and community standards for personal web ownership.",
+    "domain": "indieweb.org"
+  },
+  "insideclimatenews_org": {
+    "field": "news-politics",
+    "description": "Climate change journalism publication with investigative reporting.",
+    "domain": "insideclimatenews.org"
+  },
+  "itch_io": {
+    "field": "gaming",
+    "description": "Indie game distribution platform with thousands of games and creator content.",
+    "domain": "itch.io"
+  },
+  "journals_plos_org": {
+    "field": "academia",
+    "description": "PLOS open access scientific journal platform with thousands of articles.",
+    "domain": "journals.plos.org"
+  },
+  "lexi_lambda_github_io": {
+    "field": "programming",
+    "description": "Well-regarded functional programming blog with deep technical articles and tutorials.",
+    "domain": "lexi-lambda.github.io"
+  },
+  "link_springer_com": {
+    "field": "academia",
+    "description": "Springer's academic publishing platform with vast peer-reviewed journal collection.",
+    "domain": "link.springer.com"
+  },
+  "longreads_com": {
+    "field": "news-politics",
+    "description": "Long-form journalism aggregator with substantial curated article archive.",
+    "domain": "longreads.com"
+  },
+  "makham_itch_io": {
+    "field": "gaming",
+    "description": "Game developer portfolio on itch.io with multiple game projects.",
+    "domain": "makham.itch.io"
+  },
+  "markodenic_com": {
+    "field": "tech",
+    "description": "tech site (markodenic.com)",
+    "domain": "markodenic.com"
+  },
+  "mathbabe_org": {
+    "field": "programming",
+    "description": "Active blog on mathematics, algorithms, and data science by Cathy O'Neil.",
+    "domain": "mathbabe.org"
+  },
+  "mathenchant_wordpress_com": {
+    "field": "science",
+    "description": "science site (mathenchant.wordpress.com)",
+    "domain": "mathenchant.wordpress.com"
+  },
+  "minecraft_wiki": {
+    "field": "gaming",
+    "description": "gaming site (minecraft.wiki)",
+    "domain": "minecraft.wiki"
+  },
+  "musicbrainz_org": {
+    "field": "music",
+    "description": "music site (musicbrainz.org)",
+    "domain": "musicbrainz.org"
+  },
+  "openstreetmap_org": {
+    "field": "maps-places",
+    "description": "OpenStreetMap \u2014 places, towns, addresses, and local points of interest (maps/local)."
+  },
+  "phys_org": {
+    "field": "science",
+    "description": "Physics and science news portal with research coverage and searchable archives.",
+    "domain": "phys.org"
+  },
+  "pluralistic_net": {
+    "field": "news-politics",
+    "description": "news-politics site (pluralistic.net)",
+    "domain": "pluralistic.net"
+  },
+  "propublica_org": {
+    "field": "news-politics",
+    "description": "news-politics site (www.propublica.org)",
+    "domain": "www.propublica.org"
+  },
+  "quantamagazine_org": {
+    "field": "science",
+    "description": "science site (www.quantamagazine.org)",
+    "domain": "www.quantamagazine.org"
+  },
+  "reactos_org": {
+    "field": "tech",
+    "description": "ReactOS open-source operating system with extensive documentation.",
+    "domain": "reactos.org"
+  },
+  "reallifemag_com": {
+    "field": "news-politics",
+    "description": "Real Life magazine with searchable articles on culture and technology.",
+    "domain": "reallifemag.com"
+  },
+  "rosettacode_org": {
+    "field": "programming",
+    "description": "MediaWiki site with programming solutions across multiple languages, comprehensive searchable resource.",
+    "domain": "rosettacode.org"
+  },
+  "rubygems_org": {
+    "field": "programming",
+    "description": "Official Ruby package registry with searchable gem documentation and metadata.",
+    "domain": "rubygems.org"
+  },
+  "semiengineering_com": {
+    "field": "tech",
+    "description": "Semiconductor and electronics industry news with technical depth and searchable archives.",
+    "domain": "semiengineering.com"
+  },
+  "simonwillison_net": {
+    "field": "tech",
+    "description": "Tech and web development blog from established expert with searchable archive and strong recognition.",
+    "domain": "simonwillison.net"
+  },
+  "slashdot_org": {
+    "field": "tech",
+    "description": "Technology news and community site with searchable archives and discussion forums.",
+    "domain": "slashdot.org"
+  },
+  "sourceforge_net": {
+    "field": "programming",
+    "description": "Historical open-source software repository and forge for developer resources.",
+    "domain": "sourceforge.net"
+  },
+  "spectrum_ieee_org": {
+    "field": "tech",
+    "description": "IEEE technology news and feature publication with substantial peer-reviewed content.",
+    "domain": "spectrum.ieee.org"
+  },
+  "stratechery_com": {
+    "field": "business-finance",
+    "description": "business-finance site (stratechery.com)",
+    "domain": "stratechery.com"
+  },
+  "techcrunch_com": {
+    "field": "business-finance",
+    "description": "business-finance site (techcrunch.com)",
+    "domain": "techcrunch.com"
+  },
+  "technicshistory_com": {
+    "field": "history",
+    "description": "history site (technicshistory.com)",
+    "domain": "technicshistory.com"
+  },
+  "the_president_europarl_europa_eu": {
+    "field": "law-government",
+    "description": "law-government site (the-president.europarl.europa.eu)",
+    "domain": "the-president.europarl.europa.eu"
+  },
+  "theanarchistlibrary_org": {
+    "field": "philosophy",
+    "description": "philosophy site (theanarchistlibrary.org)",
+    "domain": "theanarchistlibrary.org"
+  },
+  "thebulletin_org": {
+    "field": "news-politics",
+    "description": "Bulletin of the Atomic Scientists with analysis on security and science policy.",
+    "domain": "thebulletin.org"
+  },
+  "theconversation_com": {
+    "field": "news-politics",
+    "description": "Academic experts writing on current issues for general audience.",
+    "domain": "theconversation.com"
+  },
+  "thehill_com": {
+    "field": "news-politics",
+    "description": "US political and policy news publication with opinion content.",
+    "domain": "thehill.com"
+  },
+  "theintercept_com": {
+    "field": "news-politics",
+    "description": "news-politics site (theintercept.com)",
+    "domain": "theintercept.com"
+  },
+  "towardsdatascience_com": {
+    "field": "programming",
+    "description": "Medium publication covering data science, machine learning, and programming tutorials.",
+    "domain": "towardsdatascience.com"
+  },
+  "unherd_com": {
+    "field": "news-politics",
+    "description": "UK-based opinion and culture publication with commentary and long-form essays.",
+    "domain": "unherd.com"
+  },
+  "usa_streetsblog_org": {
+    "field": "news-politics",
+    "description": "Streetsblog USA covering transportation, urban planning, and mobility news.",
+    "domain": "usa.streetsblog.org"
+  },
+  "users_rust_lang_org": {
+    "field": "programming",
+    "description": "Rust language users forum for questions, discussion, and community support.",
+    "domain": "users.rust-lang.org"
+  },
+  "waxy_org": {
+    "field": "tech",
+    "description": "Technology and culture blog curating internet oddities and discoveries.",
+    "domain": "waxy.org"
+  },
+  "webaim_org": {
+    "field": "tech",
+    "description": "Web accessibility education and resources for inclusive design.",
+    "domain": "webaim.org"
+  },
+  "webkit_org": {
+    "field": "programming",
+    "description": "WebKit browser engine official documentation and development resources.",
+    "domain": "webkit.org"
+  },
+  "wiki_archiveteam_org": {
+    "field": "tech",
+    "description": "Archive Team wiki about web archiving, preservation, and digital archaeology.",
+    "domain": "wiki.archiveteam.org"
+  },
+  "wiki_archlinux_org": {
+    "field": "tech",
+    "description": "Arch Linux community wiki with extensive Linux system administration guides.",
+    "domain": "wiki.archlinux.org"
+  },
+  "wikidata_org": {
+    "field": "other",
+    "description": "other site (www.wikidata.org)",
+    "domain": "www.wikidata.org"
+  },
+  "wikisource_org": {
+    "field": "books-literature",
+    "description": "Large repository of public domain and free-license texts with wiki search functionality.",
+    "domain": "wikisource.org"
+  },
+  "wiktionary": {
+    "field": "other",
+    "description": "other site (en.wiktionary.org)",
+    "domain": "en.wiktionary.org"
+  },
+  "www2_sqlite_org": {
+    "field": "programming",
+    "description": "SQLite database documentation and reference with comprehensive guide.",
+    "domain": "www2.sqlite.org"
+  },
+  "www_bellingcat_com": {
+    "field": "news-politics",
+    "description": "Investigative journalism outlet specializing in open source research with searchable articles.",
+    "domain": "www.bellingcat.com"
+  },
+  "www_centauri_dreams_org": {
+    "field": "science",
+    "description": "Science and futurism blog focused on space exploration and exoplanet research.",
+    "domain": "www.centauri-dreams.org"
+  },
+  "www_cis_upenn_edu": {
+    "field": "programming",
+    "description": "University computer science department with courses, research, and technical resources.",
+    "domain": "www.cis.upenn.edu"
+  },
+  "www_cs_princeton_edu": {
+    "field": "programming",
+    "description": "Elite university computer science department with courses and research.",
+    "domain": "www.cs.princeton.edu"
+  },
+  "www_cs_utexas_edu": {
+    "field": "programming",
+    "description": "University computer science department with academic and technical resources.",
+    "domain": "www.cs.utexas.edu"
+  },
+  "www_csmonitor_com": {
+    "field": "news-politics",
+    "description": "International news organization with thoughtful journalism and analysis.",
+    "domain": "www.csmonitor.com"
+  },
+  "www_esa_int": {
+    "field": "science",
+    "description": "European Space Agency with space exploration and satellite research content.",
+    "domain": "www.esa.int"
+  },
+  "www_etymonline_com": {
+    "field": "books-literature",
+    "description": "Etymology dictionary tracing word origins and language history.",
+    "domain": "www.etymonline.com"
+  },
+  "www_euronews_com": {
+    "field": "news-politics",
+    "description": "European news organization with international journalism.",
+    "domain": "www.euronews.com"
+  },
+  "www_gov_uk": {
+    "field": "law-government",
+    "description": "law-government site (www.gov.uk)",
+    "domain": "www.gov.uk"
+  },
+  "www_hcn_org": {
+    "field": "news-politics",
+    "description": "High Country News environmental and regional journalism publication.",
+    "domain": "www.hcn.org"
+  },
+  "www_howtogeek_com": {
+    "field": "tech",
+    "description": "Technology how-to guide blog with extensive tutorials and tech articles.",
+    "domain": "www.howtogeek.com"
+  },
+  "www_johndcook_com": {
+    "field": "programming",
+    "description": "Technical blog on mathematics, statistics, and software development.",
+    "domain": "www.johndcook.com"
+  },
+  "www_legislation_gov_uk": {
+    "field": "law-government",
+    "description": "Official UK legislation repository with comprehensive legal text database.",
+    "domain": "www.legislation.gov.uk"
+  },
+  "www_loopinsight_com": {
+    "field": "tech",
+    "description": "Apple-focused tech blog with regular news and analysis articles.",
+    "domain": "www.loopinsight.com"
+  },
+  "www_lrb_co_uk": {
+    "field": "books-literature",
+    "description": "London Review of Books literary journal with archives and articles.",
+    "domain": "www.lrb.co.uk"
+  },
+  "www_math_columbia_edu": {
+    "field": "academia",
+    "description": "Columbia University math department with research and course materials.",
+    "domain": "www.math.columbia.edu"
+  },
+  "www_medievalists_net": {
+    "field": "history",
+    "description": "history site (www.medievalists.net)",
+    "domain": "www.medievalists.net"
+  },
+  "www_motherjones_com": {
+    "field": "news-politics",
+    "description": "Investigative news magazine with articles and long-form journalism.",
+    "domain": "www.motherjones.com"
+  },
+  "www_neh_gov": {
+    "field": "academia",
+    "description": "US National Endowment for Humanities with grant and cultural content.",
+    "domain": "www.neh.gov"
+  },
+  "www_nist_gov": {
+    "field": "science",
+    "description": "National standards and technology institute with technical standards and resources.",
+    "domain": "www.nist.gov"
+  },
+  "www_nybooks_com": {
+    "field": "books-literature",
+    "description": "Literary review with book reviews, essays, and cultural criticism.",
+    "domain": "www.nybooks.com"
+  },
+  "www_pewresearch_org": {
+    "field": "news-politics",
+    "description": "Respected nonpartisan research center with extensive polling and sociological studies.",
+    "domain": "www.pewresearch.org"
+  },
+  "www_popsci_com": {
+    "field": "science",
+    "description": "Science journalism publication with extensive articles on technology and scientific discovery.",
+    "domain": "www.popsci.com"
+  },
+  "www_poynter_org": {
+    "field": "news-politics",
+    "description": "Journalism institute with extensive training materials and media criticism articles.",
+    "domain": "www.poynter.org"
+  },
+  "www_sciencenews_org": {
+    "field": "science",
+    "description": "Science news publication with reporting on research and discovery.",
+    "domain": "www.sciencenews.org"
+  },
+  "www_sigarch_org": {
+    "field": "programming",
+    "description": "ACM computer architecture group with technical papers and resources.",
+    "domain": "www.sigarch.org"
+  },
+  "www_sigops_org": {
+    "field": "programming",
+    "description": "ACM operating systems group with systems research papers and resources.",
+    "domain": "www.sigops.org"
+  },
+  "www_space_com": {
+    "field": "science",
+    "description": "Space and astronomy news publication with extensive content.",
+    "domain": "www.space.com"
+  },
+  "www_springer_com": {
+    "field": "academia",
+    "description": "Major academic publisher with journals, books, and research content.",
+    "domain": "www.springer.com"
+  },
+  "www_springernature_com": {
+    "field": "academia",
+    "description": "Springer Nature publishing group with extensive research publications.",
+    "domain": "www.springernature.com"
+  },
+  "www_stanford_edu": {
+    "field": "academia",
+    "description": "Stanford University's main portal with extensive academic resources.",
+    "domain": "www.stanford.edu"
+  },
+  "www_thestranger_com": {
+    "field": "news-politics",
+    "description": "Alternative weekly newspaper with news, arts, and cultural coverage.",
+    "domain": "www.thestranger.com"
+  },
+  "www_whitehouse_gov": {
+    "field": "law-government",
+    "description": "U.S. Executive Branch official portal with government information.",
+    "domain": "www.whitehouse.gov"
+  }
+}

@@ -1,0 +1,17 @@
+name: community_grafana_com
+domain: community.grafana.com
+field: programming
+request:
+  url: https://community.grafana.com/search.json
+  params:
+    q: '{query}'
+response:
+  format: json
+  results: topics
+  fields:
+    title: title
+    url:
+      template: https://community.grafana.com/t/{slug}/{id}
+smoke:
+  query: history
+  expect_title_contains: history

@@ -1,0 +1,19 @@
+# Genius music annotation platform via their public search API.
+name: genius_com
+domain: genius.com
+field: music
+request:
+  url: https://genius.com/api/search
+  params:
+    q: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: response.hits
+  fields:
+    title: result.full_title
+    extract: result.title
+    url: result.url
+smoke:
+  query: Beatles
+  expect_title_contains: Beatles

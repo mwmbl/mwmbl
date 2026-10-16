@@ -1,0 +1,19 @@
+name: www_howtogeek_com
+domain: www.howtogeek.com
+field: tech
+request:
+  url: https://www.howtogeek.com/search/
+  params:
+    q: '{query}'
+response:
+  format: html
+  results: h5.display-card-title
+  base_url: https://www.howtogeek.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

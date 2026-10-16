@@ -1,0 +1,19 @@
+name: www_legislation_gov_uk
+domain: www.legislation.gov.uk
+field: law-government
+request:
+  url: https://www.legislation.gov.uk/search
+  params:
+    title: '{query}'
+response:
+  format: html
+  results: tbody tr
+  base_url: https://www.legislation.gov.uk
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: science
+  expect_title_contains: science

@@ -41,9 +41,10 @@ COPY mwmbl /app/mwmbl
 COPY mwmbl_rank /app/mwmbl_rank
 
 # Working directory is /app
-# Use uv to install the mwmbl python package including the mwmbl_rank Rust
-# extension. PEP 517/518 allows uv to use maturin as the build backend.
-RUN uv pip install --python /venv/bin/python .
+# Install from uv.lock so the image ships the versions the tests ran against: uv pip
+# install resolves against PyPI and ignores the lockfile (#403). --no-editable puts the
+# package in the venv rather than a link back to /app, which the final stage lacks.
+RUN UV_PROJECT_ENVIRONMENT=/venv uv sync --frozen --no-dev --no-editable
 
 # Copy libxgboost.so (prebuilt by the xgb crate) into the mwmbl_rank package
 # directory and patch the extension's RPATH so it finds the library at runtime.

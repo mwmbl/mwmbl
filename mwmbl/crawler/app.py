@@ -1,11 +1,9 @@
 import gzip
 import hashlib
 import json
-from logging import getLogger
 import os
-from datetime import datetime, timezone, date
-from queue import Empty
-from typing import Union
+from datetime import datetime, timezone
+from logging import getLogger
 from uuid import uuid4
 
 import boto3
@@ -15,30 +13,34 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
-from mwmbl.crawler.batch import Batch, NewBatchRequest, HashedBatch, Results, PostResultsResponse, Error, DatasetRequest, HashedDataset
+from mwmbl.crawler.batch import (
+    DatasetRequest,
+    Error,
+    HashedDataset,
+    PostResultsResponse,
+    Results,
+)
 from mwmbl.crawler.stats import MwmblStats, StatsManager
-from mwmbl.database import Database
-from mwmbl.exceptions import InvalidRequest
-from mwmbl.indexer.batch_cache import BatchCache
+from mwmbl.devices import record_device
 from mwmbl.indexer.index_batches import index_documents
-from mwmbl.indexer.indexdb import IndexDatabase, BatchInfo, BatchStatus
 from mwmbl.models import ApiKey
-from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.settings import (
-    ENDPOINT_URL,
-    KEY_ID,
     APPLICATION_KEY,
     BUCKET_NAME,
-    MAX_BATCH_SIZE,
-    USER_ID_LENGTH,
-    VERSION,
+    DATE_REGEX,
+    ENDPOINT_URL,
+    FILE_NAME_SUFFIX,
+    KEY_ID,
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
-    FILE_NAME_SUFFIX,
-    DATE_REGEX)
+    USER_ID_LENGTH,
+    VERSION,
+)
 from mwmbl.tinysearchengine.indexer import Document
 
-stats_manager = StatsManager(Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True))
+stats_manager = StatsManager(
+    Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
+)
 
 logger = getLogger(__name__)
 
@@ -47,8 +49,9 @@ router = Router(tags=["Crawler"])
 
 
 def get_bucket(name):
-    s3 = boto3.resource('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
-                        aws_secret_access_key=APPLICATION_KEY)
+    s3 = boto3.resource(
+        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
+    )
     return s3.Object(BUCKET_NAME, name)
 
 
@@ -57,9 +60,6 @@ def upload(data: bytes, name: str):
     bucket = get_bucket(name)
     result = bucket.put(Body=data)
     return result
-
-
-last_batch = None
 
 
 def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object_type: str):
@@ -72,97 +72,46 @@ def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object
     # See discussion here: https://stackoverflow.com/a/13484764
     uid = str(uuid4())[:8]
 
-    filename = f'1/{VERSION}/{now.date()}/{object_type}/{user_id_hash}/{padded_seconds}__{uid}.json.gz'
-    data = gzip.compress(model_object.json().encode('utf8'))
+    filename = f"1/{VERSION}/{now.date()}/{object_type}/{user_id_hash}/{padded_seconds}__{uid}.json.gz"
+    data = gzip.compress(model_object.json().encode("utf8"))
     upload(data, filename)
     return filename
 
 
-def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batches: RedisURLQueue):
+def _register_routes(r: Router | NinjaAPI):
     """Register all crawler routes on the given router or API instance."""
 
     @r.post(
-        '/batches/',
-        summary="Submit a crawl batch",
+        "/batches/",
+        summary="Submit a crawl batch (removed)",
         description=(
-            "Deprecated - the new crawler uses the /results/ endpoint.\n\n"
-            "Submit a batch of crawled pages to the Mwmbl index. "
-            "Each batch must contain URLs that were previously assigned to this crawler via "
-            "`POST /batches/new`. Batches are stored in object storage and queued for indexing. "
-            f"Maximum {MAX_BATCH_SIZE} items per batch. "
-            "The `user_id` must be exactly 64 characters."
+            "Removed - this endpoint served the old crawler and now always returns 410 Gone.\n\n"
+            "Crawlers should submit crawled pages via `POST /results/` instead."
         ),
     )
-    def post_batch(request, batch: Batch):
-        if len(batch.items) > MAX_BATCH_SIZE:
-            return r.create_response(request, f"Batch size too large (maximum {MAX_BATCH_SIZE}), got {len(batch.items)}", status=400)
-
-        if len(batch.user_id) != USER_ID_LENGTH:
-            return r.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
-
-        if len(batch.items) == 0:
-            return {
-                'status': 'ok',
-            }
-
-        user_id_hash = _get_user_id_hash(batch)
-
-        urls = [item.url for item in batch.items]
-        invalid_urls = queued_batches.check_user_crawled_urls(user_id_hash, urls)
-        if invalid_urls:
-            return r.create_response(request, f"The following URLs were not assigned to the user for crawling:"
-                                               f" {invalid_urls}. To suggest a domain to crawl, please visit "
-                                               f"https://mwmbl.org/app/domain-submissions/new", status=400)
-
-        # Using an approach from https://stackoverflow.com/a/30476450
-        now = datetime.now(timezone.utc)
-        epoch_time = (now - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
-        hashed_batch = HashedBatch(user_id_hash=user_id_hash, timestamp=epoch_time, items=batch.items)
-
-        stats_manager.record_batch(hashed_batch)
-
-        filename = upload_object(hashed_batch, now, user_id_hash, "batch")
-
-        global last_batch
-        last_batch = hashed_batch
-
-        batch_url = f'{PUBLIC_URL_PREFIX}{filename}'
-        batch_cache.store(hashed_batch, batch_url)
-
-        # Record the batch as being local so that we don't retrieve it again when the server restarts
-        infos = [BatchInfo(batch_url, user_id_hash, BatchStatus.LOCAL)]
-
-        with Database() as db:
-            index_db = IndexDatabase(db.connection)
-            index_db.record_batches(infos)
-
-        return {
-            'status': 'ok',
-            'public_user_id': user_id_hash,
-            'url': batch_url,
-        }
+    def post_batch(request):
+        # HttpError rather than r.create_response: `r` may be a Router, which has no
+        # create_response.
+        raise HttpError(410, "This endpoint has been removed. Submit crawled pages via POST /results/ instead.")
 
     @r.post(
-        '/batches/new',
-        summary="Request URLs to crawl",
+        "/batches/new",
+        summary="Request URLs to crawl (removed)",
         description=(
-            "Deprecated - crawlers should now determine their own batches.\n\n"
-            "Request a new batch of URLs assigned to this crawler for crawling. "
-            "Returns a list of URLs that this crawler should fetch and submit back via "
-            "`POST /batches/`. Returns an empty list if no URLs are currently queued. "
-            "The `user_id` must be exactly 64 characters."
+            "Removed - this handed out URLs to be submitted back via the now-removed "
+            "`POST /batches/`, so it always returns 410 Gone.\n\n"
+            "Crawlers now choose their own URLs and submit them via `POST /results/`."
         ),
     )
-    def request_new_batch(request, batch_request: NewBatchRequest) -> list[str]:
-        user_id_hash = _get_user_id_hash(batch_request)
-        try:
-            urls = queued_batches.get_batch(user_id_hash)
-        except Empty:
-            return []
-        return urls
+    def request_new_batch(request):
+        # Not an empty list: get_batch() pops URLs off the queue permanently, so every
+        # legacy crawler still polling this was draining the crawl frontier into results
+        # it could no longer submit. An error tells its operator the client is dead;
+        # an empty list would have left it polling a queue it can never contribute to.
+        raise HttpError(410, "This endpoint has been removed. Crawlers now choose their own URLs.")
 
     @r.get(
-        '/batches/{date_str}/users/{public_user_id}',
+        "/batches/{date_str}/users/{public_user_id}",
         summary="List batch IDs for a user on a date",
         description=(
             "Retrieve the list of batch IDs submitted by a specific user on a given date. "
@@ -173,11 +122,11 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
     def get_batches_for_date_and_user(request, date_str, public_user_id):
         check_date_str(date_str)
         check_public_user_id(public_user_id)
-        prefix = f'1/{VERSION}/{date_str}/1/{public_user_id}/'
+        prefix = f"1/{VERSION}/{date_str}/1/{public_user_id}/"
         return get_batch_ids_for_prefix(prefix)
 
     @r.get(
-        '/batches/{date_str}/users/{public_user_id}/batch/{batch_id}',
+        "/batches/{date_str}/users/{public_user_id}/batch/{batch_id}",
         summary="Get a specific batch",
         description=(
             "Retrieve the full content of a specific crawl batch from object storage. "
@@ -189,23 +138,23 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         url = get_batch_url(batch_id, date_str, public_user_id)
         data = json.loads(gzip.decompress(requests.get(url).content))
         return {
-            'url': url,
-            'batch': data,
+            "url": url,
+            "batch": data,
         }
 
     @r.get(
-        '/latest-batch',
-        summary="Get the latest batch",
+        "/latest-batch",
+        summary="Get the latest batch (removed)",
         description=(
-            "Return the most recently submitted crawl batch held in memory. "
-            "Returns an empty list if no batch has been submitted since the server started."
+            "Removed - this returned the most recent submission to the now-removed "
+            "`POST /batches/` endpoint, so it always returns 410 Gone."
         ),
     )
-    def get_latest_batch(request) -> list[HashedBatch]:
-        return [] if last_batch is None else [last_batch]
+    def get_latest_batch(request):
+        raise HttpError(410, "This endpoint has been removed along with POST /batches/.")
 
     @r.get(
-        '/batches/{date_str}/users',
+        "/batches/{date_str}/users",
         summary="List crawlers active on a date",
         description=(
             "Return the list of public user ID hashes (SHA3-256) for all crawlers that submitted "
@@ -214,11 +163,11 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
     )
     def get_user_id_hashes_for_date(request, date_str: str):
         check_date_str(date_str)
-        prefix = f'1/{VERSION}/{date_str}/1/'
+        prefix = f"1/{VERSION}/{date_str}/1/"
         return get_subfolders(prefix)
 
     @r.get(
-        '/stats',
+        "/stats",
         summary="Crawler statistics",
         description=(
             "Return aggregate statistics about the Mwmbl crawler network, including the number "
@@ -230,58 +179,109 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         return stats_manager.get_stats()
 
     @r.get(
-        '/',
+        "/",
         summary="Health check",
-        description="Returns `{\"status\": \"ok\"}` if the crawler API is running.",
+        description='Returns `{"status": "ok"}` if the crawler API is running.',
     )
     def status(request):
-        return {
-            'status': 'ok'
-        }
+        return {"status": "ok"}
+
+    class CuratedDomain(Schema):
+        name: str
+
+    class CuratedDomainsResponse(Schema):
+        domains: list[CuratedDomain]
+
+    @r.get(
+        "/curated-domains",
+        summary="Get curated domains for crawling",
+        description=(
+            "Retrieve the list of approved domains curated by mwmbl users. "
+            "Crawlers should prioritize these domains when selecting URLs to crawl. "
+            "Results are cached server-side for 5 minutes."
+        ),
+    )
+    def get_curated_domains_endpoint(request) -> CuratedDomainsResponse:
+        from mwmbl.curated_domains import get_curated_domains
+
+        return CuratedDomainsResponse(domains=[CuratedDomain(name=d) for d in sorted(get_curated_domains())])
 
     @r.post(
-        '/results',
-        response={200: PostResultsResponse, 401: Error},
+        "/results",
+        response={200: PostResultsResponse, 400: Error, 401: Error},
         summary="Submit indexed results",
         description=(
             "Submit a set of pre-indexed search results directly into the Mwmbl index. "
             "Requires a valid crawl-scoped API key passed in the `X-API-Key` request header "
             "(preferred) or in the request body `api_key` field (deprecated). "
             "Results are indexed immediately and also stored in object storage. "
-            "This endpoint is intended for trusted crawlers."
+            "This endpoint is intended for trusted crawlers.\n\n"
+            "Pass `?dry_run=true` to authenticate and validate the request without indexing "
+            "or storing anything. Useful for exercising the submission path from CI."
         ),
     )
-    def post_results(request, results: Results):
+    def post_results(request, results: Results, dry_run: bool = False):
         # Prefer X-API-Key header; fall back to deprecated body field
         raw_key = request.headers.get("X-API-Key") or results.api_key
         if not raw_key:
             return 401, {"message": "API key required. Pass it in the X-API-Key header."}
 
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        api_key = ApiKey.objects.filter(
-            key=key_hash,
-            scopes__contains=[ApiKey.Scope.CRAWL],
-        ).select_related("user").first()
+        api_key = (
+            ApiKey.objects.filter(
+                key=key_hash,
+                scopes__contains=[ApiKey.Scope.CRAWL],
+            )
+            .select_related("user")
+            .first()
+        )
         if api_key is None:
             return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
 
-        documents = [Document(url=result.url, title=result.title, extract=result.extract) for result in results.results]
+        now = datetime.now(timezone.utc)
+        ApiKey.objects.filter(pk=api_key.pk).update(last_used=now)
+        now_ts = int(now.timestamp())
+
+        documents = []
+        for result in results.results:
+            if result.last_crawled is not None and result.last_crawled > now_ts:
+                return 400, {"message": f"last_crawled timestamp is in the future for URL: {result.url}"}
+            last_crawled = result.last_crawled if result.last_crawled is not None else now_ts
+            documents.append(
+                Document(
+                    url=result.url,
+                    title=result.title,
+                    extract=result.extract,
+                    user_ids=[api_key.user.id],
+                    last_crawled=last_crawled,
+                )
+            )
+
+        if dry_run:
+            return {"status": "dry-run", "url": None}
+
+        # Update or create Device records for this submission. This used to happen on the
+        # now-removed /batches/ endpoint, which was the only path that saw a device name.
+        if results.device_name:
+            record_device(api_key.user, results.device_name)
+
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         index_documents(documents, index_path)
-
-        now = datetime.now(timezone.utc)
-        filename = upload_object(results, now, api_key.user.username, "results")
+        # Without api_key: the bucket is world-readable (get_batch_from_id fetches from it
+        # with a plain unauthenticated GET), so uploading the object as submitted would
+        # publish the plaintext key of any client still using the deprecated body field.
+        filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
 
         # Update stats for the user
-        stats_manager.record_results(results, api_key.user.username)
+        stats_manager.record_results(results, api_key.user)
 
         return {
-            'status': 'ok',
-            'url': f'{PUBLIC_URL_PREFIX}{filename}',
+            "status": "ok",
+            "url": f"{PUBLIC_URL_PREFIX}{filename}",
         }
 
     @r.post(
-        '/dataset',
+        "/dataset",
         summary="Submit Firefox extension dataset",
         description=(
             "Submit a dataset of search interactions collected by the Mwmbl Firefox extension. "
@@ -292,7 +292,7 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
     )
     def post_dataset(request, dataset: DatasetRequest):
         if len(dataset.user_id) != USER_ID_LENGTH:
-            return r.create_response(request, f"Incorrect user ID length, should be {USER_ID_LENGTH}", status=400)
+            raise HttpError(400, f"Incorrect user ID length, should be {USER_ID_LENGTH}")
 
         user_id_hash = _get_user_id_hash(dataset)
 
@@ -303,7 +303,7 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
             timestamp=dataset.timestamp,
             extensionVersion=dataset.extensionVersion,
             queryDataset=dataset.queryDataset,
-            searchResults=dataset.searchResults
+            searchResults=dataset.searchResults,
         )
 
         now = datetime.now(timezone.utc)
@@ -313,26 +313,26 @@ def _register_routes(r: Router | NinjaAPI, batch_cache: BatchCache, queued_batch
         stats_manager.record_dataset(hashed_dataset)
 
         return {
-            'status': 'ok',
-            'public_user_id': user_id_hash,
-            'url': f'{PUBLIC_URL_PREFIX}{filename}',
+            "status": "ok",
+            "public_user_id": user_id_hash,
+            "url": f"{PUBLIC_URL_PREFIX}{filename}",
         }
 
 
-def init_router(batch_cache: BatchCache, queued_batches: RedisURLQueue):
+def init_router():
     """Initialise the module-level router (called from urls.py for the unified v1 API)."""
-    _register_routes(router, batch_cache, queued_batches)
+    _register_routes(router)
 
 
-def create_router(batch_cache: BatchCache, queued_batches: RedisURLQueue, version: str) -> NinjaAPI:
+def create_router(version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
-    _register_routes(api, batch_cache, queued_batches)
+    _register_routes(api)
     return api
 
 
-def _get_user_id_hash(batch: Union[Batch, NewBatchRequest, DatasetRequest]):
-    return hashlib.sha3_256(batch.user_id.encode('utf8')).hexdigest()
+def _get_user_id_hash(batch: DatasetRequest):
+    return hashlib.sha3_256(batch.user_id.encode("utf8")).hexdigest()
 
 
 def check_public_user_id(public_user_id):
@@ -343,25 +343,26 @@ def check_public_user_id(public_user_id):
 def get_batch_url(batch_id, date_str, public_user_id):
     check_date_str(date_str)
     check_public_user_id(public_user_id)
-    url = f'{PUBLIC_URL_PREFIX}1/{VERSION}/{date_str}/1/{public_user_id}/{batch_id}{FILE_NAME_SUFFIX}'
+    url = f"{PUBLIC_URL_PREFIX}1/{VERSION}/{date_str}/1/{public_user_id}/{batch_id}{FILE_NAME_SUFFIX}"
     return url
 
 
 def get_batch_id_from_file_name(file_name: str):
     assert file_name.endswith(FILE_NAME_SUFFIX)
-    return file_name[:-len(FILE_NAME_SUFFIX)]
+    return file_name[: -len(FILE_NAME_SUFFIX)]
 
 
 def get_batch_ids_for_prefix(prefix):
     filenames = get_batches_for_prefix(prefix)
-    filename_endings = sorted(filename.rsplit('/', 1)[1] for filename in filenames)
-    results = {'batch_ids': [get_batch_id_from_file_name(name) for name in filename_endings]}
+    filename_endings = sorted(filename.rsplit("/", 1)[1] for filename in filenames)
+    results = {"batch_ids": [get_batch_id_from_file_name(name) for name in filename_endings]}
     return results
 
 
 def get_batches_for_prefix(prefix):
-    s3 = boto3.resource('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
-                        aws_secret_access_key=APPLICATION_KEY)
+    s3 = boto3.resource(
+        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
+    )
     bucket = s3.Bucket(BUCKET_NAME)
     items = bucket.objects.filter(Prefix=prefix)
     filenames = [item.key for item in items]
@@ -370,37 +371,13 @@ def get_batches_for_prefix(prefix):
 
 def check_date_str(date_str):
     if not DATE_REGEX.match(date_str):
-        raise HttpError(400, f"Incorrect date format, should be YYYY-MM-DD")
+        raise HttpError(400, "Incorrect date format, should be YYYY-MM-DD")
 
 
 def get_subfolders(prefix):
-    client = boto3.client('s3', endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID,
-                          aws_secret_access_key=APPLICATION_KEY)
-    items = client.list_objects(Bucket=BUCKET_NAME,
-                                Prefix=prefix,
-                                Delimiter='/')
-    item_keys = [item['Prefix'][len(prefix):].strip('/') for item in items['CommonPrefixes']]
+    client = boto3.client(
+        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
+    )
+    items = client.list_objects(Bucket=BUCKET_NAME, Prefix=prefix, Delimiter="/")
+    item_keys = [item["Prefix"][len(prefix) :].strip("/") for item in items["CommonPrefixes"]]
     return item_keys
-
-
-def get_batches_for_date(date_str):
-    check_date_str(date_str)
-    prefix = f'1/{VERSION}/{date_str}/1/'
-    cache_filename = prefix + 'batches.json.gz'
-    cache_url = PUBLIC_URL_PREFIX + cache_filename
-    try:
-        cached_batches = json.loads(gzip.decompress(requests.get(cache_url).content))
-        print(f"Got cached batches for {date_str}")
-        return cached_batches
-    except gzip.BadGzipFile:
-        pass
-
-    batches = get_batches_for_prefix(prefix)
-    result = {'batch_urls': [f'{PUBLIC_URL_PREFIX}{batch}' for batch in sorted(batches)]}
-    if date_str != str(date.today()):
-        # Don't cache data from today since it may change
-        data = gzip.compress(json.dumps(result).encode('utf8'))
-        upload(data, cache_filename)
-        print(f"Cached batches for {date_str} in {PUBLIC_URL_PREFIX}{cache_filename}")
-    print(f"Returning {len(result['batch_urls'])} batches for {date_str}")
-    return result

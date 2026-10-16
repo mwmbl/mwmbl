@@ -1,0 +1,20 @@
+name: hacks_mozilla_org
+domain: hacks.mozilla.org
+field: programming
+request:
+  url: https://hacks.mozilla.org/wp-json/wp/v2/posts
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title.rendered
+    extract: excerpt.rendered
+    url: link
+  strip_html:
+    - extract
+smoke:
+  query: firefox
+  expect_title_contains: firefox

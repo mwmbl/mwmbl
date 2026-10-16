@@ -3,17 +3,15 @@ Investigate adding term information to the database.
 
 How much extra space will it take?
 """
-import os
+
 from pathlib import Path
 from random import Random
 
 import numpy as np
 from scipy.stats import sem
-
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document, _trim_items_to_page
-
 from zstandard import ZstdCompressor
 
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex, _trim_items_to_page
 from mwmbl.utils import add_term_info
 
 random = Random(1)
@@ -47,5 +45,5 @@ def run():
         print("New sizes mean", np.mean(new_sizes), sem(new_sizes))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

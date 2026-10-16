@@ -4,14 +4,13 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0008_alter_flagcuration_options_and_more'),
+        ("mwmbl", "0008_alter_flagcuration_options_and_more"),
     ]
 
     operations = [
         migrations.AlterModelOptions(
-            name='domainsubmission',
-            options={'permissions': [('change_domain_submission_status', 'Can change the domain submission status')]},
+            name="domainsubmission",
+            options={"permissions": [("change_domain_submission_status", "Can change the domain submission status")]},
         ),
     ]

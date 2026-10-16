@@ -1,0 +1,19 @@
+name: unherd_com
+domain: unherd.com
+field: news-politics
+request:
+  url: https://unherd.com/
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h1
+  base_url: https://unherd.com
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: music
+  expect_title_contains: music

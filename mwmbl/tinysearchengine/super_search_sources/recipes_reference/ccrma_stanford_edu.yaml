@@ -1,0 +1,20 @@
+name: ccrma_stanford_edu
+domain: ccrma.stanford.edu
+field: academia
+request:
+  url: https://ccrma.stanford.edu/search/node/{query}
+  method: GET
+response:
+  format: html
+  results: "dl.search-results dt.title"
+  base_url: https://ccrma.stanford.edu
+  fields:
+    title:
+      selector: "a"
+    url:
+      selector: "a"
+      attr: href
+    extract: ""
+smoke:
+  query: audiovisual
+  expect_title_contains: Composition

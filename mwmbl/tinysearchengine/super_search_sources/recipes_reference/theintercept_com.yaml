@@ -1,0 +1,18 @@
+# The Intercept via the WordPress REST API search endpoint.
+name: theintercept_com
+domain: theintercept.com
+field: news-politics
+request:
+  url: https://theintercept.com/wp-json/wp/v2/search
+  params:
+    search: "{query}"
+    per_page: "{limit}"
+response:
+  format: json
+  results: ""
+  fields:
+    title: title
+    url: url
+smoke:
+  query: investigating
+  expect_title_contains: Investigations

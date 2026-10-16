@@ -1,7 +1,6 @@
 from mwmbl.settings_dev import *
 
-# Disable the legacy psycopg2 index-DB setup for testing
-SETUP_DATABASE = False
+HAS_DATABASE = False
 
 # PostgreSQL is required for ArrayField.
 # Set DATABASE_URL in the environment before running tests, e.g.:
@@ -12,6 +11,13 @@ SETUP_DATABASE = False
 DATA_PATH = "/tmp/test_mwmbl_data"
 INDEX_NAME = "index-v2.tinysearch"
 NUM_PAGES = 10
+EXTERNAL_CACHE_INDEX_NAME = "external-cache.tinysearch"
+EXTERNAL_CACHE_NUM_PAGES = 10
+
+# The traffic counters are the only Redis touch on the request path, and every test that
+# drives the Django test client would hit them. Tests that exercise them turn this on with
+# override_settings and a fakeredis client of their own.
+SEARCH_TRAFFIC_COUNTING = False
 
 # Use fakeredis for cache so tests don't need a real Redis server
 CACHES = {
@@ -29,3 +35,8 @@ DOMAIN_LINKS_BLOOM_FILTER_PATH = "/tmp/test_links_{domain_group}.bloom"
 NUM_DOMAINS_IN_BLOOM_FILTER = 1000
 
 REQUEST_CACHE_PATH = "/tmp/test_request_cache"
+
+# The front end is not built when running the tests, so there is no Vite manifest to resolve assets
+# against. In dev mode django-vite points at the dev server instead of reading the manifest, which
+# lets views that render the base template be tested.
+DJANGO_VITE_DEV_MODE = True

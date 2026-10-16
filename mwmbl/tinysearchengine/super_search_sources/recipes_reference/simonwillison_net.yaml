@@ -1,0 +1,20 @@
+name: simonwillison_net
+domain: simonwillison.net
+field: tech
+request:
+  url: https://simonwillison.net/search/
+  params:
+    q: "{query}"
+response:
+  format: html
+  results: "h3"
+  base_url: https://simonwillison.net
+  fields:
+    title:
+      selector: "a"
+    url:
+      selector: "a"
+      attr: href
+smoke:
+  query: web development
+  expect_title_contains: web

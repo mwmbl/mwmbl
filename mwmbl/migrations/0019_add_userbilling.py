@@ -6,20 +6,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0018_usagebucket_remove_monthly_search_count'),
+        ("mwmbl", "0018_usagebucket_remove_monthly_search_count"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='UserBilling',
+            name="UserBilling",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('polar_customer_id', models.CharField(blank=True, default='', max_length=100)),
-                ('polar_subscription_id', models.CharField(blank=True, default='', max_length=100)),
-                ('current_period_end', models.DateTimeField(blank=True, null=True)),
-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='billing', to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("polar_customer_id", models.CharField(blank=True, default="", max_length=100)),
+                ("polar_subscription_id", models.CharField(blank=True, default="", max_length=100)),
+                ("current_period_end", models.DateTimeField(blank=True, null=True)),
+                (
+                    "user",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE, related_name="billing", to=settings.AUTH_USER_MODEL
+                    ),
+                ),
             ],
         ),
     ]

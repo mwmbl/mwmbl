@@ -1,14 +1,14 @@
 """
 Perform an evaluation using NDCG against a gold standard set of results.
 """
-from abc import ABC, abstractmethod
+
 import time
+from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
 from scipy.stats import sem
 from sklearn.metrics import ndcg_score
-
 
 # Sourced from https://www.searchenginejournal.com/google-first-page-clicks/374516/
 from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, RANKINGS_DATASET_TRAIN_PATH
@@ -29,6 +29,32 @@ class RankingModel(ABC):
         pass
 
 
+def latest_ranking(rankings):
+    """The most recent scrape of one query's results, in rank order.
+
+    The rankings dataset holds several scrapes of the same query taken on different
+    dates - 1,135 of the 5,969 test queries, up to 16 dates each - and their rows sit
+    consecutively under the one query. Taking the first ten rows therefore mixes dates:
+    the ten are not one ranking, and a URL that appears in two scrapes appears twice at
+    two different ranks. Keeping only the latest date makes the gold set what it is meant
+    to be - one ranking per query.
+    """
+    latest = rankings["date_retrieved"].max()
+    return rankings[rankings["date_retrieved"] == latest].sort_values("rank")
+
+
+def gold_scores_for(rankings) -> dict[str, float]:
+    """The gold URL -> click-weight map for one query's rows of the rankings dataset.
+
+    Duplicate URLs are dropped keeping the best rank, because the map is keyed by URL:
+    left in, the *worse* rank's weight is the one that would survive.
+    """
+    ranking = latest_ranking(rankings).drop_duplicates(subset="url", keep="first")
+    top_ranked = ranking[["url"]].iloc[:NUM_RESULTS_FOR_EVAL].copy()
+    top_ranked["score"] = CLICK_PROPORTIONS[: len(top_ranked)]
+    return top_ranked.set_index("url")["score"].to_dict()
+
+
 def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False):
     # TODO:
     #  - output feature importances from XGBoost
@@ -43,7 +69,7 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     ndcg_scores = []
     proportions = []
 
-    queries = dataset['query'].unique()
+    queries = dataset["query"].unique()
     if fraction < 1.0:
         num_queries = int(fraction * len(queries))
         print("Num queries", num_queries)
@@ -53,13 +79,11 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
 
     wiki_counts = []
     durations = []
-    for query, rankings in dataset.groupby('query'):
+    for query, rankings in dataset.groupby("query"):
         if query not in random_queries:
             continue
 
-        top_ranked = rankings[['url']].iloc[:NUM_RESULTS_FOR_EVAL]
-        top_ranked['score'] = CLICK_PROPORTIONS[:len(top_ranked)]
-        scores = top_ranked.set_index('url')['score'].to_dict()
+        scores = gold_scores_for(rankings)
         print(f"Query: '{query}'", scores)
 
         start_time = time.perf_counter()
@@ -97,6 +121,8 @@ def evaluate(ranking_model: RankingModel, fraction: float = 1.0, use_test=False)
     print("predict_time_sem:", sem(durations))
 
     print("Dataset\tFraction\tNDCG\tSEM\tProportion\tSEM\tWiki Count\tSEM\tPredict time\tSEM")
-    print(f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
-          f"{np.mean(proportions)}\t{sem(proportions)}\t{np.mean(wiki_counts)}\t{sem(wiki_counts)}"
-          f"\t{np.mean(durations)}\t{sem(durations)}")
+    print(
+        f"{'Test' if use_test else 'Train'}\t{fraction}\t{np.mean(ndcg_scores)}\t{sem(ndcg_scores)}\t"
+        f"{np.mean(proportions)}\t{sem(proportions)}\t{np.mean(wiki_counts)}\t{sem(wiki_counts)}"
+        f"\t{np.mean(durations)}\t{sem(durations)}"
+    )

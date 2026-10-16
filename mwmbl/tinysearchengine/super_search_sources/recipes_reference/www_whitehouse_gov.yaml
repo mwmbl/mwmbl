@@ -1,0 +1,19 @@
+name: www_whitehouse_gov
+domain: www.whitehouse.gov
+field: law-government
+request:
+  url: https://www.whitehouse.gov
+  params:
+    s: '{query}'
+response:
+  format: html
+  results: h2.has-reduced-mobile-size.wp-block-post-title
+  base_url: https://www.whitehouse.gov
+  fields:
+    title: a
+    url:
+      selector: a
+      attr: href
+smoke:
+  query: history
+  expect_title_contains: history

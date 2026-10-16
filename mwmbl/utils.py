@@ -1,19 +1,26 @@
-import os
 import re
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import Sequence, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional, Sequence
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from redis import Redis
-from requests_cache import CachedSession, RedisCache
-from requests.adapters import Retry, HTTPAdapter
+from requests_cache import CachedSession
 
 from mwmbl.indexer.index import tokenize_document
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 DOMAIN_REGEX = re.compile(r".*://([^/]*)")
+
+
+def utc_today() -> date:
+    """Today in UTC, whatever the server's local timezone is.
+
+    Daily Redis counters are keyed by this date, and the crawler's S3 batch prefixes are
+    UTC, so a local date would name a different day's key for hours either side of
+    midnight.
+    """
+    return datetime.now(timezone.utc).date()
 
 
 def batch(items: Sequence, batch_size):
@@ -22,7 +29,7 @@ def batch(items: Sequence, batch_size):
     """
     length = len(items)
     for ndx in range(0, length, batch_size):
-        yield items[ndx:min(ndx + batch_size, length)]
+        yield items[ndx : min(ndx + batch_size, length)]
 
 
 def get_domain(url):
@@ -76,20 +83,63 @@ def parse_url(url: str) -> ParsedUrl:
 
 VALID_DOMAIN_REGEX = re.compile(r"^[\w-]{1,63}(\.[\w-]{1,63})+$")
 
+# Everything from the first of these characters onwards is a path, query string or fragment.
+DOMAIN_END_REGEX = re.compile(r"[/?#]")
+
+
+def normalize_domain(domain_or_url: str) -> str:
+    """
+    Extract the domain from a URL. A bare domain is returned unchanged, and any path, query string
+    or fragment is stripped. The domain is lowercased so that a domain has a single representation
+    however it was typed: domains are compared as strings elsewhere, e.g. against the curated
+    domains when deciding how many URLs to queue for a domain.
+    """
+    netloc = parse_url(domain_or_url).netloc
+    if not netloc:
+        netloc = DOMAIN_END_REGEX.split(domain_or_url, maxsplit=1)[0]
+    return netloc.lower()
+
+
+def bare_host(domain_or_url: str) -> str:
+    """:func:`normalize_domain`, minus a leading ``www.``.
+
+        >>> bare_host("https://www.example.com/a/b?c=d"), bare_host("example.com")
+        ('example.com', 'example.com')
+
+    Votes are cast against result URLs and domains are submitted by hand, so the two disagree
+    about ``www.`` constantly. Reducing both sides to the same host is what makes a vote on
+    www.example.com/x count towards a submission of example.com.
+    """
+    host = normalize_domain(domain_or_url)
+    return host[4:] if host.startswith("www.") else host
+
 
 def validate_domain(domain_or_url: str):
-    if VALID_DOMAIN_REGEX.fullmatch(domain_or_url) is None:
-        # See if we can extract a domain from the URL
-        try:
-            domain = parse_url(domain_or_url).netloc
-        except ValueError:
-            raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
-        if domain is None or VALID_DOMAIN_REGEX.fullmatch(domain) is None:
-            raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
+    domain = normalize_domain(domain_or_url)
+    if VALID_DOMAIN_REGEX.fullmatch(domain) is None:
+        raise ValidationError("Invalid domain: %(domain)s", params={"domain": domain_or_url})
 
 
 def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
+    """A session backed by a cache on disk. expire_after of None never expires a response.
+
+    Never expiring suits a caller that replays the same requests - the evaluation scripts -
+    and is wrong for one with an endless supply of new ones, which should pass the longest
+    staleness it can live with and prune_request_cache what is left over.
+    """
     return CachedSession(expire_after=expire_after, backend="filesystem", cache_name=settings.REQUEST_CACHE_PATH)
+
+
+def prune_request_cache() -> None:
+    """Delete the cached responses that have expired.
+
+    Asking for a request again replaces its expired response, so a cache whose requests come
+    round again keeps itself in order. One whose requests mostly do not - a response per
+    search term, say - only ever grows, because the entry nobody asks for a second time is
+    the one nothing replaces. Expiry alone does not reclaim a byte without this.
+    """
+    with request_cache() as session:
+        session.cache.delete(expired=True)
 
 
 def float_or_none(s: str) -> Optional[float]:

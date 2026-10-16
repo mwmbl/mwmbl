@@ -1,0 +1,20 @@
+name: gis_stackexchange_com
+domain: gis.stackexchange.com
+field: science
+request:
+  url: https://api.stackexchange.com/2.3/search/advanced
+  params:
+    q: "{query}"
+    pagesize: "{limit}"
+    site: gis
+    sort: relevance
+response:
+  format: json
+  results: items
+  fields:
+    title: title
+    extract: excerpt
+    url: link
+smoke:
+  query: geospatial mapping
+  expect_title_contains: mapping

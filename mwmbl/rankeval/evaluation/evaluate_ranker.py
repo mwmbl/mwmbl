@@ -1,9 +1,8 @@
 from argparse import ArgumentParser
 
-from mwmbl.tinysearchengine.indexer import TinyIndex, Document
-from mwmbl.tinysearchengine.rank import Ranker, HeuristicRanker
-
 from mwmbl.rankeval.evaluation.evaluate import RankingModel, evaluate
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.rank import HeuristicRanker, Ranker
 
 
 class MwmblRankingModel(RankingModel):
@@ -22,8 +21,8 @@ class DummyCompleter:
 
 def run():
     arg_parser = ArgumentParser()
-    arg_parser.add_argument('--index', help='Path to the index', required=True)
-    arg_parser.add_argument('--note', required=True)
+    arg_parser.add_argument("--index", help="Path to the index", required=True)
+    arg_parser.add_argument("--note", required=True)
 
     args = arg_parser.parse_args()
 
@@ -38,5 +37,5 @@ def run():
         evaluate(model)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

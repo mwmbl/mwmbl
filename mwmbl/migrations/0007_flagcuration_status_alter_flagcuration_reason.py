@@ -4,20 +4,27 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mwmbl', '0006_flagcuration'),
+        ("mwmbl", "0006_flagcuration"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='flagcuration',
-            name='status',
-            field=models.CharField(choices=[('PENDING', 'The flag has been submitted and is awaiting review'), ('REJECTED', 'The flag has been rejected'), ('ACCEPTED', 'The flag has been accepted and the curation has been reverted')], default='PENDING', max_length=20),
+            model_name="flagcuration",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("PENDING", "The flag has been submitted and is awaiting review"),
+                    ("REJECTED", "The flag has been rejected"),
+                    ("ACCEPTED", "The flag has been accepted and the curation has been reverted"),
+                ],
+                default="PENDING",
+                max_length=20,
+            ),
         ),
         migrations.AlterField(
-            model_name='flagcuration',
-            name='reason',
+            model_name="flagcuration",
+            name="reason",
             field=models.CharField(blank=True, max_length=300),
         ),
     ]

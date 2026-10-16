@@ -1,0 +1,17 @@
+name: forum_godotengine_org
+domain: forum.godotengine.org
+field: programming
+request:
+  url: https://forum.godotengine.org/search.json
+  params:
+    q: "{query}"
+response:
+  format: json
+  results: "topics"
+  fields:
+    title: title
+    url:
+      template: "https://forum.godotengine.org/t/{slug}/{id}"
+smoke:
+  query: godot
+  expect_title_contains: godot

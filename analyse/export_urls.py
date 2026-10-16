@@ -1,10 +1,11 @@
 """
 Export the list of unique URLs to a SQLite file for analysis/evaluation.
 """
+
 import sqlite3
 
-from mwmbl.indexer import URLS_PATH
 from mwmbl.app import get_config_and_index
+from mwmbl.indexer import URLS_PATH
 
 
 def create_database():
@@ -32,10 +33,13 @@ def run():
     with sqlite3.connect(URLS_PATH) as connection:
         for url_batch in url_batches:
             parameters = [(url,) for url in url_batch]
-            connection.executemany("""
+            connection.executemany(
+                """
             INSERT OR IGNORE INTO urls VALUES (?)
-            """, parameters)
+            """,
+                parameters,
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

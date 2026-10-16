@@ -5,9 +5,9 @@ Evaluate the crawled URLs to see how well they cover our gold-standard search re
 import pandas as pd
 from pandas import DataFrame
 
-from mwmbl.rankeval.evaluation.evaluate import evaluate, RankingModel, NUM_RESULTS_FOR_EVAL
+from mwmbl.rankeval.evaluation.evaluate import NUM_RESULTS_FOR_EVAL, RankingModel, evaluate
 from mwmbl.rankeval.evaluation.urldb import find_matching_urls
-from mwmbl.rankeval.paths import URLS_PATH, RANKINGS_DATASET_TEST_PATH
+from mwmbl.rankeval.paths import RANKINGS_DATASET_TEST_PATH, URLS_PATH
 
 
 class OracleRankingModel(RankingModel):
@@ -20,8 +20,8 @@ class OracleRankingModel(RankingModel):
         self.rankings = {}
 
     def prepare_rankings(self, gold_standard: DataFrame, url_database_path: str):
-        for query, rankings in gold_standard.groupby('query'):
-            gold_standard_urls = rankings['url'].to_list()[:NUM_RESULTS_FOR_EVAL]
+        for query, rankings in gold_standard.groupby("query"):
+            gold_standard_urls = rankings["url"].to_list()[:NUM_RESULTS_FOR_EVAL]
             matches = set(find_matching_urls(url_database_path, gold_standard_urls))
             oracle_ranking = [url for url in gold_standard_urls if url in matches]
             if oracle_ranking:
@@ -39,5 +39,5 @@ def run():
     evaluate(model)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
