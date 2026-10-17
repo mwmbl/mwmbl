@@ -57,6 +57,8 @@ class MembershipResponse(Schema):
     tier: MembershipTier
     current_period_end: Optional[datetime]
     cancel_at_period_end: bool
+    # "crawler" memberships are earned by crawling rather than bought, so there is nothing to cancel or change.
+    source: Literal["paid", "crawler"] = "paid"
 
 
 class CombinedSearchUsageResponse(Schema):

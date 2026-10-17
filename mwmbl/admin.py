@@ -5,6 +5,7 @@ from django.contrib.auth.admin import UserAdmin
 
 from mwmbl.models import (
     ApiKey,
+    CrawlerMembership,
     Curation,
     DomainSubmission,
     FlagCuration,
@@ -94,6 +95,15 @@ class MembershipAdmin(ModelAdmin):
 
 
 admin.site.register(Membership, MembershipAdmin)
+
+
+class CrawlerMembershipAdmin(ModelAdmin):
+    list_display = ("user", "valid_until", "earned")
+    readonly_fields = ("earned",)
+    search_fields = ("user__username", "user__email")
+
+
+admin.site.register(CrawlerMembership, CrawlerMembershipAdmin)
 
 # Adds the "Status" panel linking to the blacklist status page (mwmbl.admin_views) to the
 # admin front page.

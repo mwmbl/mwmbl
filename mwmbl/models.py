@@ -269,6 +269,18 @@ class Membership(models.Model):
     started = models.DateTimeField(auto_now_add=True)
 
 
+class CrawlerMembership(models.Model):
+    """A free Sprout membership earned by crawling, kept apart from Membership so Polar syncs never touch it.
+
+    Earned on the user's CRAWLER_MEMBERSHIP_DAYS-th crawl day of a calendar month and valid to the
+    end of the following month, so a volunteer who keeps qualifying is never without it.
+    """
+
+    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="crawler_membership")
+    valid_until = models.DateField()
+    earned = models.DateTimeField(auto_now=True)
+
+
 class AgreementType(models.TextChoices):
     TERMS_OF_SERVICE_GUI = "TERMS_OF_SERVICE_GUI", "Terms of Service (GUI)"
     TERMS_OF_SERVICE_API = "TERMS_OF_SERVICE_API", "Terms of Service (API)"

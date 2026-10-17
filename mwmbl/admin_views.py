@@ -45,8 +45,8 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
-from mwmbl.membership import TIERS, combined_search_monthly_limit
-from mwmbl.models import ApiKey, Membership, MwmblUser
+from mwmbl.membership import TIERS, MembershipTier, combined_search_monthly_limit
+from mwmbl.models import ApiKey, CrawlerMembership, Membership, MwmblUser
 from mwmbl.traffic import (
     HEADER_LABELS,
     STATUS_LABELS,
@@ -415,7 +415,13 @@ def _seed_search_stats() -> dict:
     users_by_id = MwmblUser.objects.in_bulk(list(counts))
     # Counters outlive deleted accounts until they expire, so skip users that no longer exist.
     counts = {user_id: count for user_id, count in counts.items() if user_id in users_by_id}
-    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
+    tier_by_user = {
+        user_id: MembershipTier.SPROUT.value
+        for user_id in CrawlerMembership.objects.filter(user_id__in=counts, valid_until__gte=utc_today()).values_list(
+            "user_id", flat=True
+        )
+    }
+    tier_by_user |= dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
 
     tier_names = ["free"] + [tier_info.tier.value for tier_info in TIERS]
     by_tier = {tier: {"tier": tier, "users": 0, "queries": 0, "at_limit": 0} for tier in tier_names}

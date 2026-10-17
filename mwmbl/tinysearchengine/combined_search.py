@@ -41,6 +41,7 @@ from ninja_jwt.authentication import JWTAuth
 from pydantic import Field
 
 from mwmbl import pricing
+from mwmbl.crawler_membership import membership_tier
 from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
@@ -52,7 +53,7 @@ from mwmbl.indexer.seed_crawl import (
 )
 from mwmbl.indexer.seed_domains import published_seed_domains
 from mwmbl.membership import combined_search_monthly_limit
-from mwmbl.models import Membership, UserBilling
+from mwmbl.models import UserBilling
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
@@ -285,7 +286,7 @@ def init_router(ranker) -> None:
                     "to allow more.",
                 )
         else:
-            tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
+            tier = await sync_to_async(membership_tier)(user.id)
             monthly_limit = combined_search_monthly_limit(tier)
             # Increment first, then check: this makes the quota check atomic under concurrent
             # requests (a check-then-increment would let racing requests both pass). Refund the

@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime, time, timedelta
+from datetime import timezone as dt_timezone
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
@@ -24,10 +26,13 @@ from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
+from mwmbl.crawler_membership import membership_tier
 from mwmbl.exceptions import InvalidRequest
+from mwmbl.membership import MembershipTier
 from mwmbl.models import (
     AgreementType,
     ApiKey,
+    CrawlerMembership,
     Device,
     DomainEvidence,
     DomainSubmission,
@@ -96,7 +101,7 @@ from mwmbl.quota import get_monthly_combined_search_api_count, get_monthly_combi
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
-from mwmbl.utils import normalize_domain, validate_domain
+from mwmbl.utils import normalize_domain, utc_today, validate_domain
 
 logger = logging.getLogger(__name__)
 
@@ -1341,14 +1346,25 @@ def list_membership_tiers(request):
     auth=JWTAuth(),
     response=MembershipResponse,
     summary="Get current membership",
-    description="Returns the user's membership tier, or 404 if they aren't a member.",
+    description="Returns the user's membership tier, or 404 if they aren't a member. A paid membership "
+    "takes precedence over a Sprout membership earned by crawling.",
     tags=["Membership"],
 )
 def get_membership(request):
     user_membership = Membership.objects.filter(user=request.user).first()
-    if user_membership is None:
+    if user_membership is not None:
+        return user_membership
+    crawler_membership = CrawlerMembership.objects.filter(user=request.user, valid_until__gte=utc_today()).first()
+    if crawler_membership is None:
         raise InvalidRequest("Not a member.", status=404)
-    return user_membership
+    return MembershipResponse(
+        tier=MembershipTier.SPROUT,
+        current_period_end=datetime.combine(
+            crawler_membership.valid_until + timedelta(days=1), time.min, tzinfo=dt_timezone.utc
+        ),
+        cancel_at_period_end=False,
+        source="crawler",
+    )
 
 
 @router.get(
@@ -1361,7 +1377,7 @@ def get_membership(request):
     tags=["Membership"],
 )
 def get_combined_search_usage(request):
-    tier = Membership.objects.filter(user=request.user).values_list("tier", flat=True).first()
+    tier = membership_tier(request.user.id)
     return CombinedSearchUsageResponse(
         monthly_usage=get_monthly_combined_search_count(request.user.id),
         monthly_limit=membership.combined_search_monthly_limit(tier),

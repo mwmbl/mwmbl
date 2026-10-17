@@ -301,6 +301,8 @@ CURRENT_AGREEMENT_VERSIONS = {
 # meant to replace. Monthly limits for web (JWT) callers, keyed by
 # mwmbl.membership.MembershipTier value; "free" is signed-in users without a membership.
 COMBINED_SEARCH_MONTHLY_LIMITS = {"free": 30, "sprout": 300, "sapling": 1_500, "canopy": 1_500}
+# Crawling on this many days in a calendar month earns a free Sprout membership.
+CRAWLER_MEMBERSHIP_DAYS = 3
 # Its own model artifact, so Combined Search can be retrained on the pooled candidate set
 # without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
 COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"
