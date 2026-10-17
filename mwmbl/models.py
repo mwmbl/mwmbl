@@ -6,7 +6,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
-from mwmbl.membership import MembershipTier
+from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
 
 
@@ -269,16 +269,21 @@ class Membership(models.Model):
     started = models.DateTimeField(auto_now_add=True)
 
 
-class CrawlerMembership(models.Model):
-    """A free Sprout membership earned by crawling, kept apart from Membership so Polar syncs never touch it.
+class VolunteerMembership(models.Model):
+    """A volunteer tier earned by crawling, kept apart from Membership so Polar syncs never touch it.
 
-    Earned on the user's CRAWLER_MEMBERSHIP_DAYS-th crawl day of a calendar month and valid to the
-    end of the following month, so a volunteer who keeps qualifying is never without it.
+    One row per tier the user has earned, each valid to the end of the month after the one it was
+    last earned in, so a volunteer who keeps qualifying is never without it. See
+    mwmbl.membership.VOLUNTEER_TIERS for what earns each tier.
     """
 
-    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="crawler_membership")
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="volunteer_memberships")
+    tier = models.CharField(max_length=20, choices=VolunteerTier.choices)
     valid_until = models.DateField()
     started = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "tier")]
 
 
 class AgreementType(models.TextChoices):

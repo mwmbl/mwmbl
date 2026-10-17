@@ -1,6 +1,4 @@
 import logging
-from datetime import datetime, time, timedelta
-from datetime import timezone as dt_timezone
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
@@ -26,13 +24,10 @@ from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
-from mwmbl.crawler_membership import has_crawler_membership, membership_tier
 from mwmbl.exceptions import InvalidRequest
-from mwmbl.membership import MembershipTier
 from mwmbl.models import (
     AgreementType,
     ApiKey,
-    CrawlerMembership,
     Device,
     DomainEvidence,
     DomainSubmission,
@@ -90,6 +85,8 @@ from mwmbl.platform.schemas import (
     UserProfileResponse,
     UserStatsResponse,
     UserVoteHistory,
+    VolunteerMembershipResponse,
+    VolunteerTierResponse,
     VoteRemoveRequest,
     VoteRequest,
     VoteResponse,
@@ -101,7 +98,8 @@ from mwmbl.quota import get_monthly_combined_search_api_count, get_monthly_combi
 from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
-from mwmbl.utils import normalize_domain, utc_today, validate_domain
+from mwmbl.utils import normalize_domain, validate_domain
+from mwmbl.volunteer_membership import current_volunteer_membership, user_combined_search_monthly_limit
 
 logger = logging.getLogger(__name__)
 
@@ -1346,24 +1344,53 @@ def list_membership_tiers(request):
     auth=JWTAuth(),
     response=MembershipResponse,
     summary="Get current membership",
-    description="Returns the user's membership tier, or 404 if they aren't a member. A paid membership "
-    "takes precedence over a Sprout membership earned by crawling.",
+    description="Returns the user's membership tier, or 404 if they aren't a member.",
     tags=["Membership"],
 )
 def get_membership(request):
     user_membership = Membership.objects.filter(user=request.user).first()
-    if user_membership is not None:
-        return user_membership
-    crawler_membership = CrawlerMembership.objects.filter(user=request.user, valid_until__gte=utc_today()).first()
-    if crawler_membership is None:
+    if user_membership is None:
         raise InvalidRequest("Not a member.", status=404)
-    return MembershipResponse(
-        tier=MembershipTier.SPROUT,
-        current_period_end=datetime.combine(
-            crawler_membership.valid_until + timedelta(days=1), time.min, tzinfo=dt_timezone.utc
-        ),
-        cancel_at_period_end=False,
-        source="crawler",
+    return user_membership
+
+
+@router.get(
+    "/membership/volunteer-tiers",
+    response=list[VolunteerTierResponse],
+    summary="List volunteer tiers",
+    description="Returns the tiers earned by crawling rather than bought, with what earns each one and its perks.",
+    tags=["Membership"],
+)
+def list_volunteer_tiers(request):
+    return [
+        VolunteerTierResponse(
+            tier=info.tier,
+            name=info.tier.label,
+            days_per_month=info.days_per_month,
+            min_results_per_day=info.min_results_per_day,
+            perks=info.perks,
+        )
+        for info in membership.VOLUNTEER_TIERS
+    ]
+
+
+@router.get(
+    "/membership/volunteer",
+    auth=JWTAuth(),
+    response=VolunteerMembershipResponse,
+    summary="Get current volunteer membership",
+    description="Returns the highest volunteer tier the user has earned by crawling, or 404 if they don't "
+    "currently hold one. This is separate from a paid membership, and a user can hold both.",
+    tags=["Membership"],
+)
+def get_volunteer_membership(request):
+    volunteer_membership = current_volunteer_membership(request.user.id)
+    if volunteer_membership is None:
+        raise InvalidRequest("Not a volunteer member.", status=404)
+    return VolunteerMembershipResponse(
+        tier=volunteer_membership.tier,
+        name=volunteer_membership.get_tier_display(),
+        valid_until=volunteer_membership.valid_until,
     )
 
 
@@ -1372,15 +1399,14 @@ def get_membership(request):
     auth=JWTAuth(),
     response=CombinedSearchUsageResponse,
     summary="Get Combined Search usage",
-    description="Returns the user's Combined Search usage this month and their limit, which is set by "
-    "their membership tier.",
+    description="Returns the user's Combined Search usage this month and their limit, which is the more "
+    "generous of those set by their membership tier and their volunteer tier.",
     tags=["Membership"],
 )
 def get_combined_search_usage(request):
-    tier = membership_tier(request.user.id)
     return CombinedSearchUsageResponse(
         monthly_usage=get_monthly_combined_search_count(request.user.id),
-        monthly_limit=membership.combined_search_monthly_limit(tier),
+        monthly_limit=user_combined_search_monthly_limit(request.user.id),
     )
 
 
@@ -1454,7 +1480,9 @@ def create_membership_checkout(request, body: MembershipCheckoutRequest):
 )
 def cancel_membership(request):
     check_email_verified(request)
-    user_membership = _paid_membership(request.user)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
     if user_membership.cancel_at_period_end:
         raise InvalidRequest("Membership is already scheduled to cancel.", status=409)
     try:
@@ -1480,7 +1508,9 @@ def cancel_membership(request):
 )
 def uncancel_membership(request):
     check_email_verified(request)
-    user_membership = _paid_membership(request.user)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
     if not user_membership.cancel_at_period_end:
         raise InvalidRequest("Membership is not scheduled to cancel.", status=409)
     try:
@@ -1507,7 +1537,9 @@ def uncancel_membership(request):
 )
 def change_membership(request, body: MembershipChangeRequest):
     check_email_verified(request)
-    user_membership = _paid_membership(request.user)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
     if user_membership.tier == body.tier:
         raise InvalidRequest("Already on this tier.", status=409)
     # Changing tier would leave the cancellation in place, which is rarely what anyone wants;
@@ -1532,19 +1564,6 @@ def change_membership(request, body: MembershipChangeRequest):
         raise InvalidRequest("A change to this membership is already in progress. Try again shortly.", status=409)
     tier = membership.tier_for_product(result.product_id)
     return _save_membership_update(user_membership, tier=tier, current_period_end=result.current_period_end)
-
-
-def _paid_membership(user) -> Membership:
-    """The user's paid membership, for the endpoints that change it in Polar."""
-    user_membership = Membership.objects.filter(user=user).first()
-    if user_membership is not None:
-        return user_membership
-    if has_crawler_membership(user.id):
-        raise InvalidRequest(
-            "Memberships earned by crawling can't be cancelled or changed. Buy a membership to choose a tier.",
-            status=409,
-        )
-    raise InvalidRequest("Not a member.", status=404)
 
 
 def _save_membership_update(user_membership, **changes):

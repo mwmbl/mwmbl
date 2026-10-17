@@ -10,9 +10,9 @@ from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import Results
-from mwmbl.crawler_membership import update_crawler_membership
 from mwmbl.models import MwmblUser, UserStats
 from mwmbl.utils import utc_today
+from mwmbl.volunteer_membership import update_volunteer_memberships
 
 logger = getLogger(__name__)
 
@@ -225,7 +225,7 @@ class StatsManager:
                 num_results=num_results,
             )
 
-        update_crawler_membership(user, today)
+        update_volunteer_memberships(user, today)
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.

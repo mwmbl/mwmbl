@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from ninja import Field, ModelSchema, Schema
 from pydantic import model_validator
 
-from mwmbl.membership import MembershipTier
+from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
 
 
@@ -57,8 +57,21 @@ class MembershipResponse(Schema):
     tier: MembershipTier
     current_period_end: Optional[datetime]
     cancel_at_period_end: bool
-    # "crawler" memberships are earned by crawling rather than bought, so there is nothing to cancel or change.
-    source: Literal["paid", "crawler"] = "paid"
+
+
+class VolunteerTierResponse(Schema):
+    tier: VolunteerTier
+    name: str
+    days_per_month: int
+    min_results_per_day: int
+    perks: list[str]
+
+
+class VolunteerMembershipResponse(Schema):
+    tier: VolunteerTier
+    name: str
+    # The last day the membership is valid, unless the user earns it again before then.
+    valid_until: date
 
 
 class CombinedSearchUsageResponse(Schema):

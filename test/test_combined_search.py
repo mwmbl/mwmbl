@@ -23,8 +23,8 @@ from ninja_jwt.tokens import RefreshToken
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
 from mwmbl.indexer import seed_crawl
-from mwmbl.membership import MembershipTier
-from mwmbl.models import ApiKey, CrawlerMembership, Membership, UserBilling, generate_api_key
+from mwmbl.membership import MembershipTier, VolunteerTier
+from mwmbl.models import ApiKey, Membership, UserBilling, VolunteerMembership, generate_api_key
 from mwmbl.quota import (
     _combined_search_api_monthly_key,
     _combined_search_monthly_key,
@@ -289,9 +289,9 @@ def _join(user, tier):
 
 
 @pytest.mark.django_db
-def test_a_crawler_membership_gives_the_sprout_limit(client, user, access_token, fresh_quota, stub_sources):
+def test_a_volunteer_membership_sets_the_limit(client, user, access_token, fresh_quota, stub_sources):
     stub_sources()
-    CrawlerMembership.objects.create(user=user, valid_until=utc_today())
+    VolunteerMembership.objects.create(user=user, tier=VolunteerTier.POLLINATOR, valid_until=utc_today())
     cache.set(_combined_search_monthly_key(user.id), 299, timeout=3600)
 
     last_allowed = _get(client, access_token)

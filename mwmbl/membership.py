@@ -48,6 +48,36 @@ TIERS = [
 ]
 
 
+class VolunteerTier(models.TextChoices):
+    """Tiers earned by volunteering rather than bought. Kept apart from MembershipTier, which is sold through Polar."""
+
+    POLLINATOR = "pollinator", "Pollinator"
+
+
+@dataclass(frozen=True)
+class VolunteerTierInfo:
+    tier: VolunteerTier
+    # Earned by crawling on days_per_month days of a calendar month, where a day counts once
+    # the user has submitted min_results_per_day results that day.
+    days_per_month: int
+    min_results_per_day: int
+    perks: list[str]
+
+
+# Lowest first: a user holding several has the last one listed.
+VOLUNTEER_TIERS = [
+    VolunteerTierInfo(
+        tier=VolunteerTier.POLLINATOR,
+        days_per_month=3,
+        min_results_per_day=100,
+        perks=[
+            "Access to the members area in Matrix and Discord",
+            "300 Seed Search queries a month to enhance our index",
+        ],
+    ),
+]
+
+
 def product_ids() -> dict[MembershipTier, str]:
     return {
         MembershipTier.SPROUT: settings.POLAR_PRODUCT_ID_SPROUT,
@@ -63,5 +93,5 @@ def tier_for_product(product_id: str) -> MembershipTier | None:
 
 
 def combined_search_monthly_limit(tier: str | None) -> int:
-    """Combined Search queries a month for a web (JWT) caller with this membership tier."""
+    """Combined Search queries a month for a web (JWT) caller with this membership or volunteer tier."""
     return settings.COMBINED_SEARCH_MONTHLY_LIMITS[tier or "free"]
