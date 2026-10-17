@@ -28,7 +28,8 @@ def list_notifications(request):
     response={204: None},
     summary="Dismiss a notification",
     description="Marks one of the user's notifications as dismissed, so it is no longer listed. Dismissing a "
-    "notification that is already dismissed does nothing.",
+    "notification that is already dismissed does nothing. Returns 404 if the notification does not exist or "
+    "belongs to another user.",
 )
 def dismiss_notification(request, notification_id: int):
     notifications = UserNotification.objects.filter(user=request.user, id=notification_id)

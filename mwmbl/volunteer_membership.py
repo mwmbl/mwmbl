@@ -3,6 +3,8 @@
 import calendar
 from datetime import date
 
+from django.db import transaction
+
 from mwmbl.membership import VOLUNTEER_TIERS, combined_search_monthly_limit
 from mwmbl.models import (
     Membership,
@@ -48,23 +50,29 @@ def update_volunteer_memberships(user: MwmblUser, today: date) -> None:
         days_crawled = sum(num_results >= info.min_results_per_day for num_results in daily_results)
         if days_crawled < info.days_per_month:
             continue
-        _, created = VolunteerMembership.objects.get_or_create(
-            user=user, tier=info.tier, defaults={"valid_until": valid_until}
-        )
-        if created:
-            notify_volunteer_membership_granted(user.id, info.tier, valid_until)
-            continue
-        # Reviving a lapsed membership is a fresh grant, so it's notified; extending a current one isn't.
-        # Each update is a single statement, so concurrent batches can't both revive it.
-        revived = VolunteerMembership.objects.filter(user=user, tier=info.tier, valid_until__lt=today).update(
-            valid_until=valid_until
-        )
-        if revived:
-            notify_volunteer_membership_granted(user.id, info.tier, valid_until)
-            continue
-        VolunteerMembership.objects.filter(user=user, tier=info.tier, valid_until__lt=valid_until).update(
-            valid_until=valid_until
-        )
+        _grant_volunteer_membership(user, info.tier, valid_until, today)
+
+
+# Atomic so a grant and its notification commit together: a grant that commits alone would be
+# extended, not granted, on the next batch, and the user would never be notified.
+@transaction.atomic
+def _grant_volunteer_membership(user: MwmblUser, tier: str, valid_until: date, today: date) -> None:
+    _, created = VolunteerMembership.objects.get_or_create(user=user, tier=tier, defaults={"valid_until": valid_until})
+    if created:
+        notify_volunteer_membership_granted(user.id, tier, valid_until)
+        return
+    # Reviving a lapsed membership is a fresh grant, so it's notified; extending a current one isn't.
+    # A concurrent revival blocks on the row lock, then re-checks valid_until < today and matches
+    # nothing, so only one batch revives it.
+    revived = VolunteerMembership.objects.filter(user=user, tier=tier, valid_until__lt=today).update(
+        valid_until=valid_until
+    )
+    if revived:
+        notify_volunteer_membership_granted(user.id, tier, valid_until)
+        return
+    VolunteerMembership.objects.filter(user=user, tier=tier, valid_until__lt=valid_until).update(
+        valid_until=valid_until
+    )
 
 
 def notify_volunteer_membership_granted(user_id: int, tier: str, valid_until: date) -> None:

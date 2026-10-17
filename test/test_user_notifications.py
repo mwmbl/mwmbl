@@ -6,11 +6,9 @@ from unittest.mock import patch
 
 import fakeredis
 import pytest
-from django.contrib.admin.sites import AdminSite
 from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.admin import VolunteerMembershipAdmin
 from mwmbl.crawler.stats import StatsManager
 from mwmbl.membership import VolunteerTier
 from mwmbl.models import MwmblUser, NotificationKind, UserNotification, VolunteerMembership
@@ -71,16 +69,30 @@ def test_earning_a_lapsed_membership_again_notifies(user):
     assert _notification_data(user)[1] == {"tier": "pollinator", "valid_until": "2027-02-28"}
 
 
-def _save_in_admin(volunteer_membership, change: bool, initial_valid_until: date | None = None) -> None:
-    form = SimpleNamespace(initial={"valid_until": initial_valid_until} if change else {})
+@pytest.fixture
+def admin_client(client, db):
+    admin = MwmblUser.objects.create_superuser(username="admin", email="admin@example.com", password="testpass123")
+    client.force_login(admin)
+    return client
+
+
+def _save_in_admin(admin_client, url: str, user, valid_until: date) -> None:
+    data = {"user": user.id, "tier": POLLINATOR, "valid_until": valid_until.isoformat()}
     with patch("mwmbl.admin.utc_today", return_value=TODAY):
-        VolunteerMembershipAdmin(VolunteerMembership, AdminSite()).save_model(None, volunteer_membership, form, change)
+        response = admin_client.post(url, data)
+    assert response.status_code == 302
 
 
-def test_a_membership_gifted_in_the_admin_notifies(user):
-    _save_in_admin(VolunteerMembership(user=user, tier=POLLINATOR, valid_until=date(2027, 6, 30)), change=False)
+def test_a_membership_gifted_in_the_admin_notifies(admin_client, user):
+    _save_in_admin(admin_client, "/admin/mwmbl/volunteermembership/add/", user, date(2027, 6, 30))
 
     assert _notification_data(user) == [{"tier": "pollinator", "valid_until": "2027-06-30"}]
+
+
+def test_an_already_expired_membership_added_in_the_admin_does_not_notify(admin_client, user):
+    _save_in_admin(admin_client, "/admin/mwmbl/volunteermembership/add/", user, date(2026, 10, 1))
+
+    assert _notification_data(user) == []
 
 
 @pytest.mark.parametrize(
@@ -92,15 +104,29 @@ def test_a_membership_gifted_in_the_admin_notifies(user):
     ],
     ids=["reviving a lapsed one", "extending a current one", "editing a lapsed one that stays lapsed"],
 )
-def test_editing_a_membership_in_the_admin(user, initial_valid_until, valid_until, notified):
+def test_editing_a_membership_in_the_admin(admin_client, user, initial_valid_until, valid_until, notified):
     volunteer_membership = VolunteerMembership.objects.create(
         user=user, tier=POLLINATOR, valid_until=initial_valid_until
     )
-    volunteer_membership.valid_until = valid_until
 
-    _save_in_admin(volunteer_membership, change=True, initial_valid_until=initial_valid_until)
+    _save_in_admin(
+        admin_client, f"/admin/mwmbl/volunteermembership/{volunteer_membership.id}/change/", user, valid_until
+    )
 
     assert bool(_notification_data(user)) == notified
+
+
+def test_a_grant_and_its_notification_commit_together(user):
+    for day in (1, 2):
+        _crawl(user, date(2026, 10, day))
+    with patch("mwmbl.volunteer_membership.notify_volunteer_membership_granted", side_effect=RuntimeError):
+        with pytest.raises(RuntimeError):
+            _crawl(user, date(2026, 10, 3))
+    assert not VolunteerMembership.objects.filter(user=user).exists()
+
+    _crawl(user, date(2026, 10, 3))
+
+    assert _notification_data(user) == [{"tier": "pollinator", "valid_until": "2026-11-30"}]
 
 
 def test_list_notifications(user):
