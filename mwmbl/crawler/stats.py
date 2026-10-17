@@ -224,7 +224,8 @@ class StatsManager:
                 date=today,
                 num_results=num_results,
             )
-            update_crawler_membership(user, today)
+
+        update_crawler_membership(user, today)
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.

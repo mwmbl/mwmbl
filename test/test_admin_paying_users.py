@@ -6,8 +6,9 @@ from django.core.cache import cache
 from fakeredis import FakeConnection
 
 from mwmbl import quota
-from mwmbl.models import ApiKey, Membership, UserBilling
+from mwmbl.models import ApiKey, CrawlerMembership, Membership, UserBilling
 from mwmbl.templatetags.money import minor_units
+from mwmbl.utils import utc_today
 
 User = get_user_model()
 
@@ -141,6 +142,18 @@ def test_seed_search_usage_by_tier(staff_client):
     assert by_tier["sprout"] == {"tier": "sprout", "users": 1, "queries": 5, "at_limit": 0, "limit": 300}
     assert by_tier["canopy"]["users"] == 0
     assert [row["user"].username for row in seed_search["top_users"]] == ["free_user", "sprout_member"]
+
+
+def test_seed_search_counts_crawler_members_as_sprout(staff_client):
+    crawler = User.objects.create_user(username="crawler_member")
+    CrawlerMembership.objects.create(user=crawler, valid_until=utc_today())
+    quota.increment_monthly_combined_search(crawler.id)
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    by_tier = {tier["tier"]: tier for tier in response.context["seed_search"]["by_tier"]}
+    assert by_tier["sprout"]["users"] == 1
+    assert by_tier["free"]["users"] == 0
 
 
 def test_seed_search_skips_deleted_users(staff_client):

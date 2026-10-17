@@ -278,7 +278,7 @@ class CrawlerMembership(models.Model):
 
     user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="crawler_membership")
     valid_until = models.DateField()
-    earned = models.DateTimeField(auto_now=True)
+    started = models.DateTimeField(auto_now_add=True)
 
 
 class AgreementType(models.TextChoices):

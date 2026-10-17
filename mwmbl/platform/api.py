@@ -26,7 +26,7 @@ from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
-from mwmbl.crawler_membership import membership_tier
+from mwmbl.crawler_membership import has_crawler_membership, membership_tier
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.membership import MembershipTier
 from mwmbl.models import (
@@ -1454,9 +1454,7 @@ def create_membership_checkout(request, body: MembershipCheckoutRequest):
 )
 def cancel_membership(request):
     check_email_verified(request)
-    user_membership = Membership.objects.filter(user=request.user).first()
-    if user_membership is None:
-        raise InvalidRequest("Not a member.", status=404)
+    user_membership = _paid_membership(request.user)
     if user_membership.cancel_at_period_end:
         raise InvalidRequest("Membership is already scheduled to cancel.", status=409)
     try:
@@ -1482,9 +1480,7 @@ def cancel_membership(request):
 )
 def uncancel_membership(request):
     check_email_verified(request)
-    user_membership = Membership.objects.filter(user=request.user).first()
-    if user_membership is None:
-        raise InvalidRequest("Not a member.", status=404)
+    user_membership = _paid_membership(request.user)
     if not user_membership.cancel_at_period_end:
         raise InvalidRequest("Membership is not scheduled to cancel.", status=409)
     try:
@@ -1511,9 +1507,7 @@ def uncancel_membership(request):
 )
 def change_membership(request, body: MembershipChangeRequest):
     check_email_verified(request)
-    user_membership = Membership.objects.filter(user=request.user).first()
-    if user_membership is None:
-        raise InvalidRequest("Not a member.", status=404)
+    user_membership = _paid_membership(request.user)
     if user_membership.tier == body.tier:
         raise InvalidRequest("Already on this tier.", status=409)
     # Changing tier would leave the cancellation in place, which is rarely what anyone wants;
@@ -1538,6 +1532,19 @@ def change_membership(request, body: MembershipChangeRequest):
         raise InvalidRequest("A change to this membership is already in progress. Try again shortly.", status=409)
     tier = membership.tier_for_product(result.product_id)
     return _save_membership_update(user_membership, tier=tier, current_period_end=result.current_period_end)
+
+
+def _paid_membership(user) -> Membership:
+    """The user's paid membership, for the endpoints that change it in Polar."""
+    user_membership = Membership.objects.filter(user=user).first()
+    if user_membership is not None:
+        return user_membership
+    if has_crawler_membership(user.id):
+        raise InvalidRequest(
+            "Memberships earned by crawling can't be cancelled or changed. Buy a membership to choose a tier.",
+            status=409,
+        )
+    raise InvalidRequest("Not a member.", status=404)
 
 
 def _save_membership_update(user_membership, **changes):

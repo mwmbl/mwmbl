@@ -98,8 +98,8 @@ admin.site.register(Membership, MembershipAdmin)
 
 
 class CrawlerMembershipAdmin(ModelAdmin):
-    list_display = ("user", "valid_until", "earned")
-    readonly_fields = ("earned",)
+    list_display = ("user", "valid_until", "started")
+    readonly_fields = ("started",)
     search_fields = ("user__username", "user__email")
 
 

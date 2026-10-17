@@ -18,13 +18,27 @@ def end_of_next_month(day: date) -> date:
 def update_crawler_membership(user: MwmblUser, today: date) -> None:
     """Grant or extend the user's crawler membership if they have crawled on enough days this month.
 
-    Called when the user's first results of the day arrive, so the membership starts the moment
-    they reach the threshold.
+    Called after every batch of results, so the membership starts the moment the user reaches the
+    threshold, and a grant that failed is retried on their next batch. Once this month has earned
+    the membership, it costs one query. A grant never shortens a membership, so a longer one set by
+    hand in the admin survives.
     """
-    days_crawled = UserStats.objects.filter(user=user, date__gte=today.replace(day=1), date__lte=today).count()
+    valid_until = end_of_next_month(today)
+    if CrawlerMembership.objects.filter(user=user, valid_until__gte=valid_until).exists():
+        return
+
+    days_crawled = UserStats.objects.filter(
+        user=user,
+        date__gte=today.replace(day=1),
+        date__lte=today,
+        num_results__gte=settings.CRAWLER_MEMBERSHIP_MIN_RESULTS,
+    ).count()
     if days_crawled < settings.CRAWLER_MEMBERSHIP_DAYS:
         return
-    CrawlerMembership.objects.update_or_create(user=user, defaults={"valid_until": end_of_next_month(today)})
+
+    _, created = CrawlerMembership.objects.get_or_create(user=user, defaults={"valid_until": valid_until})
+    if not created:
+        CrawlerMembership.objects.filter(user=user, valid_until__lt=valid_until).update(valid_until=valid_until)
 
 
 def has_crawler_membership(user_id: int) -> bool:

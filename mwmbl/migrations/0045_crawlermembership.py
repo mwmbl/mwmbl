@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("valid_until", models.DateField()),
-                ("earned", models.DateTimeField(auto_now=True)),
+                ("started", models.DateTimeField(auto_now_add=True)),
                 (
                     "user",
                     models.OneToOneField(
