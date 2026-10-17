@@ -22,8 +22,16 @@ POLAR_REPORT_TASK = "mwmbl.background.report_usage_to_polar"
 BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
 BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
 INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
+PRUNE_AGREEMENTS_TASK = "mwmbl.background.prune_crawler_agreements"
 
-ALL_TASKS = {SYNC_TASK, POLAR_REPORT_TASK, BLACKLIST_SNAPSHOT_TASK, BLACKLIST_PURGE_TASK, INDEX_COUNT_TASK}
+ALL_TASKS = {
+    SYNC_TASK,
+    POLAR_REPORT_TASK,
+    BLACKLIST_SNAPSHOT_TASK,
+    BLACKLIST_PURGE_TASK,
+    INDEX_COUNT_TASK,
+    PRUNE_AGREEMENTS_TASK,
+}
 
 
 @pytest.fixture(autouse=True)

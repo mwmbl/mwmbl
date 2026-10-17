@@ -10,6 +10,7 @@ from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
+from mwmbl.indexer.agreement import Agreement, find_agreements
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.tinysearchengine.indexer import (
@@ -58,12 +59,19 @@ def get_url_score(url):
 def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
     start_time = datetime.now(timezone.utc)
     documents = list(get_documents_from_batches(batch_data))
-    end_time, new_page_doc_counts = index_documents(documents, index_path)
-    logger.info(f"Indexing took {end_time - start_time}")
-    return new_page_doc_counts
+    indexed = index_documents(documents, index_path)
+    logger.info(f"Indexing took {indexed.end_time - start_time}")
+    return indexed.new_page_doc_counts
 
 
-def index_documents(documents, index_path):
+class IndexedDocuments(NamedTuple):
+    end_time: datetime
+    new_page_doc_counts: Counter
+    agreements: set[Agreement]
+    """Where an incoming document met another crawler's stored copy of its URL."""
+
+
+def index_documents(documents, index_path) -> IndexedDocuments:
     """The common choke point every indexing path (the trusted-crawler POST /results
     endpoint, the standalone crawl tool) goes through, so
     this is where the blacklist is enforced. Crawling/link-discovery also check the
@@ -77,9 +85,15 @@ def index_documents(documents, index_path):
     tens of megabytes and hold ~156 MB of domain strings for the process's life - see
     blacklist_snapshot."""
     page_documents = _page_documents(documents, index_path)
-    new_page_doc_counts = index_pages(index_path, page_documents)
+    new_page_doc_counts = Counter()
+    agreements = set()
+    for page_index, stored_documents, existing_documents in _store_pages(index_path, page_documents):
+        new_page_doc_counts.update(_new_terms(stored_documents))
+        # A set, because the URL is on the page of each of its terms and most of those pages
+        # hold the same stored copy.
+        agreements |= find_agreements(page_documents[page_index], existing_documents)
     end_time = datetime.now(timezone.utc)
-    return end_time, new_page_doc_counts
+    return IndexedDocuments(end_time, new_page_doc_counts, agreements)
 
 
 class IndexedURLs(NamedTuple):
@@ -100,7 +114,7 @@ def index_new_documents(documents, index_path) -> IndexedURLs:
     page_documents = _page_documents(documents, index_path)
     stored_urls = set()
     held_urls = set()
-    for stored_documents, existing_documents in _store_pages(index_path, page_documents):
+    for _, stored_documents, existing_documents in _store_pages(index_path, page_documents):
         stored_urls |= {document.url for document in stored_documents}
         held_urls |= {document.url for document in existing_documents}
     incoming_urls = {document.url for documents in page_documents.values() for document in documents}
@@ -140,16 +154,18 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
-    for stored_documents, _ in _store_pages(index_path, page_documents, mark_synced):
-        term_new_doc_counts.update(
-            document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX
-        )
+    for _, stored_documents, _ in _store_pages(index_path, page_documents, mark_synced):
+        term_new_doc_counts.update(_new_terms(stored_documents))
     return term_new_doc_counts
 
 
+def _new_terms(stored_documents: list[Document]) -> Iterable[str | None]:
+    return (document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
+
+
 def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False):
-    """Merge the documents into their pages, yielding for each page written what it now
-    stores and what it held before."""
+    """Merge the documents into their pages, yielding for each page written its index, what
+    it now stores and what it held before."""
     with TinyIndex(Document, index_path, "w") as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
         for page_index, documents in page_documents.items():
@@ -170,7 +186,7 @@ def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mar
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            yield combined_documents[:num_stored], existing_documents
+            yield page_index, combined_documents[:num_stored], existing_documents
 
 
 def _document_token_set(doc: Document) -> set[str]:

@@ -575,3 +575,27 @@ class SeedDomainCrawl(models.Model):
         indexes = [
             models.Index(fields=["seed_domain", "-crawled_at"]),
         ]
+
+
+class CrawlerAgreement(models.Model):
+    """A crawler's submission of a URL meeting another crawler's stored copy of it, and how
+    closely the two agreed - see mwmbl.indexer.agreement.
+
+    For finding crawlers whose copies disagree with many different crawlers. Keeps the
+    similarities rather than the text, which the submitted batches in object storage hold.
+    """
+
+    url = models.TextField()
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="+")
+    # Not foreign keys: up to two users, and the stored text is one of theirs without saying which.
+    existing_user_ids = ArrayField(models.IntegerField())
+    title_similarity = models.FloatField()
+    extract_similarity = models.FloatField()
+    last_crawled_delta = models.IntegerField(null=True)  # seconds, incoming crawl minus stored crawl
+    crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"]),
+        ]

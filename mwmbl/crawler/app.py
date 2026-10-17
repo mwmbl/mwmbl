@@ -13,6 +13,7 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
+from mwmbl.crawler.agreement import record_agreements
 from mwmbl.crawler.batch import (
     DatasetRequest,
     Error,
@@ -266,7 +267,8 @@ def _register_routes(r: Router | NinjaAPI):
             record_device(api_key.user, results.device_name)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
-        index_documents(documents, index_path)
+        indexed = index_documents(documents, index_path)
+        record_agreements(indexed.agreements, api_key.user, results.crawler_version)
         # Without api_key: the bucket is world-readable (get_batch_from_id fetches from it
         # with a plain unauthenticated GET), so uploading the object as submitted would
         # publish the plaintext key of any client still using the deprecated body field.

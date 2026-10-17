@@ -9,6 +9,7 @@ Covers:
 - flush_search_counts background task
 """
 
+from collections import Counter
 from datetime import datetime
 from datetime import timezone as stdlib_timezone
 from unittest.mock import patch
@@ -23,6 +24,7 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl import pricing
 from mwmbl.background import sync_search_counts
+from mwmbl.indexer.index_batches import IndexedDocuments
 from mwmbl.models import AgreementType, ApiKey, UsageBucket, UserAgreement, UserBilling, generate_api_key
 from mwmbl.quota import (
     RATE_LIMIT,
@@ -489,6 +491,14 @@ def test_search_keyed_cap_shrinks_with_combined_search_spend(api_client, search_
 # ---------------------------------------------------------------------------
 
 
+def _capturing_index(captured):
+    def index_documents(documents, index_path):
+        captured.extend(documents)
+        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), set())
+
+    return index_documents
+
+
 @pytest.mark.django_db
 def test_post_results_no_key_returns_401(api_client):
     response = api_client.post(
@@ -579,7 +589,7 @@ def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
     captured = []
 
     with (
-        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.index_documents", side_effect=_capturing_index(captured)),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
     ):
@@ -647,7 +657,7 @@ def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
     captured = []
 
     with (
-        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.index_documents", side_effect=_capturing_index(captured)),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
     ):
