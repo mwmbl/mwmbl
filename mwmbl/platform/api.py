@@ -85,8 +85,6 @@ from mwmbl.platform.schemas import (
     UserProfileResponse,
     UserStatsResponse,
     UserVoteHistory,
-    VolunteerMembershipResponse,
-    VolunteerTierResponse,
     VoteRemoveRequest,
     VoteRequest,
     VoteResponse,
@@ -99,7 +97,7 @@ from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
 from mwmbl.utils import normalize_domain, validate_domain
-from mwmbl.volunteer_membership import current_volunteer_membership, user_combined_search_monthly_limit
+from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
 logger = logging.getLogger(__name__)
 
@@ -1352,46 +1350,6 @@ def get_membership(request):
     if user_membership is None:
         raise InvalidRequest("Not a member.", status=404)
     return user_membership
-
-
-@router.get(
-    "/membership/volunteer-tiers",
-    response=list[VolunteerTierResponse],
-    summary="List volunteer tiers",
-    description="Returns the tiers earned by crawling rather than bought, with what earns each one and its perks.",
-    tags=["Membership"],
-)
-def list_volunteer_tiers(request):
-    return [
-        VolunteerTierResponse(
-            tier=info.tier,
-            name=info.tier.label,
-            days_per_month=info.days_per_month,
-            min_results_per_day=info.min_results_per_day,
-            perks=info.perks,
-        )
-        for info in membership.VOLUNTEER_TIERS
-    ]
-
-
-@router.get(
-    "/membership/volunteer",
-    auth=JWTAuth(),
-    response=VolunteerMembershipResponse,
-    summary="Get current volunteer membership",
-    description="Returns the highest volunteer tier the user has earned by crawling, or 404 if they don't "
-    "currently hold one. This is separate from a paid membership, and a user can hold both.",
-    tags=["Membership"],
-)
-def get_volunteer_membership(request):
-    volunteer_membership = current_volunteer_membership(request.user.id)
-    if volunteer_membership is None:
-        raise InvalidRequest("Not a volunteer member.", status=404)
-    return VolunteerMembershipResponse(
-        tier=volunteer_membership.tier,
-        name=volunteer_membership.get_tier_display(),
-        valid_until=volunteer_membership.valid_until,
-    )
 
 
 @router.get(

@@ -13,6 +13,7 @@ Sub-routers (v2):
   /api/v2/search/          — full-text search with optional API-key auth and quota info
   /api/v2/super-search/    — multi-source streaming search (SSE), authenticated
   /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
+  /api/v2/membership/      — paid and volunteer memberships and Seed Search usage, authenticated
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
@@ -173,6 +174,7 @@ v2_api = NinjaExtraAPI(
         "tags": [
             {"name": "Search"},
             {"name": "Super Search"},
+            {"name": "Membership"},
         ]
     },
 )
@@ -201,6 +203,7 @@ def register_routers(ranker, combined_ranker, tiny_index):
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.tinysearchengine.super_search as super_search_module
     from mwmbl.platform.api import router as platform_router
+    from mwmbl.platform.membership_v2 import router as membership_v2_router
 
     # Initialise routers that depend on runtime objects
     search_module.init_router(ranker, tiny_index)
@@ -216,3 +219,4 @@ def register_routers(ranker, combined_ranker, tiny_index):
     v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
     v2_api.add_router("/super-search/", super_search_module.router, tags=["Super Search"])
     v2_api.add_router("/combined-search/", combined_search_module.router, tags=["Combined Search"])
+    v2_api.add_router("/membership/", membership_v2_router, tags=["Membership"])

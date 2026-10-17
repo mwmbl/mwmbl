@@ -79,6 +79,26 @@ class CombinedSearchUsageResponse(Schema):
     monthly_limit: int
 
 
+class PaidMembershipResponse(Schema):
+    tier: MembershipTier
+    name: str
+    current_period_end: Optional[datetime]
+    cancel_at_period_end: bool
+
+
+class MembershipV2Response(Schema):
+    """Everything the membership page shows: a user can hold a paid and a volunteer membership at once."""
+
+    paid: Optional[PaidMembershipResponse]
+    volunteer: Optional[VolunteerMembershipResponse]
+    combined_search: CombinedSearchUsageResponse
+
+
+class MembershipTiersV2Response(Schema):
+    paid: list[MembershipTierResponse]
+    volunteer: list[VolunteerTierResponse]
+
+
 class CombinedSearchPreference(Schema):
     enabled: bool
 

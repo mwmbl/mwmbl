@@ -1,6 +1,6 @@
 """Tests for volunteer tiers earned by crawling."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -184,43 +184,90 @@ def test_the_more_generous_limit_applies(user, today, settings, paid_limit, poll
     assert user_combined_search_monthly_limit(user.id) == expected
 
 
-def test_list_volunteer_tiers():
-    response = Client().get("/api/v1/platform/membership/volunteer-tiers")
+def test_list_tiers():
+    response = Client().get("/api/v2/membership/tiers")
 
     assert response.status_code == 200
-    assert response.json()[0] == {
-        "tier": "pollinator",
-        "name": "Pollinator",
-        "days_per_month": 3,
-        "min_results_per_day": 100,
-        "perks": membership.VOLUNTEER_TIERS[0].perks,
+    body = response.json()
+    assert [tier["tier"] for tier in body["paid"]] == ["sprout", "sapling", "canopy"]
+    assert body["volunteer"] == [
+        {
+            "tier": "pollinator",
+            "name": "Pollinator",
+            "days_per_month": 3,
+            "min_results_per_day": 100,
+            "perks": membership.VOLUNTEER_TIERS[0].perks,
+        }
+    ]
+
+
+def _get_membership(user):
+    with patch("mwmbl.platform.api.get_monthly_combined_search_count", return_value=12):
+        return Client().get("/api/v2/membership/", **auth_headers(user))
+
+
+def test_get_membership_for_a_non_member(user, today):
+    response = _get_membership(user)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "paid": None,
+        "volunteer": None,
+        "combined_search": {"monthly_usage": 12, "monthly_limit": 30},
     }
 
 
-def test_get_volunteer_membership(user, today):
+def test_get_membership_for_a_volunteer(user, today):
     VolunteerMembership.objects.create(user=user, tier=POLLINATOR, valid_until=date(2026, 11, 30))
-    response = Client().get("/api/v1/platform/membership/volunteer", **auth_headers(user))
 
-    assert response.status_code == 200
-    assert response.json() == {"tier": "pollinator", "name": "Pollinator", "valid_until": "2026-11-30"}
+    response = _get_membership(user)
+
+    assert response.json() == {
+        "paid": None,
+        "volunteer": {"tier": "pollinator", "name": "Pollinator", "valid_until": "2026-11-30"},
+        "combined_search": {"monthly_usage": 12, "monthly_limit": 300},
+    }
 
 
-def test_get_volunteer_membership_returns_the_highest_tier(user, today, two_tiers):
+def test_get_membership_with_paid_and_volunteer_memberships(user, today):
+    Membership.objects.create(
+        user=user,
+        tier=MembershipTier.SAPLING,
+        polar_subscription_id="sub_1",
+        current_period_end=datetime(2026, 11, 3, tzinfo=timezone.utc),
+    )
+    VolunteerMembership.objects.create(user=user, tier=POLLINATOR, valid_until=date(2026, 11, 30))
+
+    body = _get_membership(user).json()
+
+    assert body["paid"] == {
+        "tier": "sapling",
+        "name": "Sapling",
+        "current_period_end": "2026-11-03T00:00:00Z",
+        "cancel_at_period_end": False,
+    }
+    assert body["volunteer"]["tier"] == "pollinator"
+    assert body["combined_search"]["monthly_limit"] == 1_500
+
+
+def test_get_membership_returns_the_highest_volunteer_tier(user, today, two_tiers):
     VolunteerMembership.objects.create(user=user, tier="lower", valid_until=date(2026, 12, 31))
     VolunteerMembership.objects.create(user=user, tier=POLLINATOR, valid_until=date(2026, 11, 30))
-    response = Client().get("/api/v1/platform/membership/volunteer", **auth_headers(user))
 
-    assert response.json()["tier"] == "pollinator"
+    assert _get_membership(user).json()["volunteer"]["tier"] == "pollinator"
 
 
-def test_get_volunteer_membership_is_404_once_expired(user, today):
+def test_get_membership_omits_an_expired_volunteer_membership(user, today):
     VolunteerMembership.objects.create(user=user, tier=POLLINATOR, valid_until=date(2026, 10, 16))
-    response = Client().get("/api/v1/platform/membership/volunteer", **auth_headers(user))
 
-    assert response.status_code == 404
+    assert _get_membership(user).json()["volunteer"] is None
 
 
-def test_volunteer_membership_is_not_a_paid_membership(user, today):
+def test_get_membership_requires_login(db):
+    assert Client().get("/api/v2/membership/").status_code == 401
+
+
+def test_v1_membership_ignores_volunteer_memberships(user, today):
     VolunteerMembership.objects.create(user=user, tier=POLLINATOR, valid_until=today)
     response = Client().get("/api/v1/platform/membership", **auth_headers(user))
 
