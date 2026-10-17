@@ -4,7 +4,14 @@ import calendar
 from datetime import date
 
 from mwmbl.membership import VOLUNTEER_TIERS, combined_search_monthly_limit
-from mwmbl.models import Membership, MwmblUser, UserStats, VolunteerMembership
+from mwmbl.models import (
+    Membership,
+    MwmblUser,
+    NotificationKind,
+    UserNotification,
+    UserStats,
+    VolunteerMembership,
+)
 from mwmbl.utils import utc_today
 
 TIER_RANK = {info.tier.value: rank for rank, info in enumerate(VOLUNTEER_TIERS)}
@@ -21,7 +28,8 @@ def update_volunteer_memberships(user: MwmblUser, today: date) -> None:
     Called after every batch of results, so a tier starts the moment the user reaches its
     threshold, and a grant that failed is retried on their next batch. Once this month has earned
     every tier, it costs one query. A grant never shortens a membership, so a longer one set by
-    hand in the admin survives.
+    hand in the admin survives. The user is notified when a tier is granted afresh, not when it's
+    extended.
     """
     valid_until = end_of_next_month(today)
     extended = set(
@@ -43,10 +51,28 @@ def update_volunteer_memberships(user: MwmblUser, today: date) -> None:
         _, created = VolunteerMembership.objects.get_or_create(
             user=user, tier=info.tier, defaults={"valid_until": valid_until}
         )
-        if not created:
-            VolunteerMembership.objects.filter(user=user, tier=info.tier, valid_until__lt=valid_until).update(
-                valid_until=valid_until
-            )
+        if created:
+            notify_volunteer_membership_granted(user.id, info.tier, valid_until)
+            continue
+        # Reviving a lapsed membership is a fresh grant, so it's notified; extending a current one isn't.
+        # Each update is a single statement, so concurrent batches can't both revive it.
+        revived = VolunteerMembership.objects.filter(user=user, tier=info.tier, valid_until__lt=today).update(
+            valid_until=valid_until
+        )
+        if revived:
+            notify_volunteer_membership_granted(user.id, info.tier, valid_until)
+            continue
+        VolunteerMembership.objects.filter(user=user, tier=info.tier, valid_until__lt=valid_until).update(
+            valid_until=valid_until
+        )
+
+
+def notify_volunteer_membership_granted(user_id: int, tier: str, valid_until: date) -> None:
+    UserNotification.objects.create(
+        user_id=user_id,
+        kind=NotificationKind.VOLUNTEER_MEMBERSHIP_GRANTED,
+        data={"tier": tier, "valid_until": valid_until.isoformat()},
+    )
 
 
 def current_volunteer_memberships(user_ids) -> dict[int, VolunteerMembership]:

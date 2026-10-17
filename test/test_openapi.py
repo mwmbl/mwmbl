@@ -213,6 +213,8 @@ def test_v2_openapi_spec_generation():
         "/api/v2/combined-search/seed-domains",
         "/api/v2/membership/",
         "/api/v2/membership/tiers",
+        "/api/v2/notifications/",
+        "/api/v2/notifications/{notification_id}/dismiss",
     }
 
 

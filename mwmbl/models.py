@@ -286,6 +286,26 @@ class VolunteerMembership(models.Model):
         unique_together = [("user", "tier")]
 
 
+class NotificationKind(models.TextChoices):
+    VOLUNTEER_MEMBERSHIP_GRANTED = "volunteer_membership_granted", "Volunteer membership granted"
+
+
+class UserNotification(models.Model):
+    """A message for a user that stays until they dismiss it, such as being granted a volunteer membership.
+
+    What a notification says is up to the front end: data holds the details it needs for each kind.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=40, choices=NotificationKind.choices)
+    data = models.JSONField(default=dict)
+    created = models.DateTimeField(auto_now_add=True)
+    dismissed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "dismissed_at"])]
+
+
 class AgreementType(models.TextChoices):
     TERMS_OF_SERVICE_GUI = "TERMS_OF_SERVICE_GUI", "Terms of Service (GUI)"
     TERMS_OF_SERVICE_API = "TERMS_OF_SERVICE_API", "Terms of Service (API)"

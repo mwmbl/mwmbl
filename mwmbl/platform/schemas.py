@@ -5,7 +5,7 @@ from ninja import Field, ModelSchema, Schema
 from pydantic import model_validator
 
 from mwmbl.membership import MembershipTier, VolunteerTier
-from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
+from mwmbl.models import AgreementType, DomainSubmission, MarketingSource, NotificationKind
 
 
 class UserProfileResponse(Schema):
@@ -97,6 +97,14 @@ class MembershipV2Response(Schema):
 class MembershipTiersV2Response(Schema):
     paid: list[MembershipTierResponse]
     volunteer: list[VolunteerTierResponse]
+
+
+class UserNotificationResponse(Schema):
+    id: int
+    kind: NotificationKind
+    # Depends on kind: volunteer_membership_granted has tier and valid_until.
+    data: dict
+    created: datetime
 
 
 class CombinedSearchPreference(Schema):

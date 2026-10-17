@@ -13,9 +13,12 @@ from mwmbl.models import (
     MwmblUser,
     OldIndex,
     UserBilling,
+    UserNotification,
     VolunteerMembership,
     generate_api_key,
 )
+from mwmbl.utils import utc_today
+from mwmbl.volunteer_membership import notify_volunteer_membership_granted
 
 
 class ApiKeyForm(forms.ModelForm):
@@ -103,8 +106,26 @@ class VolunteerMembershipAdmin(ModelAdmin):
     readonly_fields = ("started",)
     search_fields = ("user__username", "user__email")
 
+    def save_model(self, request, obj, form, change):
+        # Notify a gift, or the revival of a lapsed membership, but not an edit to a current one.
+        today = utc_today()
+        granted = obj.valid_until >= today and (not change or form.initial["valid_until"] < today)
+        super().save_model(request, obj, form, change)
+        if granted:
+            notify_volunteer_membership_granted(obj.user_id, obj.tier, obj.valid_until)
+
 
 admin.site.register(VolunteerMembership, VolunteerMembershipAdmin)
+
+
+class UserNotificationAdmin(ModelAdmin):
+    list_display = ("user", "kind", "created", "dismissed_at")
+    list_filter = ("kind",)
+    readonly_fields = ("created",)
+    search_fields = ("user__username", "user__email")
+
+
+admin.site.register(UserNotification, UserNotificationAdmin)
 
 # Adds the "Status" panel linking to the blacklist status page (mwmbl.admin_views) to the
 # admin front page.
