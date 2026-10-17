@@ -1,3 +1,5 @@
+<img width="200" height="200" alt="mwmbl_logo_full" src="https://github.com/user-attachments/assets/e1668174-ea5a-422c-85b4-51af1ff4a144" />
+
 # Mwmbl - the Open Source and Non-Profit Web Search Engine
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
