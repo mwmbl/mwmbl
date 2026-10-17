@@ -51,8 +51,7 @@ from mwmbl.indexer.seed_crawl import (
     start_seed_crawl,
 )
 from mwmbl.indexer.seed_domains import published_seed_domains
-from mwmbl.membership import combined_search_monthly_limit
-from mwmbl.models import Membership, UserBilling
+from mwmbl.models import UserBilling
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
@@ -66,6 +65,7 @@ from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
 from mwmbl.tinysearchengine.search import SearchResponse
 from mwmbl.tinysearchengine.staan import get_staan_results
+from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
 logger = getLogger(__name__)
 
@@ -285,8 +285,7 @@ def init_router(ranker) -> None:
                     "to allow more.",
                 )
         else:
-            tier = await Membership.objects.filter(user=user).values_list("tier", flat=True).afirst()
-            monthly_limit = combined_search_monthly_limit(tier)
+            monthly_limit = await sync_to_async(user_combined_search_monthly_limit)(user.id)
             # Increment first, then check: this makes the quota check atomic under concurrent
             # requests (a check-then-increment would let racing requests both pass). Refund the
             # increment if the caller is over the limit.

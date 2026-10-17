@@ -6,7 +6,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
-from mwmbl.membership import MembershipTier
+from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
 
 
@@ -267,6 +267,43 @@ class Membership(models.Model):
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
     started = models.DateTimeField(auto_now_add=True)
+
+
+class VolunteerMembership(models.Model):
+    """A volunteer tier earned by crawling, kept apart from Membership so Polar syncs never touch it.
+
+    One row per tier the user has earned, each valid to the end of the month after the one it was
+    last earned in, so a volunteer who keeps qualifying is never without it. See
+    mwmbl.membership.VOLUNTEER_TIERS for what earns each tier.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="volunteer_memberships")
+    tier = models.CharField(max_length=20, choices=VolunteerTier.choices)
+    valid_until = models.DateField()
+    started = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "tier")]
+
+
+class NotificationKind(models.TextChoices):
+    VOLUNTEER_MEMBERSHIP_GRANTED = "volunteer_membership_granted", "Volunteer membership granted"
+
+
+class UserNotification(models.Model):
+    """A message for a user that stays until they dismiss it, such as being granted a volunteer membership.
+
+    What a notification says is up to the front end: data holds the details it needs for each kind.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=40, choices=NotificationKind.choices)
+    data = models.JSONField(default=dict)
+    created = models.DateTimeField(auto_now_add=True)
+    dismissed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "dismissed_at"])]
 
 
 class AgreementType(models.TextChoices):

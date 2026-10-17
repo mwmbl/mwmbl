@@ -23,8 +23,8 @@ from ninja_jwt.tokens import RefreshToken
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
 from mwmbl.indexer import seed_crawl
-from mwmbl.membership import MembershipTier
-from mwmbl.models import ApiKey, Membership, UserBilling, generate_api_key
+from mwmbl.membership import MembershipTier, VolunteerTier
+from mwmbl.models import ApiKey, Membership, UserBilling, VolunteerMembership, generate_api_key
 from mwmbl.quota import (
     _combined_search_api_monthly_key,
     _combined_search_monthly_key,
@@ -33,6 +33,7 @@ from mwmbl.quota import (
     get_monthly_count,
 )
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
+from mwmbl.utils import utc_today
 
 User = get_user_model()
 
@@ -285,6 +286,20 @@ def test_the_quota_counter_is_its_own(client, user, access_token, fresh_quota, s
 
 def _join(user, tier):
     Membership.objects.create(user=user, tier=tier, polar_subscription_id=f"sub_{tier}")
+
+
+@pytest.mark.django_db
+def test_a_volunteer_membership_sets_the_limit(client, user, access_token, fresh_quota, stub_sources):
+    stub_sources()
+    VolunteerMembership.objects.create(user=user, tier=VolunteerTier.POLLINATOR, valid_until=utc_today())
+    cache.set(_combined_search_monthly_key(user.id), 299, timeout=3600)
+
+    last_allowed = _get(client, access_token)
+    over_the_limit = _get(client, access_token)
+
+    assert last_allowed.status_code == 200
+    assert last_allowed.json()["monthly_limit"] == 300
+    assert over_the_limit.status_code == 429
 
 
 @pytest.mark.django_db

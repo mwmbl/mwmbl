@@ -97,6 +97,7 @@ from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
 from mwmbl.utils import normalize_domain, validate_domain
+from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
 logger = logging.getLogger(__name__)
 
@@ -1356,15 +1357,14 @@ def get_membership(request):
     auth=JWTAuth(),
     response=CombinedSearchUsageResponse,
     summary="Get Combined Search usage",
-    description="Returns the user's Combined Search usage this month and their limit, which is set by "
-    "their membership tier.",
+    description="Returns the user's Combined Search usage this month and their limit, which is the more "
+    "generous of those set by their membership tier and their volunteer tier.",
     tags=["Membership"],
 )
 def get_combined_search_usage(request):
-    tier = Membership.objects.filter(user=request.user).values_list("tier", flat=True).first()
     return CombinedSearchUsageResponse(
         monthly_usage=get_monthly_combined_search_count(request.user.id),
-        monthly_limit=membership.combined_search_monthly_limit(tier),
+        monthly_limit=user_combined_search_monthly_limit(request.user.id),
     )
 
 
