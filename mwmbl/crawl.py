@@ -1,7 +1,9 @@
 import argparse
 import logging
 import os
+import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Process
 from pathlib import Path
@@ -29,10 +31,19 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
-from mwmbl.crawler.batch import HashedBatch, Result, Results
+from mwmbl.crawler.batch import (
+    MAX_ERROR_MESSAGE_LENGTH,
+    CrawlerErrorReport,
+    ErrorContext,
+    ErrorFrame,
+    HashedBatch,
+    Result,
+    Results,
+)
 from mwmbl.crawler.device import get_device_name
 from mwmbl.crawler.env_vars import (
     CRAWL_DELAY_SECONDS,
+    CRAWL_REPORT_ERRORS,
     CRAWL_SUBMIT_MODE,
     CRAWL_THREADS,
     CRAWLER_WORKERS,
@@ -68,6 +79,10 @@ MIN_NEW_INDEX_ENTRIES = 1
 # again often enough that the cache grew by around 800MB a day until the disk filled.
 REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
 
+# The server indexes submitted results before it answers, so allow it well over a typical
+# request's time - but not forever.
+RESULTS_POST_TIMEOUT_SECONDS = 120
+
 
 def _fetch_curated_domains() -> set[str]:
     global _curated_domains_cache, _curated_domains_fetched_at
@@ -88,6 +103,79 @@ def _fetch_curated_domains() -> set[str]:
     except Exception:
         logger.exception("Failed to fetch curated domains, using cached value")
     return _curated_domains_cache
+
+
+# How long to wait before reporting the same error from the same process again. The loops
+# retry every ten seconds, so a persistent failure would otherwise send a report each time.
+ERROR_REPORT_INTERVAL_SECONDS = 3600.0
+_error_last_reported_at: dict[tuple[ErrorContext, str, str, int | None], float] = {}
+
+
+# The server accepts at most this many frames. A traceback deeper than that is almost always
+# recursion, where the innermost frames are the ones that say what went wrong.
+MAX_ERROR_FRAMES = 200
+
+
+def _module_path(filename: str) -> str:
+    """
+    The path of a source file relative to the Python path entry it was imported from.
+
+    An absolute path names the volunteer's home directory, which often carries their name -
+    the reason the crawler identifies itself by a generated device name, not its hostname.
+    """
+    containing_entries = [entry for entry in sys.path if entry and filename.startswith(entry.rstrip("/") + "/")]
+    if not containing_entries:
+        return os.path.basename(filename)
+    longest_entry = max(containing_entries, key=len)
+    return os.path.relpath(filename, longest_entry)
+
+
+def report_error(context: ErrorContext, error: Exception):
+    """
+    Send an error the crawl loops caught to the Mwmbl server, which passes it on to Sentry.
+
+    The loops catch everything and retry, which keeps a volunteer's crawler running but means
+    a crawler failing on every pass looks, from our side, exactly like one that has stopped.
+    Reporting goes through our own endpoint rather than straight to Sentry so that volunteers'
+    machines only ever talk to Mwmbl, and so each report arrives tied to an API key.
+    """
+    if not CRAWL_REPORT_ERRORS or CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
+        return
+
+    frames = traceback.extract_tb(error.__traceback__)
+    exception_type = f"{type(error).__module__}.{type(error).__qualname__}"
+    innermost = frames[-1]
+    error_key = (context, exception_type, innermost.filename, innermost.lineno)
+    now = time.monotonic()
+    last_reported_at = _error_last_reported_at.get(error_key)
+    if last_reported_at is not None and now - last_reported_at < ERROR_REPORT_INTERVAL_SECONDS:
+        return
+    _error_last_reported_at[error_key] = now
+
+    # Messages can name local files too - "No such file or directory: '/home/...'".
+    message = str(error).replace(str(Path.home()), "~")[:MAX_ERROR_MESSAGE_LENGTH]
+    report = CrawlerErrorReport(
+        context=context,
+        exception_type=exception_type,
+        message=message,
+        frames=[
+            ErrorFrame(filename=_module_path(frame.filename), lineno=frame.lineno, function=frame.name, line=frame.line)
+            for frame in frames[-MAX_ERROR_FRAMES:]
+        ],
+        crawler_version=CRAWLER_VERSION,
+        device_name=get_device_name(data_path),
+    )
+    # Failing to report must not become a second error in the loop that caught the first.
+    try:
+        response = requests.post(
+            f"{REMOTE_SERVER}/api/v1/crawler/errors",
+            json=report.dict(),
+            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": USER_AGENT},
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        logger.exception("Failed to report error to the Mwmbl server")
 
 
 def count_new_index_entries(term: str, new_items: list[Document], remote_items: list[Document]) -> int:
@@ -312,7 +400,14 @@ class Crawler:
                         if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
                             results_url += "?dry_run=true"
                         logger.info(f"Posting {len(result_items)} results to {results_url}")
-                        response = requests.post(results_url, json=results.dict(), headers={"X-API-Key": MWMBL_API_KEY})
+                        # A post with no timeout that never gets an answer hangs this loop for
+                        # good: no exception, so nothing logged or reported, and no more syncing.
+                        response = requests.post(
+                            results_url,
+                            json=results.dict(),
+                            headers={"X-API-Key": MWMBL_API_KEY},
+                            timeout=RESULTS_POST_TIMEOUT_SECONDS,
+                        )
                         logger.info(f"Response: {response.text}")
                         response.raise_for_status()
 
@@ -349,6 +444,7 @@ class Crawler:
                 self.process_batch()
             except Exception as err:
                 logger.exception(f"Error processing batch: '{err}'")
+                report_error("batch", err)
                 time.sleep(10)
 
     def run_indexing_continuously(self):
@@ -365,6 +461,7 @@ class Crawler:
                 self.run_indexing()
             except Exception as err:
                 logger.exception(f"Error running indexing: '{err}'")
+                report_error("indexing", err)
                 time.sleep(10)
 
     def run_once(self):

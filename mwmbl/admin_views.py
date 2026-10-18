@@ -34,7 +34,7 @@ from django.http import HttpRequest
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl import count_urls, pricing, quota, search_setup, traffic
+from mwmbl import count_urls, pricing, quota, search_callers, search_setup, traffic
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -228,6 +228,9 @@ TRAFFIC_DEFAULT_DAYS = 7
 TRAFFIC_WINDOW_CHOICES = [1, 7, TRAFFIC_MAX_DAYS]
 USER_AGENT_MAX_DAYS = USER_AGENT_EXPIRE_SECONDS // SECONDS_PER_DAY
 
+# This week, still filling, and as many finished weeks as their summaries are kept for.
+CALLER_WINDOWS = search_callers.SUMMARY_EXPIRE_SECONDS // (SECONDS_PER_DAY * search_callers.WINDOW_DAYS) + 1
+
 # Enough to see the shape of the tail without putting two thousand caller-supplied strings
 # through the template.
 TOP_USER_AGENTS = 100
@@ -306,6 +309,45 @@ def _user_agents(redis_client, days: list[date], counts: dict) -> dict:
         "tracked_total": tracked_total,
         "request_total": request_total,
         "gap": request_total - tracked_total,
+    }
+
+
+def _callers(redis_client) -> dict:
+    """Distinct callers per week, how concentrated their searches are, and how many search often.
+
+    Weeks with no callers are left out, which before this was deployed is all of them: a row
+    of zeros would read as nobody searching rather than as nothing counted.
+    """
+    this_window = search_callers.window_start(utc_today())
+    windows = [this_window - timedelta(days=search_callers.WINDOW_DAYS * offset) for offset in range(CALLER_WINDOWS)]
+    rows = []
+    for window in windows:
+        if window == this_window:
+            totals = search_callers.read_live(
+                redis_client, window, traffic.caller_window_searches(redis_client, window)
+            )
+        else:
+            totals = search_callers.read_summary(redis_client, window)
+        # Last week in the hour before it is summarised is absent too, briefly.
+        if totals is None or totals["distinct"] == 0:
+            continue
+        searches = totals["searches"]
+        rows.append(
+            {
+                "window": window,
+                "summarised": window != this_window,
+                "searches": searches,
+                "distinct": totals["distinct"],
+                "shares": [100 * busiest / searches if searches else 0 for busiest in totals["busiest_searches"]],
+                "over": totals["over"],
+            }
+        )
+    return {
+        "rows": rows,
+        "ranks": search_callers.SHARE_RANKS,
+        "thresholds": search_callers.THRESHOLDS,
+        "endpoints": sorted(search_callers.IDENTITY_ENDPOINTS),
+        "tracked_limit": search_callers.TRACKED_CALLERS,
     }
 
 
@@ -477,6 +519,7 @@ def search_traffic_view(request):
         context["by_headers"] = _requests_by_label(counts, HEADERS, HEADER_LABELS)
         context["by_status"] = _requests_by_label(counts, STATUS, STATUS_LABELS)
         context["user_agents"] = _user_agents(redis_client, days, counts)
+        context["callers"] = _callers(redis_client)
     except RedisError as e:
         logger.exception("Could not read search traffic from Redis")
         context["redis_error"] = str(e)
