@@ -581,8 +581,10 @@ class CrawlerAgreement(models.Model):
     """A crawler's submission of a URL meeting another crawler's stored copy of it, and how
     closely the two agreed - see mwmbl.indexer.agreement.
 
-    For finding crawlers whose copies disagree with many different crawlers. Keeps the
-    similarities rather than the text, which the submitted batches in object storage hold.
+    For finding crawlers whose copies disagree with many different crawlers. A low
+    similarity says the two sides disagree, not which one is wrong, so the analysis has to
+    hold it against both: user is often the honest crawler revisiting a polluted URL. Keeps
+    the similarities rather than the text, which the submitted batches in object storage hold.
     """
 
     url = models.TextField()

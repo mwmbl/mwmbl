@@ -43,7 +43,6 @@ def test_find_agreements_compares_against_another_crawlers_copy():
     (agreement,) = find_agreements(incoming, existing)
 
     assert agreement.url == URL
-    assert agreement.user_id == 3
     assert agreement.existing_user_ids == (1, 2)
     assert agreement.title_similarity == 1.0
     assert agreement.extract_similarity == 0.0
@@ -85,8 +84,11 @@ def test_find_agreements_without_crawl_times_has_no_delta():
 
 @pytest.fixture
 def index_path(tmp_path):
+    """Enough pages that a document's terms land on pages of their own, as they do in the
+    real index. On a few pages they collide, and a page can then hold an incoming copy that
+    combining a colliding term's documents has not touched, hiding what it does to the rest."""
     path = tmp_path / "test.tinysearch"
-    TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=10, page_size=PAGE_SIZE)
+    TinyIndex.create(item_factory=Document, index_path=str(path), num_pages=100_000, page_size=PAGE_SIZE)
     return str(path)
 
 
@@ -107,13 +109,49 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
     assert indexed.agreements == {
         Agreement(
             url=URL,
-            user_id=2,
             existing_user_ids=(1,),
             title_similarity=1.0,
             extract_similarity=1.0,
             last_crawled_delta=None,
         )
     }
+
+
+@pytest.mark.parametrize(
+    "title, extract",
+    [
+        ("Python tutorial", "Learn python today"),
+        ("Python tutorial", "Buy cheap pills buy cheap pills python python python"),
+        ("Python tutorial python python python", "Learn python today"),
+    ],
+)
+def test_index_documents_reports_the_agreement_whichever_copy_wins(index_path, no_blacklist, title, extract):
+    """Combining merges the copies' user_ids into whichever one ranks first, so the
+    comparison has to see them before that, whether the incoming copy ranks above the stored
+    one or not."""
+    index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[1])], index_path)
+
+    indexed = index_documents([Document(title, URL, extract, user_ids=[2])], index_path)
+
+    (agreement,) = indexed.agreements
+    assert agreement.existing_user_ids == (1,)
+    assert agreement.title_similarity == trigram_similarity(title, "Python tutorial")
+    assert agreement.extract_similarity == trigram_similarity(extract, "Learn python today")
+
+
+def test_index_documents_reports_one_agreement_when_stored_copies_differ(index_path, no_blacklist):
+    """Two crawlers' versions of a URL have different terms, so the pages it is on hold
+    different stored copies. A submission meeting both is still one agreement, against the
+    copy most of its pages hold."""
+    index_documents([Document("Python tutorial", URL, "Learn python today with examples", user_ids=[1])], index_path)
+    index_documents([Document("Python tutorial", URL, "Spam", user_ids=[2])], index_path)
+
+    indexed = index_documents(
+        [Document("Python tutorial", URL, "Learn python today with examples", user_ids=[3])], index_path
+    )
+
+    (agreement,) = indexed.agreements
+    assert agreement.extract_similarity == 1.0
 
 
 def test_index_documents_reports_no_agreement_for_a_new_url(index_path, no_blacklist):
@@ -130,7 +168,6 @@ def user(db):
 def _agreement(url=URL):
     return Agreement(
         url=url,
-        user_id=0,
         existing_user_ids=(1, 2),
         title_similarity=0.9,
         extract_similarity=0.4,

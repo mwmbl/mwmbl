@@ -86,14 +86,23 @@ def index_documents(documents, index_path) -> IndexedDocuments:
     blacklist_snapshot."""
     page_documents = _page_documents(documents, index_path)
     new_page_doc_counts = Counter()
-    agreements = set()
-    for page_index, stored_documents, existing_documents in _store_pages(index_path, page_documents):
-        new_page_doc_counts.update(_new_terms(stored_documents))
-        # A set, because the URL is on the page of each of its terms and most of those pages
-        # hold the same stored copy.
-        agreements |= find_agreements(page_documents[page_index], existing_documents)
+    page_agreements = Counter()
+    for page in _store_pages(index_path, page_documents):
+        new_page_doc_counts.update(_new_terms(page.stored))
+        page_agreements.update(page.agreements)
     end_time = datetime.now(timezone.utc)
-    return IndexedDocuments(end_time, new_page_doc_counts, agreements)
+    return IndexedDocuments(end_time, new_page_doc_counts, _one_agreement_per_url(page_agreements))
+
+
+def _one_agreement_per_url(page_agreements: Counter) -> set[Agreement]:
+    """The URL is on the page of each of its terms, and the pages need not all hold the same
+    stored copy: two crawlers' versions have different terms, and which one a shared term's
+    page keeps depends on rank. Keeping the copy most of its pages hold gives one agreement
+    per submitted URL, so a URL with divergent copies is not counted several times over."""
+    agreements_by_url = {}
+    for agreement, _ in page_agreements.most_common():
+        agreements_by_url.setdefault(agreement.url, agreement)
+    return set(agreements_by_url.values())
 
 
 class IndexedURLs(NamedTuple):
@@ -114,9 +123,9 @@ def index_new_documents(documents, index_path) -> IndexedURLs:
     page_documents = _page_documents(documents, index_path)
     stored_urls = set()
     held_urls = set()
-    for _, stored_documents, existing_documents in _store_pages(index_path, page_documents):
-        stored_urls |= {document.url for document in stored_documents}
-        held_urls |= {document.url for document in existing_documents}
+    for page in _store_pages(index_path, page_documents):
+        stored_urls |= {document.url for document in page.stored}
+        held_urls |= {document.url for document in page.existing}
     incoming_urls = {document.url for documents in page_documents.values() for document in documents}
     written_urls = stored_urls & incoming_urls
     return IndexedURLs(stored=written_urls, new=written_urls - held_urls)
@@ -154,8 +163,8 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
-    for _, stored_documents, _ in _store_pages(index_path, page_documents, mark_synced):
-        term_new_doc_counts.update(_new_terms(stored_documents))
+    for page in _store_pages(index_path, page_documents, mark_synced):
+        term_new_doc_counts.update(_new_terms(page.stored))
     return term_new_doc_counts
 
 
@@ -163,15 +172,26 @@ def _new_terms(stored_documents: list[Document]) -> Iterable[str | None]:
     return (document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
 
 
+class StoredPage(NamedTuple):
+    stored: list[Document]
+    """What the page now stores."""
+    existing: list[Document]
+    """What it held before."""
+    agreements: set[Agreement]
+    """Where an incoming document met another crawler's copy of its URL on the page."""
+
+
 def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False):
-    """Merge the documents into their pages, yielding for each page written its index, what
-    it now stores and what it held before."""
+    """Merge the documents into their pages, yielding a StoredPage for each page written."""
     with TinyIndex(Document, index_path, "w") as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
         for page_index, documents in page_documents.items():
             try:
                 with indexer.page(page_index) as page:
                     existing_documents = page.documents
+                    # Before combining, which merges the user_ids and crawl times of the copies
+                    # of a URL into whichever one it keeps, in place.
+                    agreements = find_agreements(documents, existing_documents)
                     combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
                     num_stored = page.store(combined_documents)
                     logger.info(
@@ -186,7 +206,7 @@ def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mar
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            yield page_index, combined_documents[:num_stored], existing_documents
+            yield StoredPage(combined_documents[:num_stored], existing_documents, agreements)
 
 
 def _document_token_set(doc: Document) -> set[str]:

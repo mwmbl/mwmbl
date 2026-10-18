@@ -14,8 +14,6 @@ from mwmbl.tinysearchengine.indexer import Document
 
 class Agreement(NamedTuple):
     url: str
-    user_id: int
-    """The crawler submitting the incoming copy."""
     existing_user_ids: tuple[int, ...]
     """The crawlers the stored copy is attributed to. Up to two of them, and the text is
     whichever of their versions ranked higher, so it cannot be pinned on just one."""
@@ -23,7 +21,8 @@ class Agreement(NamedTuple):
     extract_similarity: float
     last_crawled_delta: Optional[int]
     """Seconds from the stored copy's crawl to the incoming one's: pages change, so a large
-    gap explains a low similarity that a small one does not."""
+    gap explains a low similarity that a small one does not. The stored crawl time is the
+    latest of the copies merged into it, not necessarily that of its text."""
 
 
 def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) -> set[Agreement]:
@@ -38,13 +37,11 @@ def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) 
         # The stored copy may be this crawler's own, from an earlier submission.
         if set(document.user_ids) & set(stored.user_ids):
             continue
-        (user_id,) = document.user_ids
         both_crawled = document.last_crawled is not None and stored.last_crawled is not None
         last_crawled_delta = document.last_crawled - stored.last_crawled if both_crawled else None
         agreements.add(
             Agreement(
                 url=document.url,
-                user_id=user_id,
                 existing_user_ids=tuple(stored.user_ids),
                 title_similarity=trigram_similarity(document.title, stored.title),
                 extract_similarity=trigram_similarity(document.extract, stored.extract),
