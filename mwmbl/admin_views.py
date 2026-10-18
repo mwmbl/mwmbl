@@ -49,10 +49,14 @@ from mwmbl.membership import TIERS, VOLUNTEER_TIERS, combined_search_monthly_lim
 from mwmbl.models import ApiKey, Membership, MwmblUser
 from mwmbl.traffic import (
     HEADER_LABELS,
+    IDENTITY_ENDPOINTS,
+    IDENTITY_EXPIRE_SECONDS,
     STATUS_LABELS,
+    TRACKED_IDENTITIES,
     TRACKED_USER_AGENTS,
     TRAFFIC_EXPIRE_SECONDS,
     USER_AGENT_EXPIRE_SECONDS,
+    read_identity_counts,
     read_request_counts,
     read_user_agent_counts,
 )
@@ -227,6 +231,10 @@ TRAFFIC_MAX_DAYS = TRAFFIC_EXPIRE_SECONDS // SECONDS_PER_DAY
 TRAFFIC_DEFAULT_DAYS = 7
 TRAFFIC_WINDOW_CHOICES = [1, 7, TRAFFIC_MAX_DAYS]
 USER_AGENT_MAX_DAYS = USER_AGENT_EXPIRE_SECONDS // SECONDS_PER_DAY
+IDENTITY_MAX_DAYS = IDENTITY_EXPIRE_SECONDS // SECONDS_PER_DAY
+
+# The share of a day's searches carried by its busiest N callers, at each of these N.
+IDENTITY_SHARE_RANKS = [1, 10, 100, 1000]
 
 # Enough to see the shape of the tail without putting two thousand caller-supplied strings
 # through the template.
@@ -306,6 +314,37 @@ def _user_agents(redis_client, days: list[date], counts: dict) -> dict:
         "tracked_total": tracked_total,
         "request_total": request_total,
         "gap": request_total - tracked_total,
+    }
+
+
+def _identities(redis_client, days: list[date], counts: dict) -> dict:
+    """How many distinct callers searched each day, and how concentrated their searches are.
+
+    The shares are of the day's served searches as the request counter has them, so the
+    callers the trim dropped still count towards the total they are a share of.
+    """
+    identity_days = days[:IDENTITY_MAX_DAYS]
+    searches_by_day: Counter = Counter()
+    for coordinate, count in counts.items():
+        if coordinate[ENDPOINT] in IDENTITY_ENDPOINTS and coordinate[STATUS] == "2xx":
+            searches_by_day[coordinate[DAY]] += count
+
+    rows = []
+    for day, (distinct, tracked) in read_identity_counts(redis_client, identity_days).items():
+        searches = searches_by_day[day]
+        rows.append(
+            {
+                "day": day,
+                "searches": searches,
+                "distinct": distinct,
+                "shares": [100 * sum(tracked[:rank]) / searches if searches else 0 for rank in IDENTITY_SHARE_RANKS],
+            }
+        )
+    return {
+        "rows": rows,
+        "ranks": IDENTITY_SHARE_RANKS,
+        "endpoints": sorted(IDENTITY_ENDPOINTS),
+        "tracked_limit": TRACKED_IDENTITIES,
     }
 
 
@@ -477,6 +516,7 @@ def search_traffic_view(request):
         context["by_headers"] = _requests_by_label(counts, HEADERS, HEADER_LABELS)
         context["by_status"] = _requests_by_label(counts, STATUS, STATUS_LABELS)
         context["user_agents"] = _user_agents(redis_client, days, counts)
+        context["identities"] = _identities(redis_client, days, counts)
     except RedisError as e:
         logger.exception("Could not read search traffic from Redis")
         context["redis_error"] = str(e)

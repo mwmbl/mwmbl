@@ -140,6 +140,37 @@
         {% endif %}
       </div>
 
+      <div class="module">
+        <h2>Distinct callers</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Day</th><th class="num">Searches</th><th class="num">Distinct callers</th>
+              {% for rank in identities.ranks %}<th class="num">Top {{ rank|intcomma }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in identities.rows %}
+              <tr>
+                <td>{{ row.day }}</td>
+                <td class="num">{{ row.searches|intcomma }}</td>
+                <td class="num">{{ row.distinct|intcomma }}</td>
+                {% for share in row.shares %}<td class="num">{{ share|floatformat:1 }}%</td>{% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="note">
+          Served searches on {% for endpoint in identities.endpoints %}<code>{{ endpoint }}</code>{% if not forloop.last %}, {% endif %}{% endfor %},
+          the ones query n-grams would be counted from. A caller is an IPv4 address or an IPv6
+          /64, so a SearxNG instance is one caller however many people use it. The distinct
+          count is a HyperLogLog, accurate to about 1%. The Top columns are the share of the
+          day's searches made by its busiest callers, from the {{ identities.tracked_limit|intcomma }}
+          kept per day. Callers are stored only as a token keyed on the day and the secret key,
+          so no address is kept and a caller cannot be followed from one day to the next.
+        </p>
+      </div>
+
     {% endif %}
 
   </div>

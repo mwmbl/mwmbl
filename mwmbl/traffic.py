@@ -14,6 +14,7 @@ differently next week. #412 is where a
 classification earns its place, once there is data to design it against.
 """
 
+import ipaddress
 import random
 from collections import Counter
 from datetime import date
@@ -23,6 +24,7 @@ from typing import Optional
 import redis
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
+from django.utils.crypto import salted_hmac
 from redis.exceptions import RedisError
 
 from mwmbl.utils import utc_today
@@ -124,6 +126,8 @@ def status_label(response: HttpResponse) -> str:
 
 REQUEST_COUNT_KEY = "traffic:req:{date}:{endpoint}:{headers}:{status}"
 USER_AGENT_COUNT_KEY = "traffic:user-agents:{date}"
+IDENTITY_DISTINCT_KEY = "traffic:identities:{date}"
+IDENTITY_COUNT_KEY = "traffic:identity-counts:{date}"
 
 # Thirty days, matching the public daily crawler counters in mwmbl/crawler/stats.py.
 # Production Redis runs allkeys-lru (see mwmbl/indexer/blacklist_snapshot.py), so a longer
@@ -147,6 +151,24 @@ USER_AGENT_TRIM_PROBABILITY = 1 / 500
 # A missing user agent is a real answer, so it gets a row rather than being dropped.
 MISSING_USER_AGENT = "(none)"
 
+# Who is searching, for sizing a k-anonymous count of query n-grams: how many distinct
+# callers there are in a day, and how much of the traffic the busiest carry. A SearxNG
+# instance forwards no client address, so it is one caller however many people use it.
+# Only searches somebody typed and got an answer to, since those are what n-grams would be
+# counted from: /complete is keystrokes and /raw is mostly the crawler's index sync.
+IDENTITY_ENDPOINTS = {"legacy_search", "v1_search", "v2_search", "ui_search"}
+
+# Kept as long as the user agents and trimmed the same way, for the same reasons.
+IDENTITY_EXPIRE_SECONDS = USER_AGENT_EXPIRE_SECONDS
+TRACKED_IDENTITIES = 2000
+IDENTITY_TRIM_PROBABILITY = 1 / 500
+
+# A household or a small network gets a /64, so one IPv6 caller is the whole prefix.
+IPV6_IDENTITY_PREFIX = 64
+
+# 64 bits: collisions are negligible at a few million callers a day.
+IDENTITY_HASH_LENGTH = 16
+
 # Aggressive by design. django-redis is configured with 5 s timeouts, which is fine for a
 # cache lookup a view is waiting on and far too slow for a counter: this runs on every
 # request, on the one thread asgiref gives the whole sync middleware chain.
@@ -166,6 +188,32 @@ def get_redis() -> redis.Redis:
             decode_responses=True,
         )
     return _redis
+
+
+def client_network(request: HttpRequest) -> str:
+    """The caller's address, or its /64 for IPv6.
+
+    The last X-Forwarded-For entry is the one our nginx saw: dokku sets the header to
+    $remote_addr, and anything earlier in the list would be the client's own say-so.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    address = forwarded_for.split(",")[-1].strip() if forwarded_for else request.META["REMOTE_ADDR"]
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        # Still a caller, just not one with a parseable address, and record_request must not raise.
+        return address
+    if ip.version == 6:
+        return str(ipaddress.ip_network(f"{ip}/{IPV6_IDENTITY_PREFIX}", strict=False))
+    return str(ip)
+
+
+def client_identity(request: HttpRequest, day: date) -> str:
+    """An opaque per-day token for the caller. Keyed on the day so tokens cannot be joined
+    across days, and on SECRET_KEY so the address space cannot be hashed to reverse them
+    without it. No address is ever stored."""
+    digest = salted_hmac(f"mwmbl.traffic.identity:{day}", client_network(request), algorithm="sha256")
+    return digest.hexdigest()[:IDENTITY_HASH_LENGTH]
 
 
 def record_request(request: HttpRequest, response: HttpResponse) -> None:
@@ -197,6 +245,17 @@ def record_request(request: HttpRequest, response: HttpResponse) -> None:
         pipeline.expire(user_agent_key, USER_AGENT_EXPIRE_SECONDS)
         if random.random() < USER_AGENT_TRIM_PROBABILITY:
             pipeline.zremrangebyrank(user_agent_key, 0, -TRACKED_USER_AGENTS - 1)
+
+        if endpoint in IDENTITY_ENDPOINTS and response.status_code // 100 == 2:
+            identity = client_identity(request, today)
+            distinct_key = IDENTITY_DISTINCT_KEY.format(date=today)
+            pipeline.pfadd(distinct_key, identity)
+            pipeline.expire(distinct_key, IDENTITY_EXPIRE_SECONDS)
+            identity_count_key = IDENTITY_COUNT_KEY.format(date=today)
+            pipeline.zincrby(identity_count_key, 1, identity)
+            pipeline.expire(identity_count_key, IDENTITY_EXPIRE_SECONDS)
+            if random.random() < IDENTITY_TRIM_PROBABILITY:
+                pipeline.zremrangebyrank(identity_count_key, 0, -TRACKED_IDENTITIES - 1)
 
         pipeline.execute()
     except RedisError:
@@ -240,3 +299,21 @@ def read_user_agent_counts(redis_client, days: list[date], limit: int) -> list[t
         for user_agent, count in day_counts:
             totals[user_agent] += int(count)
     return totals.most_common(limit)
+
+
+def read_identity_counts(redis_client, days: list[date]) -> dict[date, tuple[int, list[int]]]:
+    """Per day, the distinct callers and the tracked callers' search counts, busiest first.
+
+    Per day rather than summed, because the tokens change at midnight and the same caller
+    on two days is two rows that cannot be matched up.
+    """
+    pipeline = redis_client.pipeline()
+    for day in days:
+        pipeline.pfcount(IDENTITY_DISTINCT_KEY.format(date=day))
+        pipeline.zrevrange(IDENTITY_COUNT_KEY.format(date=day), 0, TRACKED_IDENTITIES - 1, withscores=True)
+    results = pipeline.execute()
+
+    readout = {}
+    for day, distinct, tracked in zip(days, results[0::2], results[1::2]):
+        readout[day] = (distinct, [int(count) for _, count in tracked])
+    return readout

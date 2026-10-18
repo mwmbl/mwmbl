@@ -332,3 +332,105 @@ def test_a_streaming_response_is_counted_without_being_consumed(counting, rf):
 
     assert count_for("super_search") == "1"
     assert b"".join(response.streaming_content) == b"ab"
+
+
+def identity_counts():
+    key = traffic.IDENTITY_COUNT_KEY.format(date=utc_today())
+    return sorted(int(count) for _, count in traffic.get_redis().zrange(key, 0, -1, withscores=True))
+
+
+def distinct_identities():
+    return traffic.get_redis().pfcount(traffic.IDENTITY_DISTINCT_KEY.format(date=utc_today()))
+
+
+def test_each_address_is_one_caller(counting, client):
+    for address, searches in [("203.0.113.1", 3), ("203.0.113.2", 1)]:
+        for _ in range(searches):
+            client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR=address)
+
+    assert distinct_identities() == 2
+    assert identity_counts() == [1, 3]
+
+
+def test_an_ipv6_caller_is_its_whole_64(counting, client):
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="2001:db8:1:2::1")
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="2001:db8:1:2:ffff::9")
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="2001:db8:1:3::1")
+
+    assert identity_counts() == [1, 2]
+
+
+def test_the_caller_is_the_address_our_nginx_saw(rf):
+    """Earlier X-Forwarded-For entries are whatever the client claimed."""
+    request = rf.get("/", HTTP_X_FORWARDED_FOR="10.0.0.1, 198.51.100.7", REMOTE_ADDR="172.17.0.1")
+
+    assert traffic.client_network(request) == "198.51.100.7"
+
+
+def test_an_unparseable_address_is_still_a_caller(rf):
+    request = rf.get("/", HTTP_X_FORWARDED_FOR="unknown")
+
+    assert traffic.client_network(request) == "unknown"
+
+
+def test_no_address_is_stored_and_tokens_change_daily(counting, client, rf):
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.1")
+
+    stored = [
+        str(value)
+        for key in counting.keys("traffic:identity*")
+        if counting.type(key) == "zset"
+        for value in counting.zrange(key, 0, -1)
+    ]
+    assert stored and all("203.0.113" not in value for value in stored)
+    request = rf.get("/", REMOTE_ADDR="203.0.113.1")
+    yesterday = utc_today() - timedelta(days=1)
+    assert traffic.client_identity(request, utc_today()) != traffic.client_identity(request, yesterday)
+
+
+@pytest.mark.parametrize(
+    "path,query,endpoint",
+    [
+        ("/api/v1/search/complete", {"q": "pyth"}, "v1_complete"),
+        ("/api/v1/search/raw", {"s": "python"}, "v1_raw"),
+        ("/app/home/", {"q": "py"}, "ui_keystroke"),
+    ],
+)
+def test_only_typed_searches_are_attributed_to_a_caller(counting, client, path, query, endpoint):
+    client.get(path, query, **BROWSER_HEADERS)
+
+    assert count_for(endpoint) == "1"
+    assert distinct_identities() == 0
+
+
+def test_an_unserved_search_is_not_attributed_to_a_caller(counting, rf):
+    request = rf.get("/api/v1/search/", {"s": "python"})
+    request.resolver_match = type("Match", (), {"view_name": "api-v1:search"})()
+
+    traffic.record_request(request, HttpResponseServerError())
+
+    assert distinct_identities() == 0
+
+
+def test_the_caller_keys_expire_and_are_trimmed(counting, client, monkeypatch):
+    monkeypatch.setattr(traffic, "TRACKED_IDENTITIES", 1)
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.1")
+    monkeypatch.setattr(traffic, "IDENTITY_TRIM_PROBABILITY", 1)
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.1")
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.2")
+
+    assert identity_counts() == [2]
+    for key in [traffic.IDENTITY_DISTINCT_KEY, traffic.IDENTITY_COUNT_KEY]:
+        assert 0 < counting.ttl(key.format(date=utc_today())) <= traffic.IDENTITY_EXPIRE_SECONDS
+
+
+def test_the_readout_gives_distinct_callers_and_counts_per_day(counting, client):
+    yesterday = utc_today() - timedelta(days=1)
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.1")
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.1")
+    client.get("/api/v1/search/", {"s": "python"}, REMOTE_ADDR="203.0.113.2")
+
+    assert traffic.read_identity_counts(counting, [utc_today(), yesterday]) == {
+        utc_today(): (2, [2, 1]),
+        yesterday: (0, []),
+    }

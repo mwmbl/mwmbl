@@ -232,3 +232,43 @@ def test_view_renders_when_redis_is_down(staff_client, monkeypatch):
 
 def test_admin_index_links_to_the_traffic_page(staff_client):
     assert TRAFFIC_URL in staff_client.get("/admin/").content.decode()
+
+
+def record_callers(redis_client, searches_by_caller, day=None):
+    """Seed the caller keys the way record_request writes them, and the matching requests."""
+    day = day or utc_today()
+    for caller, searches in searches_by_caller.items():
+        redis_client.pfadd(traffic.IDENTITY_DISTINCT_KEY.format(date=day), caller)
+        redis_client.zincrby(traffic.IDENTITY_COUNT_KEY.format(date=day), searches, caller)
+    record(redis_client, "v1_search", day=day, count=sum(searches_by_caller.values()))
+
+
+def test_callers_are_counted_and_their_share_is_of_all_searches(redis_client):
+    record_callers(redis_client, {"instance": 90, "browser": 6, "phone": 4})
+    # Served searches by callers the trim dropped, and traffic that is not a typed search.
+    record(redis_client, "ui_search", count=100)
+    record(redis_client, "v1_raw", count=1000)
+    record(redis_client, "v1_search", status="4xx", count=1000)
+
+    identities = admin_views._identities(traffic.get_redis(), *window(1))
+
+    [today] = identities["rows"]
+    assert today["searches"] == 200
+    assert today["distinct"] == 3
+    assert today["shares"] == [45, 50, 50, 50]
+
+
+def test_the_caller_window_stops_at_the_caller_expiry(redis_client):
+    identities = admin_views._identities(traffic.get_redis(), *window(traffic.TRAFFIC_EXPIRE_SECONDS // 86400))
+
+    assert len(identities["rows"]) == admin_views.IDENTITY_MAX_DAYS
+
+
+def test_view_renders_the_callers(staff_client, redis_client):
+    record_callers(redis_client, {"instance": 1234})
+
+    response = staff_client.get(TRAFFIC_URL)
+
+    assert response.status_code == 200
+    assert "Distinct callers" in response.content.decode()
+    assert response.context["identities"]["rows"][0]["shares"][0] == 100
