@@ -201,7 +201,7 @@ Like "mumble". I live in
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=mwmbl/mwmbl&type=Date)](https://www.star-history.com/#mwmbl/mwmbl&Date)
+[![Star History Chart](https://api.star-history.com/chart?repos=mwmbl/mwmbl&type=date&legend=top-left)](https://www.star-history.com/?repos=mwmbl%2Fmwmbl&type=date&legend=top-left)
 
 Acknowledgements
 ================
