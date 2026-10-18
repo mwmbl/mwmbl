@@ -272,6 +272,7 @@ def _register_routes(r: Router | NinjaAPI):
         # with a plain unauthenticated GET), so uploading the object as submitted would
         # publish the plaintext key of any client still using the deprecated body field.
         filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
+
         # Update stats for the user
         stats_manager.record_results(results, api_key.user)
 

@@ -33,6 +33,12 @@ def test_an_external_provider_names_itself():
     assert format_result_v2(result, 1, "tokio")["engine"] == "eusp"
 
 
+def test_a_staan_result_from_our_index_still_names_staan():
+    result = Document("Tokio", "https://tokio.rs/", "An async runtime.", source=DocumentSource.STAAN_INDEXED)
+
+    assert get_result_source(result) == "eusp"
+
+
 def test_a_document_with_no_source_still_answers_from_its_state():
     result = Document("Python", "https://en.wikipedia.org/wiki/Python", "", state=DocumentState.FROM_WIKI)
 

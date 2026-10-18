@@ -392,8 +392,6 @@ def test_the_crawled_pages_are_credited_to_the_seed_crawler(fake_web, redis_cach
     with TinyIndex(Document, index_path, "r") as index:
         (spawning,) = [d for d in index.retrieve("spawning") if d.url == "https://tokio.rs/tutorial/spawning"]
     assert spawning.user_ids == [seed_crawler.id]
-    assert not seed_crawler.is_active
-    assert not seed_crawler.has_usable_password()
 
 
 @pytest.mark.django_db

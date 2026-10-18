@@ -595,9 +595,10 @@ class CrawlerAgreement(models.Model):
     the similarities rather than the text, which the submitted batches in object storage hold.
 
     existing_user_id names the stored text's author only on pages written since that became
-    the last of a copy's user_ids. Before then the ids were in rank order, and a Super Search
-    copy, which has none of its own, took on those of the copies it beat. Such a page keeps
-    the wrong author until a fresh copy wins it, so early rows deserve less weight.
+    the last of a copy's user_ids. Before then the ids were in rank order, and a copy of
+    Staan's or Super Search's, which has none of its own and was written without a source,
+    took on those of the copies it beat. Such a page keeps the wrong author until a fresh
+    copy wins it, so early rows deserve less weight.
     """
 
     url = models.TextField()
@@ -606,7 +607,7 @@ class CrawlerAgreement(models.Model):
     existing_user_id = models.IntegerField(db_index=True)
     title_similarity = models.FloatField()
     extract_similarity = models.FloatField()
-    last_crawled_delta = models.IntegerField(null=True)  # seconds, incoming crawl minus stored crawl
+    last_crawled_delta = models.BigIntegerField(null=True)  # seconds, incoming crawl minus stored crawl
     crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
     created_at = models.DateTimeField(auto_now_add=True)
 

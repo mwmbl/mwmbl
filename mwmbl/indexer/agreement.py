@@ -28,12 +28,12 @@ class Agreement(NamedTuple):
 def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) -> set[Agreement]:
     """Compare each incoming document against another crawler's stored copy of its URL."""
     # A page keeps one document per URL, so there is at most one stored copy to compare. A
-    # curated copy has no author of its own but always wins its page, so it takes on the
-    # user_ids of the copies it beat, and its last id names one of them.
+    # curated copy or a copy of Staan's has no author of its own, yet takes on the user_ids
+    # of the copies it beats, so its last id names one of them.
     authors_by_url = {
         document.url: (document, document.user_ids[-1])
         for document in existing
-        if document.user_ids and document.state not in CURATED_STATES
+        if document.user_ids and document.state not in CURATED_STATES and document.source is None
     }
     agreements = set()
     for document in incoming:

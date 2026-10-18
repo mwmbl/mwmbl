@@ -16,6 +16,7 @@ from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.tinysearchengine.indexer import (
     CURATED_STATES,
     Document,
+    DocumentSource,
     DocumentState,
     PageError,
     TinyIndex,
@@ -28,6 +29,10 @@ from mwmbl.utils import get_domain
 logger = getLogger(__name__)
 
 MAX_USER_IDS = 2
+
+# What an external result's source becomes in the search index. Only Staan's results are
+# kept with one, under a source of their own - see DocumentSource.STAAN_INDEXED.
+INDEXED_SOURCES = {DocumentSource.STAAN: DocumentSource.STAAN_INDEXED}
 
 
 def _merge_user_ids(existing: Optional[list[int]], incoming: Optional[list[int]]) -> Optional[list[int]]:
@@ -275,6 +280,7 @@ def index_new_results_against_query(documents: list[Document], query: str, index
                         cleaned.extract,
                         term=term,
                         last_crawled=cleaned.last_crawled,
+                        source=INDEXED_SOURCES.get(cleaned.source),
                     )
                 )
                 if page not in existing_keys:
@@ -314,7 +320,8 @@ def combine_documents(existing_documents, documents, mark_synced, ranker):
             document.state = DocumentState.SYNCED_WITH_MAIN_INDEX
         # The kept copy's ids merged last, so the last id is always the crawler whose text the
         # page holds - see mwmbl.indexer.agreement. Its own last id is its author by the same
-        # rule, and a fresh submission carries only its submitter's.
+        # rule, and a fresh submission carries only its submitter's. Only that last id is
+        # meaningful: once the kept copy holds two, those of the copies it beats are dropped.
         document.user_ids = _merge_user_ids(url_user_ids.get(document.url), document.user_ids)
         document.last_crawled = url_last_crawled.get(document.url)
         combined_documents.append(document)

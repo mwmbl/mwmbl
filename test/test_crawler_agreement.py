@@ -14,7 +14,7 @@ from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import _one_agreement_per_url, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
-from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentState, TinyIndex
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
 
 URL = "https://example.com/page"
 
@@ -71,6 +71,15 @@ def test_find_agreements_skips_a_curated_copy():
     """A curated copy always wins its page and takes on the user_ids of the copies it beat,
     so its last id is not its author."""
     existing = [Document("Title", URL, "Curated extract", term="t", state=DocumentState.ORGANIC_APPROVED, user_ids=[1])]
+    incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
+
+    assert find_agreements(incoming, existing) == set()
+
+
+def test_find_agreements_skips_a_copy_of_staans():
+    """Like a curated copy, it has no author of its own but takes on the user_ids of the
+    copies it beats."""
+    existing = [Document("Title", URL, "Staan snippet", term="t", source=DocumentSource.STAAN_INDEXED, user_ids=[1])]
     incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
 
     assert find_agreements(incoming, existing) == set()
@@ -229,6 +238,24 @@ def test_prune_agreements_deletes_only_expired_rows(user):
 
     assert prune_agreements() == 1
     assert list(CrawlerAgreement.objects.values_list("url", flat=True)) == ["https://example.com/new"]
+
+
+@pytest.mark.django_db
+def test_post_results_rejects_a_crawl_time_before_the_epoch(user):
+    """A crawl time from the distant past made the gap to the next crawler's copy overflow."""
+    raw_key, key_hash = generate_api_key()
+    ApiKey.objects.create(user=user, key=key_hash, name="Crawl key", scopes=[ApiKey.Scope.CRAWL])
+
+    with patch("mwmbl.crawler.app.index_documents") as index_documents:
+        response = Client().post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [{"url": URL, "title": "t", "extract": "e", "last_crawled": -1_000_000_000}]},
+            HTTP_X_API_KEY=raw_key,
+        )
+
+    assert response.status_code == 422
+    index_documents.assert_not_called()
 
 
 @pytest.mark.django_db
