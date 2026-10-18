@@ -101,8 +101,30 @@ def test_compare():
     agreement = compare(incoming, StoredCopy(URL, 2, "Title", "An extract"), stored_last_crawled=1000)
 
     assert agreement == Agreement(
-        url=URL, existing_user_id=2, title_similarity=1.0, extract_similarity=0.0, last_crawled_delta=600
+        url=URL,
+        existing_user_id=2,
+        title_similarity=1.0,
+        extract_similarity=0.0,
+        extract_empty=False,
+        existing_extract_empty=False,
+        last_crawled_delta=600,
     )
+
+
+@pytest.mark.parametrize(
+    "incoming_extract, stored_extract, extract_empty, existing_extract_empty",
+    [
+        ("", "An extract", True, False),
+        ("An extract", " ", False, True),
+        ("", "", True, True),
+    ],
+)
+def test_compare_records_empty_extracts(incoming_extract, stored_extract, extract_empty, existing_extract_empty):
+    incoming = Document("Title", URL, incoming_extract, user_ids=[3])
+
+    agreement = compare(incoming, StoredCopy(URL, 2, "Title", stored_extract), stored_last_crawled=None)
+
+    assert (agreement.extract_empty, agreement.existing_extract_empty) == (extract_empty, existing_extract_empty)
 
 
 def test_compare_without_crawl_times_has_no_delta():
@@ -143,6 +165,8 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
             existing_user_id=1,
             title_similarity=1.0,
             extract_similarity=1.0,
+            extract_empty=False,
+            existing_extract_empty=False,
             last_crawled_delta=None,
         )
     ]
@@ -228,6 +252,8 @@ def _agreement(url=URL):
         existing_user_id=2,
         title_similarity=0.9,
         extract_similarity=0.4,
+        extract_empty=False,
+        existing_extract_empty=True,
         last_crawled_delta=60,
     )
 
@@ -242,6 +268,8 @@ def test_record_agreements(user):
     assert stored.existing_user_id == 2
     assert stored.title_similarity == 0.9
     assert stored.extract_similarity == 0.4
+    assert not stored.extract_empty
+    assert stored.existing_extract_empty
     assert stored.last_crawled_delta == 60
     assert stored.crawler_version == "1.2.0"
 

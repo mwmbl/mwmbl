@@ -610,6 +610,8 @@ class CrawlerAgreement(models.Model):
     existing_user_id = models.IntegerField(db_index=True)
     title_similarity = models.FloatField()
     extract_similarity = models.FloatField()
+    extract_empty = models.BooleanField()
+    existing_extract_empty = models.BooleanField()
     last_crawled_delta = models.BigIntegerField(null=True)  # seconds, incoming crawl minus stored crawl
     crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
     created_at = models.DateTimeField(auto_now_add=True)

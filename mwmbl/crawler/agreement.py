@@ -18,6 +18,8 @@ def record_agreements(agreements: list[Agreement], user: MwmblUser, crawler_vers
             existing_user_id=agreement.existing_user_id,
             title_similarity=agreement.title_similarity,
             extract_similarity=agreement.extract_similarity,
+            extract_empty=agreement.extract_empty,
+            existing_extract_empty=agreement.existing_extract_empty,
             last_crawled_delta=agreement.last_crawled_delta,
             crawler_version=crawler_version,
         )

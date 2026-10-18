@@ -27,6 +27,8 @@ class Migration(migrations.Migration):
                 ("existing_user_id", models.IntegerField(db_index=True)),
                 ("title_similarity", models.FloatField()),
                 ("extract_similarity", models.FloatField()),
+                ("extract_empty", models.BooleanField()),
+                ("existing_extract_empty", models.BooleanField()),
                 ("last_crawled_delta", models.BigIntegerField(null=True)),
                 ("crawler_version", models.TextField(null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),

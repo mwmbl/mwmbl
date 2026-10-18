@@ -30,6 +30,11 @@ class Agreement(NamedTuple):
     existing_user_id: int
     title_similarity: float
     extract_similarity: float
+    extract_empty: bool
+    """Whether the incoming copy's extract is empty. A copy with an empty extract scores zero
+    against any other, and a quarter of the agreements replayed from a real crawl had one, so
+    these need telling apart from copies that disagree."""
+    existing_extract_empty: bool
     last_crawled_delta: Optional[int]
     """Seconds from the stored copy's crawl to the incoming one's: pages change, so a large
     gap explains a low similarity that a small one does not. The stored crawl time is the
@@ -67,6 +72,8 @@ def compare(document: Document, stored_copy: StoredCopy, stored_last_crawled: Op
         existing_user_id=stored_copy.author_id,
         title_similarity=trigram_similarity(document.title, stored_copy.title),
         extract_similarity=trigram_similarity(document.extract, stored_copy.extract),
+        extract_empty=_is_empty(document.extract),
+        existing_extract_empty=_is_empty(stored_copy.extract),
         last_crawled_delta=document.last_crawled - stored_last_crawled if both_crawled else None,
     )
 
@@ -76,6 +83,10 @@ def trigram_similarity(first: str, second: str) -> float:
     first_trigrams = _trigrams(first)
     second_trigrams = _trigrams(second)
     return len(first_trigrams & second_trigrams) / len(first_trigrams | second_trigrams)
+
+
+def _is_empty(text: str) -> bool:
+    return not text.strip()
 
 
 def _trigrams(text: str) -> set[str]:
