@@ -141,33 +141,38 @@
       </div>
 
       <div class="module">
-        <h2>Distinct callers</h2>
+        <h2>Distinct callers per week</h2>
         <table>
           <thead>
             <tr>
-              <th>Day</th><th class="num">Searches</th><th class="num">Distinct callers</th>
-              {% for rank in identities.ranks %}<th class="num">Top {{ rank|intcomma }}</th>{% endfor %}
+              <th>Week from (UTC)</th><th class="num">Searches</th><th class="num">Distinct callers</th>
+              {% for rank in callers.ranks %}<th class="num">Top {{ rank|intcomma }}</th>{% endfor %}
+              {% for threshold in callers.thresholds %}<th class="num">&ge; {{ threshold|intcomma }} searches</th>{% endfor %}
             </tr>
           </thead>
           <tbody>
-            {% for row in identities.rows %}
+            {% for row in callers.rows %}
               <tr>
-                <td>{{ row.day }}</td>
+                <td>{{ row.window }}{% if not row.summarised %} <span class="note">(filling)</span>{% endif %}</td>
                 <td class="num">{{ row.searches|intcomma }}</td>
                 <td class="num">{{ row.distinct|intcomma }}</td>
                 {% for share in row.shares %}<td class="num">{{ share|floatformat:1 }}%</td>{% endfor %}
+                {% for count in row.over %}<td class="num">{{ count|intcomma }}</td>{% endfor %}
               </tr>
             {% endfor %}
           </tbody>
         </table>
         <p class="note">
-          Served searches on {% for endpoint in identities.endpoints %}<code>{{ endpoint }}</code>{% if not forloop.last %}, {% endif %}{% endfor %},
-          the ones query n-grams would be counted from. A caller is an IPv4 address or an IPv6
-          /64, so a SearxNG instance is one caller however many people use it. The distinct
-          count is a HyperLogLog, accurate to about 1%. The Top columns are the share of the
-          day's searches made by its busiest callers, from the {{ identities.tracked_limit|intcomma }}
-          kept per day. Callers are stored only as a token keyed on the day and the secret key,
-          so no address is kept and a caller cannot be followed from one day to the next.
+          Served searches on {% for endpoint in callers.endpoints %}<code>{{ endpoint }}</code>{% if not forloop.last %}, {% endif %}{% endfor %},
+          the ones query n-grams would be counted from, in Monday-to-Sunday weeks. A caller is
+          an IPv4 address or an IPv6 /64, so a SearxNG instance is one caller however many
+          people use it, and so is our own front end's server-side render. Distinct counts are
+          HyperLogLogs, accurate to about 1%. The Top columns are the share of the week's
+          searches made by its busiest callers, from the {{ callers.tracked_limit|intcomma }}
+          kept; a caller the trim dropped restarts from zero, so they slightly understate it.
+          Callers are hashed under a random salt made for the week, which expires a day after
+          it ends. Within the hour after a week ends its per-caller counts are replaced by
+          these totals, so a finished week is only the numbers in its row.
         </p>
       </div>
 

@@ -34,7 +34,7 @@ from django.http import HttpRequest
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl import count_urls, pricing, quota, search_setup, traffic
+from mwmbl import count_urls, pricing, quota, search_callers, search_setup, traffic
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -49,14 +49,10 @@ from mwmbl.membership import TIERS, VOLUNTEER_TIERS, combined_search_monthly_lim
 from mwmbl.models import ApiKey, Membership, MwmblUser
 from mwmbl.traffic import (
     HEADER_LABELS,
-    IDENTITY_ENDPOINTS,
-    IDENTITY_EXPIRE_SECONDS,
     STATUS_LABELS,
-    TRACKED_IDENTITIES,
     TRACKED_USER_AGENTS,
     TRAFFIC_EXPIRE_SECONDS,
     USER_AGENT_EXPIRE_SECONDS,
-    read_identity_counts,
     read_request_counts,
     read_user_agent_counts,
 )
@@ -231,10 +227,9 @@ TRAFFIC_MAX_DAYS = TRAFFIC_EXPIRE_SECONDS // SECONDS_PER_DAY
 TRAFFIC_DEFAULT_DAYS = 7
 TRAFFIC_WINDOW_CHOICES = [1, 7, TRAFFIC_MAX_DAYS]
 USER_AGENT_MAX_DAYS = USER_AGENT_EXPIRE_SECONDS // SECONDS_PER_DAY
-IDENTITY_MAX_DAYS = IDENTITY_EXPIRE_SECONDS // SECONDS_PER_DAY
 
-# The share of a day's searches carried by its busiest N callers, at each of these N.
-IDENTITY_SHARE_RANKS = [1, 10, 100, 1000]
+# This week, still filling, and as many finished weeks as their summaries are kept for.
+CALLER_WINDOWS = search_callers.SUMMARY_EXPIRE_SECONDS // (SECONDS_PER_DAY * search_callers.WINDOW_DAYS) + 1
 
 # Enough to see the shape of the tail without putting two thousand caller-supplied strings
 # through the template.
@@ -317,34 +312,42 @@ def _user_agents(redis_client, days: list[date], counts: dict) -> dict:
     }
 
 
-def _identities(redis_client, days: list[date], counts: dict) -> dict:
-    """How many distinct callers searched each day, and how concentrated their searches are.
+def _callers(redis_client) -> dict:
+    """Distinct callers per week, how concentrated their searches are, and how many search often.
 
-    The shares are of the day's served searches as the request counter has them, so the
-    callers the trim dropped still count towards the total they are a share of.
+    Weeks with no callers are left out, which before this was deployed is all of them: a row
+    of zeros would read as nobody searching rather than as nothing counted.
     """
-    identity_days = days[:IDENTITY_MAX_DAYS]
-    searches_by_day: Counter = Counter()
-    for coordinate, count in counts.items():
-        if coordinate[ENDPOINT] in IDENTITY_ENDPOINTS and coordinate[STATUS] == "2xx":
-            searches_by_day[coordinate[DAY]] += count
-
+    this_window = search_callers.window_start(utc_today())
+    windows = [this_window - timedelta(days=search_callers.WINDOW_DAYS * offset) for offset in range(CALLER_WINDOWS)]
     rows = []
-    for day, (distinct, tracked) in read_identity_counts(redis_client, identity_days).items():
-        searches = searches_by_day[day]
+    for window in windows:
+        if window == this_window:
+            totals = search_callers.read_live(
+                redis_client, window, traffic.caller_window_searches(redis_client, window)
+            )
+        else:
+            totals = search_callers.read_summary(redis_client, window)
+        # Last week in the hour before it is summarised is absent too, briefly.
+        if totals is None or totals["distinct"] == 0:
+            continue
+        searches = totals["searches"]
         rows.append(
             {
-                "day": day,
+                "window": window,
+                "summarised": window != this_window,
                 "searches": searches,
-                "distinct": distinct,
-                "shares": [100 * sum(tracked[:rank]) / searches if searches else 0 for rank in IDENTITY_SHARE_RANKS],
+                "distinct": totals["distinct"],
+                "shares": [100 * busiest / searches if searches else 0 for busiest in totals["busiest_searches"]],
+                "over": totals["over"],
             }
         )
     return {
         "rows": rows,
-        "ranks": IDENTITY_SHARE_RANKS,
-        "endpoints": sorted(IDENTITY_ENDPOINTS),
-        "tracked_limit": TRACKED_IDENTITIES,
+        "ranks": search_callers.SHARE_RANKS,
+        "thresholds": search_callers.THRESHOLDS,
+        "endpoints": sorted(search_callers.IDENTITY_ENDPOINTS),
+        "tracked_limit": search_callers.TRACKED_CALLERS,
     }
 
 
@@ -516,7 +519,7 @@ def search_traffic_view(request):
         context["by_headers"] = _requests_by_label(counts, HEADERS, HEADER_LABELS)
         context["by_status"] = _requests_by_label(counts, STATUS, STATUS_LABELS)
         context["user_agents"] = _user_agents(redis_client, days, counts)
-        context["identities"] = _identities(redis_client, days, counts)
+        context["callers"] = _callers(redis_client)
     except RedisError as e:
         logger.exception("Could not read search traffic from Redis")
         context["redis_error"] = str(e)
