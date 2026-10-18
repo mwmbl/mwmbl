@@ -246,12 +246,13 @@ def _cache_robots_content(redis: Redis, domain: str, content: List[str], error: 
 
 def _resolve_and_validate_link(href: str, current_url: str) -> str | None:
     """Resolve a raw href to an absolute URL and validate it. Returns None if invalid."""
-    href = urljoin(current_url, href)
-    if not href.startswith("http") or len(href) > MAX_URL_LENGTH:
-        return None
-    if BAD_URL_REGEX.search(href):
-        return None
     try:
+        # Both raise ValueError on malformed hrefs such as "http://[foo/" (invalid IPv6)
+        href = urljoin(current_url, href)
+        if not href.startswith("http") or len(href) > MAX_URL_LENGTH:
+            return None
+        if BAD_URL_REGEX.search(href):
+            return None
         parsed = urlparse(href)
     except ValueError:
         return None
