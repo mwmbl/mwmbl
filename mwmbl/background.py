@@ -7,6 +7,7 @@ Django Background Tasks for periodic maintenance:
   - refresh_blacklist_snapshot: rebuilds the blacklist the search path filters against
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
   - count_index_urls: counts the unique URLs and domains in the index once a week
+  - summarise_search_callers: replaces last week's per-caller counts with totals
 """
 
 import logging
@@ -23,7 +24,7 @@ from django.core.management import call_command
 from django.db import transaction
 from redis import Redis
 
-from mwmbl import pricing
+from mwmbl import pricing, traffic
 from mwmbl.count_urls import count_urls_step, get_redis
 from mwmbl.crawler.agreement import prune_agreements
 from mwmbl.crawler.stats import StatsManager
@@ -364,3 +365,10 @@ def prune_crawler_agreements():
     """Delete crawler agreements older than their retention, since every shared URL adds a row."""
     deleted = prune_agreements()
     logger.info("Pruned %d crawler agreements", deleted)
+
+
+@background(schedule=0)
+def summarise_search_callers():
+    """Roll last week's search callers into totals and delete the per-caller keys."""
+    if traffic.summarise_last_caller_window(traffic.get_redis()):
+        logger.info("Summarised last week's search callers")

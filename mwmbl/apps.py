@@ -148,6 +148,7 @@ class MwmblConfig(AppConfig):
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
                 retrain_domain_moderation_model,
+                summarise_search_callers,
                 sync_search_counts,
             )
 
@@ -159,6 +160,7 @@ class MwmblConfig(AppConfig):
             INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
             FLUSH_TOKENS_TASK = "mwmbl.background.flush_expired_tokens"
             PRUNE_AGREEMENTS_TASK = "mwmbl.background.prune_crawler_agreements"
+            SUMMARISE_CALLERS_TASK = "mwmbl.background.summarise_search_callers"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -205,6 +207,11 @@ class MwmblConfig(AppConfig):
 
             if not Task.objects.filter(task_name=PRUNE_AGREEMENTS_TASK).exists():
                 prune_crawler_agreements(repeat=Task.DAILY, repeat_until=None)
+
+            # Hourly, so a finished week's per-caller counts are replaced by its totals well
+            # inside the grace day before they expire - see mwmbl.search_callers.
+            if not Task.objects.filter(task_name=SUMMARISE_CALLERS_TASK).exists():
+                summarise_search_callers(repeat=Task.HOURLY, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
