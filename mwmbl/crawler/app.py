@@ -387,9 +387,16 @@ def _crawler_error_event(report: CrawlerErrorReport, user_id: int) -> dict:
         "crawler_version": report.crawler_version,
         "crawler_device": report.device_name,
     }
+    # Set explicitly, or the SDK fills environment, release and server_name in from the server
+    # itself, filing a volunteer's crawler bug under production on our host. Its own
+    # environment puts crawler issues behind Sentry's environment filter, apart from ours.
+    release = f"mwmbl-crawler@{report.crawler_version}" if report.crawler_version else None
     return {
         "level": "error",
         "logger": "mwmbl.crawler.remote",
+        "environment": "crawler",
+        "release": release,
+        "server_name": report.device_name,
         "exception": {
             "values": [
                 {

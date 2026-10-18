@@ -63,7 +63,9 @@ def test_a_report_goes_to_sentry_as_an_exception_with_its_traceback():
         "run_indexing_continuously",
         "run_indexing",
     ]
-    assert event["tags"]["crawler_version"] == "1.2.0"
+    assert event["environment"] == "crawler"
+    assert event["release"] == "mwmbl-crawler@1.2.0"
+    assert event["server_name"] == "crawler-3f7a1c9e"
     assert event["user"] == {"id": str(user.id)}
 
 
