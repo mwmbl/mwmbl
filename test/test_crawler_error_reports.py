@@ -10,10 +10,13 @@ from unittest.mock import patch
 
 import pytest
 import requests
+import sentry_sdk
 from django.contrib.auth import get_user_model
 from django.test import Client
+from sentry_sdk.transport import Transport
 
 from mwmbl import crawl
+from mwmbl.crawler.batch import MAX_ERROR_MESSAGE_LENGTH, MAX_ERROR_TAG_LENGTH
 from mwmbl.models import ApiKey, generate_api_key
 
 User = get_user_model()
@@ -43,19 +46,36 @@ def make_api_key(scope):
     return user, raw_key
 
 
-def post_report(raw_key):
-    return Client().post("/api/v1/crawler/errors", content_type="application/json", data=REPORT, HTTP_X_API_KEY=raw_key)
+def post_report(raw_key, report=REPORT):
+    return Client().post("/api/v1/crawler/errors", content_type="application/json", data=report, HTTP_X_API_KEY=raw_key)
+
+
+class CapturingTransport(Transport):
+    def __init__(self, options):
+        super().__init__(options)
+        self.events = []
+
+    def capture_envelope(self, envelope):
+        self.events.extend(item.payload.json for item in envelope.items if item.type == "event")
+
+
+@pytest.fixture
+def sentry_events():
+    """The events a real Sentry client sends, so the SDK's own defaults are part of the test."""
+    with sentry_sdk.init(dsn="https://key@example.ingest.sentry.io/1", transport=CapturingTransport, release="server"):
+        transport = sentry_sdk.get_client().transport
+        yield transport.events
 
 
 @pytest.mark.django_db
-def test_a_report_goes_to_sentry_as_an_exception_with_its_traceback():
+def test_a_report_goes_to_sentry_once_as_a_crawler_exception(sentry_events):
     user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
 
-    with patch("mwmbl.crawler.app.sentry_sdk.capture_event") as capture_event:
-        response = post_report(raw_key)
+    response = post_report(raw_key)
+    sentry_sdk.flush()
 
     assert response.status_code == 200
-    event = capture_event.call_args.args[0]
+    [event] = sentry_events
     exception = event["exception"]["values"][0]
     assert exception["type"] == "requests.exceptions.HTTPError"
     assert exception["value"] == "502 Server Error: Bad Gateway"
@@ -67,6 +87,28 @@ def test_a_report_goes_to_sentry_as_an_exception_with_its_traceback():
     assert event["release"] == "mwmbl-crawler@1.2.0"
     assert event["server_name"] == "crawler-3f7a1c9e"
     assert event["user"] == {"id": str(user.id)}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"crawler_version": None},
+        {"device_name": None},
+        {"context": "anything"},
+        {"frames": []},
+        {"message": "x" * (MAX_ERROR_MESSAGE_LENGTH + 1)},
+        {"device_name": "x" * (MAX_ERROR_TAG_LENGTH + 1)},
+    ],
+)
+def test_a_report_sentry_could_misfile_or_drop_is_rejected(change):
+    raw_key = make_api_key(ApiKey.Scope.CRAWL)[1]
+
+    with patch("mwmbl.crawler.app.sentry_sdk.capture_event") as capture_event:
+        response = post_report(raw_key, {**REPORT, **change})
+
+    assert response.status_code == 422
+    capture_event.assert_not_called()
 
 
 @pytest.mark.django_db
@@ -131,7 +173,26 @@ def test_nothing_is_reported_when_turned_off(reporting, monkeypatch, setting, va
     reporting.assert_not_called()
 
 
-def test_a_failed_report_does_not_raise(reporting):
+def test_the_report_does_not_name_the_volunteers_home_directory(reporting, monkeypatch, tmp_path):
+    monkeypatch.setattr(crawl.Path, "home", lambda: tmp_path)
+    error = raise_and_catch(FileNotFoundError(f"No such file: '{tmp_path}/.mwmbl/index'"))
+
+    crawl.report_error("indexing", error)
+
+    report = reporting.call_args.kwargs["json"]
+    assert report["message"] == "No such file: '~/.mwmbl/index'"
+    assert report["frames"][-1]["filename"] == "test_crawler_error_reports.py"
+
+
+def test_a_frame_path_is_relative_to_its_python_path_entry(monkeypatch):
+    monkeypatch.setattr(crawl.sys, "path", ["/home/jane/venv/lib/site-packages", "/home/jane"])
+
+    assert crawl._module_path("/home/jane/venv/lib/site-packages/mwmbl/crawl.py") == "mwmbl/crawl.py"
+
+
+def test_a_failed_report_is_logged_not_raised(reporting, caplog):
     reporting.side_effect = requests.ConnectionError("server down")
 
     crawl.report_error("indexing", raise_and_catch(ValueError("bad page")))
+
+    assert "Failed to report error" in caplog.text

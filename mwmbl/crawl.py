@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import sys
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -30,7 +31,15 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
-from mwmbl.crawler.batch import CrawlerErrorReport, ErrorFrame, HashedBatch, Result, Results
+from mwmbl.crawler.batch import (
+    MAX_ERROR_MESSAGE_LENGTH,
+    CrawlerErrorReport,
+    ErrorContext,
+    ErrorFrame,
+    HashedBatch,
+    Result,
+    Results,
+)
 from mwmbl.crawler.device import get_device_name
 from mwmbl.crawler.env_vars import (
     CRAWL_DELAY_SECONDS,
@@ -99,10 +108,29 @@ def _fetch_curated_domains() -> set[str]:
 # How long to wait before reporting the same error from the same process again. The loops
 # retry every ten seconds, so a persistent failure would otherwise send a report each time.
 ERROR_REPORT_INTERVAL_SECONDS = 3600.0
-_error_last_reported_at: dict[tuple[str, str, str, int | None], float] = {}
+_error_last_reported_at: dict[tuple[ErrorContext, str, str, int | None], float] = {}
 
 
-def report_error(context: str, error: Exception):
+# The server accepts at most this many frames. A traceback deeper than that is almost always
+# recursion, where the innermost frames are the ones that say what went wrong.
+MAX_ERROR_FRAMES = 200
+
+
+def _module_path(filename: str) -> str:
+    """
+    The path of a source file relative to the Python path entry it was imported from.
+
+    An absolute path names the volunteer's home directory, which often carries their name -
+    the reason the crawler identifies itself by a generated device name, not its hostname.
+    """
+    containing_entries = [entry for entry in sys.path if entry and filename.startswith(entry.rstrip("/") + "/")]
+    if not containing_entries:
+        return os.path.basename(filename)
+    longest_entry = max(containing_entries, key=len)
+    return os.path.relpath(filename, longest_entry)
+
+
+def report_error(context: ErrorContext, error: Exception):
     """
     Send an error the crawl loops caught to the Mwmbl server, which passes it on to Sentry.
 
@@ -124,13 +152,15 @@ def report_error(context: str, error: Exception):
         return
     _error_last_reported_at[error_key] = now
 
+    # Messages can name local files too - "No such file or directory: '/home/...'".
+    message = str(error).replace(str(Path.home()), "~")[:MAX_ERROR_MESSAGE_LENGTH]
     report = CrawlerErrorReport(
         context=context,
         exception_type=exception_type,
-        message=str(error),
+        message=message,
         frames=[
-            ErrorFrame(filename=frame.filename, lineno=frame.lineno, function=frame.name, line=frame.line)
-            for frame in frames
+            ErrorFrame(filename=_module_path(frame.filename), lineno=frame.lineno, function=frame.name, line=frame.line)
+            for frame in frames[-MAX_ERROR_FRAMES:]
         ],
         crawler_version=CRAWLER_VERSION,
         device_name=get_device_name(data_path),

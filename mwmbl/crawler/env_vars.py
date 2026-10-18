@@ -24,7 +24,8 @@ MWMBL_DEVICE_NAME = os.environ.get("MWMBL_DEVICE_NAME", "")
 
 # Whether to send the errors the crawl loops catch to the Mwmbl server, so we can see when
 # crawlers are failing. Reports carry the exception and traceback, the crawler version and
-# the device name - nothing about the machine beyond the file paths in the traceback.
+# the device name. File paths are sent relative to the Python path, and the home directory
+# is replaced with ~ in the message, so a report does not name the volunteer's account.
 CRAWL_REPORT_ERRORS = os.environ.get("CRAWL_REPORT_ERRORS", "true").lower() == "true"
 
 # Bounds for running the crawler somewhere that is not a volunteer's machine - CI, mainly.

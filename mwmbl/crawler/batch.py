@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from ninja import Field, Schema
 
@@ -222,30 +222,44 @@ class PostResultsResponse(Schema):
     )
 
 
+# Every field of an error report ends up in Sentry, and anyone with a crawl key can send one,
+# so each is bounded: well past anything a real report needs, short of a payload Sentry
+# would drop. The tag-like fields stay inside Sentry's 200-character limit on tag values.
+MAX_ERROR_MESSAGE_LENGTH = 8192
+MAX_ERROR_FRAME_FIELD_LENGTH = 1024
+MAX_ERROR_TAG_LENGTH = 200
+
+# The crawler loop that caught an error.
+ErrorContext = Literal["batch", "indexing"]
+
+
 class ErrorFrame(Schema):
     """One frame of the traceback of an exception a crawler caught."""
 
-    filename: str = Field(example="/venv/lib/python3.11/site-packages/mwmbl/crawl.py")
+    filename: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="mwmbl/crawl.py")
     lineno: Optional[int] = Field(example=312)
-    function: str = Field(example="run_indexing")
-    line: Optional[str] = Field(default=None, example="response.raise_for_status()")
+    function: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="run_indexing")
+    line: Optional[str] = Field(
+        default=None, max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="response.raise_for_status()"
+    )
 
 
 class CrawlerErrorReport(Schema):
     """An exception a crawler caught and recovered from, reported so it is not lost in local logs."""
 
-    context: str = Field(
+    context: ErrorContext = Field(
         description="Which crawler loop caught the exception.",
         example="indexing",
     )
-    exception_type: str = Field(example="requests.exceptions.HTTPError")
-    message: str = Field(example="502 Server Error: Bad Gateway")
+    exception_type: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="requests.exceptions.HTTPError")
+    message: str = Field(max_length=MAX_ERROR_MESSAGE_LENGTH, example="502 Server Error: Bad Gateway")
     frames: list[ErrorFrame] = Field(
-        description="The traceback, outermost frame first.",
+        description="The traceback, outermost frame first. File paths are relative to the Python path entry.",
+        min_length=1,
         max_length=200,
     )
-    crawler_version: Optional[str] = Field(default=None, example="1.2.0")
-    device_name: Optional[str] = Field(default=None, example="crawler-3f7a1c9e")
+    crawler_version: str = Field(max_length=MAX_ERROR_TAG_LENGTH, example="1.2.0")
+    device_name: str = Field(max_length=MAX_ERROR_TAG_LENGTH, example="crawler-3f7a1c9e")
 
 
 class StatusResponse(Schema):

@@ -293,9 +293,9 @@ def _register_routes(r: Router | NinjaAPI):
         if api_key is None:
             return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
 
-        logger.error(
-            f"Crawler error from user {api_key.user.id} ({report.context}): {report.exception_type}: {report.message}"
-        )
+        # Info, not error: Sentry's logging integration sends every error log as an event of
+        # its own, which would file each report a second time, under production.
+        logger.info("Crawler error from user %s (%s): %s", api_key.user.id, report.context, report.exception_type)
         sentry_sdk.capture_event(_crawler_error_event(report, api_key.user.id))
         return {"status": "ok"}
 
@@ -381,21 +381,14 @@ def _crawler_error_event(report: CrawlerErrorReport, user_id: int) -> dict:
         }
         for frame in report.frames
     ]
-    tags = {
-        "source": "crawler",
-        "crawler_context": report.context,
-        "crawler_version": report.crawler_version,
-        "crawler_device": report.device_name,
-    }
-    # Set explicitly, or the SDK fills environment, release and server_name in from the server
-    # itself, filing a volunteer's crawler bug under production on our host. Its own
-    # environment puts crawler issues behind Sentry's environment filter, apart from ours.
-    release = f"mwmbl-crawler@{report.crawler_version}" if report.crawler_version else None
+    # Set explicitly, and never to None, or the SDK fills environment, release and server_name
+    # in from the server itself, filing a volunteer's crawler bug under production on our host.
+    # Its own environment puts crawler issues behind Sentry's environment filter, apart from ours.
     return {
         "level": "error",
         "logger": "mwmbl.crawler.remote",
         "environment": "crawler",
-        "release": release,
+        "release": f"mwmbl-crawler@{report.crawler_version}",
         "server_name": report.device_name,
         "exception": {
             "values": [
@@ -406,7 +399,12 @@ def _crawler_error_event(report: CrawlerErrorReport, user_id: int) -> dict:
                 }
             ]
         },
-        "tags": {tag: value for tag, value in tags.items() if value is not None},
+        "tags": {
+            "source": "crawler",
+            "crawler_context": report.context,
+            "crawler_version": report.crawler_version,
+            "crawler_device": report.device_name,
+        },
         "user": {"id": str(user_id)},
     }
 
