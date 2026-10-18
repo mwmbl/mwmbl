@@ -231,3 +231,5 @@ devdata/external-cache-engb.tinysearch
 devdata/moderation_bakeoff/
 
 vendor/
+# Redis snapshot written by a local redis-server started in the repo
+dump.rdb

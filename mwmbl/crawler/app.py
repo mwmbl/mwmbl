@@ -13,6 +13,7 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
+from mwmbl.crawler.agreement import record_agreements
 from mwmbl.crawler.batch import (
     DatasetRequest,
     Error,
@@ -266,7 +267,7 @@ def _register_routes(r: Router | NinjaAPI):
             record_device(api_key.user, results.device_name)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
-        index_documents(documents, index_path)
+        indexed = index_documents(documents, index_path)
         # Without api_key: the bucket is world-readable (get_batch_from_id fetches from it
         # with a plain unauthenticated GET), so uploading the object as submitted would
         # publish the plaintext key of any client still using the deprecated body field.
@@ -274,6 +275,10 @@ def _register_routes(r: Router | NinjaAPI):
 
         # Update stats for the user
         stats_manager.record_results(results, api_key.user)
+
+        # Last, since they are only analytics: a failure to store them still answers with an
+        # error, but after the batch is indexed, uploaded and counted.
+        record_agreements(indexed.agreements, api_key.user, results.crawler_version)
 
         return {
             "status": "ok",

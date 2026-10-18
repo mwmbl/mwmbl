@@ -26,6 +26,7 @@ from redis import Redis
 
 from mwmbl import pricing, traffic
 from mwmbl.count_urls import count_urls_step, get_redis
+from mwmbl.crawler.agreement import prune_agreements
 from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
 from mwmbl.indexer.purge_blacklisted import purge_documents
@@ -357,6 +358,13 @@ def retrain_domain_moderation_model():
 def flush_expired_tokens():
     """Delete expired JWT refresh tokens from the blacklist tables, which gain a row per refresh."""
     call_command("flushexpiredtokens")
+
+
+@background(schedule=0)
+def prune_crawler_agreements():
+    """Delete crawler agreements older than their retention, since every shared URL adds a row."""
+    deleted = prune_agreements()
+    logger.info("Pruned %d crawler agreements", deleted)
 
 
 @background(schedule=0)

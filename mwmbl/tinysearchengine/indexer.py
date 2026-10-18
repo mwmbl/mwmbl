@@ -85,10 +85,11 @@ CURATED_STATES = {state for state in DocumentState if state.value >= 7}
 class DocumentSource(IntEnum):
     """Which external provider a document came from. None means our own crawl.
 
-    Only the external results cache sets this (see mwmbl.indexer.external_cache); documents
-    in the search index leave it None, and as_tuple truncates trailing Nones, so they cost
-    nothing for it. The values are written to disk, so they are append-only: never reuse a
-    number for a different provider, or a stale cache entry becomes a lie about where its
+    The external results cache sets this (see mwmbl.indexer.external_cache). In the search
+    index only STAAN_INDEXED is set, on the copies of Staan's results Combined Search writes
+    there; crawled documents leave it None, and as_tuple truncates trailing Nones, so they
+    cost nothing for it. The values are written to disk, so they are append-only: never reuse
+    a number for a different provider, or a stale cache entry becomes a lie about where its
     results came from.
     """
 
@@ -97,6 +98,10 @@ class DocumentSource(IntEnum):
     # because it is the numbering registry: with only one member the source field cannot be
     # told apart from "unset" and the cache's per-source behaviour cannot be tested at all.
     STAAN = 2
+    # A Staan result as written to the search index. Apart from STAAN because the rankers read
+    # a STAAN document's score as the rank Staan gave it in this request, which a stored copy
+    # does not carry. It also tells the crawler agreement log that no crawler wrote the copy.
+    STAAN_INDEXED = 3
 
 
 @dataclass

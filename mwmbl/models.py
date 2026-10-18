@@ -9,6 +9,12 @@ from django.utils import timezone
 from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
 
+# The seed crawl fetches its pages itself rather than through a volunteer, so they are credited
+# to a user of their own, made by migration 0049: the user who asked for the crawl did not
+# write them. It gives every copy the crawl writes an author, which the crawler agreement log
+# relies on, and a copy of a page that no volunteer could have tampered with.
+SEED_CRAWLER_USERNAME = "mwmbl-seed-crawler"
+
 
 class MwmblUser(AbstractUser):
     # Pages the user's seed crawls (Combined Search with crawl=true) have added to the index,
@@ -576,4 +582,41 @@ class SeedDomainCrawl(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["seed_domain", "-crawled_at"]),
+        ]
+
+
+class CrawlerAgreement(models.Model):
+    """A crawler's submission of a URL meeting another crawler's stored copy of it, and how
+    closely the two agreed - see mwmbl.indexer.agreement.
+
+    For finding crawlers whose copies disagree with many different crawlers. A low
+    similarity says the two sides disagree, not which one is wrong, so the analysis has to
+    hold it against both: user is often the honest crawler revisiting a polluted URL. Keeps
+    the similarities rather than the text, which the submitted batches in object storage hold.
+
+    existing_user_id names the stored text's author only on pages written since that became
+    the last of a copy's user_ids. Before then the ids were in rank order, and a copy of
+    Staan's written without a source took on those of the copies it beat. Such a page keeps
+    the wrong author until a fresh copy wins it, so early rows deserve less weight.
+
+    Super Search still writes copies with neither user_ids nor a source, and one that wins a
+    page takes on the ids of the copies it beat in the same way. It is deprecated, so this is
+    left to end with it rather than handled here.
+    """
+
+    url = models.TextField()
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="+")
+    # Not a foreign key: it comes from the index, which keeps the ids of deleted users.
+    existing_user_id = models.IntegerField(db_index=True)
+    title_similarity = models.FloatField()
+    extract_similarity = models.FloatField()
+    extract_empty = models.BooleanField()
+    existing_extract_empty = models.BooleanField()
+    last_crawled_delta = models.BigIntegerField(null=True)  # seconds, incoming crawl minus stored crawl
+    crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"]),
         ]
