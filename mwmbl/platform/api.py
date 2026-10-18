@@ -128,10 +128,12 @@ def register(request, registration: Registration):
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
-    username_taken = MwmblUser.objects.filter(username=registration.username).exists()
-    # Reserved even before migration 0049 makes the user, so nobody can take it first and fail it.
-    if registration.username and (username_taken or registration.username == SEED_CRAWLER_USERNAME):
-        raise InvalidRequest("Username already exists")
+    if registration.username:
+        username_taken = MwmblUser.objects.filter(username=registration.username).exists()
+        # Reserved even before migration 0049 makes the user, so nobody can take it first and
+        # fail it - and in any case, as allauth's blacklist is, so nobody can pass for it.
+        if username_taken or registration.username.lower() == SEED_CRAWLER_USERNAME:
+            raise InvalidRequest("Username already exists")
 
     user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)

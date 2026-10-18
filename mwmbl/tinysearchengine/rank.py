@@ -411,6 +411,7 @@ class Ranker:
                         result.score,
                         result.term,
                         remove_curate_state(result.state),
+                        source=result.source,
                     )
                     for result in items_wrong_state
                 ]

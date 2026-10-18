@@ -35,6 +35,19 @@ def test_the_seed_crawlers_username_cannot_be_registered(client):
     assert not User.objects.filter(username=SEED_CRAWLER_USERNAME).exists()
 
 
+@pytest.mark.django_db
+def test_a_lookalike_of_the_seed_crawlers_username_cannot_be_registered(client):
+    response = client.post(
+        "/api/v1/platform/register",
+        data=json.dumps(
+            {"email": "new@example.com", "password": "correctpassword", "username": SEED_CRAWLER_USERNAME.title()}
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+
+
 def test_allauth_refuses_the_seed_crawlers_username():
     """Settings cannot import SEED_CRAWLER_USERNAME, so they repeat it."""
     assert settings.ACCOUNT_USERNAME_BLACKLIST == [SEED_CRAWLER_USERNAME]
