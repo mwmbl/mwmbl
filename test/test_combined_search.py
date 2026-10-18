@@ -567,6 +567,20 @@ def test_a_seed_search_counts_itself_in_the_users_total(
 
 
 @pytest.mark.django_db
+def test_a_seed_search_that_cannot_start_a_crawl_is_not_counted(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    _crawl(client, access_token, query="tokio")
+
+    body = _crawl(client, access_token, query="rust").json()
+    user.refresh_from_db()
+
+    assert body["crawl_outcome"] == "already_running"
+    assert user.seed_searches == 1
+
+
+@pytest.mark.django_db
 def test_a_search_without_the_crawl_flag_is_not_counted(client, user, access_token, fresh_quota, stub_sources):
     stub_sources(new_urls=("https://a.example/",))
 

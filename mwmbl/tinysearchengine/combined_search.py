@@ -310,10 +310,11 @@ def init_router(ranker) -> None:
         crawl_outcome = None
         active_crawl_query = None
         if crawl:
-            await sync_to_async(record_seed_search)(user.id)
             crawl_outcome = await sync_to_async(start_seed_crawl)(
                 user.id, q, retrieval.pages, staan_results, new_staan_urls
             )
+            if crawl_outcome == CrawlOutcome.SCHEDULED:
+                await sync_to_async(record_seed_search)(user.id)
             if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
                 active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
 
