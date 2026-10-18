@@ -43,7 +43,7 @@ def test_find_agreements_compares_against_another_crawlers_copy():
     (agreement,) = find_agreements(incoming, existing)
 
     assert agreement.url == URL
-    assert agreement.existing_user_ids == (1, 2)
+    assert agreement.existing_user_id == 2
     assert agreement.title_similarity == 1.0
     assert agreement.extract_similarity == 0.0
     assert agreement.last_crawled_delta == 600
@@ -54,6 +54,16 @@ def test_find_agreements_skips_the_crawlers_own_copy():
     incoming = [Document("Title", URL, "New extract", term="t", user_ids=[3])]
 
     assert find_agreements(incoming, existing) == set()
+
+
+def test_find_agreements_compares_against_another_crawlers_text_the_crawler_is_credited_on():
+    """The crawler is on the stored copy's user_ids, but the text is the last one's."""
+    existing = [Document("Title", URL, "Old extract", term="t", user_ids=[3, 1])]
+    incoming = [Document("Title", URL, "New extract", term="t", user_ids=[3])]
+
+    (agreement,) = find_agreements(incoming, existing)
+
+    assert agreement.existing_user_id == 1
 
 
 def test_find_agreements_skips_unattributed_documents():
@@ -109,7 +119,7 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
     assert indexed.agreements == {
         Agreement(
             url=URL,
-            existing_user_ids=(1,),
+            existing_user_id=1,
             title_similarity=1.0,
             extract_similarity=1.0,
             last_crawled_delta=None,
@@ -134,7 +144,7 @@ def test_index_documents_reports_the_agreement_whichever_copy_wins(index_path, n
     indexed = index_documents([Document(title, URL, extract, user_ids=[2])], index_path)
 
     (agreement,) = indexed.agreements
-    assert agreement.existing_user_ids == (1,)
+    assert agreement.existing_user_id == 1
     assert agreement.title_similarity == trigram_similarity(title, "Python tutorial")
     assert agreement.extract_similarity == trigram_similarity(extract, "Learn python today")
 
@@ -168,7 +178,7 @@ def user(db):
 def _agreement(url=URL):
     return Agreement(
         url=url,
-        existing_user_ids=(1, 2),
+        existing_user_id=2,
         title_similarity=0.9,
         extract_similarity=0.4,
         last_crawled_delta=60,
@@ -182,7 +192,7 @@ def test_record_agreements(user):
     stored = CrawlerAgreement.objects.get()
     assert stored.url == URL
     assert stored.user == user
-    assert stored.existing_user_ids == [1, 2]
+    assert stored.existing_user_id == 2
     assert stored.title_similarity == 0.9
     assert stored.extract_similarity == 0.4
     assert stored.last_crawled_delta == 60
@@ -225,7 +235,7 @@ def test_post_results_records_agreements(user, index_path, no_blacklist):
     assert response.status_code == 200
     stored = CrawlerAgreement.objects.get()
     assert stored.user == user
-    assert stored.existing_user_ids == [other_user.id]
+    assert stored.existing_user_id == other_user.id
     assert stored.title_similarity == 1.0
     assert stored.extract_similarity < 1.0
     assert stored.crawler_version == "1.2.0"

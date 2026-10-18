@@ -591,8 +591,8 @@ class CrawlerAgreement(models.Model):
 
     url = models.TextField()
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="+")
-    # Not foreign keys: up to two users, and the stored text is one of theirs without saying which.
-    existing_user_ids = ArrayField(models.IntegerField())
+    # Not a foreign key: it comes from the index, which keeps the ids of deleted users.
+    existing_user_id = models.IntegerField(db_index=True)
     title_similarity = models.FloatField()
     extract_similarity = models.FloatField()
     last_crawled_delta = models.IntegerField(null=True)  # seconds, incoming crawl minus stored crawl

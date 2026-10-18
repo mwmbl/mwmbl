@@ -15,7 +15,7 @@ def record_agreements(agreements: set[Agreement], user: MwmblUser, crawler_versi
         CrawlerAgreement(
             url=agreement.url,
             user=user,
-            existing_user_ids=list(agreement.existing_user_ids),
+            existing_user_id=agreement.existing_user_id,
             title_similarity=agreement.title_similarity,
             extract_similarity=agreement.extract_similarity,
             last_crawled_delta=agreement.last_crawled_delta,

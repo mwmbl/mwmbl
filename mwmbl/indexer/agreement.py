@@ -14,9 +14,9 @@ from mwmbl.tinysearchengine.indexer import Document
 
 class Agreement(NamedTuple):
     url: str
-    existing_user_ids: tuple[int, ...]
-    """The crawlers the stored copy is attributed to. Up to two of them, and the text is
-    whichever of their versions ranked higher, so it cannot be pinned on just one."""
+    existing_user_id: int
+    """The crawler whose text the stored copy holds: the last of its user_ids, which
+    combine_documents keeps for the kept copy's author."""
     title_similarity: float
     extract_similarity: float
     last_crawled_delta: Optional[int]
@@ -28,21 +28,21 @@ class Agreement(NamedTuple):
 def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) -> set[Agreement]:
     """Compare each incoming document against another crawler's stored copy of its URL."""
     # A page keeps one document per URL, so there is at most one stored copy to compare.
-    attributed_by_url = {document.url: document for document in existing if document.user_ids}
+    authors_by_url = {document.url: (document, document.user_ids[-1]) for document in existing if document.user_ids}
     agreements = set()
     for document in incoming:
-        stored = attributed_by_url.get(document.url)
-        if stored is None or document.user_ids is None:
+        if document.url not in authors_by_url or document.user_ids is None:
             continue
-        # The stored copy may be this crawler's own, from an earlier submission.
-        if set(document.user_ids) & set(stored.user_ids):
+        stored, existing_user_id = authors_by_url[document.url]
+        # The stored text may be this crawler's own, from an earlier submission.
+        if existing_user_id in document.user_ids:
             continue
         both_crawled = document.last_crawled is not None and stored.last_crawled is not None
         last_crawled_delta = document.last_crawled - stored.last_crawled if both_crawled else None
         agreements.add(
             Agreement(
                 url=document.url,
-                existing_user_ids=tuple(stored.user_ids),
+                existing_user_id=existing_user_id,
                 title_similarity=trigram_similarity(document.title, stored.title),
                 extract_similarity=trigram_similarity(document.extract, stored.extract),
                 last_crawled_delta=last_crawled_delta,

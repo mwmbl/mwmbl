@@ -31,6 +31,8 @@ MAX_USER_IDS = 2
 
 
 def _merge_user_ids(existing: Optional[list[int]], incoming: Optional[list[int]]) -> Optional[list[int]]:
+    """The incoming ids go last, moved there if already present, and the oldest are dropped
+    past MAX_USER_IDS."""
     combined = list(existing or [])
     for uid in incoming or []:
         if uid in combined:
@@ -301,7 +303,10 @@ def combine_documents(existing_documents, documents, mark_synced, ranker):
             continue
         if mark_synced:
             document.state = DocumentState.SYNCED_WITH_MAIN_INDEX
-        document.user_ids = url_user_ids.get(document.url)
+        # The kept copy's ids merged last, so the last id is always the crawler whose text the
+        # page holds - see mwmbl.indexer.agreement. Its own last id is its author by the same
+        # rule, and a fresh submission carries only its submitter's.
+        document.user_ids = _merge_user_ids(url_user_ids.get(document.url), document.user_ids)
         document.last_crawled = url_last_crawled.get(document.url)
         combined_documents.append(document)
         seen_urls.add(document.url)
