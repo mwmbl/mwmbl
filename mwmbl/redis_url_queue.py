@@ -1,5 +1,6 @@
 import json
 import math
+import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
@@ -18,7 +19,6 @@ from mwmbl.utils import parse_url
 
 MAX_TIME_DELTA = timedelta(days=100000)
 
-random = Random(1)
 logger = getLogger(__name__)
 
 
@@ -36,6 +36,10 @@ MAX_OTHER_DOMAINS = 10000
 
 NUM_TOP_DOMAIN_URLS_TO_INCLUDE = 50
 NUM_OTHER_URLS_TO_INCLUDE = 100
+
+# Seeded so that two CI runs with the same allowlist start from the same place. Only the
+# allowlist path uses it: forked crawl workers each get a copy, so they would seed in lockstep.
+ALLOWLIST_RANDOM = Random(1)
 
 
 # Discount URLs crawled recently - this is the scale - currently 10 months
@@ -115,10 +119,14 @@ class RedisURLQueue:
             # PYTHONHASHSEED the crawler image sets.
             domains = sorted(CRAWL_ALLOWED_DOMAINS)
             seed_domains = sorted(CRAWL_ALLOWED_DOMAINS)
+            seed_random = ALLOWLIST_RANDOM
         else:
             top_scoring_domains = set(self.redis.zrange(DOMAIN_SCORE_KEY, 0, 2000, desc=True))
             top_other_domains = top_scoring_domains - DOMAINS.keys()
 
+            # The stdlib's shared random instance, which Python reseeds in every forked child. A
+            # Random of our own, seeded or not, would be copied into each crawl worker, and every
+            # worker would then pick the same domains and seed URL in lockstep.
             domains = list(CORE_DOMAINS)
             top_curated_domains = (DOMAINS.keys() & top_scoring_domains) | curated_domains
             if len(top_curated_domains) > NUM_TOP_DOMAIN_URLS_TO_INCLUDE:
@@ -132,15 +140,24 @@ class RedisURLQueue:
                 domains += list(top_other_domains)
 
             seed_domains = list(DOMAINS.keys() | curated_domains)
-
-        domains = [domain for domain in domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
-        logger.info(f"Getting batch from domains {domains}")
+            seed_random = random
 
         # Add a random url as the root domain of one of DOMAINS. The seed needs the same
         # blacklist filter as the rest: it is a URL we are about to fetch.
         seed_domains = [domain for domain in seed_domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
-        random_domain = random.choice(seed_domains)
+        random_domain = seed_random.choice(seed_domains)
         urls = [f"https://{random_domain}/"]
+
+        # At most one URL per domain, since the batch is crawled concurrently: the samples
+        # above can pick a core domain again, and the seed can repeat any of them. Unless the
+        # seed's domain is the only one, as with a single-domain allowlist: dropping it then
+        # would leave that domain's queued URLs never popped.
+        domains = [
+            domain for domain in dict.fromkeys(domains) if not self.blacklist_provider.is_domain_blacklisted(domain)
+        ]
+        if domains != [random_domain]:
+            domains = [domain for domain in domains if domain != random_domain]
+        logger.info(f"Getting batch from domains {domains}")
 
         # Pop the highest scoring URL from each domain
         for domain in domains:

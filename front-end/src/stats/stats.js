@@ -26,8 +26,6 @@ import {Chart} from "chart.js/auto";
   }
 
   const resultsIndexedDailyChart = createChart('results-indexed-daily', null, "Results indexed by day");
-  const urlsCrawledDailyChart = createChart('urls-by-day', null, "URLs crawled by day");
-  const urlsCrawledHourlyChart = createChart('urls-by-hour', [...Array(24).keys()], "URLs crawled today by hour");
   const usersCrawledDailyChart = createChart('users-by-day', null, "Number of users crawling by day");
   const datasetQueriesDailyChart = createChart('dataset-queries-by-day', null, "Dataset queries by day");
   const datasetResultsDailyChart = createChart('dataset-results-by-day', null, "Dataset results by day");
@@ -52,27 +50,7 @@ import {Chart} from "chart.js/auto";
       maintainAspectRatio: false
     }
   });
-
-  const urlsByDomainCanvas = document.getElementById('urls-by-domain');
-  const byDomainChart = new Chart(urlsByDomainCanvas, {
-    type: 'bar',
-    data: {
-      datasets: [{
-        label: "Top domains",
-        borderWidth: 1
-      }]
-    },
-    options: {
-      scales: {
-        x: {
-          beginAtZero: true
-        }
-      },
-      indexAxis: 'y',
-      maintainAspectRatio: false
-    }
-  });
-
+  
 function numberWithCommas(x) {
   // From https://stackoverflow.com/a/2901298/660902
   if (x == null) return "0";
@@ -83,9 +61,6 @@ function numberWithCommas(x) {
     fetch("https://api.mwmbl.org/crawler/stats").then(result => {
       result.json().then(stats => {
         console.log("Stats", stats);
-
-        const urlCountSpan = document.getElementById("num-urls");
-        urlCountSpan.innerText = numberWithCommas(stats.urls_crawled_today);
 
         const numUsers = Object.values(stats.users_crawled_daily)[Object.keys(stats.users_crawled_daily).length - 1];
         const userCountSpan = document.getElementById("num-users");
@@ -107,21 +82,10 @@ function numberWithCommas(x) {
         usersCrawledDailyChart.data.datasets[0].data = Object.values(stats.users_crawled_daily);
         usersCrawledDailyChart.update();
 
-        urlsCrawledHourlyChart.data.datasets[0].data = stats.urls_crawled_hourly;
-        urlsCrawledHourlyChart.update();
-
-        urlsCrawledDailyChart.data.labels = Object.keys(stats.urls_crawled_daily);
-        urlsCrawledDailyChart.data.datasets[0].data = Object.values(stats.urls_crawled_daily);
-        urlsCrawledDailyChart.update();
-
         console.log("Top users", stats.top_user_results);
         byUserChart.data.labels = stats.top_user_results.map(u => u[0]);
         byUserChart.data.datasets[0].data = stats.top_user_results.map(u => u[1]);
         byUserChart.update();
-
-        byDomainChart.data.labels = stats.top_domains.map(d => d[0]);
-        byDomainChart.data.datasets[0].data = stats.top_domains.map(d => d[1]);
-        byDomainChart.update();
 
         datasetQueriesDailyChart.data.labels = Object.keys(stats.dataset_queries_daily);
         datasetQueriesDailyChart.data.datasets[0].data = Object.values(stats.dataset_queries_daily);

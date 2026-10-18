@@ -1,8 +1,9 @@
 import argparse
 import logging
 import os
-import random
+import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Process
 from pathlib import Path
@@ -13,6 +14,7 @@ import django
 import requests
 from django.conf import settings
 from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 FORMAT = "%(process)d:%(levelname)s:%(name)s:%(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
@@ -31,10 +33,21 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
-from mwmbl.crawler.batch import HashedBatch, Result, Results
+from mwmbl.crawler.batch import (
+    MAX_ERROR_MESSAGE_LENGTH,
+    CrawlerErrorReport,
+    ErrorContext,
+    ErrorFrame,
+    HashedBatch,
+    Result,
+    Results,
+)
+from mwmbl.crawler.device import get_device_name
 from mwmbl.crawler.env_vars import (
     CRAWL_DELAY_SECONDS,
+    CRAWL_REPORT_ERRORS,
     CRAWL_SUBMIT_MODE,
+    CRAWL_THREADS,
     CRAWLER_WORKERS,
     MWMBL_API_KEY,
     MWMBL_CONTACT_INFO,
@@ -42,14 +55,14 @@ from mwmbl.crawler.env_vars import (
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
-from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_url
+from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.rank import score_result
-from mwmbl.tokenizer import tokenize
+from mwmbl.utils import prune_request_cache
 
 BATCH_QUEUE_KEY = "batch-queue"
 # Reads (RemoteIndex) and writes (results, curated domains) have to agree about which
@@ -77,6 +90,17 @@ CURATED_DOMAINS_CACHE_SECONDS = 300.0
 # How many of a term's new items must be expected to survive in the main index before we
 # submit the term at all. See count_new_index_entries for where the expectation comes from.
 MIN_NEW_INDEX_ENTRIES = 1
+
+# How long run_indexing may reuse a cached copy of what the main index holds for a term.
+# Never expiring it, which is what request_cache does by default, is wrong here twice over:
+# the diff below decides what to submit by comparing local items against remote ones, so a
+# stale copy submits what the index already has, and a crawler sees a term it will never see
+# again often enough that the cache grew by around 800MB a day until the disk filled.
+REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
+
+# The server indexes submitted results before it answers, so allow it well over a typical
+# request's time - but not forever.
+RESULTS_POST_TIMEOUT_SECONDS = 120
 
 
 def _fetch_curated_domains() -> set[str]:
@@ -130,6 +154,79 @@ def api_user_agent(username: Optional[str]) -> str:
     return f"{API_PRODUCT} ({identity})"
 
 
+# How long to wait before reporting the same error from the same process again. The loops
+# retry every ten seconds, so a persistent failure would otherwise send a report each time.
+ERROR_REPORT_INTERVAL_SECONDS = 3600.0
+_error_last_reported_at: dict[tuple[ErrorContext, str, str, int | None], float] = {}
+
+
+# The server accepts at most this many frames. A traceback deeper than that is almost always
+# recursion, where the innermost frames are the ones that say what went wrong.
+MAX_ERROR_FRAMES = 200
+
+
+def _module_path(filename: str) -> str:
+    """
+    The path of a source file relative to the Python path entry it was imported from.
+
+    An absolute path names the volunteer's home directory, which often carries their name -
+    the reason the crawler identifies itself by a generated device name, not its hostname.
+    """
+    containing_entries = [entry for entry in sys.path if entry and filename.startswith(entry.rstrip("/") + "/")]
+    if not containing_entries:
+        return os.path.basename(filename)
+    longest_entry = max(containing_entries, key=len)
+    return os.path.relpath(filename, longest_entry)
+
+
+def report_error(context: ErrorContext, error: Exception):
+    """
+    Send an error the crawl loops caught to the Mwmbl server, which passes it on to Sentry.
+
+    The loops catch everything and retry, which keeps a volunteer's crawler running but means
+    a crawler failing on every pass looks, from our side, exactly like one that has stopped.
+    Reporting goes through our own endpoint rather than straight to Sentry so that volunteers'
+    machines only ever talk to Mwmbl, and so each report arrives tied to an API key.
+    """
+    if not CRAWL_REPORT_ERRORS or CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
+        return
+
+    frames = traceback.extract_tb(error.__traceback__)
+    exception_type = f"{type(error).__module__}.{type(error).__qualname__}"
+    innermost = frames[-1]
+    error_key = (context, exception_type, innermost.filename, innermost.lineno)
+    now = time.monotonic()
+    last_reported_at = _error_last_reported_at.get(error_key)
+    if last_reported_at is not None and now - last_reported_at < ERROR_REPORT_INTERVAL_SECONDS:
+        return
+    _error_last_reported_at[error_key] = now
+
+    # Messages can name local files too - "No such file or directory: '/home/...'".
+    message = str(error).replace(str(Path.home()), "~")[:MAX_ERROR_MESSAGE_LENGTH]
+    report = CrawlerErrorReport(
+        context=context,
+        exception_type=exception_type,
+        message=message,
+        frames=[
+            ErrorFrame(filename=_module_path(frame.filename), lineno=frame.lineno, function=frame.name, line=frame.line)
+            for frame in frames[-MAX_ERROR_FRAMES:]
+        ],
+        crawler_version=CRAWLER_VERSION,
+        device_name=get_device_name(data_path),
+    )
+    # Failing to report must not become a second error in the loop that caught the first.
+    try:
+        response = requests.post(
+            f"{REMOTE_SERVER}/api/v1/crawler/errors",
+            json=report.dict(),
+            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        logger.exception("Failed to report error to the Mwmbl server")
+
+
 def count_new_index_entries(term: str, new_items: list[Document], remote_items: list[Document]) -> int:
     """
     Estimate how many of our new local items the main index will actually keep for a term.
@@ -150,8 +247,16 @@ def count_new_index_entries(term: str, new_items: list[Document], remote_items: 
     terms that hash to it, which we cannot see, so the real capacity is lower than
     len(remote_items) suggests and blacklisting can drop items server-side. run_indexing logs
     the estimate next to the number the index actually kept, which is how to calibrate it.
+
+    The term is split, not tokenized, which is what the server does to rank a term's
+    documents (index_batches.sort_documents) and the only thing that works here: tokenize is
+    not a total function on its own output. Index terms come from tokenizing a title, a URL
+    or an extract, and one of those can hold an ellipsis mid-text - "Hello… World" gives
+    the token "hello…", which tokenize() then reads as a truncated extract and drops the
+    last two tokens of, returning []. score_result asserts on an empty term list, so
+    re-tokenizing crashed the indexing loop on every batch that carried such a term.
     """
-    terms = tokenize(term)
+    terms = term.split()
     new_scores = [score_result(terms, item, True) for item in new_items]
     matching_new_scores = [score for score in new_scores if score > 0.0]
     if not remote_items:
@@ -218,41 +323,35 @@ class Crawler:
         return self._url_queue
 
     def check_redis(self):
-        """Check Redis connection health."""
+        """Check Redis connection health.
+
+        redis.exceptions.ConnectionError is not the builtin of that name - it inherits from
+        RedisError - so catching only the builtin meant the friendly message never appeared
+        for the case it was written for: redis-py wraps a refused socket in its own class.
+        """
         try:
             self.redis.ping()
             logger.debug("Redis ping successful")
-        except ConnectionError:
+        except (ConnectionError, RedisConnectionError):
             raise SystemExit(f"Cannot reach Redis at {self.redis_url}. Make sure your Redis server is running.")
 
     def process_batch(self):
         """
-        Process a single batch of URLs by crawling them sequentially with rate limiting.
+        Process a single batch of URLs by crawling them concurrently with rate limiting.
 
         This function handles the core crawling workflow:
         1. Gets a batch of URLs from the Redis URL queue
-        2. Crawls each URL sequentially with configurable delay between requests
+        2. Crawls the URLs on CRAWL_THREADS threads, each waiting CRAWL_DELAY_SECONDS between URLs
         3. Records crawl results in the database for URL tracking
         4. Pushes the completed batch to Redis queue for indexing
 
-        The sequential crawling with delays respects rate limits and reduces load on target servers.
         Each batch is processed as a HashedBatch object containing metadata and crawl results.
         """
         user_id = "test"
         urls = self.url_queue.get_batch(user_id)
-        logger.info(f"Processing batch of {len(urls)} URLs")
+        logger.info(f"Processing batch of {len(urls)} URLs on {CRAWL_THREADS} threads")
 
-        # Process URLs sequentially with rate limiting
-        results = []
-        for i, url in enumerate(urls):
-            if i > 0:  # Don't delay before the first URL
-                # Add delay with 10% random fuzz
-                delay = CRAWL_DELAY_SECONDS * (0.9 + 0.2 * random.random())
-                time.sleep(delay)
-
-            result = crawl_url(url, self.redis)
-            results.append(result)
-            logger.debug("Result", result)
+        results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
 
         js_timestamp = int(time.time() * 1000)
         batch = HashedBatch.parse_obj(
@@ -306,7 +405,10 @@ class Crawler:
         term_new_doc_count = index_batches(batches, index_path)
         logger.info(f"Indexed, top terms to sync: {term_new_doc_count.most_common(10)}")
 
-        remote_index = RemoteIndex(user_agent=api_user_agent(_fetch_username()))
+        # Once a round is often enough to keep the cache at roughly an hour's worth of terms,
+        # and the rounds are minutes apart, so the sweep costs nothing worth measuring.
+        prune_request_cache()
+        remote_index = RemoteIndex(user_agent=api_user_agent(_fetch_username()), expire_after=REMOTE_INDEX_CACHE_EXPIRY)
         with TinyIndex(Document, index_path, "w") as local_index:
             for term, count in term_new_doc_count.most_common(100):
                 logger.info(f"Syncing term {term} with {count} new local items")
@@ -338,12 +440,23 @@ class Crawler:
                     if CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
                         logger.info(f"Submission is off, not posting {len(result_items)} results")
                     else:
-                        results = Results(api_key=MWMBL_API_KEY, results=result_items, crawler_version=CRAWLER_VERSION)
+                        results = Results(
+                            results=result_items,
+                            crawler_version=CRAWLER_VERSION,
+                            device_name=get_device_name(data_path),
+                        )
                         results_url = f"{REMOTE_SERVER}/api/v1/crawler/results"
                         if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
                             results_url += "?dry_run=true"
                         logger.info(f"Posting {len(result_items)} results to {results_url}")
-                        response = requests.post(results_url, json=results.dict())
+                        # A post with no timeout that never gets an answer hangs this loop for
+                        # good: no exception, so nothing logged or reported, and no more syncing.
+                        response = requests.post(
+                            results_url,
+                            json=results.dict(),
+                            headers={"X-API-Key": MWMBL_API_KEY},
+                            timeout=RESULTS_POST_TIMEOUT_SECONDS,
+                        )
                         logger.info(f"Response: {response.text}")
                         response.raise_for_status()
 
@@ -361,26 +474,43 @@ class Crawler:
                 logger.info(f"Completed indexing for term {term}")
 
                 new_page_content = local_index.get_page(page_index)
-                logger.info(f"Page content: {new_page_content}")
+                logger.info(f"Page {page_index} now holds {len(new_page_content)} documents")
 
     def process_batch_continuously(self):
-        """Continuously process batches with error handling."""
+        """Continuously process batches with error handling.
+
+        The health check runs inside the try for the reason everything else does: a Redis
+        that answers with an error is a condition to wait out, not to die of. Redis refusing
+        every write ("MISCONF ... unable to persist to disk", after a failed background save)
+        took out all four crawl workers and the indexing process this way, because
+        check_redis only converts a ConnectionError and let the rest through into a loop that
+        was not guarding it. An unreachable Redis still ends the process: check_redis raises
+        SystemExit for that, and SystemExit is not an Exception.
+        """
         while True:
-            self.check_redis()
             try:
+                self.check_redis()
                 self.process_batch()
             except Exception as err:
                 logger.exception(f"Error processing batch: '{err}'")
+                report_error("batch", err)
                 time.sleep(10)
 
     def run_indexing_continuously(self):
-        """Continuously run indexing with error handling."""
+        """Continuously run indexing with error handling.
+
+        The health check is inside the try - see process_batch_continuously. This loop is
+        the one that costs the whole crawler: run() gives up and exits once the indexing
+        process has died six times in an hour, so a Redis error escaping here stops
+        crawling, not just indexing.
+        """
         while True:
-            self.check_redis()
             try:
+                self.check_redis()
                 self.run_indexing()
             except Exception as err:
                 logger.exception(f"Error running indexing: '{err}'")
+                report_error("indexing", err)
                 time.sleep(10)
 
     def run_once(self):

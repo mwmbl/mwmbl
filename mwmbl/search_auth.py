@@ -3,6 +3,7 @@ Authentication for the search API using the X-API-Key header.
 """
 
 import hashlib
+from datetime import datetime, timezone
 
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
@@ -51,7 +52,28 @@ class SearchApiKeyAuth(APIKeyHeader):
         except ApiKey.DoesNotExist:
             return None
 
+        # Only on a cache miss, which is also what makes this affordable: a hot key is
+        # served from cache for CACHE_TTL, so a busy caller costs one UPDATE an hour
+        # rather than one per request. The stored time is therefore accurate to the hour,
+        # which is the granularity "last used" is read at anyway.
+        ApiKey.objects.filter(pk=api_key.pk).update(last_used=datetime.now(timezone.utc))
+
         cache.set(cache_key, api_key, CACHE_TTL)
+        return api_key
+
+
+class CrawlApiKeyAuth(APIKeyHeader):
+    """A crawl-scoped key in X-API-Key, for endpoints only trusted crawlers may use."""
+
+    param_name = "X-API-Key"
+
+    def authenticate(self, request, key: str | None):
+        if not key:
+            return None
+        key_hash = hashlib.sha256(key.encode()).hexdigest()
+        api_key = ApiKey.objects.filter(key=key_hash, scopes__contains=[ApiKey.Scope.CRAWL]).first()
+        if api_key is not None:
+            ApiKey.objects.filter(pk=api_key.pk).update(last_used=datetime.now(timezone.utc))
         return api_key
 
 

@@ -6,11 +6,26 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
+from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
+
+# The seed crawl fetches its pages itself rather than through a volunteer, so they are credited
+# to a user of their own, made by migration 0049: the user who asked for the crawl did not
+# write them. It gives every copy the crawl writes an author, which the crawler agreement log
+# relies on, and a copy of a page that no volunteer could have tampered with.
+SEED_CRAWLER_USERNAME = "mwmbl-seed-crawler"
 
 
 class MwmblUser(AbstractUser):
-    pass
+    # Pages the user's seed crawls (Combined Search with crawl=true) have added to the index,
+    # all time. A total on the user rather than a UserStats column, because a UserStats row
+    # created for it would enter the crawl leaderboards with no crawl results behind it.
+    seed_search_pages_indexed = models.IntegerField(default=0)
+    # How many searches the user has made with Seed Search on (Combined Search with crawl=true), all time.
+    seed_searches = models.IntegerField(default=0)
+
+    # On for new accounts. Accounts created before this field existed start off (see the migration).
+    combined_search_enabled = models.BooleanField(default=True)
 
 
 class UserCuration(models.Model):
@@ -173,6 +188,7 @@ class ApiKey(models.Model):
     key = models.CharField(max_length=64, unique=True)  # stores SHA-256 hash of the raw key
     created_on = models.DateTimeField(auto_now_add=True)
     name = models.CharField(max_length=100, blank=True, default="")
+    last_used = models.DateTimeField(null=True, blank=True)
     scopes = ArrayField(
         models.CharField(max_length=20, choices=Scope.choices),
         default=list,
@@ -208,11 +224,34 @@ class UsageBucket(models.Model):
     # ingested to Polar as usage events for this month. Lets the reporting job
     # send only the incremental delta each run, idempotently.
     reported_overage = models.IntegerField(default=0)
+    # Keyed Combined Search requests, which are billed from the first one and reported to
+    # Polar as their own event, so they are counted and tracked apart from the above.
+    combined_search_count = models.IntegerField(default=0)
+    reported_combined_search = models.IntegerField(default=0)
 
     class Meta:
         unique_together = [("user", "year", "month")]
         indexes = [
             models.Index(fields=["year", "month"]),
+        ]
+
+
+class UserStats(models.Model):
+    """Records a user's crawl results for a specific calendar day.
+
+    This persists the per-user result counts that were previously only stored
+    in Redis (with a 30-day TTL). Having them in Postgres enables all-time
+    leaderboards and historical analysis.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="user_stats")
+    date = models.DateField()
+    num_results = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [("user", "date")]
+        indexes = [
+            models.Index(fields=["user", "date"]),
         ]
 
 
@@ -225,6 +264,54 @@ class UserBilling(models.Model):
     # Maximum amount (in cents) the account may be billed per month for metered
     # usage beyond the free allowance. 0 = free-tier-only (hard capped).
     max_monthly_spend_cents = models.IntegerField(default=0)
+
+
+class Membership(models.Model):
+    """An active supporter membership. The row is deleted when the Polar subscription ends."""
+
+    user = models.OneToOneField(MwmblUser, on_delete=models.CASCADE, related_name="membership")
+    tier = models.CharField(max_length=20, choices=MembershipTier.choices)
+    polar_subscription_id = models.CharField(max_length=100, unique=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    started = models.DateTimeField(auto_now_add=True)
+
+
+class VolunteerMembership(models.Model):
+    """A volunteer tier earned by crawling, kept apart from Membership so Polar syncs never touch it.
+
+    One row per tier the user has earned, each valid to the end of the month after the one it was
+    last earned in, so a volunteer who keeps qualifying is never without it. See
+    mwmbl.membership.VOLUNTEER_TIERS for what earns each tier.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="volunteer_memberships")
+    tier = models.CharField(max_length=20, choices=VolunteerTier.choices)
+    valid_until = models.DateField()
+    started = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "tier")]
+
+
+class NotificationKind(models.TextChoices):
+    VOLUNTEER_MEMBERSHIP_GRANTED = "volunteer_membership_granted", "Volunteer membership granted"
+
+
+class UserNotification(models.Model):
+    """A message for a user that stays until they dismiss it, such as being granted a volunteer membership.
+
+    What a notification says is up to the front end: data holds the details it needs for each kind.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=40, choices=NotificationKind.choices)
+    data = models.JSONField(default=dict)
+    created = models.DateTimeField(auto_now_add=True)
+    dismissed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "dismissed_at"])]
 
 
 class AgreementType(models.TextChoices):
@@ -269,6 +356,22 @@ class MarketingConsent(models.Model):
         indexes = [
             models.Index(fields=["user", "source", "-timestamp"]),
         ]
+
+
+class Device(models.Model):
+    """A crawler device linked to a user."""
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="devices")
+    hostname = models.CharField(max_length=255)  # device name from crawler (platform.uname().node)
+    friendly_name = models.CharField(max_length=255, blank=True, default="")  # user-defined name
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "hostname"]),
+        ]
+        unique_together = ("user", "hostname")
 
 
 class SearchResultVote(models.Model):
@@ -435,3 +538,85 @@ class ModerationModelArtifact(models.Model):
 
     def __str__(self):
         return f"{self.version} ({self.created_on:%Y-%m-%d})"
+
+
+class SeedDomain(models.Model):
+    """A domain Staan returned for a seed crawl (Combined Search with crawl=true).
+
+    Scored for how much a crawl of it is still likely to add to the index, and for how often
+    Staan returns it - its likely benefit to searches - so crawlers can go where both are
+    high. See mwmbl.indexer.seed_domains.
+    """
+
+    domain = models.CharField(max_length=300, unique=True)
+    # Kept so discovering a high-impact domain can be rewarded later; private for now.
+    discovered_by = models.ForeignKey(
+        MwmblUser, on_delete=models.SET_NULL, null=True, related_name="discovered_seed_domains"
+    )
+    discovered_at = models.DateTimeField(default=timezone.now)
+    # Staan results for this domain across every seed crawl.
+    staan_results = models.IntegerField(default=0)
+    # Denormalised from the recent SeedDomainCrawls, so the domains can be ordered by score.
+    new_page_score = models.FloatField(default=0.0)
+    score = models.FloatField(default=0.0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["-score"]),
+        ]
+
+    def __str__(self):
+        return self.domain
+
+
+class SeedDomainCrawl(models.Model):
+    """How many new pages one finished seed crawl added from one domain.
+
+    Holds neither the user nor the query: queries are private.
+    """
+
+    seed_domain = models.ForeignKey(SeedDomain, on_delete=models.CASCADE, related_name="crawls")
+    crawled_at = models.DateTimeField(default=timezone.now)
+    pages_indexed = models.IntegerField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["seed_domain", "-crawled_at"]),
+        ]
+
+
+class CrawlerAgreement(models.Model):
+    """A crawler's submission of a URL meeting another crawler's stored copy of it, and how
+    closely the two agreed - see mwmbl.indexer.agreement.
+
+    For finding crawlers whose copies disagree with many different crawlers. A low
+    similarity says the two sides disagree, not which one is wrong, so the analysis has to
+    hold it against both: user is often the honest crawler revisiting a polluted URL. Keeps
+    the similarities rather than the text, which the submitted batches in object storage hold.
+
+    existing_user_id names the stored text's author only on pages written since that became
+    the last of a copy's user_ids. Before then the ids were in rank order, and a copy of
+    Staan's written without a source took on those of the copies it beat. Such a page keeps
+    the wrong author until a fresh copy wins it, so early rows deserve less weight.
+
+    Super Search still writes copies with neither user_ids nor a source, and one that wins a
+    page takes on the ids of the copies it beat in the same way. It is deprecated, so this is
+    left to end with it rather than handled here.
+    """
+
+    url = models.TextField()
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="+")
+    # Not a foreign key: it comes from the index, which keeps the ids of deleted users.
+    existing_user_id = models.IntegerField(db_index=True)
+    title_similarity = models.FloatField()
+    extract_similarity = models.FloatField()
+    extract_empty = models.BooleanField()
+    existing_extract_empty = models.BooleanField()
+    last_crawled_delta = models.BigIntegerField(null=True)  # seconds, incoming crawl minus stored crawl
+    crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"]),
+        ]

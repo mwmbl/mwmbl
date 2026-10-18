@@ -121,7 +121,25 @@ def validate_domain(domain_or_url: str):
 
 
 def request_cache(expire_after: Optional[timedelta] = None) -> CachedSession:
+    """A session backed by a cache on disk. expire_after of None never expires a response.
+
+    Never expiring suits a caller that replays the same requests - the evaluation scripts -
+    and is wrong for one with an endless supply of new ones, which should pass the longest
+    staleness it can live with and prune_request_cache what is left over.
+    """
     return CachedSession(expire_after=expire_after, backend="filesystem", cache_name=settings.REQUEST_CACHE_PATH)
+
+
+def prune_request_cache() -> None:
+    """Delete the cached responses that have expired.
+
+    Asking for a request again replaces its expired response, so a cache whose requests come
+    round again keeps itself in order. One whose requests mostly do not - a response per
+    search term, say - only ever grows, because the entry nobody asks for a second time is
+    the one nothing replaces. Expiry alone does not reclaim a byte without this.
+    """
+    with request_cache() as session:
+        session.cache.delete(expired=True)
 
 
 def float_or_none(s: str) -> Optional[float]:

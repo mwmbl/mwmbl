@@ -63,7 +63,7 @@ class DomainLinkDatabase:
             # This is a URL that we don't care about
             return
 
-        logger.info(f"Updating domain links for {domain_group} with {target} links")
+        logger.info(f"Updating domain links for {domain_group} with {len(target)} links")
         bloom_filter, score = self.links[domain_group]
         bloom_filter.update(target)
 

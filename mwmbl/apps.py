@@ -3,9 +3,6 @@ from pathlib import Path
 from django.apps import AppConfig
 from django.conf import settings
 
-from mwmbl.database import Database
-from mwmbl.indexer.indexdb import IndexDatabase
-
 
 def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     """Create the index file if it is missing, and check an existing one is the right shape.
@@ -81,12 +78,6 @@ def _replace_index_file(index_path, num_pages):
     temp_path.replace(index_path)
 
 
-def create_index_db():
-    with Database() as db:
-        index_db = IndexDatabase(db.connection)
-        index_db.create_tables()
-
-
 class MwmblConfig(AppConfig):
     name = "mwmbl"
     verbose_name = "Mwmbl Application"
@@ -99,7 +90,6 @@ class MwmblConfig(AppConfig):
         # grace in app.json has to cover.
         create_index(settings.EXTERNAL_CACHE_INDEX_NAME, settings.EXTERNAL_CACHE_NUM_PAGES, rebuild_on_mismatch=True)
         if settings.HAS_DATABASE:
-            create_index_db()
             import mwmbl.signals  # noqa: F401 - connects the post_save receivers
 
             self._schedule_background_tasks()
@@ -151,10 +141,14 @@ class MwmblConfig(AppConfig):
             from background_task.models import Task
 
             from mwmbl.background import (
+                count_index_urls,
+                flush_expired_tokens,
+                prune_crawler_agreements,
                 purge_blacklisted_from_queue,
                 refresh_blacklist_snapshot,
                 report_usage_to_polar,
                 retrain_domain_moderation_model,
+                summarise_search_callers,
                 sync_search_counts,
             )
 
@@ -163,6 +157,10 @@ class MwmblConfig(AppConfig):
             BLACKLIST_SNAPSHOT_TASK = "mwmbl.background.refresh_blacklist_snapshot"
             BLACKLIST_PURGE_TASK = "mwmbl.background.purge_blacklisted_from_queue"
             MODERATION_RETRAIN_TASK = "mwmbl.background.retrain_domain_moderation_model"
+            INDEX_COUNT_TASK = "mwmbl.background.count_index_urls"
+            FLUSH_TOKENS_TASK = "mwmbl.background.flush_expired_tokens"
+            PRUNE_AGREEMENTS_TASK = "mwmbl.background.prune_crawler_agreements"
+            SUMMARISE_CALLERS_TASK = "mwmbl.background.summarise_search_callers"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -196,6 +194,24 @@ class MwmblConfig(AppConfig):
                     repeat=settings.MODERATION_RETRAIN_INTERVAL_SECONDS,
                     repeat_until=None,
                 )
+
+            # Count the unique URLs in the index. The task runs every few minutes but only
+            # starts a new scan once a week; most runs either carry on with a scan or do
+            # nothing - see mwmbl.count_urls.
+            if not Task.objects.filter(task_name=INDEX_COUNT_TASK).exists():
+                count_index_urls(repeat=settings.INDEX_COUNT_RUN_INTERVAL_SECONDS, repeat_until=None)
+
+            # Clear expired refresh tokens out of the JWT blacklist tables once a day
+            if not Task.objects.filter(task_name=FLUSH_TOKENS_TASK).exists():
+                flush_expired_tokens(repeat=Task.DAILY, repeat_until=None)
+
+            if not Task.objects.filter(task_name=PRUNE_AGREEMENTS_TASK).exists():
+                prune_crawler_agreements(repeat=Task.DAILY, repeat_until=None)
+
+            # Hourly, so a finished week's per-caller counts are replaced by its totals well
+            # inside the grace day before they expire - see mwmbl.search_callers.
+            if not Task.objects.filter(task_name=SUMMARISE_CALLERS_TASK).exists():
+                summarise_search_callers(repeat=Task.HOURLY, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails

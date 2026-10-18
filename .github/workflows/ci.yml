@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -50,6 +49,15 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
     
     steps:
       #----------------------------------------------
@@ -76,6 +84,10 @@ jobs:
       #----------------------------------------------
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       #----------------------------------------------
       # install dependencies
@@ -106,9 +118,16 @@ jobs:
       #----------------------------------------------
       - name: Check the crawler entry point imports standalone
         run: uv run python -c "from mwmbl.crawl import run"
-      - name: Run tests
+      - name: Run Python and Rust tests with coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl
           DJANGO_SETTINGS_MODULE: mwmbl.settings_test
-        run: |
-          uv run pytest
+          TEST_REDIS_URL: redis://localhost:6379/15
+        run: make coverage
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/python.xml,./coverage/rust.lcov
+          fail_ci_if_error: false

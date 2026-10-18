@@ -9,6 +9,7 @@ This counter is the only signal that the removals are actually happening.
 from unittest.mock import patch
 
 import fakeredis
+import pytest
 
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY, LONG_EXPIRE_SECONDS, StatsManager
 from mwmbl.utils import utc_today
@@ -20,6 +21,7 @@ NO_INDEX_COUNTS = {
 }
 
 
+@pytest.mark.django_db
 def test_recorded_removals_appear_in_the_stats_for_today():
     redis = fakeredis.FakeRedis(decode_responses=True)
     stats_manager = StatsManager(redis)
@@ -34,6 +36,7 @@ def test_recorded_removals_appear_in_the_stats_for_today():
     assert stats.blacklisted_results_removed_daily[today] == 7
 
 
+@pytest.mark.django_db
 def test_stats_report_zero_removals_for_days_with_no_purge():
     redis = fakeredis.FakeRedis(decode_responses=True)
     stats_manager = StatsManager(redis)

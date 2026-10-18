@@ -1,7 +1,7 @@
 """
-Compare standard search vs Super Search v2 on the gold test set.
+Compare standard search, Super Search v2 and Combined Search on the gold test set.
 
-Both are scored against the same gold test split via ``rankeval.evaluation.evaluate``
+Every arm is scored against the same gold test split via ``rankeval.evaluation.evaluate``
 on the same sampled queries (the evaluate module RNG is reseeded per model).
 
 Fairness note — the standard-search baseline uses the *same* local mwmbl index,
@@ -11,6 +11,10 @@ being measured is what Super Search *adds*: its extra sources (HN, GitHub, ArXiv
 PyPI, Stack Exchange, recipes), page crawling and outbound-link following. A
 remote-index baseline (``evaluate_remote.py``) would be confounded by index size,
 because Super Search's mwmbl source queries the local index, not the production one.
+
+Combined Search is the arm that is meant to replace Super Search: the same local index and
+LTR machinery, plus Staan and Wikipedia, with no crawling and no link-following. Its ablation
+arm pools the index and Wikipedia only, so the gap between the two is Staan's contribution.
 
 Usage::
 
@@ -32,6 +36,7 @@ from django.conf import settings  # noqa: E402
 import mwmbl.rankeval.evaluation.evaluate as evaluate_module  # noqa: E402
 import mwmbl.rankeval.evaluation.evaluate_super_search as ss_module  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate import evaluate  # noqa: E402
+from mwmbl.rankeval.evaluation.evaluate_combined_search import CombinedSearchRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_ranker import MwmblRankingModel  # noqa: E402
 from mwmbl.rankeval.evaluation.evaluate_super_search import SuperSearchRankingModel  # noqa: E402
 from mwmbl.search_setup import ranker  # noqa: E402  (local mwmbl index + LTR + MMR + wiki)
@@ -63,6 +68,8 @@ def run():
         ("standard search (local index + wiki)", lambda: MwmblRankingModel(ranker)),
         ("super search v2 (cosine baseline, no new sources)", lambda: ss_arm([])),
         ("super search + new sources (gov.uk, imdb)", lambda: ss_arm(NEW_SOURCES)),
+        ("combined search (index + wiki, no staan)", lambda: CombinedSearchRankingModel(include_staan=False)),
+        ("combined search (index + staan + wiki)", lambda: CombinedSearchRankingModel()),
     ]
     for label, make_model in models:
         print(f"\n{'=' * 70}\nEvaluating {label}\n{'=' * 70}")

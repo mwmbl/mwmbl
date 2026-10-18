@@ -6,7 +6,6 @@ from time import sleep
 import django
 from django.core.management import call_command
 from gunicorn.app.base import BaseApplication
-from redis import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -40,38 +39,45 @@ def run_background_tasks():
         sleep(TASK_QUEUE_RESTART_SECONDS)
 
 
+def run_seed_crawls():
+    """Run queued seed crawls - see mwmbl.indexer.seed_crawl. Entry point for the child process.
+
+    A process of its own, rather than a task on the queue above, so that crawls lasting
+    minutes never hold up the periodic tasks. Spawned for the same reason that is.
+    """
+    django.setup()
+
+    from mwmbl.indexer.seed_crawl import run_seed_crawl_worker
+
+    while True:
+        try:
+            run_seed_crawl_worker()
+        except Exception:
+            # A crawl's own failure is recorded and survived inside the worker, so this is
+            # Redis or the database going away.
+            logger.exception("Seed crawl worker failed; restarting in %ds", TASK_QUEUE_RESTART_SECONDS)
+        sleep(TASK_QUEUE_RESTART_SECONDS)
+
+
 def run():
     django.setup()
 
     from django.conf import settings
 
     from mwmbl import background
-    from mwmbl.count_urls import count_urls_continuously
-    from mwmbl.curated_domains import get_curated_domains
-    from mwmbl.indexer.update_urls import update_urls_continuously
-    from mwmbl.redis_url_queue import RedisURLQueue
 
     if settings.STATIC_ROOT:
         call_command("collectstatic", "--clear", "--noinput")
 
     call_command("migrate")
 
-    # DEPRECATED: update_urls, update_batches, copy_indexes and count_urls are no longer
-    # deployed. "server" is the only app that runs, and it now also runs the background
-    # task queue (see below). They are kept here rather than deleted because the code
-    # they call is still reachable from the management commands and the standalone
-    # crawler; treat them as unmaintained.
+    # DEPRECATED: copy_indexes is no longer deployed. "server" is the only app that runs,
+    # and it now also runs the background task queue (see below). It is kept here rather
+    # than deleted because the code it calls is still reachable from the management
+    # commands and the standalone crawler; treat it as unmaintained.
     mwmbl_app = os.environ["MWMBL_APP"]
-    if mwmbl_app == "update_urls":
-        redis: Redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
-        url_queue = RedisURLQueue(redis, get_curated_domains)
-        update_urls_continuously(settings.DATA_PATH, url_queue)
-    elif mwmbl_app == "update_batches":
-        background.run(settings.DATA_PATH)
-    elif mwmbl_app == "copy_indexes":
+    if mwmbl_app == "copy_indexes":
         background.copy_indexes_continuously()
-    elif mwmbl_app == "count_urls":
-        count_urls_continuously()
     elif mwmbl_app == "process_tasks":
         # The task queue on its own, for running it in a container of its own rather than
         # alongside the server. Not currently deployed - RUN_BACKGROUND_TASKS on the
@@ -92,6 +98,12 @@ def run():
             )
             process.start()
             logger.info("Started the background task queue (pid %d)", process.pid)
+
+            seed_crawl_process = multiprocessing.get_context("spawn").Process(
+                target=run_seed_crawls, name="seed-crawls", daemon=True
+            )
+            seed_crawl_process.start()
+            logger.info("Started the seed crawl worker (pid %d)", seed_crawl_process.pid)
 
         workers = multiprocessing.cpu_count() * 2 + 1
 

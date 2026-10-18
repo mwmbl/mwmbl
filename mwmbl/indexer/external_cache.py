@@ -138,19 +138,26 @@ def external_cache_term(query: str) -> str:
     return digest.hexdigest()[:16]
 
 
-def is_fresh(document: Document, now: int) -> bool:
-    """Whether a cached document is still within its TTL. Untimestamped means stale.
+def _ttl_seconds(document: Document) -> int:
+    """How long this entry stays fresh.
 
-    This runs over a page's other entries too, which belong to other queries and other
-    providers, so it cannot recover the source from the term - document.source is the only
-    thing that identifies them, and it is where a per-source TTL would key off.
+    An empty-result sentinel expires sooner than a real entry, and a provider whose results
+    turn over faster than an encyclopedia's gets its own TTL. document.source is the only
+    thing that identifies a provider here - this runs over a page's other entries too, which
+    belong to other queries and other providers, so the term says nothing about them.
+
+    Built per call rather than at import: a setting read at import time is a setting that
+    override_settings cannot move, and the tests do move it.
     """
-    ttl = (
-        settings.EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS
-        if document.url == EXTERNAL_CACHE_EMPTY_URL
-        else settings.EXTERNAL_CACHE_TTL_SECONDS
-    )
-    return document.last_crawled is not None and now - document.last_crawled < ttl
+    if document.url == EXTERNAL_CACHE_EMPTY_URL:
+        return settings.EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS
+    ttl_by_source = {DocumentSource.STAAN: settings.EXTERNAL_CACHE_STAAN_TTL_SECONDS}
+    return ttl_by_source.get(document.source, settings.EXTERNAL_CACHE_TTL_SECONDS)
+
+
+def is_fresh(document: Document, now: int) -> bool:
+    """Whether a cached document is still within its TTL. Untimestamped means stale."""
+    return document.last_crawled is not None and now - document.last_crawled < _ttl_seconds(document)
 
 
 def get_cached_external_results(

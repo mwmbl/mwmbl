@@ -3,7 +3,9 @@ Pretend to be an index but retrieve results from a remote index.
 """
 
 import time
+from datetime import timedelta
 from logging import getLogger
+from typing import Optional
 
 import requests
 
@@ -25,17 +27,30 @@ USER_AGENT = f"mwmbl-remote-index/{REMOTE_INDEX_VERSION} (+https://github.com/mw
 
 
 class RemoteIndex:
-    def __init__(self, remote_server: str = MWMBL_REMOTE_SERVER, user_agent: str = USER_AGENT):
+    def __init__(
+        self,
+        remote_server: str = MWMBL_REMOTE_SERVER,
+        user_agent: str = USER_AGENT,
+        expire_after: Optional[timedelta] = None,
+    ):
+        """expire_after is how long a cached copy of the index's results may be reused.
+
+        None never expires it, which is what the evaluation scripts want: they replay one
+        set of queries over and over against an index that moves slowly enough not to
+        matter. A caller that runs for weeks against a moving index wants a real expiry -
+        see REMOTE_INDEX_CACHE_EXPIRY in crawl.py.
+        """
         self.remote_server = remote_server
         # A caller that knows more about itself than this module does - the crawler, with its
         # version and its user's name - says so here rather than being lumped in with scripts.
         self.user_agent = user_agent
+        self.expire_after = expire_after
         self.url = f"{remote_server}/api/v1/search/raw?s="
 
     def retrieve(self, query: str, refresh: bool = False):
         url = self.url + query
         response = None
-        with request_cache() as session:
+        with request_cache(self.expire_after) as session:
             session.headers["User-Agent"] = self.user_agent
             for i in range(3):
                 try:

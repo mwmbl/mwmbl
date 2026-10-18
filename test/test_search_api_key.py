@@ -9,6 +9,7 @@ Covers:
 - flush_search_counts background task
 """
 
+from collections import Counter
 from datetime import datetime
 from datetime import timezone as stdlib_timezone
 from unittest.mock import patch
@@ -23,8 +24,17 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl import pricing
 from mwmbl.background import sync_search_counts
+from mwmbl.indexer.index_batches import IndexedDocuments
 from mwmbl.models import AgreementType, ApiKey, UsageBucket, UserAgreement, UserBilling, generate_api_key
-from mwmbl.quota import RATE_LIMIT, _monthly_key, check_rate_limit, get_monthly_count, increment_monthly
+from mwmbl.quota import (
+    RATE_LIMIT,
+    _combined_search_api_monthly_key,
+    _monthly_key,
+    check_rate_limit,
+    get_monthly_combined_search_api_count,
+    get_monthly_count,
+    increment_monthly,
+)
 
 User = get_user_model()
 
@@ -458,9 +468,35 @@ def test_search_keyed_with_spend_limit_raises_cap(api_client, search_api_key, ve
     assert response.status_code == 429
 
 
+@pytest.mark.django_db
+def test_search_keyed_cap_shrinks_with_combined_search_spend(api_client, search_api_key, verified_user):
+    """Standard search and keyed Combined Search share the one spend limit."""
+    UserBilling.objects.create(user=verified_user, max_monthly_spend_cents=1_000)
+    expected_cap = pricing.effective_monthly_request_cap(1_000, combined_search_count=1_000)
+
+    with (
+        patch("mwmbl.tinysearchengine.search.check_rate_limit", return_value=True),
+        patch("mwmbl.tinysearchengine.search.get_monthly_combined_search_api_count", return_value=1_000),
+        patch("mwmbl.tinysearchengine.search.get_monthly_count", return_value=expected_cap),
+    ):
+        response = api_client.get(
+            "/api/v2/search/?q=python",
+            **api_key_header(search_api_key.raw_key),
+        )
+    assert response.status_code == 429
+
+
 # ---------------------------------------------------------------------------
 # Crawler /results — header vs body key and scope enforcement
 # ---------------------------------------------------------------------------
+
+
+def _capturing_index(captured):
+    def index_documents(documents, index_path):
+        captured.extend(documents)
+        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), [])
+
+    return index_documents
 
 
 @pytest.mark.django_db
@@ -553,7 +589,7 @@ def test_post_results_uses_submitted_last_crawled(api_client, crawl_api_key):
     captured = []
 
     with (
-        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.index_documents", side_effect=_capturing_index(captured)),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
     ):
@@ -621,7 +657,7 @@ def test_post_results_sets_user_id(api_client, crawl_api_key, verified_user):
     captured = []
 
     with (
-        patch("mwmbl.crawler.app.index_documents", side_effect=lambda docs, path: captured.extend(docs)),
+        patch("mwmbl.crawler.app.index_documents", side_effect=_capturing_index(captured)),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
     ):
@@ -687,7 +723,10 @@ def test_sync_search_counts_redis_to_postgres(verified_user):
     key = _monthly_key(verified_user.id)
     cache.set(key, 42, timeout=3600)
 
-    with patch("mwmbl.background.get_all_monthly_keys", return_value=[key]):
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[key]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[]),
+    ):
         sync_search_counts.now()
 
     bucket = UsageBucket.objects.get(user=verified_user, year=now.year, month=now.month)
@@ -707,7 +746,10 @@ def test_sync_search_counts_seeds_redis_from_postgres(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=99)
     cache.delete(key)
 
-    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[]),
+    ):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 99
@@ -727,7 +769,10 @@ def test_sync_search_counts_uses_postgres_value_when_higher(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=70)
     cache.set(key, 5, timeout=3600)
 
-    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[]),
+    ):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 70
@@ -746,11 +791,42 @@ def test_sync_search_counts_keeps_redis_value_when_higher(verified_user):
     UsageBucket.objects.create(user=verified_user, year=now.year, month=now.month, count=70)
     cache.set(key, 85, timeout=3600)
 
-    with patch("mwmbl.background.get_all_monthly_keys", return_value=[]):
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[]),
+    ):
         sync_search_counts.now()
 
     assert get_monthly_count(verified_user.id) == 85
 
+    cache.delete(key)
+
+
+@pytest.mark.django_db
+def test_sync_search_counts_syncs_the_combined_search_counter(verified_user):
+    """The keyed Combined Search counter goes to its own field and is restored from it."""
+    now = datetime.now(stdlib_timezone.utc)
+    key = _combined_search_api_monthly_key(verified_user.id)
+    cache.set(key, 12, timeout=3600)
+
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[key]),
+    ):
+        sync_search_counts.now()
+
+    bucket = UsageBucket.objects.get(user=verified_user, year=now.year, month=now.month)
+    assert bucket.combined_search_count == 12
+    assert bucket.count == 0
+
+    cache.delete(key)
+    with (
+        patch("mwmbl.background.get_all_monthly_keys", return_value=[]),
+        patch("mwmbl.background.get_all_combined_search_api_monthly_keys", return_value=[]),
+    ):
+        sync_search_counts.now()
+
+    assert get_monthly_combined_search_api_count(verified_user.id) == 12
     cache.delete(key)
 
 
@@ -858,6 +934,27 @@ def test_rate_limit_allows_up_to_limit():
     # The next one should be rejected
     assert not check_rate_limit(user_id), "Request exceeding rate limit should be rejected"
 
+    cache.delete(rate_key)
+
+
+def test_rate_limit_allows_a_request_when_the_window_expires_between_add_and_incr():
+    user_id = 99998
+    rate_key = f"search:rate:{user_id}"
+    cache.delete(rate_key)
+    real_add = cache.add
+    add_calls = []
+
+    def add_after_expiry(key, value, timeout):
+        # The first add() sees the previous window's key, which expires before incr().
+        add_calls.append(key)
+        if len(add_calls) == 1:
+            return False
+        return real_add(key, value, timeout)
+
+    with patch.object(cache, "add", side_effect=add_after_expiry):
+        assert check_rate_limit(user_id)
+
+    assert cache.get(rate_key) == 1, "The request should start a new window"
     cache.delete(rate_key)
 
 

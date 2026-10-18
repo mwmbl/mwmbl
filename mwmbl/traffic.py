@@ -16,7 +16,7 @@ classification earns its place, once there is data to design it against.
 
 import random
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 from logging import getLogger
 from typing import Optional
 
@@ -25,6 +25,7 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from redis.exceptions import RedisError
 
+from mwmbl import search_callers
 from mwmbl.utils import utc_today
 
 logger = getLogger(__name__)
@@ -87,9 +88,12 @@ def endpoint_label(request: HttpRequest) -> Optional[str]:
 
 
 # The one split on the request counter, and a description rather than a judgement: which of
-# the two headers arrived, not what that means. A request with neither is what our own
-# server-side render sends today, and a missing Accept-Language is the cheapest hint that a
-# client is not a browser, since browsers send one and HTTP clients do not.
+# the two headers arrived, not what that means. A missing Accept-Language is the cheapest hint
+# that a client is not a browser, since browsers send one and HTTP clients do not. Note what it
+# cannot see: SearxNG sets Accept-Language (send_accept_language_header defaults to True) and a
+# browser User-Agent, and our own SvelteKit render reaches us through Node's fetch as
+# User-Agent: node with Accept-Language: *. Both land in user_agent+language, which is where
+# real browsers land too. The split separates clients that do not try from everything else.
 HEADER_LABELS = ["user_agent+language", "user_agent", "language", "neither"]
 
 
@@ -102,11 +106,16 @@ def header_label(request: HttpRequest) -> str:
 
 
 # The status class the client got, and like the header split a description rather than a
-# judgement. A request that 4xx'd cost us a URL match and nothing else; one that 2xx'd cost
-# us a ranker run. Without this dimension a bot sending malformed queries that never reach
-# the index is indistinguishable from a visitor being served, which is the whole question
-# #410 is asking. The class rather than the code, because the codes are the view's business
-# and this counter should not have an opinion about how many of them there are.
+# judgement. A request that 4xx'd cost us a URL match and nothing else. What a 2xx cost
+# depends on the endpoint and this dimension cannot tell them apart: /search retrieves for
+# every term, completion and bigram and then runs the model, while /raw is a single retrieve
+# of the whole query as one term (rank.get_raw_results). Reading a 2xx as one fixed price
+# overstates /raw, which is most of what the crawler's index sync does.
+#
+# Without this dimension a bot sending malformed queries that never reach the index is
+# indistinguishable from a visitor being served, which is the whole question #410 is asking.
+# The class rather than the code, because the codes are the view's business and this counter
+# should not have an opinion about how many of them there are.
 STATUS_LABELS = ["1xx", "2xx", "3xx", "4xx", "5xx"]
 
 
@@ -190,7 +199,13 @@ def record_request(request: HttpRequest, response: HttpResponse) -> None:
         if random.random() < USER_AGENT_TRIM_PROBABILITY:
             pipeline.zremrangebyrank(user_agent_key, 0, -TRACKED_USER_AGENTS - 1)
 
-        pipeline.execute()
+        queued_caller = None
+        if endpoint in search_callers.IDENTITY_ENDPOINTS and response.status_code // 100 == 2:
+            queued_caller = search_callers.queue_caller(get_redis(), pipeline, request, today)
+
+        results = pipeline.execute()
+        if queued_caller is not None:
+            search_callers.record_thresholds(get_redis(), queued_caller, results)
     except RedisError:
         logger.warning("Could not record search traffic for %s", endpoint, exc_info=True)
 
@@ -232,3 +247,30 @@ def read_user_agent_counts(redis_client, days: list[date], limit: int) -> list[t
         for user_agent, count in day_counts:
             totals[user_agent] += int(count)
     return totals.most_common(limit)
+
+
+def caller_window_searches(redis_client, window: date) -> int:
+    """A week's served searches on the endpoints callers are counted for: what their shares are of."""
+    days = [window + timedelta(days=offset) for offset in range(search_callers.WINDOW_DAYS)]
+    counts = read_request_counts(redis_client, days)
+    return sum(
+        count
+        for (_, endpoint, _, status), count in counts.items()
+        if endpoint in search_callers.IDENTITY_ENDPOINTS and status == "2xx"
+    )
+
+
+def summarise_last_caller_window(redis_client) -> bool:
+    """Roll last week's callers into totals, if that has not happened yet. Hourly, so a week
+    is summarised within an hour of ending and well inside its per-caller keys' grace day."""
+    last_window = search_callers.window_start(utc_today()) - timedelta(days=search_callers.WINDOW_DAYS)
+    # A request that read the clock just before midnight can recreate last week's keys after
+    # its summary. They expire at the end of the grace day; summarising them again would
+    # replace the week's totals with that one search.
+    if search_callers.read_summary(redis_client, last_window) is not None:
+        return False
+    if not redis_client.exists(search_callers.DISTINCT_KEY.format(window=last_window)):
+        return False
+    searches = caller_window_searches(redis_client, last_window)
+    search_callers.summarise_window(redis_client, last_window, searches)
+    return True

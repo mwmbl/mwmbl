@@ -2,6 +2,8 @@
 
 [![Matrix](https://img.shields.io/matrix/mwmbl:matrix.org)](https://matrix.to/#/#mwmbl:matrix.org)
 
+[![codecov](https://codecov.io/gh/mwmbl/mwmbl/graph/badge.svg)](https://codecov.io/gh/mwmbl/mwmbl)
+
 **No ads, no tracking, no profit**
 
 [Mwmbl](https://mwmbl.org) is a non-profit, open source search engine
@@ -37,6 +39,13 @@ Documentation
 =============
 
 All documentation is at [https://book.mwmbl.org](https://book.mwmbl.org).
+
+Development coverage
+====================
+
+`make coverage` measures the Python and Rust code and prints a combined,
+executable-line-weighted percentage. See [the coverage guide](docs/coverage.md)
+for prerequisites, exclusions, and CI details.
 
 
 Crawling
@@ -198,4 +207,3 @@ Acknowledgements
 ================
 
 Many thanks to [Mohamed Alm](https://github.com/theonlyalm) for security consultations and recommendations.
-

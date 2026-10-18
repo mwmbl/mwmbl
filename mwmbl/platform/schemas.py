@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from ninja import Field, ModelSchema, Schema
 from pydantic import model_validator
 
-from mwmbl.models import AgreementType, DomainSubmission, MarketingSource
+from mwmbl.membership import MembershipTier, VolunteerTier
+from mwmbl.models import AgreementType, DomainSubmission, MarketingSource, NotificationKind
 
 
 class UserProfileResponse(Schema):
@@ -12,6 +13,18 @@ class UserProfileResponse(Schema):
     email: str
     plan: str
     email_confirmed: bool
+    date_joined: datetime
+
+
+class UserStatsResponse(Schema):
+    """Per-user contribution stats for the logged-in user."""
+
+    username: str
+    results_indexed_today: int
+    results_indexed_daily: dict[str, int]
+    seed_search_pages_indexed: int
+    seed_searches: int
+    seed_sites_discovered: int
 
 
 class SubscriptionResponse(Schema):
@@ -19,6 +32,8 @@ class SubscriptionResponse(Schema):
     max_monthly_spend_cents: int
     monthly_limit: int
     monthly_usage: int
+    combined_search_monthly_limit: int
+    combined_search_monthly_usage: int
     estimated_cost_cents: int
     current_period_end: Optional[datetime]
     polar_customer_id: Optional[str]
@@ -31,6 +46,81 @@ class CheckoutRequest(Schema):
 
 class CheckoutResponse(Schema):
     checkout_url: str
+
+
+class MembershipTierResponse(Schema):
+    tier: MembershipTier
+    name: str
+    monthly_price_pence: int
+    perks: list[str]
+
+
+class MembershipResponse(Schema):
+    tier: MembershipTier
+    current_period_end: Optional[datetime]
+    cancel_at_period_end: bool
+
+
+class VolunteerTierResponse(Schema):
+    tier: VolunteerTier
+    name: str
+    days_per_month: int
+    min_results_per_day: int
+    perks: list[str]
+
+
+class VolunteerMembershipResponse(Schema):
+    tier: VolunteerTier
+    name: str
+    # The last day the membership is valid, unless the user earns it again before then.
+    valid_until: date
+
+
+class CombinedSearchUsageResponse(Schema):
+    monthly_usage: int
+    monthly_limit: int
+
+
+class PaidMembershipResponse(Schema):
+    tier: MembershipTier
+    name: str
+    current_period_end: Optional[datetime]
+    cancel_at_period_end: bool
+
+
+class MembershipV2Response(Schema):
+    """Everything the membership page shows: a user can hold a paid and a volunteer membership at once."""
+
+    paid: Optional[PaidMembershipResponse]
+    volunteer: Optional[VolunteerMembershipResponse]
+    combined_search: CombinedSearchUsageResponse
+
+
+class MembershipTiersV2Response(Schema):
+    paid: list[MembershipTierResponse]
+    volunteer: list[VolunteerTierResponse]
+
+
+class UserNotificationResponse(Schema):
+    id: int
+    kind: NotificationKind
+    # Depends on kind: volunteer_membership_granted has tier and valid_until.
+    data: dict
+    created: datetime
+
+
+class CombinedSearchPreference(Schema):
+    enabled: bool
+
+
+class MembershipCheckoutRequest(Schema):
+    tier: MembershipTier
+    success_url: Optional[str] = None
+    embed_origin: Optional[str] = None
+
+
+class MembershipChangeRequest(Schema):
+    tier: MembershipTier
 
 
 class UpdateSpendLimitRequest(Schema):
@@ -77,6 +167,13 @@ class ApiKeyCreatedResponse(Schema):
     key: str = Field(description="The raw API key token. Shown only on creation.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
@@ -89,6 +186,13 @@ class ApiKeyListItem(Schema):
     id: int = Field(description="Unique ID of the API key.")
     name: str = Field(description="Human-readable label for this key.")
     created_on: datetime = Field(description="When the key was created.")
+    last_used: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the key was last used to authenticate, or null if it never has been. "
+            "Accurate to within an hour for search keys, which are cached between checks."
+        ),
+    )
     scopes: list[str] = Field(description="Scopes granted to this key.")
 
 
@@ -126,6 +230,22 @@ class MarketingConsentResponse(Schema):
 class MarketingConsentListResponse(Schema):
     consent: list[MarketingConsentResponse] = Field(
         description="Current marketing consent state per source the user has a record for.",
+    )
+
+
+class DeviceResponse(Schema):
+    id: int
+    hostname: str
+    friendly_name: Optional[str] = None
+    first_seen: datetime
+    last_seen: datetime
+
+
+class UpdateDeviceRequest(Schema):
+    friendly_name: str = Field(
+        max_length=255,
+        description="The new friendly name for the device.",
+        example="My Laptop",
     )
 
 

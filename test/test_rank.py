@@ -8,7 +8,7 @@ from requests.exceptions import RetryError
 from urllib3.exceptions import MaxRetryError, ResponseError
 
 from mwmbl.tinysearchengine import rank
-from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.indexer import Document, DocumentSource
 from mwmbl.tinysearchengine.ltr_rank import LTRRanker
 from mwmbl.tinysearchengine.rank import (
     NUM_WIKI_RESULTS,
@@ -62,6 +62,45 @@ def test_search_still_triggers_external_search():
     ranker = _TrackingRanker()
     ranker.search("some query", [])
     assert ranker.external_search_calls == ["some query"]
+
+
+def test_search_retrieved_ranks_like_search_without_external_search():
+    """Combined Search retrieves from the index while Staan is in flight, then ranks the two
+    together. That split must rank exactly as a single search() call would."""
+    index_pages = [
+        Document("Bananas", "https://a.com/", "Bananas and apples", 1.0),
+        Document("Apples", "https://b.com/", "Only apples", 2.0),
+        Document("Bananas again", "https://a.com/", "A repeat of the first URL", 0.5),
+    ]
+    additional = [Document("Banana bread", "https://c.com/", "Bananas, baked", 3.0)]
+    ranker = _TrackingRanker()
+    ranker.tiny_index.retrieve.return_value = index_pages
+
+    retrieved = ranker.search_retrieved(ranker.retrieve("bananas "), additional)
+    searched = ranker.search("bananas ", additional, use_external_search=False)
+
+    assert [d.url for d in retrieved] == [d.url for d in searched]
+    assert sorted(d.url for d in retrieved) == ["https://a.com/", "https://c.com/"]
+    assert ranker.external_search_calls == []
+
+
+def test_a_staan_copy_from_the_index_keeps_its_source():
+    """Read off a term's page rather than the curation term's, as it is for any query other
+    than the one it was stored under, it still goes out labelled as Staan's."""
+    staan_copy = Document(
+        "Tokio async runtime",
+        "https://tokio.rs/",
+        "An async runtime for Rust.",
+        1.0,
+        term="tokio",
+        source=DocumentSource.STAAN_INDEXED,
+    )
+    ranker = _TrackingRanker()
+    ranker.tiny_index.retrieve.side_effect = lambda term: [staan_copy] if term == "tokio" else []
+
+    (result,) = ranker.search("async tokio ", [], use_external_search=False)
+
+    assert result.source == DocumentSource.STAAN_INDEXED
 
 
 def _make_retry_error(status_code: int) -> RetryError:

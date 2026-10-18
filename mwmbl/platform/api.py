@@ -14,19 +14,27 @@ from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
 from polar_sdk import Polar
 from polar_sdk import models as polar_models
-from polar_sdk.models import SubscriptionCancel
-from polar_sdk.webhooks import WebhookVerificationError, validate_event
+from polar_sdk.models import (
+    SubscriptionCancel,
+    SubscriptionProrationBehavior,
+    SubscriptionStatus,
+    SubscriptionUpdateBase,
+)
+from polar_sdk.webhooks import WebhookVerificationError
 
-from mwmbl import pricing
+from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
+    SEED_CRAWLER_USERNAME,
     AgreementType,
     ApiKey,
+    Device,
     DomainEvidence,
     DomainSubmission,
     MarketingConsent,
     MarketingSource,
+    Membership,
     MwmblUser,
     SearchResultVote,
     UserAgreement,
@@ -50,13 +58,20 @@ from mwmbl.platform.schemas import (
     BulkDecisionRequest,
     CheckoutRequest,
     CheckoutResponse,
+    CombinedSearchPreference,
+    CombinedSearchUsageResponse,
     ConfirmEmail,
     CreateApiKeyRequest,
+    DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
     MarketingConsentListResponse,
     MarketingConsentRequest,
     MarketingConsentResponse,
+    MembershipChangeRequest,
+    MembershipCheckoutRequest,
+    MembershipResponse,
+    MembershipTierResponse,
     ModeratedDomainSchema,
     ModerationHistory,
     ModerationQueue,
@@ -65,9 +80,11 @@ from mwmbl.platform.schemas import (
     ResetPasswordRequest,
     SubmissionDetailSchema,
     SubscriptionResponse,
+    UpdateDeviceRequest,
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
     UserProfileResponse,
+    UserStatsResponse,
     UserVoteHistory,
     VoteRemoveRequest,
     VoteRequest,
@@ -75,10 +92,13 @@ from mwmbl.platform.schemas import (
     VoteStats,
     VoteStatsRequest,
 )
+from mwmbl.polar_webhooks import validate_event
+from mwmbl.quota import get_monthly_combined_search_api_count, get_monthly_combined_search_count
 from mwmbl.search_auth import AccountApiKeyAuth, invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
 from mwmbl.utils import normalize_domain, validate_domain
+from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +128,12 @@ def register(request, registration: Registration):
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
-    if registration.username and MwmblUser.objects.filter(username=registration.username).exists():
-        raise InvalidRequest("Username already exists")
+    if registration.username:
+        username_taken = MwmblUser.objects.filter(username=registration.username).exists()
+        # Reserved even before migration 0049 makes the user, so nobody can take it first and
+        # fail it - and in any case, as allauth's blacklist is, so nobody can pass for it.
+        if username_taken or registration.username.lower() == SEED_CRAWLER_USERNAME:
+            raise InvalidRequest("Username already exists")
 
     user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)
@@ -1077,6 +1101,7 @@ def list_api_keys(request) -> list[ApiKeyListItem]:
             id=k.id,
             name=k.name,
             created_on=k.created_on,
+            last_used=k.last_used,
             scopes=k.scopes,
         )
         for k in keys
@@ -1106,6 +1131,58 @@ def delete_api_key(request, key_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/",
+    auth=JWTAuth(),
+    response=list[DeviceResponse],
+    summary="List devices",
+    description=("List all devices belonging to the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def list_devices(request) -> list[DeviceResponse]:
+    check_email_verified(request)
+    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
+    return [
+        DeviceResponse(
+            id=d.id,
+            hostname=d.hostname,
+            friendly_name=d.friendly_name or None,
+            first_seen=d.first_seen,
+            last_seen=d.last_seen,
+        )
+        for d in devices
+    ]
+
+
+@router.patch(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    response=DeviceResponse,
+    summary="Update device friendly name",
+    description=("Update the friendly name of a device owned by the authenticated user. Requires a verified account."),
+    tags=["Devices"],
+)
+def update_device(request, device_id: int, body: UpdateDeviceRequest):
+    check_email_verified(request)
+    device = Device.objects.filter(id=device_id, user=request.user).first()
+    if device is None:
+        raise InvalidRequest("Device not found.", status=404)
+    device.friendly_name = body.friendly_name
+    device.save(update_fields=["friendly_name"])
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
+
+
+# ---------------------------------------------------------------------------
 # User profile
 # ---------------------------------------------------------------------------
 
@@ -1116,7 +1193,7 @@ def delete_api_key(request, key_id: int):
     response=UserProfileResponse,
     summary="Get current user profile",
     description=(
-        "Returns the authenticated user's username, email, plan, and email confirmation status. "
+        "Returns the authenticated user's username, email, plan, email confirmation status, and join date. "
         "Accepts a Bearer token or an API key of any scope in the `X-API-Key` header, so a "
         "crawler can look up the username its key belongs to."
     ),
@@ -1133,7 +1210,32 @@ def get_current_user(request):
         email=user.email,
         plan="free" if spend_cents == 0 else "pay-as-you-go",
         email_confirmed=email_address.verified if email_address else False,
+        date_joined=user.date_joined,
     )
+
+
+@router.get(
+    "/user/stats",
+    auth=JWTAuth(),
+    response=UserStatsResponse,
+    summary="Get current user's contribution stats",
+    description=(
+        "Returns the authenticated user's contribution stats: how many results they "
+        "have indexed, broken down per day for the last 30 days, how many Seed Searches "
+        "(Combined Search with `crawl=true`) they have made, how many sites their seed crawls were the "
+        "first to find, and how many new pages those crawls have added to the index, all in all."
+    ),
+    tags=["Users"],
+)
+def get_current_user_stats(request):
+    user = request.user
+    stats = stats_manager.get_user_stats(user.username)
+    return {
+        **stats,
+        "seed_search_pages_indexed": user.seed_search_pages_indexed,
+        "seed_searches": user.seed_searches,
+        "seed_sites_discovered": user.discovered_seed_domains.count(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1146,12 +1248,15 @@ def _subscription_response(user, billing, status: str) -> SubscriptionResponse:
 
     spend_cents = billing.max_monthly_spend_cents if billing else 0
     usage = get_monthly_count(user.id)
+    combined_search_usage = get_monthly_combined_search_api_count(user.id)
     return SubscriptionResponse(
         status=status,
         max_monthly_spend_cents=spend_cents,
-        monthly_limit=pricing.effective_monthly_request_cap(spend_cents),
+        monthly_limit=pricing.effective_monthly_request_cap(spend_cents, combined_search_usage),
         monthly_usage=usage,
-        estimated_cost_cents=pricing.estimated_cost_cents(usage),
+        combined_search_monthly_limit=pricing.combined_search_monthly_cap(spend_cents, usage),
+        combined_search_monthly_usage=combined_search_usage,
+        estimated_cost_cents=pricing.estimated_cost_cents(usage, combined_search_usage),
         current_period_end=billing.current_period_end if billing else None,
         polar_customer_id=billing.polar_customer_id if billing else None,
     )
@@ -1204,6 +1309,301 @@ def create_checkout(request, body: CheckoutRequest):
     with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
         result = polar.checkouts.create(request=checkout_params)
     return CheckoutResponse(checkout_url=result.url)
+
+
+# ---------------------------------------------------------------------------
+# Membership
+# ---------------------------------------------------------------------------
+
+# Past-due subscriptions stay live while Polar retries the payment, so a failed renewal doesn't
+# end the membership straight away; Polar cancels the subscription if the retries run out.
+LIVE_SUBSCRIPTION_STATUSES = [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE]
+
+
+def _live_membership_subscriptions(user) -> list[polar_models.Subscription]:
+    """The user's live membership subscriptions according to Polar, newest first."""
+    membership_products = [product for product in membership.product_ids().values() if product]
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        response = polar.subscriptions.list(
+            external_customer_id=str(user.id),
+            product_id=membership_products,
+            status=LIVE_SUBSCRIPTION_STATUSES,
+            limit=100,
+        )
+    return sorted(response.result.items, key=lambda subscription: subscription.created_at, reverse=True)
+
+
+@router.get(
+    "/membership/tiers",
+    response=list[MembershipTierResponse],
+    summary="List membership tiers",
+    description="Returns the supporter membership tiers with their monthly prices and perks.",
+    tags=["Membership"],
+)
+def list_membership_tiers(request):
+    return [
+        MembershipTierResponse(
+            tier=info.tier,
+            name=info.tier.label,
+            monthly_price_pence=info.monthly_price_pence,
+            perks=info.perks,
+        )
+        for info in membership.TIERS
+    ]
+
+
+@router.get(
+    "/membership",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Get current membership",
+    description="Returns the user's membership tier, or 404 if they aren't a member.",
+    tags=["Membership"],
+)
+def get_membership(request):
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return user_membership
+
+
+@router.get(
+    "/combined-search/usage",
+    auth=JWTAuth(),
+    response=CombinedSearchUsageResponse,
+    summary="Get Combined Search usage",
+    description="Returns the user's Combined Search usage this month and their limit, which is the more "
+    "generous of those set by their membership tier and their volunteer tier.",
+    tags=["Membership"],
+)
+def get_combined_search_usage(request):
+    return CombinedSearchUsageResponse(
+        monthly_usage=get_monthly_combined_search_count(request.user.id),
+        monthly_limit=user_combined_search_monthly_limit(request.user.id),
+    )
+
+
+@router.get(
+    "/combined-search/preference",
+    auth=JWTAuth(),
+    response=CombinedSearchPreference,
+    summary="Get Combined Search preference",
+    description="Returns whether the user has Combined Search switched on in the mwmbl.org interface. "
+    "It does not affect calls to the Combined Search API.",
+    tags=["Membership"],
+)
+def get_combined_search_preference(request):
+    return CombinedSearchPreference(enabled=request.user.combined_search_enabled)
+
+
+@router.put(
+    "/combined-search/preference",
+    auth=JWTAuth(),
+    response=CombinedSearchPreference,
+    summary="Set Combined Search preference",
+    description="Switches Combined Search on or off for the user in the mwmbl.org interface. "
+    "It does not affect calls to the Combined Search API.",
+    tags=["Membership"],
+)
+def set_combined_search_preference(request, body: CombinedSearchPreference):
+    request.user.combined_search_enabled = body.enabled
+    request.user.save(update_fields=["combined_search_enabled"])
+    return CombinedSearchPreference(enabled=request.user.combined_search_enabled)
+
+
+@router.post(
+    "/membership/checkout",
+    auth=JWTAuth(),
+    response=CheckoutResponse,
+    summary="Create membership checkout session",
+    description="Creates a Polar hosted-checkout session for a membership tier and returns a redirect URL.",
+    tags=["Membership"],
+)
+def create_membership_checkout(request, body: MembershipCheckoutRequest):
+    check_email_verified(request)
+    product_id = membership.product_ids()[body.tier]
+    if not product_id:
+        raise InvalidRequest("Membership is not configured. Contact support.", status=503)
+    # Ask Polar as well as the local row: a subscription paid for moments ago has no row until its
+    # webhook arrives.
+    if Membership.objects.filter(user=request.user).exists() or _live_membership_subscriptions(request.user):
+        raise InvalidRequest("You are already a member.", status=409)
+    checkout_params = {
+        "products": [product_id],
+        "external_customer_id": str(request.user.id),
+        "metadata": {"user_id": str(request.user.id)},
+    }
+    if body.success_url:
+        checkout_params["success_url"] = body.success_url
+    if body.embed_origin:
+        checkout_params["embed_origin"] = body.embed_origin
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        result = polar.checkouts.create(request=checkout_params)
+    return CheckoutResponse(checkout_url=result.url)
+
+
+@router.post(
+    "/membership/cancel",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Cancel membership at period end",
+    description="Schedules the membership to cancel at the end of the current billing period. "
+    "The membership and its perks remain active until then.",
+    tags=["Membership"],
+)
+def cancel_membership(request):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is already scheduled to cancel.", status=409)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=True),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership is already canceled.", status=409)
+    return _save_membership_update(
+        user_membership, current_period_end=result.current_period_end, cancel_at_period_end=True
+    )
+
+
+@router.post(
+    "/membership/uncancel",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Uncancel a pending membership cancellation",
+    description="Removes a scheduled cancellation, so the membership renews at the end of the current period.",
+    tags=["Membership"],
+)
+def uncancel_membership(request):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if not user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is not scheduled to cancel.", status=409)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=False),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership has already ended.", status=409)
+    return _save_membership_update(
+        user_membership, current_period_end=result.current_period_end, cancel_at_period_end=False
+    )
+
+
+@router.post(
+    "/membership/change",
+    auth=JWTAuth(),
+    response=MembershipResponse,
+    summary="Change membership tier",
+    description="Moves the membership to another tier straight away. The price difference for the rest of "
+    "the current period is added to the next invoice.",
+    tags=["Membership"],
+)
+def change_membership(request, body: MembershipChangeRequest):
+    check_email_verified(request)
+    user_membership = Membership.objects.filter(user=request.user).first()
+    if user_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    if user_membership.tier == body.tier:
+        raise InvalidRequest("Already on this tier.", status=409)
+    # Changing tier would leave the cancellation in place, which is rarely what anyone wants;
+    # making them uncancel first keeps the outcome explicit.
+    if user_membership.cancel_at_period_end:
+        raise InvalidRequest("Membership is scheduled to cancel. Uncancel it before changing tier.", status=409)
+    product_id = membership.product_ids()[body.tier]
+    if not product_id:
+        raise InvalidRequest("Membership is not configured. Contact support.", status=503)
+    try:
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            result = polar.subscriptions.update(
+                id=user_membership.polar_subscription_id,
+                subscription_update=SubscriptionUpdateBase(
+                    product_id=product_id,
+                    proration_behavior=SubscriptionProrationBehavior.PRORATE,
+                ),
+            )
+    except polar_models.AlreadyCanceledSubscription:
+        raise InvalidRequest("Membership has already ended.", status=409)
+    except polar_models.SubscriptionLocked:
+        raise InvalidRequest("A change to this membership is already in progress. Try again shortly.", status=409)
+    tier = membership.tier_for_product(result.product_id)
+    return _save_membership_update(user_membership, tier=tier, current_period_end=result.current_period_end)
+
+
+def _save_membership_update(user_membership, **changes):
+    """Record a change made in Polar on the Membership row, unless a webhook changed it during the Polar call.
+
+    Only the changed fields are written, and only while the row still points at the same
+    subscription, so a webhook that deleted the row or moved it to another subscription wins.
+    """
+    Membership.objects.filter(
+        pk=user_membership.pk, polar_subscription_id=user_membership.polar_subscription_id
+    ).update(**changes)
+    current_membership = Membership.objects.filter(user=user_membership.user).first()
+    if current_membership is None:
+        raise InvalidRequest("Not a member.", status=404)
+    return current_membership
+
+
+def _sync_membership(subscription):
+    """Bring the user's Membership row in line with their live membership subscriptions in Polar.
+
+    Webhooks can arrive late, be retried or come out of order, so the event only says which user
+    to sync; their current subscriptions are fetched from Polar rather than read from the event.
+    """
+    user_id = subscription.metadata.get("user_id")
+    user = MwmblUser.objects.filter(id=user_id).first()
+    if user is None:
+        logger.warning("Polar webhook: no user found for membership user_id=%s", user_id)
+        return
+
+    if membership.tier_for_product(subscription.product_id) is None:
+        logger.warning(
+            "Polar webhook: subscription id=%s is for product id=%s, which isn't a current membership tier",
+            subscription.id,
+            subscription.product_id,
+        )
+
+    live_subscriptions = _live_membership_subscriptions(user)
+    if not live_subscriptions:
+        deleted, _ = Membership.objects.filter(user=user).delete()
+        logger.info("Polar webhook: membership ended for user id=%s (deleted=%s)", user_id, deleted)
+        return
+
+    current, *duplicates = live_subscriptions
+    tier = membership.tier_for_product(current.product_id)
+    Membership.objects.update_or_create(
+        user=user,
+        defaults={
+            "tier": tier,
+            "polar_subscription_id": current.id,
+            "current_period_end": current.current_period_end,
+            "cancel_at_period_end": current.cancel_at_period_end,
+        },
+    )
+    logger.info("Polar webhook: user id=%s is a %s member", user_id, tier)
+
+    # A second checkout paid before the first one's webhook arrived leaves the user with two
+    # subscriptions. Keep the newest and stop the others renewing, so they aren't billed twice.
+    duplicates_to_cancel = [duplicate for duplicate in duplicates if not duplicate.cancel_at_period_end]
+    for duplicate in duplicates_to_cancel:
+        logger.warning(
+            "Polar webhook: cancelling duplicate membership subscription id=%s for user id=%s", duplicate.id, user_id
+        )
+        with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+            polar.subscriptions.update(
+                id=duplicate.id,
+                subscription_update=SubscriptionCancel(cancel_at_period_end=True),
+            )
 
 
 @router.post(
@@ -1317,7 +1717,11 @@ def polar_webhook(request):
     event_type = event.TYPE
     logger.info("Polar webhook event type=%s", event_type)
 
-    if event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
+    # Route on the usage product, which is fixed, rather than on the membership products, which can
+    # change: a subscription to a retired membership product must never be mistaken for usage billing.
+    if event_type.startswith("subscription.") and event.data.product_id != settings.POLAR_PRODUCT_ID_USAGE:
+        _sync_membership(event.data)
+    elif event_type in ("subscription.active", "subscription.updated", "subscription.uncanceled"):
         user_id = event.data.metadata.get("user_id")
         logger.info("Polar webhook: %s user_id=%s", event_type, user_id)
         user = MwmblUser.objects.filter(id=user_id).first()

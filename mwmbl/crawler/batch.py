@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from ninja import Field, Schema
 
@@ -111,21 +111,6 @@ class Item(Schema):
     )
 
 
-class Batch(Schema):
-    """A batch of crawled pages submitted by a crawler client."""
-
-    user_id: str = Field(
-        description=(
-            "The crawler's private user ID (a 64-character hex string). "
-            "This is hashed server-side before storage — the raw ID is never persisted."
-        ),
-        example="a" * 64,
-    )
-    items: list[Item] = Field(
-        description="List of crawled URLs and their results. Maximum 100 items per batch.",
-    )
-
-
 class NewBatchRequest(Schema):
     """Request for a new batch of URLs to crawl."""
 
@@ -185,6 +170,7 @@ class Result(Schema):
     )
     last_crawled: Optional[int] = Field(
         default=None,
+        ge=0,
         description="Unix timestamp (seconds since epoch) when the page was crawled.",
         example=1704672000,
     )
@@ -209,6 +195,16 @@ class Results(Schema):
         description="Version string of the crawler that produced these results.",
         example="1.2.0",
     )
+    device_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "A name identifying the crawler installation, used to list the user's devices. "
+            "Truncated to 255 characters. Not the machine hostname - submissions are stored "
+            "in public object storage, so the reference crawler reports MWMBL_DEVICE_NAME or "
+            "a random id it generates on first run."
+        ),
+        example="crawler-3f7a1c9e",
+    )
 
 
 class PostResultsResponse(Schema):
@@ -225,6 +221,50 @@ class PostResultsResponse(Schema):
         ),
         example="https://storage.mwmbl.org/1/v1/2024-01-01/results/username/00001__abcd1234.json.gz",
     )
+
+
+# Every field of an error report ends up in Sentry, and anyone with a crawl key can send one,
+# so each is bounded: well past anything a real report needs, short of a payload Sentry
+# would drop. The tag-like fields stay inside Sentry's 200-character limit on tag values.
+MAX_ERROR_MESSAGE_LENGTH = 8192
+MAX_ERROR_FRAME_FIELD_LENGTH = 1024
+MAX_ERROR_TAG_LENGTH = 200
+
+# The crawler loop that caught an error.
+ErrorContext = Literal["batch", "indexing"]
+
+
+class ErrorFrame(Schema):
+    """One frame of the traceback of an exception a crawler caught."""
+
+    filename: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="mwmbl/crawl.py")
+    lineno: Optional[int] = Field(example=312)
+    function: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="run_indexing")
+    line: Optional[str] = Field(
+        default=None, max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="response.raise_for_status()"
+    )
+
+
+class CrawlerErrorReport(Schema):
+    """An exception a crawler caught and recovered from, reported so it is not lost in local logs."""
+
+    context: ErrorContext = Field(
+        description="Which crawler loop caught the exception.",
+        example="indexing",
+    )
+    exception_type: str = Field(max_length=MAX_ERROR_FRAME_FIELD_LENGTH, example="requests.exceptions.HTTPError")
+    message: str = Field(max_length=MAX_ERROR_MESSAGE_LENGTH, example="502 Server Error: Bad Gateway")
+    frames: list[ErrorFrame] = Field(
+        description="The traceback, outermost frame first. File paths are relative to the Python path entry.",
+        min_length=1,
+        max_length=200,
+    )
+    crawler_version: str = Field(max_length=MAX_ERROR_TAG_LENGTH, example="1.2.0")
+    device_name: str = Field(max_length=MAX_ERROR_TAG_LENGTH, example="crawler-3f7a1c9e")
+
+
+class StatusResponse(Schema):
+    status: str = Field(example="ok")
 
 
 class Error(Schema):

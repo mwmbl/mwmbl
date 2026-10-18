@@ -1,0 +1,50 @@
+stages:
+  - test
+
+coverage:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+  services:
+    - name: postgres:15
+      alias: postgres
+    - name: redis:7
+      alias: redis
+  variables:
+    POSTGRES_DB: test_mwmbl
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_HOST_AUTH_METHOD: trust
+    DATABASE_URL: postgres://postgres@postgres:5432/test_mwmbl
+    TEST_REDIS_URL: redis://redis:6379/15
+    DJANGO_SETTINGS_MODULE: mwmbl.settings_test
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  cache:
+    key:
+      files:
+        - uv.lock
+        - mwmbl_rank/Cargo.lock
+    paths:
+      - .cache/uv
+      - .cargo/
+      - mwmbl_rank/target/
+  before_script:
+    - apt-get update
+    - apt-get install --yes --no-install-recommends build-essential curl patchelf pkg-config libssl-dev
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    - rustup component add llvm-tools-preview
+    - cargo install cargo-llvm-cov --locked
+    - uv sync --group dev
+    - uv run maturin develop
+  script:
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    - make coverage
+  coverage: '/TOTAL COVERAGE: ([0-9]+(?:\.[0-9]+)?)%/'
+  artifacts:
+    when: always
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/python.xml

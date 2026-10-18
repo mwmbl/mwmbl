@@ -190,6 +190,15 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
 
     env:
       ISSUE_NUMBER: ${{ matrix.item.issue }}
@@ -216,6 +225,7 @@ jobs:
             echo "CLAUDE_RUN_LOG=$RUNNER_TEMP/claude-runs.jsonl"
             echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_mwmbl"
             echo "DJANGO_SETTINGS_MODULE=mwmbl.settings_test"
+            echo "TEST_REDIS_URL=redis://localhost:6379/15"
           } >>"$GITHUB_ENV"
       # Full history: the run diffs the branch against main and pushes it.
       #

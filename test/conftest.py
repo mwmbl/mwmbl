@@ -11,7 +11,10 @@ callback that runs longer than 100 ms triggers a warning. Combined with
 accidental sync calls leaking into async paths.
 """
 
+import os
+
 import pytest
+from django_redis import get_redis_connection
 
 
 @pytest.fixture
@@ -31,3 +34,25 @@ def async_debug_loop(event_loop):
     event_loop.set_debug(True)
     event_loop.slow_callback_duration = 0.1
     yield event_loop
+
+
+@pytest.fixture
+def redis_cache(settings):
+    """Point the default cache at a real Redis, emptied before and after the test.
+
+    The test settings use LocMemCache, which can't run the Lua scripts some quota
+    counters rely on for atomicity. TEST_REDIS_URL names a Redis database the tests
+    may flush, so it must not be one holding data you want to keep.
+    """
+    redis_url = os.environ["TEST_REDIS_URL"]
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": redis_url,
+            "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        }
+    }
+    connection = get_redis_connection("default")
+    connection.flushdb()
+    yield connection
+    connection.flushdb()

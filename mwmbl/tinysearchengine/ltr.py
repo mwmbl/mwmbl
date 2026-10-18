@@ -18,6 +18,9 @@ from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 import mwmbl_rank
 from mwmbl.tinysearchengine.rank import get_features
 
+# Optional record keys the Rust pipeline reads for Combined Search - see its docstring.
+PROVIDER_COLUMNS = ["staan_asked", "staan_rank", "from_staan"]
+
 
 class ThresholdPredictor(BaseEstimator, RegressorMixin):
     def __init__(self, threshold: float, classifier: BaseEstimator):
@@ -102,6 +105,9 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         XGBoost gamma (min_split_loss) hyperparameter (default None, uses XGBoost default of 0.0).
     subsample : float or None
         XGBoost subsample hyperparameter (default None, uses XGBoost default of 1.0).
+    provider_features : bool
+        Append Staan's ranking to the features (default False). Combined Search only; a
+        loaded model sets this from its own metadata.
     """
 
     def __init__(
@@ -114,6 +120,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         min_child_weight: float | None = None,
         gamma: float | None = None,
         subsample: float | None = None,
+        provider_features: bool = False,
     ):
         self.threshold = threshold
         self.scale_pos_weight = scale_pos_weight
@@ -123,6 +130,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
         self.min_child_weight = min_child_weight
         self.gamma = gamma
         self.subsample = subsample
+        self.provider_features = provider_features
         self._inner = mwmbl_rank.RustXGBPipeline(
             threshold=self.threshold,
             scale_pos_weight=self.scale_pos_weight,
@@ -132,12 +140,14 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
             min_child_weight=self.min_child_weight,
             gamma=self.gamma,
             subsample=self.subsample,
+            provider_features=self.provider_features,
         )
 
     @staticmethod
     def _df_to_records(X: DataFrame) -> list:
         """Convert a DataFrame to a list of dicts for the Rust boundary."""
         cols = ["query", "url", "title", "extract", "score"]
+        cols += [col for col in PROVIDER_COLUMNS if col in X.columns]
         subset = X[cols].copy()
         subset["title"] = subset["title"].fillna("")
         subset["extract"] = subset["extract"].fillna("")
@@ -201,6 +211,7 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
     def load_model(self, path: str) -> "RustXGBPipeline":
         """Load a model from disk (XGBoost binary format)."""
         self._inner.load_model(path)
+        self.provider_features = self._inner.provider_features
         return self
 
     @classmethod
@@ -239,5 +250,6 @@ class RustXGBPipeline(BaseEstimator, RegressorMixin):
             f"max_depth={self.max_depth}, "
             f"min_child_weight={self.min_child_weight}, "
             f"gamma={self.gamma}, "
-            f"subsample={self.subsample})"
+            f"subsample={self.subsample}, "
+            f"provider_features={self.provider_features})"
         )

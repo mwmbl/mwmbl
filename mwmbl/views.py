@@ -558,11 +558,6 @@ class CurationFlagListView(LoginRequiredMixin, ListView):
         return FlagCuration.objects.filter(status="PENDING").order_by("-timestamp")
 
 
-def domains_view(request):
-    domain_stats = stats_manager.get_domain_stats()
-    return render(request, "mwmbl/domains.html", {"domain_stats": domain_stats})
-
-
 def domain_view(request, domain):
     if request.method == "POST":
         if request.user.has_perm("mwmbl.change_domain_submission_status"):

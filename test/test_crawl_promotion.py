@@ -176,6 +176,13 @@ def test_run_indexing_submits_results_that_beat_the_remote_index(fake_redis):
     assert submitted_urls == [STRONG.url]
 
 
+def test_run_indexing_sends_the_api_key_in_the_header(fake_redis):
+    post = run_indexing_with(fake_redis, [STRONG], [MEDIUM])
+
+    assert post.call_args.kwargs["headers"] == {"X-API-Key": "test-api-key"}
+    assert post.call_args.kwargs["json"]["api_key"] is None
+
+
 def test_run_indexing_keeps_quiet_about_results_the_remote_index_beats(fake_redis):
     post = run_indexing_with(fake_redis, [MEDIUM], [STRONG])
 
@@ -194,3 +201,18 @@ def test_run_indexing_submits_the_whole_term_once_the_gate_opens(fake_redis):
     post.assert_called_once()
     submitted_urls = {result["url"] for result in post.call_args.kwargs["json"]["results"]}
     assert submitted_urls == {STRONG.url, WEAK.url}
+
+
+def test_a_term_holding_an_ellipsis_is_still_scored():
+    """Index terms are not safe to re-tokenize.
+
+    tokenize() treats anything ending in "…" as a truncated extract and drops its last two
+    tokens, so the term "python…" - which a title like "Learn python… fast" puts in the
+    index - tokenizes to nothing. score_result asserts the term list is non-empty, so the
+    crawler's indexing loop died on every batch carrying such a term. Splitting the term is
+    what the server does on the way in (index_batches.sort_documents), and it is total.
+    """
+    ellipsis_term = "python…"
+    assert tokenize(ellipsis_term) == []
+    assert count_new_index_entries(ellipsis_term, [MEDIUM], []) == 0
+    assert count_new_index_entries("learn python…", [MEDIUM], []) == 0

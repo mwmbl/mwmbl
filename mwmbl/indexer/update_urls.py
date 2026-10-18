@@ -1,43 +1,19 @@
-import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
-from pathlib import Path
-from time import sleep
 from typing import Collection
 
 import requests
-from django.conf import settings
-from redis import Redis
 
 from mwmbl.crawler.batch import HashedBatch, Link
 from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import FoundURL, URLDatabase, URLStatus
-from mwmbl.indexer import process_batch
-from mwmbl.indexer.batch_cache import BatchCache
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.index_batches import get_url_error_status
-from mwmbl.indexer.indexdb import BatchStatus
 from mwmbl.redis_url_queue import RedisURLQueue, get_domain_max_urls
 from mwmbl.utils import get_domain, parse_url
 
 logger = getLogger(__name__)
-
-
-def update_urls_continuously(data_path: str, new_item_queue: RedisURLQueue):
-    batch_cache = BatchCache(Path(data_path) / settings.BATCH_DIR_NAME)
-    while True:
-        try:
-            run(batch_cache, new_item_queue)
-        except Exception:
-            logger.exception("Error updating URLs")
-        sleep(10)
-
-
-def run(batch_cache: BatchCache, new_item_queue: RedisURLQueue, num_batches: int = 1000):
-    process_batch.run(
-        batch_cache, BatchStatus.LOCAL, BatchStatus.URLS_UPDATED, record_urls_in_database, num_batches, new_item_queue
-    )
 
 
 def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
@@ -159,14 +135,3 @@ def process_link(
 def get_datetime_from_timestamp(timestamp: float) -> datetime:
     batch_datetime = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=timestamp)
     return batch_datetime
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    redis: Redis = Redis.from_url("redis://127.0.0.1:6379", decode_responses=True)
-    batch_cache = BatchCache(Path(settings.DATA_PATH) / settings.BATCH_DIR_NAME)
-    url_queue = RedisURLQueue(redis, lambda: set())
-    start_time = datetime.now(timezone.utc)
-    run(batch_cache, url_queue, num_batches=500)
-    end_time = datetime.now(timezone.utc)
-    logger.info(f"Finished updating URLs in {end_time - start_time}")

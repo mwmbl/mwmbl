@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "ninja_extra",
+    "ninja_jwt.token_blacklist",
     "debug_toolbar",
     "background_task",
 ]
@@ -144,6 +146,8 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_USERNAME_REQUIRED = False
+# mwmbl.models.SEED_CRAWLER_USERNAME, which settings cannot import.
+ACCOUNT_USERNAME_BLACKLIST = ["mwmbl-seed-crawler"]
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
@@ -188,7 +192,6 @@ FOOTER_LINKS = [
     },
 ]
 
-BATCH_DIR_NAME = "batches"
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
@@ -196,9 +199,9 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 # Gates database initialisation and background task scheduling; False for the crawler and tests.
 HAS_DATABASE = True
 
-# Whether this container runs the django-background-tasks queue (see mwmbl.main). Note the
-# distinction from HAS_DATABASE above: that gates *scheduling* the tasks, this gates
-# *running* them.
+# Whether this container runs the django-background-tasks queue and the seed crawl worker
+# (see mwmbl.main). Note the distinction from HAS_DATABASE above: that gates *scheduling*
+# the tasks, this gates *running* them.
 #
 # Opt-in rather than on by default because beta shares its database, index and Redis with
 # production. Exactly one deployment should run the queue, and it should be production:
@@ -241,6 +244,12 @@ def strip_query_string(event):
 # Django ninja-jwt settings
 NINJA_JWT = {
     "USER_AUTHENTICATION_RULE": require_email_confirmation,
+    # Refresh tokens rotate on every use, so this is an inactivity limit: users who
+    # visit at least once a year stay logged in indefinitely.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365),
+    "ROTATE_REFRESH_TOKENS": True,
+    # Each refresh token works once, so a leaked token dies when its owner next refreshes
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Database configuration (shared across all environments via DATABASE_URL env var)
@@ -277,6 +286,9 @@ RUST_MODEL_PATH = Path(__file__).parent / "resources" / "model.xgb"
 POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
 POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")
 POLAR_PRODUCT_ID_USAGE = os.environ.get("POLAR_PRODUCT_ID_USAGE", "")
+POLAR_PRODUCT_ID_SPROUT = os.environ.get("POLAR_PRODUCT_ID_SPROUT", "")
+POLAR_PRODUCT_ID_SAPLING = os.environ.get("POLAR_PRODUCT_ID_SAPLING", "")
+POLAR_PRODUCT_ID_CANOPY = os.environ.get("POLAR_PRODUCT_ID_CANOPY", "")
 POLAR_SERVER = os.environ.get("POLAR_SERVER", "sandbox")
 
 GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "")
@@ -285,6 +297,60 @@ CURRENT_AGREEMENT_VERSIONS = {
     "TERMS_OF_SERVICE_GUI": "v2026-04-A",
     "TERMS_OF_SERVICE_API": "v2026-04-A",
 }
+
+# Combined Search - the v2 endpoint that pools the Mwmbl index, Staan and Wikipedia and
+# ranks the union with its own LTR model. Gated behind login, like Super Search, which it is
+# meant to replace. Monthly limits for web (JWT) callers, keyed by
+# mwmbl.membership.MembershipTier or VolunteerTier value; "free" is signed-in users without either.
+COMBINED_SEARCH_MONTHLY_LIMITS = {"free": 30, "sprout": 300, "sapling": 1_500, "canopy": 1_500, "pollinator": 300}
+# Its own model artifact, so Combined Search can be retrained on the pooled candidate set
+# without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
+COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"
+
+# Staan, the external web-search provider Combined Search pools in. Results are cached in
+# the external results index - see mwmbl.tinysearchengine.staan.
+STAAN_SEARCH_API_KEY = os.environ.get("STAAN_SEARCH_API_KEY", "")
+STAAN_SEARCH_URL = os.environ.get("STAAN_SEARCH_URL", "https://api.staan.ai/v2/search/web")
+# en-gb because Combined Search's ordering was tuned on en-gb results, for a UK searcher.
+STAAN_MARKET = os.environ.get("STAAN_MARKET", "en-gb")
+STAAN_TIMEOUT_SECONDS = 5
+
+# Seed crawls: Combined Search with crawl=true crawls the Staan results the index lacked,
+# following links within Staan's domains - see mwmbl.indexer.seed_crawl.
+SEED_CRAWL_MAX_PAGES_PER_DOMAIN = 20
+# A domain is dropped from a crawl after this many fetches in a row that added no new page.
+SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
+# A backstop on a crawl's length; the per-domain cap ends almost all of them well before it.
+SEED_CRAWL_MAX_SECONDS = 15 * 60
+# Crawls queued or running, across all users, beyond which crawl=true queues nothing.
+SEED_CRAWL_MAX_QUEUED = 10
+SEED_CRAWL_THREADS = 8
+# The least time between two fetches from one domain.
+SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
+# Queries are private, so a user's record of what their crawl added is not kept for long.
+SEED_CRAWL_RECORD_TTL_SECONDS = 7 * 24 * 60 * 60
+# How long a worker has to finish a crawl's round before another may claim it. Far longer
+# than a round takes - one fetch per domain, each with a three-second timeout, then indexing.
+SEED_CRAWL_LEASE_SECONDS = 120
+# Claims of one round, by workers that died before finishing it, after which the crawl fails.
+SEED_CRAWL_MAX_ATTEMPTS = 3
+# A seed domain's new-page score averages only its most recent crawls, so a domain the
+# crawls have saturated drops down the list rather than living off its first crawl.
+SEED_DOMAIN_RECENT_CRAWLS = 5
+# The seed domain list crawlers read is republished at most this often, so it cannot be
+# diffed to learn what one private query returned - see mwmbl.indexer.seed_domains.
+SEED_DOMAINS_PUBLISH_SECONDS = 24 * 60 * 60
+SEED_DOMAINS_PUBLISHED = 1000
+
+# Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
+# Without a key, or when a request fails or times out, Combined Search serves the LTR's
+# order instead.
+JEV_API_KEY = os.environ.get("JEV_API_KEY", "")
+JEV_URL = "https://api.typesafe.ai/v1/systemone"
+# The model version the composite weights were tuned on: a new version means re-tuning them.
+JEV_MODEL = "jev-1.13.0"
+# Jev takes about 0.6s at p50 and runs after Staan, so a slow call has to give up quickly.
+JEV_TIMEOUT_SECONDS = 1.5
 
 # Super Search
 SUPER_SEARCH_MONTHLY_LIMIT = 100
@@ -330,6 +396,13 @@ BLACKLIST_SNAPSHOT_CHECK_SECONDS = 300  # how often a worker checks Redis for a 
 BLACKLIST_SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60  # how often the snapshot is rebuilt from the remote lists
 BLACKLIST_PURGE_INTERVAL_SECONDS = 300  # how often the purge queue is drained
 BLACKLIST_PURGE_BATCH_SIZE = 1000  # documents removed from the index per purge run
+
+# Counting the unique URLs in the index means reading all of it, which takes hours. It is
+# done a slice at a time so it never holds up the rest of the task queue - see
+# mwmbl.count_urls.
+INDEX_COUNT_INTERVAL_DAYS = 7  # how often a new scan of the index starts
+INDEX_COUNT_RUN_INTERVAL_SECONDS = 300  # how often a slice of the scan runs
+INDEX_COUNT_SECONDS_PER_RUN = 120  # how long each slice reads pages for; keep well under MAX_RUN_TIME
 # How far ahead approving a domain submission schedules a snapshot rebuild. Approvers work
 # through submissions in batches, so the delay collapses a batch into one rebuild rather
 # than one per approval - see mwmbl.signals.
@@ -346,10 +419,15 @@ EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower(
 # Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
 # the request path that reaches for Redis, and the CI test job runs none.
 SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
-# One TTL for every provider. Wikipedia articles move rarely, which is what justifies six
-# months; a provider whose results turn over faster wants its own, and the place to add that
-# is here, keyed by source.
+# The default TTL, for any provider that does not name its own below. Wikipedia articles
+# move rarely, which is what justifies six months.
 EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks
+# A provider that turns over faster gets its own, read by external_cache.is_fresh. A general
+# web-search index moves far faster than an encyclopedia, so six months of Staan results
+# would be six months of stale answers. One scalar per provider rather than a dict keyed by
+# DocumentSource: the settings module must not import the indexer, which would pull the Rust
+# extension in at settings-import time.
+EXTERNAL_CACHE_STAAN_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week
 # A query a provider has nothing for is worth remembering too, or it is re-fetched forever.
 # Shorter, because a result appearing is a likelier change than an existing one moving.
 EXTERNAL_CACHE_NEGATIVE_TTL_SECONDS = 7 * 24 * 60 * 60

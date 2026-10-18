@@ -14,7 +14,6 @@ APPLICATION_KEY = os.environ.get("MWMBL_APPLICATION_KEY", "SECRETAPPLICATIONKEY"
 KEY_ID = os.environ.get("MWMBL_KEY_ID", "SECRETKEYID")
 ENDPOINT_URL = os.environ.get("MWMBL_ENDPOINT_URL", "https://s3.eu-central-003.backblazeb2.com")
 BUCKET_NAME = os.environ.get("MWMBL_BUCKET_NAME", "mwmbl-eu-crawl")
-MAX_BATCH_SIZE = 100
 USER_ID_LENGTH = 36
 PUBLIC_USER_ID_LENGTH = 64
 VERSION = "v1"

@@ -31,7 +31,7 @@ Training frames exclude BOTH held-out query sets, so numbers are clean on both
 axes (this makes Haiku figures a shade lower than the original single-axis runs).
 
 Usage:
-    uv run python -m mwmbl.rankeval.ltr.llm_experiment --mode baseline --note baseline
+    DATABASE_URL=... uv run python -m mwmbl.rankeval.ltr.llm_experiment --mode baseline --note baseline
     uv run python -m mwmbl.rankeval.ltr.llm_experiment --mode ext-only --note "A'"
     uv run python -m mwmbl.rankeval.ltr.llm_experiment --mode llm-only --overall-threshold 4 --scale-pos-weight 1.0 --note B
     uv run python -m mwmbl.rankeval.ltr.llm_experiment --mode mixed --ext-weight 0.25 --overall-threshold 4 --scale-pos-weight 1.0 --note C
@@ -39,22 +39,30 @@ Usage:
 
 import gzip
 import json
+import os
 from argparse import ArgumentParser
 from collections import defaultdict
 from pathlib import Path
 
+import django
 import numpy as np
 import pandas as pd
 from scipy.stats import sem
 from sklearn.metrics import ndcg_score
 
-from mwmbl.rankeval.paths import (
+# RustXGBPipeline reaches Django models through rank -> blacklist_snapshot ->
+# curated_domains, so the app registry has to be up before it is imported - the same
+# arrangement as compare_ltr_models.py. Importing it without this fails outright.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mwmbl.settings_dev")
+django.setup()
+
+from mwmbl.rankeval.paths import (  # noqa: E402
     CURRENT_MODEL_PATH,
     LEARNING_TO_RANK_DATASET_PATH,
     LEARNING_TO_RANK_LLM_DATASET_PATH,
     ROOT_DIR,
 )
-from mwmbl.tinysearchengine.ltr import RustXGBPipeline
+from mwmbl.tinysearchengine.ltr import RustXGBPipeline  # noqa: E402
 
 FEATURE_COLUMNS = ["query", "url", "title", "extract", "score"]
 RELEVANT_OVERALL = 4
@@ -184,6 +192,19 @@ def pair_accuracy(model, test_pairs: list[dict]) -> tuple[float, float]:
     return float(correct.mean()), float((pos == neg).mean())
 
 
+def drop_pool(llm: pd.DataFrame, pool: str) -> pd.DataFrame:
+    """Rows that came ONLY from `pool`, removed.
+
+    The ablation arm: train without a source's contribution while testing on the same pool
+    the endpoint will serve, so the difference between the two arms is that source and
+    nothing else. Rows another pool also contributed are kept - the candidate exists either
+    way, and dropping it would be ablating the other source too.
+    """
+    membership = llm["pools"].fillna("").str.split("|")
+    only_this_pool = membership.apply(lambda tags: tags == [pool])
+    return llm[~only_this_pool]
+
+
 def build_training_frame(
     mode: str,
     ext: pd.DataFrame,
@@ -196,7 +217,12 @@ def build_training_frame(
     seed: int,
     curation: pd.DataFrame | None = None,
     curation_weight: float = 1.0,
+    exclude_pool: str | None = None,
 ) -> pd.DataFrame:
+    if exclude_pool:
+        before = len(llm)
+        llm = drop_pool(llm, exclude_pool)
+        print(f"Ablation: dropped {before - len(llm)} rows pooled only from {exclude_pool!r}")
     llm_train = llm[llm["qnorm"].isin(train_queries)].copy()
     llm_train["label"] = (llm_train["overall"] >= overall_threshold).astype(float)
     llm_train["weight"] = 1.0
@@ -322,6 +348,12 @@ def run():
     )
     parser.add_argument("--test-size", type=float, default=0.3)
     parser.add_argument("--save-model", default=None, help="optional path to save the trained model")
+    parser.add_argument(
+        "--exclude-pool",
+        default=None,
+        help="ablation: drop training rows pooled only from this source (e.g. staan). "
+        "The test split is untouched, so both arms are scored on the same pool.",
+    )
     args = parser.parse_args()
 
     ext, llm = load_datasets()
@@ -351,6 +383,7 @@ def run():
             args.seed,
             curation=curation,
             curation_weight=args.curation_weight,
+            exclude_pool=args.exclude_pool,
         )
         print(
             f"Training frame: {len(train_df)} rows, "

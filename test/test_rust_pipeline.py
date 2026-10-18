@@ -19,6 +19,7 @@ import pytest
 pytest.importorskip("mwmbl_rank", reason="mwmbl_rank Rust extension not built")
 
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
+from mwmbl_rank import NUM_FEATURES, PROVIDER_FEATURE_NAMES
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -266,3 +267,52 @@ class TestRustXGBPipelineNDCG:
         # Compute NDCG over the whole dataset (single group)
         score = ndcg_score([y.tolist()], [preds.tolist()])
         assert score > 0.5, f"NDCG {score:.3f} is not above 0.5"
+
+
+class TestRustXGBPipelineProviderFeatures:
+    """Combined Search's pipeline appends Staan's ranking to the shared features."""
+
+    def test_provider_features_are_appended(self):
+        records = make_dataframe(3).to_dict("records")
+        records[0] |= {"staan_asked": True, "staan_rank": 2}
+        records[1] |= {"staan_asked": True, "staan_rank": None}
+
+        rows = np.array(RustXGBPipeline()._inner.extract_features(records, True))
+
+        assert rows.shape == (3, NUM_FEATURES + len(PROVIDER_FEATURE_NAMES))
+        np.testing.assert_array_equal(rows[:, :NUM_FEATURES], RustXGBPipeline()._inner.extract_features(records))
+        np.testing.assert_array_equal(rows[0, NUM_FEATURES:], [1.0, 2.0])
+        assert rows[1, NUM_FEATURES] == 0.0 and np.isnan(rows[1, NUM_FEATURES + 1])
+        assert np.isnan(rows[2, NUM_FEATURES:]).all()
+
+    def test_a_loaded_model_knows_it_uses_provider_features(self):
+        X = make_dataframe(30)
+        X["staan_asked"] = True
+        X["staan_rank"] = [float(i % 10) if i % 3 else np.nan for i in range(30)]
+        pipeline = RustXGBPipeline(num_rounds=10, provider_features=True)
+        pipeline.fit(X, make_labels(30))
+
+        with tempfile.NamedTemporaryFile(suffix=".xgb", delete=False) as f:
+            model_path = f.name
+        try:
+            pipeline.save_model(model_path)
+            loaded = RustXGBPipeline.from_model_path(model_path)
+        finally:
+            os.unlink(model_path)
+
+        assert loaded.provider_features
+        np.testing.assert_allclose(loaded.predict(X), pipeline.predict(X), atol=1e-5)
+
+    def test_a_standard_model_loads_without_provider_features(self):
+        pipeline = RustXGBPipeline(num_rounds=10)
+        pipeline.fit(make_dataframe(20), make_labels(20))
+
+        with tempfile.NamedTemporaryFile(suffix=".xgb", delete=False) as f:
+            model_path = f.name
+        try:
+            pipeline.save_model(model_path)
+            loaded = RustXGBPipeline(provider_features=True).load_model(model_path)
+        finally:
+            os.unlink(model_path)
+
+        assert not loaded.provider_features

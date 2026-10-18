@@ -11,6 +11,7 @@ import json
 import sys
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import joblib
@@ -1205,7 +1206,7 @@ A_PAGE = (
 def crawl_with(responses: dict, domain: str) -> dict:
     """Crawl ``domain`` against canned HTTP responses, through the real crawler.
 
-    Driven from requests.get rather than by stubbing crawl_url, because everything this
+    Driven from the session's get rather than by stubbing crawl_url, because everything this
     covers lives in the plumbing between the fetch and the evidence.
     """
 
@@ -1217,7 +1218,7 @@ def crawl_with(responses: dict, domain: str) -> dict:
 
     blacklist = mock.Mock(is_domain_blacklisted=mock.Mock(return_value=False))
     with (
-        mock.patch("mwmbl.crawler.retrieve.requests.get", get),
+        mock.patch("mwmbl.crawler.retrieve.get_session", return_value=SimpleNamespace(get=get)),
         mock.patch("mwmbl.crawler.retrieve.validate_url"),
         mock.patch("mwmbl.crawler.retrieve.robots_allowed", return_value=True),
         mock.patch("mwmbl.moderation.evidence.get_snapshot_blacklist", return_value=blacklist),

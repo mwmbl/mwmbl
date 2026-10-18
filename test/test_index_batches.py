@@ -212,6 +212,32 @@ def test_combine_documents_propagates_user_ids_to_winner():
     assert 2 in combined[0].user_ids
 
 
+@pytest.mark.parametrize(
+    "existing_ids, existing_extract, incoming_extract, expected",
+    [
+        ([1], "a longer extract", "short", [3, 1]),
+        ([1], "short", "a longer extract", [1, 3]),
+        # The kept copy's ids keep their order, its author last, when the cap drops the rest.
+        ([1, 2], "a longer extract", "short", [1, 2]),
+    ],
+)
+def test_combine_documents_puts_the_kept_texts_author_last(existing_ids, existing_extract, incoming_extract, expected):
+    """mwmbl.indexer.agreement reads the author of a stored copy's text off the end of its
+    user_ids, whichever copy ranks first."""
+    existing = [Document(title="t", url="http://a.com", extract=existing_extract, term="q", user_ids=existing_ids)]
+    new_docs = [Document(title="t", url="http://a.com", extract=incoming_extract, term="q", user_ids=[3])]
+
+    (kept,) = combine_documents(existing, new_docs, mark_synced=False, ranker=LongestExtractRanker())
+
+    assert kept.user_ids == expected
+
+
+class LongestExtractRanker:
+    @staticmethod
+    def order_results(terms: list[str], pages: list[Document], is_complete: bool):
+        return sorted(pages, key=lambda doc: -len(doc.extract))
+
+
 # ---------------------------------------------------------------------------
 # index_documents: blacklist enforcement
 # ---------------------------------------------------------------------------

@@ -10,23 +10,34 @@ Sub-routers (v1):
   /api/v1/platform/  — user accounts, domain submissions, voting
 
 Sub-routers (v2):
-  /api/v2/search/    — full-text search with optional API-key auth and quota info
+  /api/v2/search/          — full-text search with optional API-key auth and quota info
+  /api/v2/super-search/    — multi-source streaming search (SSE), authenticated
+  /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
+  /api/v2/membership/      — paid and volunteer memberships and Seed Search usage, authenticated
+  /api/v2/notifications/   — the user's undismissed notifications, authenticated
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
+from datetime import timedelta
+
+from django.contrib.auth import get_user_model
 from ninja import Field
-from ninja_extra import NinjaExtraAPI, api_controller, http_post
+from ninja_extra import NinjaExtraAPI, api_controller, http_get, http_post
 from ninja_extra.permissions import AllowAny
 from ninja_jwt.controller import TokenObtainPairController, TokenVerificationController
-from ninja_jwt.schema import TokenObtainPairInputSchema
+from ninja_jwt.exceptions import AuthenticationFailed, InvalidToken, TokenError
+from ninja_jwt.schema import TokenObtainPairInputSchema, TokenRefreshInputSchema
 from ninja_jwt.schema_control import SchemaControl
 from ninja_jwt.settings import api_settings
+from ninja_jwt.tokens import RefreshToken
 from scalar_ninja import ScalarViewer
 from scalar_ninja.scalar_ninja import AgentConfig
 
+from mwmbl.crawler.app import stats_manager
 from mwmbl.exceptions import InvalidRequest
+from mwmbl.utils import utc_today
 
 _schema = SchemaControl(api_settings)
 
@@ -58,6 +69,30 @@ class MwmblTokenController(TokenVerificationController, TokenObtainPairControlle
     def obtain_token(self, user_token: MwmblTokenObtainSchema):
         user_token.check_user_authentication_rule()
         return user_token.to_response_schema()
+
+    @http_post(
+        "/refresh",
+        response=TokenRefreshInputSchema.get_response_schema(),
+        url_name="token_refresh",
+        operation_id="token_refresh",
+        summary="Refresh JWT token pair",
+        description=(
+            "Exchange a refresh token for a new access token and a new refresh token. "
+            "Each refresh token can only be used once."
+        ),
+    )
+    def refresh_token(self, refresh_token: TokenRefreshInputSchema):
+        # ninja_jwt only checks the token itself, so re-apply the login rule here,
+        # otherwise deactivated or deleted users could refresh indefinitely
+        try:
+            token = RefreshToken(refresh_token.refresh)
+        except TokenError as e:
+            raise InvalidToken(str(e)) from e
+        user_id = token[api_settings.USER_ID_CLAIM]
+        user = get_user_model().objects.filter(**{api_settings.USER_ID_FIELD: user_id}).first()
+        if user is None or not api_settings.USER_AUTHENTICATION_RULE(user):
+            raise AuthenticationFailed("No active account found for the given token")
+        return refresh_token.to_response_schema()
 
 
 api = NinjaExtraAPI(
@@ -100,6 +135,31 @@ def invalid_request_handler(request, exc: InvalidRequest):
     )
 
 
+@api_controller("/leaderboard", tags=["Platform"])
+class LeaderboardController:
+    """Leaderboard API endpoints."""
+
+    @http_get("/{period}/", response={200: list})
+    def get_leaderboard(self, request, period: str):
+        """
+        Get leaderboard data for a given period.
+        Supported periods: 'yesterday', 'all'
+        Returns list of [username, score] pairs sorted by score descending.
+        """
+        if period == "yesterday":
+            yesterday = utc_today() - timedelta(days=1)
+            results = stats_manager.get_leaderboard_for_date(yesterday)
+            return [[username, score] for username, score in results]
+        elif period == "all":
+            results = stats_manager.get_all_time_leaderboard()
+            return [[username, score] for username, score in results]
+        else:
+            return []
+
+
+api.register_controllers(LeaderboardController)
+
+
 v2_api = NinjaExtraAPI(
     title="Mwmbl API v2",
     version="2.0.0",
@@ -115,6 +175,8 @@ v2_api = NinjaExtraAPI(
         "tags": [
             {"name": "Search"},
             {"name": "Super Search"},
+            {"name": "Membership"},
+            {"name": "Notifications"},
         ]
     },
 )
@@ -131,23 +193,27 @@ def v2_invalid_request_handler(request, exc: InvalidRequest):
 
 # Routers are imported after the api instances are created to avoid circular imports,
 # and after init functions have been called from urls.py.
-def register_routers(ranker, batch_cache, queued_batches):
+def register_routers(ranker, combined_ranker, tiny_index):
     """
     Initialise and register all sub-routers on the v1 and v2 APIs.
 
     This is called from urls.py after Django app setup is complete, so that
-    dependencies (ranker, batch_cache, queued_batches) are available.
+    dependencies (the rankers and the index) are available.
     """
     import mwmbl.crawler.app as crawler_module
+    import mwmbl.tinysearchengine.combined_search as combined_search_module
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.tinysearchengine.super_search as super_search_module
     from mwmbl.platform.api import router as platform_router
+    from mwmbl.platform.membership_v2 import router as membership_v2_router
+    from mwmbl.platform.notifications import router as notifications_router
 
     # Initialise routers that depend on runtime objects
-    search_module.init_router(ranker)
+    search_module.init_router(ranker, tiny_index)
     search_module.init_v2_router(ranker)
     super_search_module.init_router()
-    crawler_module.init_router(batch_cache, queued_batches)
+    combined_search_module.init_router(combined_ranker)
+    crawler_module.init_router()
 
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])
@@ -155,3 +221,6 @@ def register_routers(ranker, batch_cache, queued_batches):
 
     v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
     v2_api.add_router("/super-search/", super_search_module.router, tags=["Super Search"])
+    v2_api.add_router("/combined-search/", combined_search_module.router, tags=["Combined Search"])
+    v2_api.add_router("/membership/", membership_v2_router, tags=["Membership"])
+    v2_api.add_router("/notifications/", notifications_router, tags=["Notifications"])

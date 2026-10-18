@@ -19,6 +19,9 @@ uv run manage.py <command> --settings=mwmbl.settings_dev
 
 `make test` and `make migrate` need `DATABASE_URL` in the environment, for example
 `DATABASE_URL="postgres://user@/mwmbl_test"`. Tests use `mwmbl.settings_test`.
+The tests also need a running Redis: the quota counters' Lua scripts and key scans are
+tested against a real one (the `redis_cache` fixture), in the database `TEST_REDIS_URL`
+names, which the tests flush. `make test` defaults it to `redis://127.0.0.1:6379/15`.
 
 `make check` and `make test` are the two gates. Both must pass before you open a pull
 request, and `.pre-commit-config.yaml` runs the first of them on every commit.
@@ -30,7 +33,11 @@ request, and `.pre-commit-config.yaml` runs the first of them on every commit.
   `rankeval/` (ranking quality), `api.py` (django-ninja endpoints), `models.py`,
   `settings_*.py` per environment.
 - `mwmbl_rank/` — the Rust ranking extension, built with maturin. Changing it means
-  `uv run maturin develop` before the tests will see it.
+  `uv run maturin develop` before the tests will see it. Its build downloads a prebuilt
+  `libxgboost.so` from GitHub, which Claude Code on the web cannot reach; there,
+  `.claude/hooks/session-start.sh` seeds the library from the `xgboost-cpu` wheel at
+  session start. If the build fails with `libxgboost.so: unknown file type`, rerun that
+  script rather than working around it by hand.
 - `test/` — pytest suite, one file per area.
 - `front-end/` — the JS build; leave it alone unless the change is about the UI.
 - `scripts/`, `analyse/` — one-off analysis and evaluation tools, not application code.
@@ -50,6 +57,21 @@ request, and `.pre-commit-config.yaml` runs the first of them on every commit.
 - Match the surrounding code's naming and idiom over any general preference.
 - Tests live next to the behaviour they cover, in `test/`, and are part of the same
   change — not a follow-up.
+
+## Evaluating ranking changes
+
+Evaluate a ranking change in at most two steps:
+
+1. **Cross-validation, to check relevance.** Cross-validate over the LLM-labelled
+   queries (`devdata/llm_relabel/`), scoring pass-3 NDCG@10. Pass 3 grades each page
+   alone, so this measures relevance and nothing else.
+2. **Holistic evaluation, for the overall comparison.** A Haiku judge compares two whole
+   top-ten lists side by side, in both orders: `mwmbl/rankeval/evaluation/holistic_judge.py`.
+   This is the step that decides between arms. It sees what per-page NDCG can't:
+   redundancy, coverage, extracts, the top result and ethos. A single verdict is noisy,
+   so small differences need many queries or several judgments per comparison.
+
+Don't add further end-to-end NDCG runs that grade newly surfaced pages with Haiku.
 
 ## Pull requests
 

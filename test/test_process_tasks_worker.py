@@ -142,18 +142,17 @@ class _FakeProcess:
         pass
 
 
-def test_server_starts_the_queue_when_enabled(settings, fake_server, recorded_commands):
+def test_server_starts_the_queue_and_the_seed_crawl_worker_when_enabled(settings, fake_server, recorded_commands):
     settings.RUN_BACKGROUND_TASKS = True
 
     main.run()
 
-    assert len(fake_server) == 1
-    started = fake_server[0]
-    assert started["target"] is main.run_background_tasks
-    # Spawn, not fork: a forked child would inherit the parent's Postgres and Redis
-    # sockets. Daemonic so it dies with the container rather than outliving it.
-    assert started["method"] == "spawn"
-    assert started["daemon"]
+    assert [started["target"] for started in fake_server] == [main.run_background_tasks, main.run_seed_crawls]
+    for started in fake_server:
+        # Spawn, not fork: a forked child would inherit the parent's Postgres and Redis
+        # sockets. Daemonic so it dies with the container rather than outliving it.
+        assert started["method"] == "spawn"
+        assert started["daemon"]
     assert FakeGunicorn.runs == 1
 
 
