@@ -8,17 +8,20 @@ from uuid import uuid4
 
 import boto3
 import requests
+import sentry_sdk
 from django.conf import settings
 from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
 from mwmbl.crawler.batch import (
+    CrawlerErrorReport,
     DatasetRequest,
     Error,
     HashedDataset,
     PostResultsResponse,
     Results,
+    StatusResponse,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.devices import record_device
@@ -43,6 +46,8 @@ stats_manager = StatsManager(
 )
 
 logger = getLogger(__name__)
+
+INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope required)."
 
 # Module-level router used by the unified v1 API
 router = Router(tags=["Crawler"])
@@ -226,17 +231,9 @@ def _register_routes(r: Router | NinjaAPI):
         if not raw_key:
             return 401, {"message": "API key required. Pass it in the X-API-Key header."}
 
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        api_key = (
-            ApiKey.objects.filter(
-                key=key_hash,
-                scopes__contains=[ApiKey.Scope.CRAWL],
-            )
-            .select_related("user")
-            .first()
-        )
+        api_key = _get_crawl_api_key(raw_key)
         if api_key is None:
-            return 401, {"message": "Invalid API key or insufficient scope (crawl scope required)."}
+            return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
 
         now = datetime.now(timezone.utc)
         ApiKey.objects.filter(pk=api_key.pk).update(last_used=now)
@@ -279,6 +276,28 @@ def _register_routes(r: Router | NinjaAPI):
             "status": "ok",
             "url": f"{PUBLIC_URL_PREFIX}{filename}",
         }
+
+    @r.post(
+        "/errors",
+        response={200: StatusResponse, 401: Error},
+        summary="Report a crawler error",
+        description=(
+            "Report an exception a crawler caught and recovered from. The crawler loops retry "
+            "after every error, so without this a crawler can fail on every pass - and stop "
+            "submitting results - with nothing to show for it but its own logs. Requires a "
+            "crawl-scoped API key in the `X-API-Key` request header."
+        ),
+    )
+    def post_error(request, report: CrawlerErrorReport):
+        api_key = _get_crawl_api_key(request.headers.get("X-API-Key", ""))
+        if api_key is None:
+            return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
+
+        logger.error(
+            f"Crawler error from user {api_key.user.id} ({report.context}): {report.exception_type}: {report.message}"
+        )
+        sentry_sdk.capture_event(_crawler_error_event(report, api_key.user.id))
+        return {"status": "ok"}
 
     @r.post(
         "/dataset",
@@ -329,6 +348,60 @@ def create_router(version: str) -> NinjaAPI:
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
     _register_routes(api)
     return api
+
+
+def _get_crawl_api_key(raw_key: str) -> ApiKey | None:
+    if not raw_key:
+        return None
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    return (
+        ApiKey.objects.filter(
+            key=key_hash,
+            scopes__contains=[ApiKey.Scope.CRAWL],
+        )
+        .select_related("user")
+        .first()
+    )
+
+
+def _crawler_error_event(report: CrawlerErrorReport, user_id: int) -> dict:
+    """
+    Build the Sentry event for a crawler's error as though Sentry had caught it itself.
+
+    Sending the traceback as a structured exception rather than a message is what lets Sentry
+    group reports by where they were raised, so a hundred crawlers hitting the same bug make
+    one issue, not a hundred.
+    """
+    frames = [
+        {
+            "filename": frame.filename,
+            "lineno": frame.lineno,
+            "function": frame.function,
+            "context_line": frame.line,
+        }
+        for frame in report.frames
+    ]
+    tags = {
+        "source": "crawler",
+        "crawler_context": report.context,
+        "crawler_version": report.crawler_version,
+        "crawler_device": report.device_name,
+    }
+    return {
+        "level": "error",
+        "logger": "mwmbl.crawler.remote",
+        "exception": {
+            "values": [
+                {
+                    "type": report.exception_type,
+                    "value": report.message,
+                    "stacktrace": {"frames": frames},
+                }
+            ]
+        },
+        "tags": {tag: value for tag, value in tags.items() if value is not None},
+        "user": {"id": str(user_id)},
+    }
 
 
 def _get_user_id_hash(batch: DatasetRequest):

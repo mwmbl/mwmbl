@@ -22,6 +22,11 @@ MWMBL_CONTACT_INFO = os.environ.get("MWMBL_CONTACT_INFO", "CHANGE_ME@example.com
 # directory - see mwmbl.crawler.device. The machine hostname is deliberately never used.
 MWMBL_DEVICE_NAME = os.environ.get("MWMBL_DEVICE_NAME", "")
 
+# Whether to send the errors the crawl loops catch to the Mwmbl server, so we can see when
+# crawlers are failing. Reports carry the exception and traceback, the crawler version and
+# the device name - nothing about the machine beyond the file paths in the traceback.
+CRAWL_REPORT_ERRORS = os.environ.get("CRAWL_REPORT_ERRORS", "true").lower() == "true"
+
 # Bounds for running the crawler somewhere that is not a volunteer's machine - CI, mainly.
 # The defaults are the unbounded behaviour a volunteer crawler has always had.
 

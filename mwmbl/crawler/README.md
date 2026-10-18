@@ -21,6 +21,9 @@ Batches crawled by different workers at the same time can share domains, since e
 ### Rate Limiting Configuration
 - `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds each crawl thread waits between the URLs it crawls. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
 
+### Error Reporting
+- `CRAWL_REPORT_ERRORS` (default: true) - Send the errors the crawler catches and recovers from to the Mwmbl server (`POST /api/v1/crawler/errors`), so the maintainers can see when crawlers are failing. A report holds the exception, its traceback, the crawler version and the device name. Each distinct error is reported at most once an hour per process. Set to `false` to opt out. Nothing is reported when `CRAWL_SUBMIT_MODE` is `off`.
+
 ### Redis Configuration
 - `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats
 

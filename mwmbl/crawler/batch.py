@@ -222,6 +222,36 @@ class PostResultsResponse(Schema):
     )
 
 
+class ErrorFrame(Schema):
+    """One frame of the traceback of an exception a crawler caught."""
+
+    filename: str = Field(example="/venv/lib/python3.11/site-packages/mwmbl/crawl.py")
+    lineno: Optional[int] = Field(example=312)
+    function: str = Field(example="run_indexing")
+    line: Optional[str] = Field(default=None, example="response.raise_for_status()")
+
+
+class CrawlerErrorReport(Schema):
+    """An exception a crawler caught and recovered from, reported so it is not lost in local logs."""
+
+    context: str = Field(
+        description="Which crawler loop caught the exception.",
+        example="indexing",
+    )
+    exception_type: str = Field(example="requests.exceptions.HTTPError")
+    message: str = Field(example="502 Server Error: Bad Gateway")
+    frames: list[ErrorFrame] = Field(
+        description="The traceback, outermost frame first.",
+        max_length=200,
+    )
+    crawler_version: Optional[str] = Field(default=None, example="1.2.0")
+    device_name: Optional[str] = Field(default=None, example="crawler-3f7a1c9e")
+
+
+class StatusResponse(Schema):
+    status: str = Field(example="ok")
+
+
 class Error(Schema):
     """A generic error response."""
 
