@@ -454,7 +454,7 @@ class Crawler:
                         response = requests.post(
                             results_url,
                             json=results.dict(),
-                            headers={"X-API-Key": MWMBL_API_KEY},
+                            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
                             timeout=RESULTS_POST_TIMEOUT_SECONDS,
                         )
                         logger.info(f"Response: {response.text}")

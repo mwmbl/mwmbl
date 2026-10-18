@@ -179,7 +179,11 @@ def test_run_indexing_submits_results_that_beat_the_remote_index(fake_redis):
 def test_run_indexing_sends_the_api_key_in_the_header(fake_redis):
     post = run_indexing_with(fake_redis, [STRONG], [MEDIUM])
 
-    assert post.call_args.kwargs["headers"] == {"X-API-Key": "test-api-key"}
+    headers = post.call_args.kwargs["headers"]
+    assert headers["X-API-Key"] == "test-api-key"
+    # Our own API gets the crawler's API identity, not the contact address meant for
+    # third-party sites.
+    assert headers["User-Agent"].startswith("mwmbl-crawler/")
     assert post.call_args.kwargs["json"]["api_key"] is None
 
 
