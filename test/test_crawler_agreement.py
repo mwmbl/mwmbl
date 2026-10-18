@@ -9,10 +9,10 @@ from django.test import Client
 from django.utils import timezone
 
 from mwmbl.crawler.agreement import AGREEMENT_RETENTION, prune_agreements, record_agreements
-from mwmbl.indexer.agreement import Agreement, find_agreements, trigram_similarity
+from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies, trigram_similarity
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
-from mwmbl.indexer.index_batches import _one_agreement_per_url, index_documents
+from mwmbl.indexer.index_batches import _most_held_copies, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
 
@@ -37,76 +37,78 @@ def test_trigram_similarity_of_an_edit_is_between():
     assert 0.5 < similarity < 1.0
 
 
-def test_find_agreements_compares_against_another_crawlers_copy():
+def test_find_stored_copies_finds_another_crawlers_copy():
     existing = [Document("Title", URL, "An extract", term="t", user_ids=[1, 2], last_crawled=1000)]
-    incoming = [Document("Title", URL, "Buy cheap pills", term="t", user_ids=[3], last_crawled=1600)]
+    incoming = [Document("Title", URL, "Buy cheap pills", term="t", user_ids=[3])]
 
-    (agreement,) = find_agreements(incoming, existing)
-
-    assert agreement.url == URL
-    assert agreement.existing_user_id == 2
-    assert agreement.title_similarity == 1.0
-    assert agreement.extract_similarity == 0.0
-    assert agreement.last_crawled_delta == 600
+    assert find_stored_copies(incoming, existing) == [(StoredCopy(URL, 2, "Title", "An extract"), 1000)]
 
 
-def test_find_agreements_skips_the_crawlers_own_copy():
+def test_find_stored_copies_skips_the_crawlers_own_copy():
     existing = [Document("Title", URL, "Old extract", term="t", user_ids=[1, 3])]
     incoming = [Document("Title", URL, "New extract", term="t", user_ids=[3])]
 
-    assert find_agreements(incoming, existing) == set()
+    assert find_stored_copies(incoming, existing) == []
 
 
-def test_find_agreements_compares_against_another_crawlers_text_the_crawler_is_credited_on():
+def test_find_stored_copies_finds_another_crawlers_text_the_crawler_is_credited_on():
     """The crawler is on the stored copy's user_ids, but the text is the last one's."""
     existing = [Document("Title", URL, "Old extract", term="t", user_ids=[3, 1])]
     incoming = [Document("Title", URL, "New extract", term="t", user_ids=[3])]
 
-    (agreement,) = find_agreements(incoming, existing)
+    ((stored_copy, _),) = find_stored_copies(incoming, existing)
 
-    assert agreement.existing_user_id == 1
+    assert stored_copy.author_id == 1
 
 
-def test_find_agreements_skips_a_curated_copy():
+def test_find_stored_copies_skips_a_curated_copy():
     """A curated copy always wins its page and takes on the user_ids of the copies it beat,
     so its last id is not its author."""
     existing = [Document("Title", URL, "Curated extract", term="t", state=DocumentState.ORGANIC_APPROVED, user_ids=[1])]
     incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
 
-    assert find_agreements(incoming, existing) == set()
+    assert find_stored_copies(incoming, existing) == []
 
 
-def test_find_agreements_skips_a_copy_of_staans():
+def test_find_stored_copies_skips_a_copy_of_staans():
     """Like a curated copy, it has no author of its own but takes on the user_ids of the
     copies it beats."""
     existing = [Document("Title", URL, "Staan snippet", term="t", source=DocumentSource.STAAN_INDEXED, user_ids=[1])]
     incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
 
-    assert find_agreements(incoming, existing) == set()
+    assert find_stored_copies(incoming, existing) == []
 
 
-def test_find_agreements_skips_unattributed_documents():
-    """Seed crawls and the main index sync write documents with no user_ids: there is no
-    crawler to hold them against."""
+def test_find_stored_copies_skips_unattributed_documents():
+    """There is no crawler to hold an unattributed copy against, nor one to compare it for."""
     attributed = Document("Title", URL, "Extract", term="t", user_ids=[1])
     unattributed = Document("Title", URL, "Extract", term="t")
 
-    assert find_agreements([attributed], [unattributed]) == set()
-    assert find_agreements([unattributed], [attributed]) == set()
+    assert find_stored_copies([attributed], [unattributed]) == []
+    assert find_stored_copies([unattributed], [attributed]) == []
 
 
-def test_find_agreements_skips_other_urls():
+def test_find_stored_copies_skips_other_urls():
     existing = [Document("Title", "https://example.com/other", "Extract", term="t", user_ids=[1])]
     incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
 
-    assert find_agreements(incoming, existing) == set()
+    assert find_stored_copies(incoming, existing) == []
 
 
-def test_find_agreements_without_crawl_times_has_no_delta():
-    existing = [Document("Title", URL, "Extract", term="t", user_ids=[1])]
-    incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2], last_crawled=1000)]
+def test_compare():
+    incoming = Document("Title", URL, "Buy cheap pills", user_ids=[3], last_crawled=1600)
 
-    (agreement,) = find_agreements(incoming, existing)
+    agreement = compare(incoming, StoredCopy(URL, 2, "Title", "An extract"), stored_last_crawled=1000)
+
+    assert agreement == Agreement(
+        url=URL, existing_user_id=2, title_similarity=1.0, extract_similarity=0.0, last_crawled_delta=600
+    )
+
+
+def test_compare_without_crawl_times_has_no_delta():
+    incoming = Document("Title", URL, "Extract", user_ids=[2], last_crawled=1000)
+
+    agreement = compare(incoming, StoredCopy(URL, 1, "Title", "Extract"), stored_last_crawled=None)
 
     assert agreement.last_crawled_delta is None
 
@@ -135,7 +137,7 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
 
     indexed = index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[2])], index_path)
 
-    assert indexed.agreements == {
+    assert indexed.agreements == [
         Agreement(
             url=URL,
             existing_user_id=1,
@@ -143,7 +145,7 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
             extract_similarity=1.0,
             last_crawled_delta=None,
         )
-    }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -183,22 +185,36 @@ def test_index_documents_reports_one_agreement_when_stored_copies_differ(index_p
     assert agreement.extract_similarity == 1.0
 
 
-def test_one_agreement_per_url_votes_on_the_copy_not_the_crawl_time_gap():
-    """A page's stored crawl time is the latest of the copies merged on it, so one stored
-    copy can carry a different gap on each page; it still gets all of its pages' votes."""
-    held_copy = Agreement(URL, existing_user_id=1, title_similarity=1.0, extract_similarity=0.2, last_crawled_delta=10)
-    other_copy = Agreement(URL, existing_user_id=2, title_similarity=1.0, extract_similarity=0.9, last_crawled_delta=10)
-    page_agreements = Counter({held_copy: 2, held_copy._replace(last_crawled_delta=20): 2, other_copy: 3})
+def test_most_held_copies_takes_the_copy_most_pages_hold_for_each_url():
+    held_copy = StoredCopy(URL, 1, "Title", "Held extract")
+    other_copy = StoredCopy(URL, 2, "Title", "Other extract")
+    other_url_copy = StoredCopy("https://example.com/other", 3, "Title", "Extract")
 
-    (agreement,) = _one_agreement_per_url(page_agreements)
+    copies = _most_held_copies(Counter({held_copy: 3, other_copy: 2, other_url_copy: 1}))
 
-    assert agreement.existing_user_id == 1
+    assert copies == [held_copy, other_url_copy]
+
+
+def test_index_documents_compares_a_repeated_url_once_against_its_last_copy(index_path, no_blacklist):
+    """However the copies of a URL a submission repeats score, they make one agreement."""
+    index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[1])], index_path)
+
+    indexed = index_documents(
+        [
+            Document("Python tutorial", URL, "Something else entirely", user_ids=[2]),
+            Document("Python tutorial", URL, "Learn python today", user_ids=[2]),
+        ],
+        index_path,
+    )
+
+    (agreement,) = indexed.agreements
+    assert agreement.extract_similarity == 1.0
 
 
 def test_index_documents_reports_no_agreement_for_a_new_url(index_path, no_blacklist):
     indexed = index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[1])], index_path)
 
-    assert indexed.agreements == set()
+    assert indexed.agreements == []
 
 
 @pytest.fixture
@@ -218,7 +234,7 @@ def _agreement(url=URL):
 
 @pytest.mark.django_db
 def test_record_agreements(user):
-    record_agreements({_agreement()}, user, "1.2.0")
+    record_agreements([_agreement()], user, "1.2.0")
 
     stored = CrawlerAgreement.objects.get()
     assert stored.url == URL
@@ -232,7 +248,7 @@ def test_record_agreements(user):
 
 @pytest.mark.django_db
 def test_prune_agreements_deletes_only_expired_rows(user):
-    record_agreements({_agreement("https://example.com/old"), _agreement("https://example.com/new")}, user, None)
+    record_agreements([_agreement("https://example.com/old"), _agreement("https://example.com/new")], user, None)
     expired = timezone.now() - AGREEMENT_RETENTION - timedelta(days=1)
     CrawlerAgreement.objects.filter(url="https://example.com/old").update(created_at=expired)
 

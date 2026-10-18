@@ -494,7 +494,7 @@ def test_search_keyed_cap_shrinks_with_combined_search_spend(api_client, search_
 def _capturing_index(captured):
     def index_documents(documents, index_path):
         captured.extend(documents)
-        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), set())
+        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), [])
 
     return index_documents
 

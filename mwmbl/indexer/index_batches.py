@@ -10,7 +10,7 @@ from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
-from mwmbl.indexer.agreement import Agreement, find_agreements
+from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.tinysearchengine.indexer import (
@@ -74,8 +74,8 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Count
 class IndexedDocuments(NamedTuple):
     end_time: datetime
     new_page_doc_counts: Counter
-    agreements: set[Agreement]
-    """Where an incoming document met another crawler's stored copy of its URL."""
+    agreements: list[Agreement]
+    """One for each submitted URL another crawler's stored copy of was met."""
 
 
 def index_documents(documents, index_path) -> IndexedDocuments:
@@ -93,32 +93,37 @@ def index_documents(documents, index_path) -> IndexedDocuments:
     blacklist_snapshot."""
     page_documents = _page_documents(documents, index_path)
     new_page_doc_counts = Counter()
-    page_agreements = Counter()
+    copy_pages = Counter()
+    copy_last_crawled = {}
     for page in _store_pages(index_path, page_documents):
         new_page_doc_counts.update(_new_terms(page.stored))
-        page_agreements.update(page.agreements)
+        for stored_copy, last_crawled in page.stored_copies:
+            copy_pages[stored_copy] += 1
+            copy_last_crawled[stored_copy] = _latest(copy_last_crawled.get(stored_copy), last_crawled)
+    # A submission can repeat a URL; its last copy is the one compared.
+    submitted_by_url = {document.url: cleaned_document(document) for document in documents}
+    agreements = [
+        compare(submitted_by_url[stored_copy.url], stored_copy, copy_last_crawled[stored_copy])
+        for stored_copy in _most_held_copies(copy_pages)
+    ]
     end_time = datetime.now(timezone.utc)
-    return IndexedDocuments(end_time, new_page_doc_counts, _one_agreement_per_url(page_agreements))
+    return IndexedDocuments(end_time, new_page_doc_counts, agreements)
 
 
-def _one_agreement_per_url(page_agreements: Counter) -> set[Agreement]:
-    """The URL is on the page of each of its terms, and the pages need not all hold the same
-    stored copy: two crawlers' versions have different terms, and which one a shared term's
-    page keeps depends on rank. Keeping the copy most of its pages hold gives one agreement
-    per submitted URL, so a URL with divergent copies is not counted several times over.
+def _most_held_copies(copy_pages: Counter) -> list[StoredCopy]:
+    """For each URL, the stored copy most of its pages hold. The URL is on the page of each
+    of its terms, and the pages need not all hold the same copy: two crawlers' versions have
+    different terms, and which one a shared term's page keeps depends on rank. Taking one
+    copy gives one agreement per submitted URL, so a URL with divergent copies is not
+    counted several times over."""
+    copies_by_url = {}
+    for stored_copy, _ in copy_pages.most_common():
+        copies_by_url.setdefault(stored_copy.url, stored_copy)
+    return list(copies_by_url.values())
 
-    The vote leaves out the crawl time gap: a page's stored crawl time is the latest of the
-    copies merged on it, so one stored copy can carry different gaps on different pages."""
-    copy_votes = Counter()
-    agreement_by_copy = {}
-    for agreement, count in page_agreements.items():
-        copy = agreement._replace(last_crawled_delta=None)
-        copy_votes[copy] += count
-        agreement_by_copy.setdefault(copy, agreement)
-    agreements_by_url = {}
-    for copy, _ in copy_votes.most_common():
-        agreements_by_url.setdefault(copy.url, agreement_by_copy[copy])
-    return set(agreements_by_url.values())
+
+def _latest(first: Optional[int], second: Optional[int]) -> Optional[int]:
+    return max((time for time in (first, second) if time is not None), default=None)
 
 
 class IndexedURLs(NamedTuple):
@@ -193,8 +198,8 @@ class StoredPage(NamedTuple):
     """What the page now stores."""
     existing: list[Document]
     """What it held before."""
-    agreements: set[Agreement]
-    """Where an incoming document met another crawler's copy of its URL on the page."""
+    stored_copies: list[tuple[StoredCopy, Optional[int]]]
+    """Other crawlers' copies of the incoming documents' URLs it held, with their crawl times."""
 
 
 def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False):
@@ -207,7 +212,7 @@ def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mar
                     existing_documents = page.documents
                     # Before combining, which merges the user_ids and crawl times of the copies
                     # of a URL into whichever one it keeps, in place.
-                    agreements = find_agreements(documents, existing_documents)
+                    stored_copies = find_stored_copies(documents, existing_documents)
                     combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
                     num_stored = page.store(combined_documents)
                     logger.info(
@@ -222,7 +227,7 @@ def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mar
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            yield StoredPage(combined_documents[:num_stored], existing_documents, agreements)
+            yield StoredPage(combined_documents[:num_stored], existing_documents, stored_copies)
 
 
 def _document_token_set(doc: Document) -> set[str]:

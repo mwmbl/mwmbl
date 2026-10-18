@@ -10,7 +10,7 @@ from mwmbl.models import CrawlerAgreement, MwmblUser
 AGREEMENT_RETENTION = timedelta(days=90)
 
 
-def record_agreements(agreements: set[Agreement], user: MwmblUser, crawler_version: str | None):
+def record_agreements(agreements: list[Agreement], user: MwmblUser, crawler_version: str | None):
     CrawlerAgreement.objects.bulk_create(
         CrawlerAgreement(
             url=agreement.url,

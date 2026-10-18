@@ -7,16 +7,27 @@ and a crawler whose copies disagree with many different crawlers is one whose su
 are worth a closer look.
 """
 
+from collections import defaultdict
 from typing import Iterable, NamedTuple, Optional
 
 from mwmbl.tinysearchengine.indexer import CURATED_STATES, Document
 
 
+class StoredCopy(NamedTuple):
+    """Another crawler's copy of a URL, as a page holds it: what pages are counted on to find
+    the copy most of a URL's pages hold. Its crawl time is left out, since that is the latest
+    of the copies merged on each page and so can differ between pages holding the same copy."""
+
+    url: str
+    author_id: int
+    """The last of its user_ids, which combine_documents keeps for the kept copy's author."""
+    title: str
+    extract: str
+
+
 class Agreement(NamedTuple):
     url: str
     existing_user_id: int
-    """The crawler whose text the stored copy holds: the last of its user_ids, which
-    combine_documents keeps for the kept copy's author."""
     title_similarity: float
     extract_similarity: float
     last_crawled_delta: Optional[int]
@@ -25,36 +36,39 @@ class Agreement(NamedTuple):
     latest of the copies merged into it, not necessarily that of its text."""
 
 
-def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) -> set[Agreement]:
-    """Compare each incoming document against another crawler's stored copy of its URL."""
-    # A page keeps one document per URL, so there is at most one stored copy to compare. A
-    # curated copy or a copy of Staan's has no author of its own, yet takes on the user_ids
-    # of the copies it beats, so its last id names one of them.
-    authors_by_url = {
-        document.url: (document, document.user_ids[-1])
-        for document in existing
-        if document.user_ids and document.state not in CURATED_STATES and document.source is None
-    }
-    agreements = set()
+def find_stored_copies(
+    incoming: Iterable[Document], existing: Iterable[Document]
+) -> list[tuple[StoredCopy, Optional[int]]]:
+    """Other crawlers' stored copies of the incoming documents' URLs, with their crawl times."""
+    submitters_by_url = defaultdict(set)
     for document in incoming:
-        if document.url not in authors_by_url or document.user_ids is None:
+        submitters_by_url[document.url] |= set(document.user_ids or ())
+    stored_copies = []
+    # A page keeps one document per URL, so there is at most one stored copy of each.
+    for document in existing:
+        # A curated copy or a copy of Staan's has no author of its own, yet takes on the
+        # user_ids of the copies it beats, so its last id names one of them.
+        attributed = document.user_ids and document.state not in CURATED_STATES and document.source is None
+        if not attributed or not submitters_by_url[document.url]:
             continue
-        stored, existing_user_id = authors_by_url[document.url]
+        author_id = document.user_ids[-1]
         # The stored text may be this crawler's own, from an earlier submission.
-        if existing_user_id in document.user_ids:
+        if author_id in submitters_by_url[document.url]:
             continue
-        both_crawled = document.last_crawled is not None and stored.last_crawled is not None
-        last_crawled_delta = document.last_crawled - stored.last_crawled if both_crawled else None
-        agreements.add(
-            Agreement(
-                url=document.url,
-                existing_user_id=existing_user_id,
-                title_similarity=trigram_similarity(document.title, stored.title),
-                extract_similarity=trigram_similarity(document.extract, stored.extract),
-                last_crawled_delta=last_crawled_delta,
-            )
-        )
-    return agreements
+        stored_copy = StoredCopy(document.url, author_id, document.title, document.extract)
+        stored_copies.append((stored_copy, document.last_crawled))
+    return stored_copies
+
+
+def compare(document: Document, stored_copy: StoredCopy, stored_last_crawled: Optional[int]) -> Agreement:
+    both_crawled = document.last_crawled is not None and stored_last_crawled is not None
+    return Agreement(
+        url=document.url,
+        existing_user_id=stored_copy.author_id,
+        title_similarity=trigram_similarity(document.title, stored_copy.title),
+        extract_similarity=trigram_similarity(document.extract, stored_copy.extract),
+        last_crawled_delta=document.last_crawled - stored_last_crawled if both_crawled else None,
+    )
 
 
 def trigram_similarity(first: str, second: str) -> float:
