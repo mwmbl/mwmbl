@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("mwmbl", "0044_mwmbluser_combined_search_enabled"),
+        ("mwmbl", "0046_usernotification"),
     ]
 
     operations = [
