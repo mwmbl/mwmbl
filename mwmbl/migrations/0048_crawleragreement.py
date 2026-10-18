@@ -8,7 +8,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("mwmbl", "0046_usernotification"),
+        ("mwmbl", "0047_mwmbluser_seed_searches"),
     ]
 
     operations = [
