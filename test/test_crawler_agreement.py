@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -11,7 +12,7 @@ from mwmbl.crawler.agreement import AGREEMENT_RETENTION, prune_agreements, recor
 from mwmbl.indexer.agreement import Agreement, find_agreements, trigram_similarity
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
-from mwmbl.indexer.index_batches import index_documents
+from mwmbl.indexer.index_batches import _one_agreement_per_url, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 
@@ -162,6 +163,18 @@ def test_index_documents_reports_one_agreement_when_stored_copies_differ(index_p
 
     (agreement,) = indexed.agreements
     assert agreement.extract_similarity == 1.0
+
+
+def test_one_agreement_per_url_votes_on_the_copy_not_the_crawl_time_gap():
+    """A page's stored crawl time is the latest of the copies merged on it, so one stored
+    copy can carry a different gap on each page; it still gets all of its pages' votes."""
+    held_copy = Agreement(URL, existing_user_id=1, title_similarity=1.0, extract_similarity=0.2, last_crawled_delta=10)
+    other_copy = Agreement(URL, existing_user_id=2, title_similarity=1.0, extract_similarity=0.9, last_crawled_delta=10)
+    page_agreements = Counter({held_copy: 2, held_copy._replace(last_crawled_delta=20): 2, other_copy: 3})
+
+    (agreement,) = _one_agreement_per_url(page_agreements)
+
+    assert agreement.existing_user_id == 1
 
 
 def test_index_documents_reports_no_agreement_for_a_new_url(index_path, no_blacklist):

@@ -100,10 +100,19 @@ def _one_agreement_per_url(page_agreements: Counter) -> set[Agreement]:
     """The URL is on the page of each of its terms, and the pages need not all hold the same
     stored copy: two crawlers' versions have different terms, and which one a shared term's
     page keeps depends on rank. Keeping the copy most of its pages hold gives one agreement
-    per submitted URL, so a URL with divergent copies is not counted several times over."""
+    per submitted URL, so a URL with divergent copies is not counted several times over.
+
+    The vote leaves out the crawl time gap: a page's stored crawl time is the latest of the
+    copies merged on it, so one stored copy can carry different gaps on different pages."""
+    copy_votes = Counter()
+    agreement_by_copy = {}
+    for agreement, count in page_agreements.items():
+        copy = agreement._replace(last_crawled_delta=None)
+        copy_votes[copy] += count
+        agreement_by_copy.setdefault(copy, agreement)
     agreements_by_url = {}
-    for agreement, _ in page_agreements.most_common():
-        agreements_by_url.setdefault(agreement.url, agreement)
+    for copy, _ in copy_votes.most_common():
+        agreements_by_url.setdefault(copy.url, agreement_by_copy[copy])
     return set(agreements_by_url.values())
 
 

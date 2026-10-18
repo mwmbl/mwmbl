@@ -272,12 +272,12 @@ def _register_routes(r: Router | NinjaAPI):
         # with a plain unauthenticated GET), so uploading the object as submitted would
         # publish the plaintext key of any client still using the deprecated body field.
         filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
-        # After the upload: the agreements are analytics, and failing to store them should not
-        # cost the batch.
-        record_agreements(indexed.agreements, api_key.user, results.crawler_version)
-
         # Update stats for the user
         stats_manager.record_results(results, api_key.user)
+
+        # Last, since they are only analytics: a failure to store them still answers with an
+        # error, but after the batch is indexed, uploaded and counted.
+        record_agreements(indexed.agreements, api_key.user, results.crawler_version)
 
         return {
             "status": "ok",
