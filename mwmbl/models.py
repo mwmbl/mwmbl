@@ -596,9 +596,12 @@ class CrawlerAgreement(models.Model):
 
     existing_user_id names the stored text's author only on pages written since that became
     the last of a copy's user_ids. Before then the ids were in rank order, and a copy of
-    Staan's or Super Search's, which has none of its own and was written without a source,
-    took on those of the copies it beat. Such a page keeps the wrong author until a fresh
-    copy wins it, so early rows deserve less weight.
+    Staan's written without a source took on those of the copies it beat. Such a page keeps
+    the wrong author until a fresh copy wins it, so early rows deserve less weight.
+
+    Super Search still writes copies with neither user_ids nor a source, and one that wins a
+    page takes on the ids of the copies it beat in the same way. It is deprecated, so this is
+    left to end with it rather than handled here.
     """
 
     url = models.TextField()
