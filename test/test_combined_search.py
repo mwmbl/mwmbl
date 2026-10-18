@@ -518,6 +518,21 @@ def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
         assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]
 
 
+def test_index_staan_results_marks_them_as_staans_in_the_index(tmp_path, monkeypatch):
+    """Not as STAAN, which the rankers read as a result of this request with Staan's rank in
+    its score, and not as nothing, which would pass them off as our own crawl."""
+    index_path = Path(tmp_path) / "index.tinysearch"
+    with TinyIndex.create(Document, str(index_path), num_pages=64, page_size=4096):
+        pass
+    monkeypatch.setattr(combined_search, "index_path", index_path)
+    monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
+
+    combined_search.index_staan_results("tokio", [STAAN_RESULT])
+
+    with TinyIndex(Document, str(index_path), "r") as index:
+        assert [document.source for document in index.retrieve("tokio")] == [DocumentSource.STAAN_INDEXED]
+
+
 # ---------------------------------------------------------------------------
 # Seed crawls (the crawl itself is tested in test_seed_crawl.py)
 # ---------------------------------------------------------------------------

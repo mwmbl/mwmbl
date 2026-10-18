@@ -14,12 +14,14 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.indexer import index_batches, seed_crawl, seed_domains
 from mwmbl.indexer.index_batches import index_new_documents
-from mwmbl.models import ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
+from mwmbl.models import SEED_CRAWLER_USERNAME, ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
 
 User = get_user_model()
 
 SEED = "https://www.tokio.rs/"
+# For the rounds run without the worker, which looks the seed crawler's user up itself.
+SEED_CRAWLER_ID = 0
 STAAN_RESULTS = [
     Document("Tokio", SEED, "An async runtime.", source=DocumentSource.STAAN),
     Document("Async book", "https://rust-lang.github.io/async-book/", "Async Rust.", source=DocumentSource.STAAN),
@@ -106,7 +108,7 @@ def _crawl(seed_urls, domains, is_new=lambda url: True):
     frontier = seed_crawl.Frontier.from_seeds(seed_urls, set(domains))
     crawled = []
     while batch := frontier.next_batch():
-        documents = seed_crawl.crawl_round(frontier, batch, redis=None)
+        documents = seed_crawl.crawl_round(frontier, batch, redis=None, seed_crawler_id=SEED_CRAWLER_ID)
         crawled.append((len(batch), documents))
         frontier.record_round(batch, {document.url for document in documents if is_new(document.url)})
     return crawled
@@ -378,6 +380,18 @@ def test_the_crawled_pages_are_in_the_index(fake_web, redis_cache, user, index_p
 
     with TinyIndex(Document, index_path, "r") as index:
         assert "https://tokio.rs/tutorial/spawning" in {document.url for document in index.retrieve("spawning")}
+
+
+@pytest.mark.django_db
+def test_the_crawled_pages_are_credited_to_the_seed_crawler(fake_web, redis_cache, user, index_path):
+    """Not to the user who asked for the crawl: the pages were fetched here, not by them."""
+    seed_crawler = User.objects.get(username=SEED_CRAWLER_USERNAME)
+
+    _run(user, index_path)
+
+    with TinyIndex(Document, index_path, "r") as index:
+        (spawning,) = [d for d in index.retrieve("spawning") if d.url == "https://tokio.rs/tutorial/spawning"]
+    assert spawning.user_ids == [seed_crawler.id]
 
 
 @pytest.mark.django_db

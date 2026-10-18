@@ -146,6 +146,8 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_USERNAME_REQUIRED = False
+# mwmbl.models.SEED_CRAWLER_USERNAME, which settings cannot import.
+ACCOUNT_USERNAME_BLACKLIST = ["mwmbl-seed-crawler"]
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"

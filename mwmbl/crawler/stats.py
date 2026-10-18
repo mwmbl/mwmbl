@@ -10,7 +10,7 @@ from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
 from mwmbl.crawler.batch import Results
-from mwmbl.models import MwmblUser, UserStats
+from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, UserStats
 from mwmbl.utils import utc_today
 from mwmbl.volunteer_membership import update_volunteer_memberships
 
@@ -148,6 +148,7 @@ class StatsManager:
         first_week_start = this_week_start - timedelta(weeks=REGISTRATION_WEEKS - 1)
         weekly_counts = (
             MwmblUser.objects.filter(date_joined__date__gte=first_week_start)
+            .exclude(username=SEED_CRAWLER_USERNAME)
             .annotate(week=TruncWeek("date_joined"))
             .values("week")
             .annotate(num_users=Count("id"))
