@@ -170,6 +170,7 @@ class Result(Schema):
     )
     last_crawled: Optional[int] = Field(
         default=None,
+        ge=0,
         description="Unix timestamp (seconds since epoch) when the page was crawled.",
         example=1704672000,
     )

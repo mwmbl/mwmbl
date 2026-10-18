@@ -23,8 +23,8 @@ from ninja_jwt.tokens import RefreshToken
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
 from mwmbl.indexer import seed_crawl
-from mwmbl.membership import MembershipTier
-from mwmbl.models import ApiKey, Membership, UserBilling, generate_api_key
+from mwmbl.membership import MembershipTier, VolunteerTier
+from mwmbl.models import ApiKey, Membership, UserBilling, VolunteerMembership, generate_api_key
 from mwmbl.quota import (
     _combined_search_api_monthly_key,
     _combined_search_monthly_key,
@@ -33,6 +33,7 @@ from mwmbl.quota import (
     get_monthly_count,
 )
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
+from mwmbl.utils import utc_today
 
 User = get_user_model()
 
@@ -288,6 +289,20 @@ def _join(user, tier):
 
 
 @pytest.mark.django_db
+def test_a_volunteer_membership_sets_the_limit(client, user, access_token, fresh_quota, stub_sources):
+    stub_sources()
+    VolunteerMembership.objects.create(user=user, tier=VolunteerTier.POLLINATOR, valid_until=utc_today())
+    cache.set(_combined_search_monthly_key(user.id), 299, timeout=3600)
+
+    last_allowed = _get(client, access_token)
+    over_the_limit = _get(client, access_token)
+
+    assert last_allowed.status_code == 200
+    assert last_allowed.json()["monthly_limit"] == 300
+    assert over_the_limit.status_code == 429
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize(
     "tier, limit",
     [(None, 30), (MembershipTier.SPROUT, 300), (MembershipTier.SAPLING, 1_500), (MembershipTier.CANOPY, 1_500)],
@@ -503,6 +518,21 @@ def test_index_staan_results_writes_new_pages_once(tmp_path, monkeypatch):
         assert [document.url for document in index.retrieve("tokio")] == [STAAN_RESULT.url]
 
 
+def test_index_staan_results_marks_them_as_staans_in_the_index(tmp_path, monkeypatch):
+    """Not as STAAN, which the rankers read as a result of this request with Staan's rank in
+    its score, and not as nothing, which would pass them off as our own crawl."""
+    index_path = Path(tmp_path) / "index.tinysearch"
+    with TinyIndex.create(Document, str(index_path), num_pages=64, page_size=4096):
+        pass
+    monkeypatch.setattr(combined_search, "index_path", index_path)
+    monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
+
+    combined_search.index_staan_results("tokio", [STAAN_RESULT])
+
+    with TinyIndex(Document, str(index_path), "r") as index:
+        assert [document.source for document in index.retrieve("tokio")] == [DocumentSource.STAAN_INDEXED]
+
+
 # ---------------------------------------------------------------------------
 # Seed crawls (the crawl itself is tested in test_seed_crawl.py)
 # ---------------------------------------------------------------------------
@@ -537,6 +567,42 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
     assert json.loads(record["new_seed_urls"]) == [STAAN_RESULT.url]
     assert json.loads(record["domains"]) == {"tokio.rs": 1}
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "queued"
+
+
+@pytest.mark.django_db
+def test_a_seed_search_counts_itself_in_the_users_total(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+
+    _crawl(client, access_token)
+    user.refresh_from_db()
+
+    assert user.seed_searches == 1
+
+
+@pytest.mark.django_db
+def test_a_seed_search_that_cannot_start_a_crawl_is_not_counted(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    crawl_sources()
+    _crawl(client, access_token, query="tokio")
+
+    body = _crawl(client, access_token, query="rust").json()
+    user.refresh_from_db()
+
+    assert body["crawl_outcome"] == "already_running"
+    assert user.seed_searches == 1
+
+
+@pytest.mark.django_db
+def test_a_search_without_the_crawl_flag_is_not_counted(client, user, access_token, fresh_quota, stub_sources):
+    stub_sources(new_urls=("https://a.example/",))
+
+    _get(client, access_token)
+    user.refresh_from_db()
+
+    assert user.seed_searches == 0
 
 
 @pytest.mark.django_db

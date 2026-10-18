@@ -137,6 +137,15 @@ def test_link_collection_stops_once_both_sets_are_full(monkeypatch):
     assert len(extra_links) == 1
 
 
+def test_invalid_ipv6_links_are_dropped_not_raised():
+    paragraphs = [_paragraph(["http://[broken/", "/a"], "good")]
+
+    new_links, extra_links = get_new_links(paragraphs, "https://example.test/")
+
+    assert new_links == {"https://example.test/a"}
+    assert extra_links == set()
+
+
 def test_fragments_are_stripped_and_overlong_urls_dropped():
     dom = html_to_dom(
         (

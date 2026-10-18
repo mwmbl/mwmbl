@@ -6,8 +6,14 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
-from mwmbl.membership import MembershipTier
+from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
+
+# The seed crawl fetches its pages itself rather than through a volunteer, so they are credited
+# to a user of their own, made by migration 0049: the user who asked for the crawl did not
+# write them. It gives every copy the crawl writes an author, which the crawler agreement log
+# relies on, and a copy of a page that no volunteer could have tampered with.
+SEED_CRAWLER_USERNAME = "mwmbl-seed-crawler"
 
 
 class MwmblUser(AbstractUser):
@@ -15,6 +21,8 @@ class MwmblUser(AbstractUser):
     # all time. A total on the user rather than a UserStats column, because a UserStats row
     # created for it would enter the crawl leaderboards with no crawl results behind it.
     seed_search_pages_indexed = models.IntegerField(default=0)
+    # How many searches the user has made with Seed Search on (Combined Search with crawl=true), all time.
+    seed_searches = models.IntegerField(default=0)
 
     # On for new accounts. Accounts created before this field existed start off (see the migration).
     combined_search_enabled = models.BooleanField(default=True)
@@ -267,6 +275,43 @@ class Membership(models.Model):
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
     started = models.DateTimeField(auto_now_add=True)
+
+
+class VolunteerMembership(models.Model):
+    """A volunteer tier earned by crawling, kept apart from Membership so Polar syncs never touch it.
+
+    One row per tier the user has earned, each valid to the end of the month after the one it was
+    last earned in, so a volunteer who keeps qualifying is never without it. See
+    mwmbl.membership.VOLUNTEER_TIERS for what earns each tier.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="volunteer_memberships")
+    tier = models.CharField(max_length=20, choices=VolunteerTier.choices)
+    valid_until = models.DateField()
+    started = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "tier")]
+
+
+class NotificationKind(models.TextChoices):
+    VOLUNTEER_MEMBERSHIP_GRANTED = "volunteer_membership_granted", "Volunteer membership granted"
+
+
+class UserNotification(models.Model):
+    """A message for a user that stays until they dismiss it, such as being granted a volunteer membership.
+
+    What a notification says is up to the front end: data holds the details it needs for each kind.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=40, choices=NotificationKind.choices)
+    data = models.JSONField(default=dict)
+    created = models.DateTimeField(auto_now_add=True)
+    dismissed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "dismissed_at"])]
 
 
 class AgreementType(models.TextChoices):
@@ -537,4 +582,41 @@ class SeedDomainCrawl(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["seed_domain", "-crawled_at"]),
+        ]
+
+
+class CrawlerAgreement(models.Model):
+    """A crawler's submission of a URL meeting another crawler's stored copy of it, and how
+    closely the two agreed - see mwmbl.indexer.agreement.
+
+    For finding crawlers whose copies disagree with many different crawlers. A low
+    similarity says the two sides disagree, not which one is wrong, so the analysis has to
+    hold it against both: user is often the honest crawler revisiting a polluted URL. Keeps
+    the similarities rather than the text, which the submitted batches in object storage hold.
+
+    existing_user_id names the stored text's author only on pages written since that became
+    the last of a copy's user_ids. Before then the ids were in rank order, and a copy of
+    Staan's written without a source took on those of the copies it beat. Such a page keeps
+    the wrong author until a fresh copy wins it, so early rows deserve less weight.
+
+    Super Search still writes copies with neither user_ids nor a source, and one that wins a
+    page takes on the ids of the copies it beat in the same way. It is deprecated, so this is
+    left to end with it rather than handled here.
+    """
+
+    url = models.TextField()
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="+")
+    # Not a foreign key: it comes from the index, which keeps the ids of deleted users.
+    existing_user_id = models.IntegerField(db_index=True)
+    title_similarity = models.FloatField()
+    extract_similarity = models.FloatField()
+    extract_empty = models.BooleanField()
+    existing_extract_empty = models.BooleanField()
+    last_crawled_delta = models.BigIntegerField(null=True)  # seconds, incoming crawl minus stored crawl
+    crawler_version = models.TextField(null=True)  # of the incoming submission; the stored copy's is unknown
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"]),
         ]

@@ -21,6 +21,8 @@ DOCUMENT_PROVIDERS = {
     # Staan's results go out as "eusp" (European Search Perspective): the label our
     # agreement with the provider requires, so it deliberately differs from the enum name.
     DocumentSource.STAAN: "eusp",
+    # The same label for Staan's results once they are in our index: they are still Staan's.
+    DocumentSource.STAAN_INDEXED: "eusp",
 }
 
 

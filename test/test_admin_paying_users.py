@@ -6,8 +6,9 @@ from django.core.cache import cache
 from fakeredis import FakeConnection
 
 from mwmbl import quota
-from mwmbl.models import ApiKey, Membership, UserBilling
+from mwmbl.models import ApiKey, Membership, UserBilling, VolunteerMembership
 from mwmbl.templatetags.money import minor_units
+from mwmbl.utils import utc_today
 
 User = get_user_model()
 
@@ -141,6 +142,31 @@ def test_seed_search_usage_by_tier(staff_client):
     assert by_tier["sprout"] == {"tier": "sprout", "users": 1, "queries": 5, "at_limit": 0, "limit": 300}
     assert by_tier["canopy"]["users"] == 0
     assert [row["user"].username for row in seed_search["top_users"]] == ["free_user", "sprout_member"]
+
+
+def test_seed_search_counts_volunteers_under_their_tier(staff_client):
+    volunteer = User.objects.create_user(username="volunteer")
+    VolunteerMembership.objects.create(user=volunteer, tier="pollinator", valid_until=utc_today())
+    quota.increment_monthly_combined_search(volunteer.id)
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    by_tier = {tier["tier"]: tier for tier in response.context["seed_search"]["by_tier"]}
+    assert by_tier["pollinator"] == {"tier": "pollinator", "users": 1, "queries": 1, "at_limit": 0, "limit": 300}
+    assert by_tier["free"]["users"] == 0
+
+
+def test_seed_search_counts_a_paid_volunteer_under_the_tier_that_sets_their_limit(staff_client):
+    member = User.objects.create_user(username="sapling_volunteer")
+    Membership.objects.create(user=member, tier="sapling", polar_subscription_id="sub_sapling")
+    VolunteerMembership.objects.create(user=member, tier="pollinator", valid_until=utc_today())
+    quota.increment_monthly_combined_search(member.id)
+
+    response = staff_client.get(PAYING_USERS_URL)
+
+    by_tier = {tier["tier"]: tier for tier in response.context["seed_search"]["by_tier"]}
+    assert by_tier["sapling"]["users"] == 1
+    assert by_tier["pollinator"]["users"] == 0
 
 
 def test_seed_search_skips_deleted_users(staff_client):

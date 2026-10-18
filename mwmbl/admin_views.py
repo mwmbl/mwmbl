@@ -45,7 +45,7 @@ from mwmbl.indexer.blacklist_snapshot import (
     get_snapshot_blacklist,
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
-from mwmbl.membership import TIERS, combined_search_monthly_limit
+from mwmbl.membership import TIERS, VOLUNTEER_TIERS, combined_search_monthly_limit
 from mwmbl.models import ApiKey, Membership, MwmblUser
 from mwmbl.traffic import (
     HEADER_LABELS,
@@ -57,6 +57,7 @@ from mwmbl.traffic import (
     read_user_agent_counts,
 )
 from mwmbl.utils import utc_today
+from mwmbl.volunteer_membership import current_volunteer_memberships
 
 logger = getLogger(__name__)
 
@@ -409,19 +410,29 @@ def _seed_search_stats() -> dict:
     """This month's Seed Search (Combined Search) usage by signed-in users, by tier.
 
     Combined Search refuses API keys, so every counter belongs to a signed-in web user.
-    "free" is everyone without a membership, matching COMBINED_SEARCH_MONTHLY_LIMITS.
+    "free" is everyone without a membership, matching COMBINED_SEARCH_MONTHLY_LIMITS. A user
+    with both a paid and a volunteer tier is counted under whichever sets their limit.
     """
     counts = quota.get_all_monthly_combined_search_counts()
     users_by_id = MwmblUser.objects.in_bulk(list(counts))
     # Counters outlive deleted accounts until they expire, so skip users that no longer exist.
     counts = {user_id: count for user_id, count in counts.items() if user_id in users_by_id}
-    tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
+    paid_tier_by_user = dict(Membership.objects.filter(user_id__in=counts).values_list("user_id", "tier"))
+    volunteer_tier_by_user = {
+        user_id: volunteer_membership.tier
+        for user_id, volunteer_membership in current_volunteer_memberships(list(counts)).items()
+    }
 
-    tier_names = ["free"] + [tier_info.tier.value for tier_info in TIERS]
+    tier_names = (
+        ["free"]
+        + [tier_info.tier.value for tier_info in TIERS]
+        + [tier_info.tier.value for tier_info in VOLUNTEER_TIERS]
+    )
     by_tier = {tier: {"tier": tier, "users": 0, "queries": 0, "at_limit": 0} for tier in tier_names}
     rows = []
     for user_id, count in counts.items():
-        tier = tier_by_user.get(user_id, "free")
+        held = [tier for tier in (paid_tier_by_user.get(user_id), volunteer_tier_by_user.get(user_id)) if tier]
+        tier = max(held, key=combined_search_monthly_limit, default="free")
         limit = combined_search_monthly_limit(tier)
         tier_stats = by_tier[tier]
         tier_stats["users"] += 1

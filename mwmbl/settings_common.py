@@ -146,6 +146,8 @@ AUTH_USER_MODEL = "mwmbl.MwmblUser"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_USERNAME_REQUIRED = False
+# mwmbl.models.SEED_CRAWLER_USERNAME, which settings cannot import.
+ACCOUNT_USERNAME_BLACKLIST = ["mwmbl-seed-crawler"]
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
@@ -299,8 +301,8 @@ CURRENT_AGREEMENT_VERSIONS = {
 # Combined Search - the v2 endpoint that pools the Mwmbl index, Staan and Wikipedia and
 # ranks the union with its own LTR model. Gated behind login, like Super Search, which it is
 # meant to replace. Monthly limits for web (JWT) callers, keyed by
-# mwmbl.membership.MembershipTier value; "free" is signed-in users without a membership.
-COMBINED_SEARCH_MONTHLY_LIMITS = {"free": 30, "sprout": 300, "sapling": 1_500, "canopy": 1_500}
+# mwmbl.membership.MembershipTier or VolunteerTier value; "free" is signed-in users without either.
+COMBINED_SEARCH_MONTHLY_LIMITS = {"free": 30, "sprout": 300, "sapling": 1_500, "canopy": 1_500, "pollinator": 300}
 # Its own model artifact, so Combined Search can be retrained on the pooled candidate set
 # without moving standard search's ranking. Falls back to RUST_MODEL_PATH until trained.
 COMBINED_MODEL_PATH = Path(__file__).parent / "resources" / "model-combined.xgb"

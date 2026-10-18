@@ -14,12 +14,14 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.indexer import index_batches, seed_crawl, seed_domains
 from mwmbl.indexer.index_batches import index_new_documents
-from mwmbl.models import ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
+from mwmbl.models import SEED_CRAWLER_USERNAME, ApiKey, SeedDomain, SeedDomainCrawl, generate_api_key
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
 
 User = get_user_model()
 
 SEED = "https://www.tokio.rs/"
+# For the rounds run without the worker, which looks the seed crawler's user up itself.
+SEED_CRAWLER_ID = 0
 STAAN_RESULTS = [
     Document("Tokio", SEED, "An async runtime.", source=DocumentSource.STAAN),
     Document("Async book", "https://rust-lang.github.io/async-book/", "Async Rust.", source=DocumentSource.STAAN),
@@ -106,7 +108,7 @@ def _crawl(seed_urls, domains, is_new=lambda url: True):
     frontier = seed_crawl.Frontier.from_seeds(seed_urls, set(domains))
     crawled = []
     while batch := frontier.next_batch():
-        documents = seed_crawl.crawl_round(frontier, batch, redis=None)
+        documents = seed_crawl.crawl_round(frontier, batch, redis=None, seed_crawler_id=SEED_CRAWLER_ID)
         crawled.append((len(batch), documents))
         frontier.record_round(batch, {document.url for document in documents if is_new(document.url)})
     return crawled
@@ -381,6 +383,18 @@ def test_the_crawled_pages_are_in_the_index(fake_web, redis_cache, user, index_p
 
 
 @pytest.mark.django_db
+def test_the_crawled_pages_are_credited_to_the_seed_crawler(fake_web, redis_cache, user, index_path):
+    """Not to the user who asked for the crawl: the pages were fetched here, not by them."""
+    seed_crawler = User.objects.get(username=SEED_CRAWLER_USERNAME)
+
+    _run(user, index_path)
+
+    with TinyIndex(Document, index_path, "r") as index:
+        (spawning,) = [d for d in index.retrieve("spawning") if d.url == "https://tokio.rs/tutorial/spawning"]
+    assert spawning.user_ids == [seed_crawler.id]
+
+
+@pytest.mark.django_db
 def test_pages_already_in_the_index_are_not_counted_as_new(fake_web, redis_cache, user, index_path):
     _run(user, index_path)
     other = User.objects.create_user(username="other", email="other@example.com", password="x")
@@ -444,14 +458,38 @@ def test_new_pages_are_added_to_the_users_total(fake_web, redis_cache, user, ind
 
 
 @pytest.mark.django_db
-def test_the_users_stats_report_their_seed_search_total(user):
-    User.objects.filter(id=user.id).update(seed_search_pages_indexed=12)
+def test_the_users_total_matches_the_pages_the_crawl_lists(fake_web, redis_cache, user, index_path):
+    _index_staan_snippet_of_the_seed(index_path)
+    record = _run(user, index_path, new_seed_urls=[SEED])
+    user.refresh_from_db()
+
+    assert SEED in [page["url"] for page in record["pages"]]
+    assert user.seed_search_pages_indexed == len(record["pages"])
+
+
+@pytest.mark.django_db
+def test_recording_a_seed_search_adds_to_the_users_count(user):
+    seed_crawl.record_seed_search(user.id)
+    seed_crawl.record_seed_search(user.id)
+    user.refresh_from_db()
+
+    assert user.seed_searches == 2
+
+
+@pytest.mark.django_db
+def test_the_users_stats_report_their_seed_search_totals(user):
+    User.objects.filter(id=user.id).update(seed_search_pages_indexed=12, seed_searches=4)
+    SeedDomain.objects.create(domain="tokio.rs", discovered_by=user)
+    SeedDomain.objects.create(domain="smol.rs", discovered_by=user)
+    SeedDomain.objects.create(domain="example.com")
     token = str(RefreshToken.for_user(user).access_token)
 
     response = Client().get("/api/v1/platform/user/stats", HTTP_AUTHORIZATION=f"Bearer {token}")
 
     assert response.status_code == 200
     assert response.json()["seed_search_pages_indexed"] == 12
+    assert response.json()["seed_searches"] == 4
+    assert response.json()["seed_sites_discovered"] == 2
 
 
 # ---------------------------------------------------------------------------

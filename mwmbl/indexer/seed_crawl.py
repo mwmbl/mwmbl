@@ -57,7 +57,7 @@ from redis.client import Pipeline
 from mwmbl.crawler.retrieve import crawl_batch
 from mwmbl.indexer.index_batches import index_new_documents
 from mwmbl.indexer.seed_domains import new_page_score, record_seed_domain_crawls, register_seed_domains
-from mwmbl.models import MwmblUser, SeedDomain
+from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, SeedDomain
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
 from mwmbl.utils import bare_host
@@ -195,7 +195,7 @@ class Frontier:
                 self.queues[domain].clear()
 
 
-def crawl_round(frontier: Frontier, batch: list[str], redis) -> list[Document]:
+def crawl_round(frontier: Frontier, batch: list[str], redis, seed_crawler_id: int) -> list[Document]:
     """Fetch a round's URLs, adding their links to the frontier and returning their documents."""
     results = crawl_batch(batch, settings.SEED_CRAWL_THREADS, 0, redis)
     documents = []
@@ -210,12 +210,18 @@ def crawl_round(frontier: Frontier, batch: list[str], redis) -> list[Document]:
                     content["title"],
                     result["url"],
                     content["extract"],
+                    user_ids=[seed_crawler_id],
                     last_crawled=result["timestamp"] // 1000,
                 )
             )
         for link in content["links"] + content["extra_links"]:
             frontier.follow(link)
     return documents
+
+
+def record_seed_search(user_id: int) -> None:
+    """Count a search made with Seed Search on, for the user's stats."""
+    MwmblUser.objects.filter(id=user_id).update(seed_searches=F("seed_searches") + 1)
 
 
 def start_seed_crawl(
@@ -455,7 +461,8 @@ def _run_round(redis, record_key: str, token: int, fields: dict[str, str], index
         next_round_due = float(fields["last_round_started"]) + settings.SEED_CRAWL_DOMAIN_DELAY_SECONDS
         time.sleep(max(0.0, next_round_due - time.time()))
     round_started = time.time()
-    documents = crawl_round(frontier, batch, redis)
+    seed_crawler_id = MwmblUser.objects.values_list("id", flat=True).get(username=SEED_CRAWLER_USERNAME)
+    documents = crawl_round(frontier, batch, redis, seed_crawler_id)
     # Should the worker die between indexing the round and recording it, the round is run
     # again, and finds its pages already indexed: they are lost from the record, not counted twice.
     indexed = index_new_documents(documents, index_path)

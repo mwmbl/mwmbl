@@ -26,6 +26,7 @@ from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
+    SEED_CRAWLER_USERNAME,
     AgreementType,
     ApiKey,
     Device,
@@ -97,6 +98,7 @@ from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
 from mwmbl.utils import normalize_domain, validate_domain
+from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +128,12 @@ def register(request, registration: Registration):
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
-    if registration.username and MwmblUser.objects.filter(username=registration.username).exists():
-        raise InvalidRequest("Username already exists")
+    if registration.username:
+        username_taken = MwmblUser.objects.filter(username=registration.username).exists()
+        # Reserved even before migration 0049 makes the user, so nobody can take it first and
+        # fail it - and in any case, as allauth's blacklist is, so nobody can pass for it.
+        if username_taken or registration.username.lower() == SEED_CRAWLER_USERNAME:
+            raise InvalidRequest("Username already exists")
 
     user = MwmblUser(username=username, email=registration.email)
     user.set_password(registration.password)
@@ -1211,15 +1217,21 @@ def get_current_user(request):
     summary="Get current user's contribution stats",
     description=(
         "Returns the authenticated user's contribution stats: how many results they "
-        "have indexed, broken down per day for the last 30 days, and how many pages their "
-        "seed crawls (Combined Search with `crawl=true`) have added to the index in all."
+        "have indexed, broken down per day for the last 30 days, how many Seed Searches "
+        "(Combined Search with `crawl=true`) they have made, how many sites their seed crawls were the "
+        "first to find, and how many new pages those crawls have added to the index, all in all."
     ),
     tags=["Users"],
 )
 def get_current_user_stats(request):
     user = request.user
     stats = stats_manager.get_user_stats(user.username)
-    return {**stats, "seed_search_pages_indexed": user.seed_search_pages_indexed}
+    return {
+        **stats,
+        "seed_search_pages_indexed": user.seed_search_pages_indexed,
+        "seed_searches": user.seed_searches,
+        "seed_sites_discovered": user.discovered_seed_domains.count(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1356,15 +1368,14 @@ def get_membership(request):
     auth=JWTAuth(),
     response=CombinedSearchUsageResponse,
     summary="Get Combined Search usage",
-    description="Returns the user's Combined Search usage this month and their limit, which is set by "
-    "their membership tier.",
+    description="Returns the user's Combined Search usage this month and their limit, which is the more "
+    "generous of those set by their membership tier and their volunteer tier.",
     tags=["Membership"],
 )
 def get_combined_search_usage(request):
-    tier = Membership.objects.filter(user=request.user).values_list("tier", flat=True).first()
     return CombinedSearchUsageResponse(
         monthly_usage=get_monthly_combined_search_count(request.user.id),
-        monthly_limit=membership.combined_search_monthly_limit(tier),
+        monthly_limit=user_combined_search_monthly_limit(request.user.id),
     )
 
 

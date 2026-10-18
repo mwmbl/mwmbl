@@ -10,11 +10,13 @@ from urllib.parse import unquote
 
 from mwmbl.crawler.batch import HashedBatch, Item
 from mwmbl.crawler.urls import URLStatus
+from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
 from mwmbl.tinysearchengine.indexer import (
     CURATED_STATES,
     Document,
+    DocumentSource,
     DocumentState,
     PageError,
     TinyIndex,
@@ -28,8 +30,14 @@ logger = getLogger(__name__)
 
 MAX_USER_IDS = 2
 
+# What an external result's source becomes in the search index. Only Staan's results are
+# kept with one, under a source of their own - see DocumentSource.STAAN_INDEXED.
+INDEXED_SOURCES = {DocumentSource.STAAN: DocumentSource.STAAN_INDEXED}
+
 
 def _merge_user_ids(existing: Optional[list[int]], incoming: Optional[list[int]]) -> Optional[list[int]]:
+    """The incoming ids go last, moved there if already present, and the oldest are dropped
+    past MAX_USER_IDS."""
     combined = list(existing or [])
     for uid in incoming or []:
         if uid in combined:
@@ -58,12 +66,19 @@ def get_url_score(url):
 def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Counter:
     start_time = datetime.now(timezone.utc)
     documents = list(get_documents_from_batches(batch_data))
-    end_time, new_page_doc_counts = index_documents(documents, index_path)
-    logger.info(f"Indexing took {end_time - start_time}")
-    return new_page_doc_counts
+    indexed = index_documents(documents, index_path)
+    logger.info(f"Indexing took {indexed.end_time - start_time}")
+    return indexed.new_page_doc_counts
 
 
-def index_documents(documents, index_path):
+class IndexedDocuments(NamedTuple):
+    end_time: datetime
+    new_page_doc_counts: Counter
+    agreements: list[Agreement]
+    """One for each submitted URL another crawler's stored copy of was met."""
+
+
+def index_documents(documents, index_path) -> IndexedDocuments:
     """The common choke point every indexing path (the trusted-crawler POST /results
     endpoint, the standalone crawl tool) goes through, so
     this is where the blacklist is enforced. Crawling/link-discovery also check the
@@ -77,9 +92,38 @@ def index_documents(documents, index_path):
     tens of megabytes and hold ~156 MB of domain strings for the process's life - see
     blacklist_snapshot."""
     page_documents = _page_documents(documents, index_path)
-    new_page_doc_counts = index_pages(index_path, page_documents)
+    new_page_doc_counts = Counter()
+    copy_pages = Counter()
+    copy_last_crawled = {}
+    for page in _store_pages(index_path, page_documents):
+        new_page_doc_counts.update(_new_terms(page.stored))
+        for stored_copy, last_crawled in page.stored_copies:
+            copy_pages[stored_copy] += 1
+            copy_last_crawled[stored_copy] = _latest(copy_last_crawled.get(stored_copy), last_crawled)
+    # A submission can repeat a URL; its last copy is the one compared.
+    submitted_by_url = {document.url: cleaned_document(document) for document in documents}
+    agreements = [
+        compare(submitted_by_url[stored_copy.url], stored_copy, copy_last_crawled[stored_copy])
+        for stored_copy in _most_held_copies(copy_pages)
+    ]
     end_time = datetime.now(timezone.utc)
-    return end_time, new_page_doc_counts
+    return IndexedDocuments(end_time, new_page_doc_counts, agreements)
+
+
+def _most_held_copies(copy_pages: Counter) -> list[StoredCopy]:
+    """For each URL, the stored copy most of its pages hold. The URL is on the page of each
+    of its terms, and the pages need not all hold the same copy: two crawlers' versions have
+    different terms, and which one a shared term's page keeps depends on rank. Taking one
+    copy gives one agreement per submitted URL, so a URL with divergent copies is not
+    counted several times over."""
+    copies_by_url = {}
+    for stored_copy, _ in copy_pages.most_common():
+        copies_by_url.setdefault(stored_copy.url, stored_copy)
+    return list(copies_by_url.values())
+
+
+def _latest(first: Optional[int], second: Optional[int]) -> Optional[int]:
+    return max((time for time in (first, second) if time is not None), default=None)
 
 
 class IndexedURLs(NamedTuple):
@@ -100,9 +144,9 @@ def index_new_documents(documents, index_path) -> IndexedURLs:
     page_documents = _page_documents(documents, index_path)
     stored_urls = set()
     held_urls = set()
-    for stored_documents, existing_documents in _store_pages(index_path, page_documents):
-        stored_urls |= {document.url for document in stored_documents}
-        held_urls |= {document.url for document in existing_documents}
+    for page in _store_pages(index_path, page_documents):
+        stored_urls |= {document.url for document in page.stored}
+        held_urls |= {document.url for document in page.existing}
     incoming_urls = {document.url for documents in page_documents.values() for document in documents}
     written_urls = stored_urls & incoming_urls
     return IndexedURLs(stored=written_urls, new=written_urls - held_urls)
@@ -140,22 +184,35 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
 
 def index_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False) -> Counter:
     term_new_doc_counts = Counter()
-    for stored_documents, _ in _store_pages(index_path, page_documents, mark_synced):
-        term_new_doc_counts.update(
-            document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX
-        )
+    for page in _store_pages(index_path, page_documents, mark_synced):
+        term_new_doc_counts.update(_new_terms(page.stored))
     return term_new_doc_counts
 
 
+def _new_terms(stored_documents: list[Document]) -> Iterable[str | None]:
+    return (document.term for document in stored_documents if document.state != DocumentState.SYNCED_WITH_MAIN_INDEX)
+
+
+class StoredPage(NamedTuple):
+    stored: list[Document]
+    """What the page now stores."""
+    existing: list[Document]
+    """What it held before."""
+    stored_copies: list[tuple[StoredCopy, Optional[int]]]
+    """Other crawlers' copies of the incoming documents' URLs it held, with their crawl times."""
+
+
 def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mark_synced: bool = False):
-    """Merge the documents into their pages, yielding for each page written what it now
-    stores and what it held before."""
+    """Merge the documents into their pages, yielding a StoredPage for each page written."""
     with TinyIndex(Document, index_path, "w") as indexer:
         ranker = HeuristicRanker(indexer, None, score_threshold=float("-inf"))
         for page_index, documents in page_documents.items():
             try:
                 with indexer.page(page_index) as page:
                     existing_documents = page.documents
+                    # Before combining, which merges the user_ids and crawl times of the copies
+                    # of a URL into whichever one it keeps, in place.
+                    stored_copies = find_stored_copies(documents, existing_documents)
                     combined_documents = combine_documents(existing_documents, documents, mark_synced, ranker)
                     num_stored = page.store(combined_documents)
                     logger.info(
@@ -170,7 +227,7 @@ def _store_pages(index_path: str, page_documents: dict[int, list[Document]], mar
                 logger.exception("Skipping index page %d", page_index)
                 continue
 
-            yield combined_documents[:num_stored], existing_documents
+            yield StoredPage(combined_documents[:num_stored], existing_documents, stored_copies)
 
 
 def _document_token_set(doc: Document) -> set[str]:
@@ -228,6 +285,7 @@ def index_new_results_against_query(documents: list[Document], query: str, index
                         cleaned.extract,
                         term=term,
                         last_crawled=cleaned.last_crawled,
+                        source=INDEXED_SOURCES.get(cleaned.source),
                     )
                 )
                 if page not in existing_keys:
@@ -265,7 +323,11 @@ def combine_documents(existing_documents, documents, mark_synced, ranker):
             continue
         if mark_synced:
             document.state = DocumentState.SYNCED_WITH_MAIN_INDEX
-        document.user_ids = url_user_ids.get(document.url)
+        # The kept copy's ids merged last, so the last id is always the crawler whose text the
+        # page holds - see mwmbl.indexer.agreement. Its own last id is its author by the same
+        # rule, and a fresh submission carries only its submitter's. Only that last id is
+        # meaningful: once the kept copy holds two, those of the copies it beats are dropped.
+        document.user_ids = _merge_user_ids(url_user_ids.get(document.url), document.user_ids)
         document.last_crawled = url_last_crawled.get(document.url)
         combined_documents.append(document)
         seen_urls.add(document.url)
