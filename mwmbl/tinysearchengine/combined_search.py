@@ -48,6 +48,7 @@ from mwmbl.indexer.seed_crawl import (
     get_active_seed_crawl_query,
     get_seed_crawl,
     get_seed_crawl_summary,
+    record_seed_search,
     start_seed_crawl,
 )
 from mwmbl.indexer.seed_domains import published_seed_domains
@@ -312,6 +313,8 @@ def init_router(ranker) -> None:
             crawl_outcome = await sync_to_async(start_seed_crawl)(
                 user.id, q, retrieval.pages, staan_results, new_staan_urls
             )
+            if crawl_outcome == CrawlOutcome.SCHEDULED:
+                await sync_to_async(record_seed_search)(user.id)
             if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
                 active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
 
