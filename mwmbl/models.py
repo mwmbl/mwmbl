@@ -9,6 +9,12 @@ from django.utils import timezone
 from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
 
+# The seed crawl fetches its pages itself rather than through a volunteer, so they are credited
+# to a user of their own, made by migration 0049: the user who asked for the crawl did not
+# write them. It gives every copy the crawl writes an author, which the crawler agreement log
+# relies on, and a copy of a page that no volunteer could have tampered with.
+SEED_CRAWLER_USERNAME = "mwmbl-seed-crawler"
+
 
 class MwmblUser(AbstractUser):
     # Pages the user's seed crawls (Combined Search with crawl=true) have added to the index,
@@ -587,6 +593,11 @@ class CrawlerAgreement(models.Model):
     similarity says the two sides disagree, not which one is wrong, so the analysis has to
     hold it against both: user is often the honest crawler revisiting a polluted URL. Keeps
     the similarities rather than the text, which the submitted batches in object storage hold.
+
+    existing_user_id names the stored text's author only on pages written since that became
+    the last of a copy's user_ids. Before then the ids were in rank order, and a Super Search
+    copy, which has none of its own, took on those of the copies it beat. Such a page keeps
+    the wrong author until a fresh copy wins it, so early rows deserve less weight.
     """
 
     url = models.TextField()

@@ -14,7 +14,7 @@ from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import _one_agreement_per_url, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
-from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentState, TinyIndex
 
 URL = "https://example.com/page"
 
@@ -65,6 +65,15 @@ def test_find_agreements_compares_against_another_crawlers_text_the_crawler_is_c
     (agreement,) = find_agreements(incoming, existing)
 
     assert agreement.existing_user_id == 1
+
+
+def test_find_agreements_skips_a_curated_copy():
+    """A curated copy always wins its page and takes on the user_ids of the copies it beat,
+    so its last id is not its author."""
+    existing = [Document("Title", URL, "Curated extract", term="t", state=DocumentState.ORGANIC_APPROVED, user_ids=[1])]
+    incoming = [Document("Title", URL, "Extract", term="t", user_ids=[2])]
+
+    assert find_agreements(incoming, existing) == set()
 
 
 def test_find_agreements_skips_unattributed_documents():

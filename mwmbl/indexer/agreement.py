@@ -9,7 +9,7 @@ are worth a closer look.
 
 from typing import Iterable, NamedTuple, Optional
 
-from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.indexer import CURATED_STATES, Document
 
 
 class Agreement(NamedTuple):
@@ -27,8 +27,14 @@ class Agreement(NamedTuple):
 
 def find_agreements(incoming: Iterable[Document], existing: Iterable[Document]) -> set[Agreement]:
     """Compare each incoming document against another crawler's stored copy of its URL."""
-    # A page keeps one document per URL, so there is at most one stored copy to compare.
-    authors_by_url = {document.url: (document, document.user_ids[-1]) for document in existing if document.user_ids}
+    # A page keeps one document per URL, so there is at most one stored copy to compare. A
+    # curated copy has no author of its own but always wins its page, so it takes on the
+    # user_ids of the copies it beat, and its last id names one of them.
+    authors_by_url = {
+        document.url: (document, document.user_ids[-1])
+        for document in existing
+        if document.user_ids and document.state not in CURATED_STATES
+    }
     agreements = set()
     for document in incoming:
         if document.url not in authors_by_url or document.user_ids is None:
