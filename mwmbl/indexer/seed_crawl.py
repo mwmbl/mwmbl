@@ -218,6 +218,11 @@ def crawl_round(frontier: Frontier, batch: list[str], redis) -> list[Document]:
     return documents
 
 
+def record_seed_search(user_id: int) -> None:
+    """Count a search made with Seed Search on, for the user's stats."""
+    MwmblUser.objects.filter(id=user_id).update(seed_searches=F("seed_searches") + 1)
+
+
 def start_seed_crawl(
     user_id: int, query: str, index_pages: list[Document], staan_results: list[Document], new_staan_urls: set[str]
 ) -> CrawlOutcome:
