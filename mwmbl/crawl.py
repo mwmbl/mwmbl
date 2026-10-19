@@ -7,6 +7,8 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Process
 from pathlib import Path
+from typing import Optional
+from urllib.parse import quote
 
 import django
 import requests
@@ -49,10 +51,11 @@ from mwmbl.crawler.env_vars import (
     CRAWLER_WORKERS,
     MWMBL_API_KEY,
     MWMBL_CONTACT_INFO,
+    MWMBL_REMOTE_SERVER,
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
-from mwmbl.crawler.retrieve import CRAWLER_VERSION, USER_AGENT, crawl_batch
+from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
@@ -62,7 +65,23 @@ from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.utils import prune_request_cache
 
 BATCH_QUEUE_KEY = "batch-queue"
-REMOTE_SERVER = "https://api.mwmbl.org"
+# Reads (RemoteIndex) and writes (results, curated domains) have to agree about which
+# deployment they are talking to, or pointing a crawler at beta would send it there for half
+# its traffic and to production for the other half.
+REMOTE_SERVER = MWMBL_REMOTE_SERVER
+
+# How the crawler names itself to our own API, most of which is the index sync: one raw search
+# per term, for the top hundred terms of every indexing pass. The version is there so that
+# crawlers running old code can be told apart and asked to upgrade; the username is the
+# account's public name, looked up from the API key, so that a crawler causing trouble can be
+# traced to an account without its operator's email address ending up in the API's logs and
+# user agent counters. The contact address stays in USER_AGENT, which goes only to the
+# third-party sites being crawled.
+API_PRODUCT = f"mwmbl-crawler/{CRAWLER_VERSION}"
+PROJECT_URL = "https://github.com/mwmbl/mwmbl"
+USER_URL = f"{REMOTE_SERVER}/api/v1/platform/user"
+
+_username: Optional[str] = None
 
 _curated_domains_cache: set[str] = set()
 _curated_domains_fetched_at: float = 0.0
@@ -93,7 +112,7 @@ def _fetch_curated_domains() -> set[str]:
         response = requests.get(
             f"{REMOTE_SERVER}/api/v1/crawler/curated-domains",
             timeout=10,
-            headers={"User-Agent": USER_AGENT},
+            headers={"User-Agent": api_user_agent(_fetch_username())},
         )
         response.raise_for_status()
         data = response.json()
@@ -103,6 +122,36 @@ def _fetch_curated_domains() -> set[str]:
     except Exception:
         logger.exception("Failed to fetch curated domains, using cached value")
     return _curated_domains_cache
+
+
+def _fetch_username() -> Optional[str]:
+    """The public username MWMBL_API_KEY belongs to, or None if it cannot be found out.
+
+    Remembered once found, per process. Not remembered when it fails, so a crawler that started
+    while the API was unreachable, or before the API accepted keys here, names itself on a
+    later pass - that is one request per indexing pass beside the hundred it already makes.
+    """
+    global _username
+    if _username is not None or not MWMBL_API_KEY:
+        return _username
+    try:
+        response = requests.get(
+            USER_URL,
+            timeout=10,
+            headers={"User-Agent": api_user_agent(None), "X-API-Key": MWMBL_API_KEY},
+        )
+        response.raise_for_status()
+        _username = response.json()["username"]
+        logger.info(f"Identifying to the index as user {_username}")
+    except requests.RequestException:
+        logger.warning("Could not look up the username for MWMBL_API_KEY; requests to the API will not include it")
+    return _username
+
+
+def api_user_agent(username: Optional[str]) -> str:
+    # Django allows non-ASCII letters in a username, and a header value has to be latin-1.
+    identity = f"+{PROJECT_URL}; user {quote(username, safe='@.+-_')}" if username else f"+{PROJECT_URL}"
+    return f"{API_PRODUCT} ({identity})"
 
 
 # How long to wait before reporting the same error from the same process again. The loops
@@ -170,7 +219,7 @@ def report_error(context: ErrorContext, error: Exception):
         response = requests.post(
             f"{REMOTE_SERVER}/api/v1/crawler/errors",
             json=report.dict(),
-            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": USER_AGENT},
+            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
             timeout=10,
         )
         response.raise_for_status()
@@ -359,7 +408,7 @@ class Crawler:
         # Once a round is often enough to keep the cache at roughly an hour's worth of terms,
         # and the rounds are minutes apart, so the sweep costs nothing worth measuring.
         prune_request_cache()
-        remote_index = RemoteIndex(expire_after=REMOTE_INDEX_CACHE_EXPIRY)
+        remote_index = RemoteIndex(user_agent=api_user_agent(_fetch_username()), expire_after=REMOTE_INDEX_CACHE_EXPIRY)
         with TinyIndex(Document, index_path, "w") as local_index:
             for term, count in term_new_doc_count.most_common(100):
                 logger.info(f"Syncing term {term} with {count} new local items")
@@ -405,7 +454,7 @@ class Crawler:
                         response = requests.post(
                             results_url,
                             json=results.dict(),
-                            headers={"X-API-Key": MWMBL_API_KEY},
+                            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
                             timeout=RESULTS_POST_TIMEOUT_SECONDS,
                         )
                         logger.info(f"Response: {response.text}")

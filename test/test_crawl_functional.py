@@ -217,7 +217,8 @@ class TestCrawlFunctional:
 
                             # A never-expiring cache of the index's answers fills the disk:
                             # see test_request_cache.py
-                            mock_remote_index.assert_called_once_with(expire_after=REMOTE_INDEX_CACHE_EXPIRY)
+                            mock_remote_index.assert_called_once()
+                            assert mock_remote_index.call_args.kwargs["expire_after"] == REMOTE_INDEX_CACHE_EXPIRY
 
     def test_crawl_url_functionality(self, mock_environment):
         """Test individual URL crawling functionality"""

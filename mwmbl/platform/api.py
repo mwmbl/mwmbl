@@ -94,7 +94,7 @@ from mwmbl.platform.schemas import (
 )
 from mwmbl.polar_webhooks import validate_event
 from mwmbl.quota import get_monthly_combined_search_api_count, get_monthly_combined_search_count
-from mwmbl.search_auth import invalidate_api_key_cache, invalidate_user_api_key_cache
+from mwmbl.search_auth import AccountApiKeyAuth, invalidate_api_key_cache, invalidate_user_api_key_cache
 from mwmbl.signals import schedule_blacklist_rebuild
 from mwmbl.usernames import generate_username
 from mwmbl.utils import normalize_domain, validate_domain
@@ -1189,10 +1189,14 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
 
 @router.get(
     "/user",
-    auth=JWTAuth(),
+    auth=[JWTAuth(), AccountApiKeyAuth()],
     response=UserProfileResponse,
     summary="Get current user profile",
-    description="Returns the authenticated user's username, email, plan, email confirmation status, and join date.",
+    description=(
+        "Returns the authenticated user's username, email, plan, email confirmation status, and join date. "
+        "Accepts a Bearer token or an API key of any scope in the `X-API-Key` header, so a "
+        "crawler can look up the username its key belongs to."
+    ),
     tags=["Users"],
 )
 def get_current_user(request):
