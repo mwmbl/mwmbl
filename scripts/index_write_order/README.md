@@ -33,6 +33,23 @@ The crawl model (`mwmbl/rankeval/index-write-order-crawl-model.md`) adds two wri
    not yet graded. `evaluate.py attribution` shows whether missing good results were evicted
    or outranked.
 
+The query-model retrain (`mwmbl/rankeval/index-write-order-retrain.md`) builds a second pair
+of indexes for the combined model's LLM-labelled training queries, with
+`INDEX_WRITE_ORDER_QUERIES=train` (into `devdata/index_write_order/train/`), and adds the
+`ARM@MODEL` rankings to `evaluate.py`:
+
+1. `build_corpus.py` (`INDEX_WRITE_ORDER_PROCESSES=4` fits in 5 GB), then `build_index.py`
+   for `heuristic` and `crawl-domain` (~60 and ~90 minutes).
+2. `retrain.py pool heuristic crawl-domain`, then `retrain.py batches`: Pass-3 prompt chunks,
+   judged by Claude Haiku 4.5 subagents into `train/judge/chunk_*.out.txt`. Then
+   `retrain.py merge`. The pools and judgments are committed under
+   `devdata/llm_relabel/index_write_order/`.
+3. `retrain.py train ARM ARM` for each arm, into `models/query-ARM.xgb`. `retrain.py train
+   baseline` reproduces the shipped model.
+4. `evaluate.py rank heuristic@heuristic ...`, then steps 4-6 of the first list. Move the
+   previous round's `judge/uk_*.out.jsonl` aside first, because `consolidate` re-reads every
+   one against the new manifest.
+
 `INDEX_WRITE_ORDER_RUN=fresh` points every script at `devdata/index_write_order/fresh/`, for a
 rerun on crawl captured from 2026-09-25 on.
 
