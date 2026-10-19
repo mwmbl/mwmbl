@@ -33,9 +33,12 @@ EVAL_DIR = Path("devdata/combined_providers_eval")
 # The first A/B read the 2023-24 batches. The "fresh" run reads run_crawl.py's crawl from the
 # day the crawl model's negatives stop (crawl_model.TRAIN_BEFORE), so the two never share one.
 RUN = os.environ.get("INDEX_WRITE_ORDER_RUN", "")
-OUT_DIR = Path("devdata/index_write_order") / RUN
+# INDEX_WRITE_ORDER_QUERIES=train collects for the query-time model's LLM-labelled training
+# queries instead (retrain.py), into a train/ subdirectory.
+QUERIES = os.environ.get("INDEX_WRITE_ORDER_QUERIES", "eval")
+OUT_DIR = Path("devdata/index_write_order") / RUN / ("train" if QUERIES == "train" else "")
 FRESH_SINCE = "2026-09-25"
-PROCESSES = 8
+PROCESSES = int(os.environ.get("INDEX_WRITE_ORDER_PROCESSES", 8))
 
 
 def lookup_terms(query: str) -> set[str]:
@@ -43,12 +46,23 @@ def lookup_terms(query: str) -> set[str]:
     return set(terms) | set(get_bigrams(len(terms), terms)) | {" ".join(terms)}
 
 
-def eval_lookup_terms() -> set[str]:
+def eval_queries() -> set[str]:
     rows = json.loads((EVAL_DIR / "engb/rows-0.05.json").read_text())
-    return set().union(*(lookup_terms(row["query"]) for row in rows))
+    return {row["query"] for row in rows}
 
 
-LOOKUP = eval_lookup_terms()
+def train_queries() -> set[str]:
+    """The LLM-labelled queries the combined model trains on. None is an eval query."""
+    import pandas as pd
+
+    from mwmbl.rankeval.paths import LEARNING_TO_RANK_LLM_DATASET_PATH
+
+    llm = pd.read_csv(LEARNING_TO_RANK_LLM_DATASET_PATH, lineterminator="\n")
+    return set(llm["query"].str.lower().str.strip()) - {query.lower().strip() for query in eval_queries()}
+
+
+QUERY_SET = train_queries() if QUERIES == "train" else eval_queries()
+LOOKUP = set().union(*(lookup_terms(query) for query in QUERY_SET))
 
 
 def filed_terms(url: str, title: str, extract: str) -> list[str]:
@@ -83,8 +97,19 @@ def read_batch(path: Path) -> list[dict] | None:
     return kept
 
 
+def compressed_batch(path: Path) -> tuple[int, bytes] | None:
+    """read_batch's documents as one gzip member, so the workers do the compressing: a single
+    writer falls behind them, and the queued results exhaust memory on the training corpus.
+    Concatenated gzip members are a valid gzip file."""
+    documents = read_batch(path)
+    if documents is None:
+        return None
+    return len(documents), gzip.compress("".join(json.dumps(document) + "\n" for document in documents).encode())
+
+
 def live_documents() -> list[dict]:
-    probe = json.loads((EVAL_DIR / "engb/miss_probe.json").read_text())
+    # The training queries were never probed: their terms' pages are all there is.
+    probe = json.loads((EVAL_DIR / "engb/miss_probe.json").read_text()) if QUERIES == "eval" else []
     probed_terms = sorted({term for record in probe for term in record["query_terms"]} | LOOKUP)
     remote_index = RemoteIndex()
     by_url = {}
@@ -123,18 +148,17 @@ def main():
     print(f"{len(live)} live documents", flush=True)
     num_batch_documents = 0
     num_unreadable = 0
-    with gzip.open(OUT_DIR / "corpus.jsonl.gz", "wt") as out, Pool(PROCESSES) as pool:
-        for document in live:
-            out.write(json.dumps(document) + "\n")
-        for i, documents in enumerate(pool.imap_unordered(read_batch, paths, chunksize=64)):
+    with open(OUT_DIR / "corpus.jsonl.gz", "wb") as out, Pool(PROCESSES) as pool:
+        out.write(gzip.compress("".join(json.dumps(document) + "\n" for document in live).encode()))
+        for i, result in enumerate(pool.imap_unordered(compressed_batch, paths, chunksize=64)):
             if i % 10000 == 0:
                 print(f"batch file {i}, {num_batch_documents} documents kept", flush=True)
-            if documents is None:
+            if result is None:
                 num_unreadable += 1
                 continue
-            for document in documents:
-                out.write(json.dumps(document) + "\n")
-            num_batch_documents += len(documents)
+            num_documents, member = result
+            out.write(member)
+            num_batch_documents += num_documents
     print(f"{num_unreadable} unreadable batch files")
     print(f"done: {len(live)} live + {num_batch_documents} batch documents -> {OUT_DIR / 'corpus.jsonl.gz'}")
 

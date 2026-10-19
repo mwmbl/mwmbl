@@ -10,7 +10,6 @@ full index. The corpus goes through index_pages in chunks, the way crawl batches
 
 import gzip
 import json
-import os
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -19,15 +18,16 @@ import django
 
 django.setup()
 
+from build_corpus import OUT_DIR, QUERIES
 from django.conf import settings
 
 import mwmbl.indexer.index_batches as index_batches
 from mwmbl.indexer.index_batches import filter_blacklisted_documents, index_pages
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex, cleaned_document
 
-OUT_DIR = Path("devdata/index_write_order") / os.environ.get("INDEX_WRITE_ORDER_RUN", "")
-# About 1,100 lookup terms: collisions are rare, and identical in both arms.
-NUM_PAGES = 65536
+# About 1,100 eval lookup terms, or 2,600 training ones: collisions are rare, and identical
+# in both arms.
+NUM_PAGES = 131072 if QUERIES == "train" else 65536
 CHUNK_SIZE = 100_000
 
 

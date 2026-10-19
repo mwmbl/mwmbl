@@ -37,6 +37,11 @@ WORK_DIR = OUT_DIR / "judge"
 RESULTS_DIR = EVAL_DIR / "index_write_order" / RUN
 JUDGMENTS_PATH = EVAL_DIR / f"haiku/relevance_engb_index_write_order{'_' + RUN if RUN else ''}.jsonl"
 ARMS = ["heuristic", "ltr", "crawl", "crawl-domain"]
+# "ARM@MODEL" ranks ARM's index with retrain.py's models/query-MODEL.xgb instead of the shipped
+# combined model: trained with the heuristic's or crawl-domain's training-index pools added.
+RETRAINED = ["heuristic@heuristic", "crawl-domain@heuristic", "heuristic@crawl-domain", "crawl-domain@crawl-domain"]
+RANKINGS = ARMS + RETRAINED
+MODEL_DIR = OUT_DIR / "models"
 NUM_RESULTS = 10
 NUM_BATCHES = 16
 GOOD_GRADE = 2
@@ -50,6 +55,7 @@ def rank(arms: list[str]):
     from mwmbl.rankeval.evaluation.haiku_arms_report import normalise_url
     from mwmbl.search_setup import combined_ltr_model
     from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+    from mwmbl.tinysearchengine.ltr import RustXGBPipeline
     from mwmbl.tinysearchengine.ltr_rank import CombinedLTRRanker
     from mwmbl.tinysearchengine.mmr_rank import MMRRanker
 
@@ -57,10 +63,12 @@ def rank(arms: list[str]):
     probe = json.loads((EVAL_DIR / "engb/miss_probe.json").read_text())
     brave_urls = {normalise_url(record["url"]) for record in probe}
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    for arm in arms or ARMS:
+    for ranking in arms or ARMS:
+        arm, _, model_name = ranking.partition("@")
+        model = RustXGBPipeline.from_model_path(str(MODEL_DIR / f"query-{model_name}.xgb")) if model_name else None
         results = {}
         with TinyIndex(item_factory=Document, index_path=str(OUT_DIR / f"{arm}.tinysearch")) as index:
-            inner = CombinedLTRRanker(index, DummyCompleter(), combined_ltr_model)
+            inner = CombinedLTRRanker(index, DummyCompleter(), model or combined_ltr_model)
             ranker = MMRRanker(inner)
             for row in rows:
                 query = row["query"]
@@ -71,8 +79,8 @@ def rank(arms: list[str]):
                     "num_candidates": len(candidates),
                     "brave_candidates": sorted(candidates & brave_urls),
                 }
-        (RESULTS_DIR / f"{arm}.results.json").write_text(json.dumps(results, indent=1))
-        print(arm, sum(len(r["top"]) for r in results.values()), "results")
+        (RESULTS_DIR / f"{ranking}.results.json").write_text(json.dumps(results, indent=1))
+        print(ranking, sum(len(r["top"]) for r in results.values()), "results")
 
 
 def pages():
@@ -115,10 +123,11 @@ def attribution():
     grades = load_grades()
     print("| Good results in the top ten of | missing from the top ten of | evicted there | kept there, outranked |")
     print("|---|---|---|---|")
-    for arm in ARMS[1:]:
-        for has, lacks in [("heuristic", arm), (arm, "heuristic")]:
+    for ranking in RANKINGS[1:]:
+        for has, lacks in [("heuristic", ranking), (ranking, "heuristic")]:
             evicted = outranked = 0
-            with TinyIndex(item_factory=Document, index_path=str(OUT_DIR / f"{lacks}.tinysearch")) as index:
+            lacks_index = OUT_DIR / f"{lacks.partition('@')[0]}.tinysearch"
+            with TinyIndex(item_factory=Document, index_path=str(lacks_index)) as index:
                 for query, result in results[has].items():
                     lacks_top = {url for url, _, _ in results[lacks][query]["top"]}
                     missing = [
@@ -136,7 +145,7 @@ def attribution():
 
 
 def load_results() -> dict[str, dict]:
-    return {arm: json.loads((RESULTS_DIR / f"{arm}.results.json").read_text()) for arm in ARMS}
+    return {ranking: json.loads((RESULTS_DIR / f"{ranking}.results.json").read_text()) for ranking in RANKINGS}
 
 
 def batches():
@@ -149,8 +158,8 @@ def batches():
     for qid, query in enumerate(sorted(results["heuristic"])):
         # The same URL can carry different text in the two indexes; show one, the first seen.
         candidates = {}
-        for arm in ARMS:
-            for url, title, extract in results[arm][query]["top"]:
+        for ranking in RANKINGS:
+            for url, title, extract in results[ranking][query]["top"]:
                 if url not in graded.get(query, {}):
                     candidates.setdefault(url, (title, extract))
         if not candidates:
@@ -223,7 +232,7 @@ def report():
         ("controls (in prod top ten)", lambda r: r["set"] == "control"),
     ]:
         records = [r for r in probe if keep(r)]
-        for arm in ARMS:
+        for arm in RANKINGS:
             gained = {"candidates": 0.0, "top": 0.0}
             total = 0.0
             for r in records:
@@ -238,12 +247,12 @@ def report():
             )
 
     print("\n## Pool\n")
-    for arm in ARMS:
+    for arm in RANKINGS:
         sizes = [results[arm][q]["num_candidates"] for q in queries]
         print(
             f"{arm}: median {np.median(sizes):.0f} candidates, {sum(len(results[arm][q]['top']) for q in queries)} results"
         )
-    for arm in ARMS[1:]:
+    for arm in RANKINGS[1:]:
         overlap = np.mean(
             [
                 len({u for u, _, _ in results["heuristic"][q]["top"]} & {u for u, _, _ in results[arm][q]["top"]})
@@ -258,8 +267,8 @@ def report():
     for line in (EVAL_DIR / "haiku/relevance_engb.jsonl").read_text().splitlines():
         record = json.loads(line)
         brave_grades.setdefault(record["query"], {})[normalise_url(record["url"])] = record["relevance"]
-    scores = {arm: [] for arm in ARMS}
-    dcgs = {arm: [] for arm in ARMS}
+    scores = {arm: [] for arm in RANKINGS}
+    dcgs = {arm: [] for arm in RANKINGS}
     for query in queries:
         if query not in grades:
             continue
@@ -267,21 +276,27 @@ def report():
         # Ideal over everything judged for the query: both arms here, and Brave's pooled URLs.
         pool = {**brave_grades.get(query, {}), **judged}
         all_gains = [2**g - 1 for g in pool.values()]
-        for arm in ARMS:
+        for arm in RANKINGS:
             gains = [2 ** grades[query][url] - 1 for url, _, _ in results[arm][query]["top"]]
             scores[arm].append(ndcg(gains, all_gains))
             dcgs[arm].append(dcg(gains))
     print(f"\n## Haiku UK relevance, {len(scores['heuristic'])} queries\n")
     print("| Arm | NDCG@10 | Good results (>=2) per query |")
     print("|---|---|---|")
-    for arm in ARMS:
+    for arm in RANKINGS:
         good = np.mean(
             [sum(grades[q][u] >= GOOD_GRADE for u, _, _ in results[arm][q]["top"]) for q in queries if q in grades]
         )
         print(f"| {arm} | {np.mean(scores[arm]):.4f} | {good:.2f} |")
     print()
-    for arm in ARMS[1:]:
+    for arm in RANKINGS[1:]:
         print(f"{arm} - heuristic NDCG@10: {bootstrap(np.array(scores[arm]) - np.array(scores['heuristic']))}")
+    # Each write order with the query model retrained on its own index's pools, against the
+    # heuristic's: retraining on more pools helps any arm, so this is the like-for-like test.
+    print()
+    baseline = np.array(scores["heuristic@heuristic"])
+    for arm in ["crawl-domain@crawl-domain", "crawl-domain@heuristic", "heuristic@crawl-domain"]:
+        print(f"{arm} - heuristic@heuristic NDCG@10: {bootstrap(np.array(scores[arm]) - baseline)}")
 
 
 if __name__ == "__main__":
