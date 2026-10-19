@@ -9,12 +9,15 @@ from django.test import Client
 from django.utils import timezone
 
 from mwmbl.crawler.agreement import AGREEMENT_RETENTION, prune_agreements, record_agreements
+from mwmbl.crawler.worst_agreements import UNKNOWN_GAP, read_worst_agreements
 from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies, trigram_similarity
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import _most_held_copies, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
+from mwmbl.search_callers import window_start
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
+from mwmbl.utils import utc_today
 
 URL = "https://example.com/page"
 
@@ -108,6 +111,10 @@ def test_compare():
         extract_empty=False,
         existing_extract_empty=False,
         last_crawled_delta=600,
+        title="Title",
+        extract="Buy cheap pills",
+        existing_title="Title",
+        existing_extract="An extract",
     )
 
 
@@ -168,6 +175,10 @@ def test_index_documents_reports_one_agreement_per_url(index_path, no_blacklist)
             extract_empty=False,
             existing_extract_empty=False,
             last_crawled_delta=None,
+            title="Python tutorial",
+            extract="Learn python today",
+            existing_title="Python tutorial",
+            existing_extract="Learn python today",
         )
     ]
 
@@ -255,6 +266,10 @@ def _agreement(url=URL):
         extract_empty=False,
         existing_extract_empty=True,
         last_crawled_delta=60,
+        title="Title",
+        extract="Extract",
+        existing_title="Title",
+        existing_extract="",
     )
 
 
@@ -308,12 +323,14 @@ def test_post_results_records_agreements(user, index_path, no_blacklist):
     index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[other_user.id])], index_path)
     raw_key, key_hash = generate_api_key()
     ApiKey.objects.create(user=user, key=key_hash, name="Crawl key", scopes=[ApiKey.Scope.CRAWL])
+    worst_redis = fakeredis.FakeRedis(decode_responses=True)
 
     with (
         patch("mwmbl.crawler.app.settings.DATA_PATH", str(index_path).rsplit("/", 1)[0]),
         patch("mwmbl.crawler.app.settings.INDEX_NAME", "test.tinysearch"),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
+        patch("mwmbl.crawler.worst_agreements.get_redis", return_value=worst_redis),
     ):
         response = Client().post(
             "/api/v1/crawler/results",
@@ -332,3 +349,5 @@ def test_post_results_records_agreements(user, index_path, no_blacklist):
     assert stored.title_similarity == 1.0
     assert stored.extract_similarity < 1.0
     assert stored.crawler_version == "1.2.0"
+    kept = read_worst_agreements(worst_redis, user.id, window_start(utc_today()))
+    assert [entry["own"]["extract"] for entry in kept[UNKNOWN_GAP]] == ["Learn rust today"]

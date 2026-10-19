@@ -14,6 +14,7 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
+from mwmbl.crawler import worst_agreements
 from mwmbl.crawler.agreement import record_agreements
 from mwmbl.crawler.batch import (
     CrawlerErrorReport,
@@ -41,6 +42,7 @@ from mwmbl.settings import (
     VERSION,
 )
 from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.utils import utc_today
 
 stats_manager = StatsManager(
     Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
@@ -276,6 +278,9 @@ def _register_routes(r: Router | NinjaAPI):
         # Last, since they are only analytics: a failure to store them still answers with an
         # error, but after the batch is indexed, uploaded and counted.
         record_agreements(indexed.agreements, api_key.user, results.crawler_version)
+        worst_agreements.record_worst_agreements(
+            worst_agreements.get_redis(), indexed.agreements, api_key.user.id, utc_today()
+        )
 
         return {
             "status": "ok",

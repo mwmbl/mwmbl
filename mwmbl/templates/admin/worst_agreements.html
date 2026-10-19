@@ -1,0 +1,91 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}Worst agreements | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Worst agreements
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .worst .note { color: #666; font-size: 0.9em; }
+    .worst .bad { color: #ba2121; font-weight: bold; }
+    .worst .result { padding: 12px 10px; border-top: 1px solid var(--hairline-color, #eee); display: flex; flex-wrap: wrap; gap: 8px 24px; }
+    .worst .copies { flex: 999 1 480px; min-width: 0; }
+    .worst .scores { flex: 1 1 180px; font-size: 0.9em; }
+    .worst .url { color: #3c6e47; font-size: 0.9em; overflow-wrap: anywhere; }
+    .worst .title { font-size: 1.2em; margin: 2px 0; }
+    .worst .extract { margin: 0; line-height: 1.5; }
+    .worst .other { margin-top: 10px; padding-left: 12px; border-left: 3px solid var(--hairline-color, #ddd); color: #555; }
+    .worst .other .title { font-size: 1em; }
+  </style>
+
+  <div id="content-main" class="worst">
+
+    <div class="module">
+      <h2>Crawler</h2>
+      <form method="get" style="padding: 10px">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" value="{{ username }}">
+        <label for="weeks_ago">Week</label>
+        <select id="weeks_ago" name="weeks_ago">
+          {% for choice in week_choices %}
+            <option value="{{ choice }}" {% if choice == weeks_ago %}selected{% endif %}>
+              {% if choice == 0 %}this week{% else %}{{ choice }} week{{ choice|pluralize }} ago{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+        <input type="submit" value="Show">
+      </form>
+      <p class="note" style="padding: 0 10px">
+        The {{ per_bucket }} comparisons with the lowest extract similarity this crawler was part
+        of in the week from {{ window }}, in either role, for each gap between the two crawls.
+        A low similarity says the copies differ, not which is wrong: read both. Comparisons
+        with an empty extract on either side are left out.
+      </p>
+    </div>
+
+    {% if not_found %}
+      <div class="module"><p class="bad" style="padding: 10px">No user named {{ username }}.</p></div>
+    {% elif redis_error %}
+      <div class="module">
+        <h2>Redis unreachable</h2>
+        <p class="bad">{{ redis_error }}</p>
+      </div>
+    {% elif username and not buckets %}
+      <div class="module"><p style="padding: 10px">Nothing kept for {{ username }} that week.</p></div>
+    {% endif %}
+
+    {% for bucket in buckets %}
+      <div class="module">
+        <h2>{{ bucket.label }}</h2>
+        {% for entry in bucket.entries %}
+          <div class="result">
+            <div class="copies">
+              <div class="url">{{ entry.url }}</div>
+              <div class="title">{{ entry.own.title }}</div>
+              <p class="extract">{{ entry.own.extract }}</p>
+              <div class="other">
+                <div class="note">{{ entry.other_username }}'s copy</div>
+                <div class="title">{{ entry.other.title }}</div>
+                <p class="extract">{{ entry.other.extract }}</p>
+              </div>
+            </div>
+            <div class="scores">
+              <div>Extract similarity <strong>{{ entry.extract_similarity|floatformat:2 }}</strong></div>
+              <div>Title similarity <strong>{{ entry.title_similarity|floatformat:2 }}</strong></div>
+              <div class="note">
+                {% if entry.role == "submitter" %}{{ username }} submitted over {{ entry.other_username }}'s copy
+                {% else %}{{ entry.other_username }} submitted over {{ username }}'s copy{% endif %}
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+
+  </div>
+{% endblock %}
