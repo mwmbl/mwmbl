@@ -30,11 +30,12 @@ from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.cache import cache
 from django.db.models import F, OuterRef, Q, Subquery
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponseBadRequest
 from django.shortcuts import render
 from redis import RedisError
 
 from mwmbl import count_urls, pricing, quota, search_callers, search_setup, traffic
+from mwmbl.crawler import worst_agreements
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -547,3 +548,74 @@ def paying_users_view(request):
         "price_per_1000_queries_cents": pricing.PRICE_PER_1000_QUERIES_CENTS,
     }
     return render(request, "admin/paying_users.html", context)
+
+
+WORST_AGREEMENT_ROLE_TITLES = {
+    worst_agreements.SUBMITTER: "Its copies, submitted over other crawlers'",
+    worst_agreements.STORED: "Other crawlers' copies, submitted over its own",
+}
+WORST_AGREEMENT_BUCKET_LABELS = {bucket.name: bucket.label for bucket in worst_agreements.BUCKETS}
+
+
+@staff_member_required
+def worst_agreements_view(request):
+    username = request.GET.get("username", "").strip()
+    week_choices = range(worst_agreements.KEPT_WINDOWS)
+    weeks_ago_param = request.GET.get("weeks_ago", "0")
+    if weeks_ago_param not in {str(choice) for choice in week_choices}:
+        return HttpResponseBadRequest(f"weeks_ago must be a whole number below {worst_agreements.KEPT_WINDOWS}")
+    weeks_ago = int(weeks_ago_param)
+    window = search_callers.window_start(utc_today()) - timedelta(weeks=weeks_ago)
+    context = {
+        "title": "Worst agreements",
+        "username": username,
+        "window": window,
+        "weeks_ago": weeks_ago,
+        "week_choices": week_choices,
+        "per_bucket": worst_agreements.WORST_PER_BUCKET,
+    }
+    if not username:
+        return render(request, "admin/worst_agreements.html", context)
+
+    crawler = MwmblUser.objects.filter(username=username).first()
+    if crawler is None:
+        context["not_found"] = True
+        return render(request, "admin/worst_agreements.html", context)
+
+    try:
+        by_role = worst_agreements.read_worst_agreements(worst_agreements.get_redis(), crawler.id, window)
+    except RedisError as e:
+        logger.exception("Could not read the worst agreements from Redis")
+        context["redis_error"] = str(e)
+        return render(request, "admin/worst_agreements.html", context)
+
+    other_ids = {
+        entry["other_user_id"] for by_bucket in by_role.values() for entries in by_bucket.values() for entry in entries
+    }
+    # The index keeps the ids of deleted users, so some have no name left.
+    usernames = dict(MwmblUser.objects.filter(id__in=other_ids).values_list("id", "username"))
+    context["roles"] = [
+        {
+            "title": WORST_AGREEMENT_ROLE_TITLES[role],
+            "submitter": role == worst_agreements.SUBMITTER,
+            "buckets": [
+                {
+                    "label": WORST_AGREEMENT_BUCKET_LABELS[bucket],
+                    "entries": [
+                        entry
+                        | {
+                            "other_username": usernames.get(
+                                entry["other_user_id"], f"deleted user {entry['other_user_id']}"
+                            )
+                        }
+                        for entry in entries
+                    ],
+                }
+                for bucket, entries in by_bucket.items()
+                if entries
+            ],
+        }
+        for role, by_bucket in by_role.items()
+    ]
+    context["empty"] = not any(role["buckets"] for role in context["roles"])
+    return render(request, "admin/worst_agreements.html", context)

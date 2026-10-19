@@ -26,6 +26,10 @@
         <th scope="row"><a href="{% url 'paying_users' %}">Paying users</a></th>
         <td>API users and members, their quotas, usage and what they pay, and Seed Search usage.</td>
       </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'worst_agreements' %}">Worst agreements</a></th>
+        <td>A crawler's copies that least match other crawlers' copies of the same URLs, side by side.</td>
+      </tr>
     </table>
   </div>
 {% endblock %}

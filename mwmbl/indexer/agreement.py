@@ -39,6 +39,10 @@ class Agreement(NamedTuple):
     """Seconds from the stored copy's crawl to the incoming one's: pages change, so a large
     gap explains a low similarity that a small one does not. The stored crawl time is the
     latest of the copies merged into it, not necessarily that of its text."""
+    title: str
+    extract: str
+    existing_title: str
+    existing_extract: str
 
 
 def find_stored_copies(
@@ -75,6 +79,10 @@ def compare(document: Document, stored_copy: StoredCopy, stored_last_crawled: Op
         extract_empty=_is_empty(document.extract),
         existing_extract_empty=_is_empty(stored_copy.extract),
         last_crawled_delta=document.last_crawled - stored_last_crawled if both_crawled else None,
+        title=document.title,
+        extract=document.extract,
+        existing_title=stored_copy.title,
+        existing_extract=stored_copy.extract,
     )
 
 

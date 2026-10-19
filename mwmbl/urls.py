@@ -26,6 +26,7 @@ from mwmbl.admin_views import (
     index_count_view,
     paying_users_view,
     search_traffic_view,
+    worst_agreements_view,
 )
 from mwmbl.api import api as v1_api
 from mwmbl.api import register_routers, v2_api
@@ -64,6 +65,7 @@ urlpatterns = [
     path("admin/search-traffic/", search_traffic_view, name="search_traffic"),
     path("admin/paying-users/", paying_users_view, name="paying_users"),
     path("admin/index-count/", index_count_view, name="index_count"),
+    path("admin/worst-agreements/", worst_agreements_view, name="worst_agreements"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", index, name="index"),

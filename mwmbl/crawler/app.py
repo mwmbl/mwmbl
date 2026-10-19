@@ -14,6 +14,7 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
+from mwmbl.crawler import worst_agreements
 from mwmbl.crawler.agreement import record_agreements
 from mwmbl.crawler.batch import (
     CrawlerErrorReport,
@@ -35,18 +36,29 @@ from mwmbl.settings import (
     ENDPOINT_URL,
     FILE_NAME_SUFFIX,
     KEY_ID,
+    NUM_EXTRACT_CHARS,
+    NUM_TITLE_CHARS,
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     USER_ID_LENGTH,
     VERSION,
 )
 from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.utils import utc_today
 
 stats_manager = StatsManager(
     Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
 )
 
 logger = getLogger(__name__)
+
+
+def _truncated(text: str, limit: int) -> str:
+    """The text cut to the limit the crawler cuts it to, so a client that does not cannot
+    store more: a result is shown at that length, and its text is copied to every page of
+    its terms and kept for comparison with other crawlers' copies."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
 
 INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope required)."
 
@@ -248,8 +260,8 @@ def _register_routes(r: Router | NinjaAPI):
             documents.append(
                 Document(
                     url=result.url,
-                    title=result.title,
-                    extract=result.extract,
+                    title=_truncated(result.title, NUM_TITLE_CHARS),
+                    extract=_truncated(result.extract, NUM_EXTRACT_CHARS),
                     user_ids=[api_key.user.id],
                     last_crawled=last_crawled,
                 )
@@ -276,6 +288,9 @@ def _register_routes(r: Router | NinjaAPI):
         # Last, since they are only analytics: a failure to store them still answers with an
         # error, but after the batch is indexed, uploaded and counted.
         record_agreements(indexed.agreements, api_key.user, results.crawler_version)
+        worst_agreements.record_worst_agreements(
+            worst_agreements.get_redis(), indexed.agreements, api_key.user.id, utc_today()
+        )
 
         return {
             "status": "ok",
