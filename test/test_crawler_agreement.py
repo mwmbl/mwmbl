@@ -9,13 +9,14 @@ from django.test import Client
 from django.utils import timezone
 
 from mwmbl.crawler.agreement import AGREEMENT_RETENTION, prune_agreements, record_agreements
-from mwmbl.crawler.worst_agreements import UNKNOWN_GAP, read_worst_agreements
+from mwmbl.crawler.worst_agreements import SUBMITTER, UNKNOWN_GAP, read_worst_agreements
 from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies, trigram_similarity
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist
 from mwmbl.indexer.index_batches import _most_held_copies, index_documents
 from mwmbl.models import ApiKey, CrawlerAgreement, generate_api_key
 from mwmbl.search_callers import window_start
+from mwmbl.settings import NUM_EXTRACT_CHARS, NUM_TITLE_CHARS
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
 from mwmbl.utils import utc_today
 
@@ -318,6 +319,31 @@ def test_post_results_rejects_a_crawl_time_before_the_epoch(user):
 
 
 @pytest.mark.django_db
+def test_post_results_truncates_titles_and_extracts(user):
+    """To what the crawler truncates them to, so a client that does not cannot store more."""
+    raw_key, key_hash = generate_api_key()
+    ApiKey.objects.create(user=user, key=key_hash, name="Crawl key", scopes=[ApiKey.Scope.CRAWL])
+
+    with (
+        patch("mwmbl.crawler.app.index_documents") as index_documents,
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+        patch("mwmbl.crawler.app.record_agreements"),
+        patch("mwmbl.crawler.worst_agreements.record_worst_agreements"),
+    ):
+        Client().post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [{"url": URL, "title": "t" * 1000, "extract": "e" * 1_000_000}]},
+            HTTP_X_API_KEY=raw_key,
+        )
+
+    ((document,), _), _ = index_documents.call_args
+    assert document.title == "t" * (NUM_TITLE_CHARS - 1) + "…"
+    assert document.extract == "e" * (NUM_EXTRACT_CHARS - 1) + "…"
+
+
+@pytest.mark.django_db
 def test_post_results_records_agreements(user, index_path, no_blacklist):
     other_user = get_user_model().objects.create_user(username="other", email="other@example.com", password="pw")
     index_documents([Document("Python tutorial", URL, "Learn python today", user_ids=[other_user.id])], index_path)
@@ -350,4 +376,4 @@ def test_post_results_records_agreements(user, index_path, no_blacklist):
     assert stored.extract_similarity < 1.0
     assert stored.crawler_version == "1.2.0"
     kept = read_worst_agreements(worst_redis, user.id, window_start(utc_today()))
-    assert [entry["own"]["extract"] for entry in kept[UNKNOWN_GAP]] == ["Learn rust today"]
+    assert [entry["own"]["extract"] for entry in kept[SUBMITTER][UNKNOWN_GAP.name]] == ["Learn rust today"]

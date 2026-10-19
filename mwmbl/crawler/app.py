@@ -36,6 +36,8 @@ from mwmbl.settings import (
     ENDPOINT_URL,
     FILE_NAME_SUFFIX,
     KEY_ID,
+    NUM_EXTRACT_CHARS,
+    NUM_TITLE_CHARS,
     PUBLIC_URL_PREFIX,
     PUBLIC_USER_ID_LENGTH,
     USER_ID_LENGTH,
@@ -49,6 +51,14 @@ stats_manager = StatsManager(
 )
 
 logger = getLogger(__name__)
+
+
+def _truncated(text: str, limit: int) -> str:
+    """The text cut to the limit the crawler cuts it to, so a client that does not cannot
+    store more: a result is shown at that length, and its text is copied to every page of
+    its terms and kept for comparison with other crawlers' copies."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
 
 INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope required)."
 
@@ -250,8 +260,8 @@ def _register_routes(r: Router | NinjaAPI):
             documents.append(
                 Document(
                     url=result.url,
-                    title=result.title,
-                    extract=result.extract,
+                    title=_truncated(result.title, NUM_TITLE_CHARS),
+                    extract=_truncated(result.extract, NUM_EXTRACT_CHARS),
                     user_ids=[api_key.user.id],
                     last_crawled=last_crawled,
                 )
