@@ -137,7 +137,17 @@ def test_a_username_can_change_case_alone(client, member):
     assert member.username == "Member"
 
 
-@pytest.mark.parametrize("username", ["STRANGER", "mwmbl-seed-crawler", "has space", ""])
+def test_a_case_change_cannot_collide_with_an_existing_case_variant(client, member):
+    _user("MEMBER")
+
+    response = _change_username(client, member, "Member")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "username", ["STRANGER", "mwmbl-seed-crawler", "has space", "", "x" * 151, "member@example.com"]
+)
 def test_taken_reserved_and_invalid_usernames_are_refused(client, member, username):
     _user("stranger")
 
@@ -190,6 +200,55 @@ def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
     assert list(EmailAddress.objects.filter(user=member).values_list("email", "verified", "primary")) == [
         ("new@example.com", True, True)
     ]
+
+
+def test_login_moves_to_the_new_email_once_confirmed(client, member):
+    _change_email(client, member, "new@example.com")
+    pending = EmailAddress.objects.get(email="new@example.com")
+    client.post(
+        f"{BASE}/confirm-email",
+        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
+        content_type="application/json",
+    )
+
+    def log_in(username):
+        return client.post(
+            f"{BASE}/token/pair",
+            data={"username": username, "password": "correctpassword"},
+            content_type="application/json",
+        )
+
+    assert log_in("new@example.com").status_code == 200
+    assert log_in("member@example.com").status_code == 401
+
+
+def test_an_email_pending_on_another_account_cannot_be_registered(client, member):
+    _change_email(client, member, "new@example.com")
+
+    response = client.post(
+        f"{BASE}/register",
+        data={"email": "NEW@example.com", "password": "anotherpassword"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_confirming_an_email_another_account_has_verified_is_refused(client, member):
+    _change_email(client, member, "new@example.com")
+    pending = EmailAddress.objects.get(email="new@example.com")
+    stranger = _user("stranger")
+    EmailAddress.objects.create(user=stranger, email="new@example.com", verified=True)
+
+    response = client.post(
+        f"{BASE}/confirm-email",
+        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
 
 
 def test_a_second_email_change_replaces_the_pending_one(client, member):

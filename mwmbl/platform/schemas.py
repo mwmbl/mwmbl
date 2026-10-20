@@ -136,7 +136,7 @@ class ForgotPasswordRequest(Schema):
 
 
 class ChangeUsernameRequest(Schema):
-    username: str = Field(description="The new username. Must be unique, ignoring case.")
+    username: str = Field(description="The new username. Must be unique, ignoring case, and may not contain `@`.")
 
 
 class ChangeEmailRequest(Schema):
@@ -269,7 +269,8 @@ class Registration(Schema):
         default=None,
         description=(
             "Optional username. If omitted, one is generated automatically in the form "
-            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided."
+            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided, and may not "
+            "contain `@`, since usernames are public."
         ),
     )
     agreements: list[AgreementType] = Field(

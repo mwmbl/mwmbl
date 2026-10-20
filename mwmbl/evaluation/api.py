@@ -15,8 +15,9 @@ router = Router(tags=["Evaluation"])
 
 def check_email_verified(request):
     """Check if user's email is verified."""
-    from_email_address = request.user.emailaddress_set.first()
-    if not from_email_address or not from_email_address.verified:
+    # Not the first address: while an email change awaits confirmation, the user also has
+    # the new, unverified one.
+    if not request.user.emailaddress_set.filter(verified=True).exists():
         raise InvalidRequest("Email address is not verified", status=403)  # 403 Forbidden
 
 

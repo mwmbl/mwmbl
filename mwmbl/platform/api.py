@@ -108,6 +108,13 @@ logger = logging.getLogger(__name__)
 router = Router(tags=["Platform"])
 
 
+def _refuse_email_like_username(username: str) -> None:
+    # Usernames are public - on leaderboards and in upload paths - so an email address there
+    # would publish it.
+    if "@" in username:
+        raise InvalidRequest("Usernames cannot contain @, so that they can't be email addresses.")
+
+
 def check_email_verified(request):
     # Not the first address: while an email change awaits confirmation, the user also has
     # the new, unverified one.
@@ -128,11 +135,17 @@ def check_email_verified(request):
     ),
 )
 def register(request, registration: Registration):
-    if MwmblUser.objects.filter(email=registration.email).exists():
+    # Pending email changes count too: once confirmed, they become their user's email.
+    email_taken = (
+        MwmblUser.objects.filter(email__iexact=registration.email).exists()
+        or EmailAddress.objects.filter(email__iexact=registration.email).exists()
+    )
+    if email_taken:
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
     if registration.username:
+        _refuse_email_like_username(registration.username)
         username_taken = MwmblUser.objects.filter(username=registration.username).exists()
         # Reserved even before migration 0049 makes the user, so nobody can take it first and
         # fail it - and in any case, as allauth's blacklist is, so nobody can pass for it.
@@ -177,8 +190,9 @@ def confirm_email(request, confirm: ConfirmEmail):
     if confirmation.email_address.email != confirm.email:
         raise InvalidRequest("Invalid email or key")
 
-    adapter = get_adapter()
-    adapter.confirm_email(request, confirmation.email_address)
+    # allauth refuses when another account has already verified the address.
+    if not get_adapter().confirm_email(request, confirmation.email_address):
+        raise InvalidRequest("Email already registered")
 
     return {
         "status": "ok",
@@ -1229,7 +1243,7 @@ def _pending_email_addresses(user: MwmblUser):
     summary="Change username",
     description=(
         "Change the authenticated user's username. It must be unique, ignoring case, and may "
-        "contain only letters, digits and `@.+-_`. Returns the new username."
+        "contain only letters, digits and `.+-_`. Returns the new username."
     ),
     tags=["Users"],
 )
@@ -1238,13 +1252,17 @@ def change_username(request, body: ChangeUsernameRequest):
     new_username = body.username.strip()
     if new_username == user.username:
         raise InvalidRequest("That is already your username.")
+    _refuse_email_like_username(new_username)
 
-    # A change of case alone would otherwise collide with the user's own name.
+    # A change of case alone would otherwise collide with the user's own name, so check the
+    # database for other users here instead.
     case_change_only = new_username.lower() == user.username.lower()
     try:
         get_adapter().clean_username(new_username, shallow=case_change_only)
     except ValidationError as error:
         raise InvalidRequest(error.messages[0])
+    if MwmblUser.objects.filter(username__iexact=new_username).exclude(id=user.id).exists():
+        raise InvalidRequest("Username already exists")
 
     user.username = new_username
     user.save(update_fields=["username"])
@@ -1286,6 +1304,8 @@ def change_email(request, body: ChangeEmailRequest):
         raise InvalidRequest("Email already registered")
 
     with transaction.atomic():
+        # Serialises concurrent changes by one user, which would otherwise each leave a pending address.
+        MwmblUser.objects.select_for_update().get(id=user.id)
         _pending_email_addresses(user).delete()
         EmailAddress.objects.add_email(request, user, new_email, confirm=True)
 
