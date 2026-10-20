@@ -1,11 +1,14 @@
 import logging
+from urllib.parse import urlencode
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailAddress, EmailConfirmationHMAC
 from allauth.account.utils import send_email_confirmation, setup_user_email
 from django.conf import settings
 from django.core import signing
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import F
@@ -64,6 +67,7 @@ from mwmbl.platform.schemas import (
     CombinedSearchPreference,
     CombinedSearchUsageResponse,
     ConfirmEmail,
+    ConfirmEmailChangeRequest,
     CreateApiKeyRequest,
     DeviceResponse,
     DomainSubmissionSchema,
@@ -116,9 +120,8 @@ def _refuse_email_like_username(username: str) -> None:
 
 
 def check_email_verified(request):
-    # Not the first address: while an email change awaits confirmation, the user also has
-    # the new, unverified one.
-    if not request.user.emailaddress_set.filter(verified=True).exists():
+    from_email_address = request.user.emailaddress_set.first()
+    if not from_email_address.verified:
         raise InvalidRequest("Email address is not verified", status=403)
 
 
@@ -135,12 +138,7 @@ def check_email_verified(request):
     ),
 )
 def register(request, registration: Registration):
-    # Pending email changes count too: once confirmed, they become their user's email.
-    email_taken = (
-        MwmblUser.objects.filter(email__iexact=registration.email).exists()
-        or EmailAddress.objects.filter(email__iexact=registration.email).exists()
-    )
-    if email_taken:
+    if _email_taken(registration.email):
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
@@ -1222,19 +1220,14 @@ def get_current_user(request):
     user = request.user
     billing = getattr(user, "billing", None)
     spend_cents = billing.max_monthly_spend_cents if billing else 0
-    pending_email = _pending_email_addresses(user).first()
+    email_address = user.emailaddress_set.first()
     return UserProfileResponse(
         username=user.username,
         email=user.email,
         plan="free" if spend_cents == 0 else "pay-as-you-go",
-        email_confirmed=user.emailaddress_set.filter(verified=True).exists(),
-        pending_email=pending_email.email if pending_email else None,
+        email_confirmed=email_address.verified if email_address else False,
         date_joined=user.date_joined,
     )
-
-
-def _pending_email_addresses(user: MwmblUser):
-    return user.emailaddress_set.filter(verified=False).exclude(email__iexact=user.email)
 
 
 @router.put(
@@ -1271,15 +1264,30 @@ def change_username(request, body: ChangeUsernameRequest):
     return {"status": "ok", "username": new_username}
 
 
+_EMAIL_CHANGE_SALT = "email-change"
+EMAIL_CHANGE_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
+# One confirmation email per user per window, so the endpoint can't be used to flood an inbox.
+EMAIL_CHANGE_COOLDOWN_SECONDS = 60
+EMAIL_CHANGE_COOLDOWN_KEY = "email-change-sent:{user_id}"
+
+
+def _email_taken(email: str, by_other_than: MwmblUser | None = None) -> bool:
+    users = MwmblUser.objects.filter(email__iexact=email)
+    addresses = EmailAddress.objects.filter(email__iexact=email)
+    if by_other_than is not None:
+        users = users.exclude(id=by_other_than.id)
+        addresses = addresses.exclude(user=by_other_than)
+    return users.exists() or addresses.exists()
+
+
 @router.post(
     "/user/email",
     auth=JWTAuth(),
     summary="Change email address",
     description=(
         "Start changing the authenticated user's email address. Requires the current password. "
-        "A confirmation email is sent to the new address; the current address stays in use until "
-        "the new one is confirmed, and is then replaced by it. Requesting another change replaces "
-        "a pending one."
+        "A link is emailed to the new address; the current address stays in use until the link is "
+        "followed, which calls `/platform/user/email/confirm`. One email is sent per user per minute."
     ),
     tags=["Users"],
 )
@@ -1295,25 +1303,72 @@ def change_email(request, body: ChangeEmailRequest):
         raise InvalidRequest("Enter a valid email address.")
     if new_email.lower() == user.email.lower():
         raise InvalidRequest("That is already your email address.")
-
-    used_by_another_user = (
-        MwmblUser.objects.filter(email__iexact=new_email).exclude(id=user.id).exists()
-        or EmailAddress.objects.filter(email__iexact=new_email).exclude(user=user).exists()
-    )
-    if used_by_another_user:
+    if _email_taken(new_email, by_other_than=user):
         raise InvalidRequest("Email already registered")
 
-    with transaction.atomic():
-        # Serialises concurrent changes by one user, which would otherwise each leave a pending address.
-        MwmblUser.objects.select_for_update().get(id=user.id)
-        _pending_email_addresses(user).delete()
-        EmailAddress.objects.add_email(request, user, new_email, confirm=True)
+    cooldown_key = EMAIL_CHANGE_COOLDOWN_KEY.format(user_id=user.id)
+    if not cache.add(cooldown_key, 1, timeout=EMAIL_CHANGE_COOLDOWN_SECONDS):
+        raise InvalidRequest("A confirmation email was sent a moment ago. Please wait a minute.", status=429)
 
-    return {
-        "status": "ok",
-        "pending_email": new_email,
-        "message": "Check your new email address for a confirmation link.",
-    }
+    # Nothing is stored until the link is followed, so an unconfirmed address neither logs in
+    # nor stops anyone else using it. The current email in the token voids the link once the
+    # email changes.
+    token = signing.dumps(
+        {"user_id": user.id, "old_email": user.email, "new_email": new_email}, salt=_EMAIL_CHANGE_SALT
+    )
+    confirm_url = f"{settings.FRONTEND_URL}/account/confirm-email-change?{urlencode({'token': token})}"
+    send_mail(
+        "Confirm your new Mwmbl email address",
+        f"Hi {user.username},\n\n"
+        f"To use this address for your Mwmbl account, follow this link within three days:\n\n"
+        f"{confirm_url}\n\n"
+        "If you didn't ask for this, you can ignore this email.",
+        settings.DEFAULT_FROM_EMAIL,
+        [new_email],
+    )
+
+    return {"status": "ok", "message": "Check your new email address for a confirmation link."}
+
+
+@router.post(
+    "/user/email/confirm",
+    summary="Confirm an email address change",
+    description=(
+        "Complete an email change with the token from the link emailed by `/platform/user/email`. "
+        "The account's email becomes the new, verified address, and the old address is told."
+    ),
+    tags=["Users"],
+)
+def confirm_email_change(request, body: ConfirmEmailChangeRequest):
+    try:
+        change = signing.loads(body.token, salt=_EMAIL_CHANGE_SALT, max_age=EMAIL_CHANGE_MAX_AGE_SECONDS)
+    except signing.BadSignature:
+        raise InvalidRequest("This link is invalid or has expired.")
+
+    with transaction.atomic():
+        user = MwmblUser.objects.select_for_update().filter(id=change["user_id"]).first()
+        if user is None or user.email != change["old_email"]:
+            raise InvalidRequest("This link is no longer valid.")
+        new_email = change["new_email"]
+        if _email_taken(new_email, by_other_than=user):
+            raise InvalidRequest("Email already registered")
+
+        user.email = new_email
+        user.save(update_fields=["email"])
+        user.emailaddress_set.all().delete()
+        EmailAddress.objects.create(user=user, email=new_email, verified=True, primary=True)
+
+    # Warns the owner if someone else, holding their password, made the change.
+    send_mail(
+        "Your Mwmbl email address has changed",
+        f"Hi {user.username},\n\n"
+        f"The email address for your Mwmbl account has been changed to {new_email}.\n\n"
+        f"If you didn't do this, contact {settings.DEFAULT_FROM_EMAIL} straight away.",
+        settings.DEFAULT_FROM_EMAIL,
+        [change["old_email"]],
+    )
+
+    return {"status": "ok", "username": user.username, "email": new_email}
 
 
 @router.get(

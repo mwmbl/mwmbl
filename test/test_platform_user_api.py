@@ -1,13 +1,17 @@
 """
-Per-user platform endpoints: agreements, devices, the profile, and the moderator's
+Per-user platform endpoints: agreements, devices, the profile and changes to it, and the moderator's
 re-crawl of a submission.
 """
 
+import re
+from urllib.parse import parse_qs, urlparse
+
 import pytest
-from allauth.account.models import EmailAddress, EmailConfirmationHMAC
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core import mail
+from django.core.cache import cache
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import Device, DomainEvidence, DomainSubmission, UserAgreement
@@ -30,6 +34,8 @@ def _auth(user) -> dict:
 
 @pytest.fixture
 def member(db):
+    # The email change cooldown lives in the cache.
+    cache.clear()
     return _user("member")
 
 
@@ -158,11 +164,29 @@ def test_taken_reserved_and_invalid_usernames_are_refused(client, member, userna
     assert member.username == "member"
 
 
+def _confirm_url_sent_to(address: str) -> str:
+    links = [re.search(r"https://\S+/confirm-email-change\S+", m.body) for m in mail.outbox if m.to == [address]]
+    return [link for link in links if link][-1].group()
+
+
+def _confirm_email_change(client, address: str):
+    token = parse_qs(urlparse(_confirm_url_sent_to(address)).query)["token"][0]
+    return client.post(f"{BASE}/user/email/confirm", data={"token": token}, content_type="application/json")
+
+
+def _log_in(client, username: str):
+    return client.post(
+        f"{BASE}/token/pair",
+        data={"username": username, "password": "correctpassword"},
+        content_type="application/json",
+    )
+
+
 def test_changing_email_needs_the_password(client, member):
     response = _change_email(client, member, "new@example.com", password="wrong")
 
     assert response.status_code == 403
-    assert not EmailAddress.objects.filter(email="new@example.com").exists()
+    assert mail.outbox == []
 
 
 @pytest.mark.parametrize(
@@ -180,19 +204,14 @@ def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
     response = _change_email(client, member, "new@example.com")
 
     assert response.status_code == 200
-    assert mail.outbox[-1].to == ["new@example.com"]
-    # The old address keeps working until the new one is confirmed.
+    assert _confirm_url_sent_to("new@example.com").startswith("https://mwmbl.org/account/confirm-email-change?")
+    # Until the link is followed, nothing changes and the new address can't log in.
     member.refresh_from_db()
     assert member.email == "member@example.com"
-    assert client.get(f"{BASE}/protected", headers=_auth(member)).status_code == 200
-    assert client.get(f"{BASE}/user", headers=_auth(member)).json()["pending_email"] == "new@example.com"
+    assert not EmailAddress.objects.filter(email="new@example.com").exists()
+    assert _log_in(client, "new@example.com").status_code == 401
 
-    pending = EmailAddress.objects.get(email="new@example.com")
-    confirmed = client.post(
-        f"{BASE}/confirm-email",
-        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
-        content_type="application/json",
-    )
+    confirmed = _confirm_email_change(client, "new@example.com")
 
     assert confirmed.status_code == 200
     member.refresh_from_db()
@@ -200,65 +219,49 @@ def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
     assert list(EmailAddress.objects.filter(user=member).values_list("email", "verified", "primary")) == [
         ("new@example.com", True, True)
     ]
+    assert mail.outbox[-1].to == ["member@example.com"]
+    assert _log_in(client, "new@example.com").status_code == 200
+    assert _log_in(client, "member@example.com").status_code == 401
 
 
-def test_login_moves_to_the_new_email_once_confirmed(client, member):
-    _change_email(client, member, "new@example.com")
-    pending = EmailAddress.objects.get(email="new@example.com")
-    client.post(
-        f"{BASE}/confirm-email",
-        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
-        content_type="application/json",
-    )
-
-    def log_in(username):
-        return client.post(
-            f"{BASE}/token/pair",
-            data={"username": username, "password": "correctpassword"},
-            content_type="application/json",
-        )
-
-    assert log_in("new@example.com").status_code == 200
-    assert log_in("member@example.com").status_code == 401
-
-
-def test_an_email_pending_on_another_account_cannot_be_registered(client, member):
+def test_a_confirmation_link_works_only_once(client, member):
     _change_email(client, member, "new@example.com")
 
-    response = client.post(
+    _confirm_email_change(client, "new@example.com")
+    replayed = _confirm_email_change(client, "new@example.com")
+
+    assert replayed.status_code == 400
+
+
+def test_a_tampered_token_is_refused(client, member):
+    response = client.post(f"{BASE}/user/email/confirm", data={"token": "forged"}, content_type="application/json")
+
+    assert response.status_code == 400
+
+
+def test_an_unconfirmed_change_does_not_stop_anyone_else_registering_the_address(client, member):
+    _change_email(client, member, "new@example.com")
+
+    registered = client.post(
         f"{BASE}/register",
-        data={"email": "NEW@example.com", "password": "anotherpassword"},
+        data={"email": "new@example.com", "password": "anotherpassword"},
         content_type="application/json",
     )
+    confirmed = _confirm_email_change(client, "new@example.com")
 
-    assert response.status_code == 400
-
-
-def test_confirming_an_email_another_account_has_verified_is_refused(client, member):
-    _change_email(client, member, "new@example.com")
-    pending = EmailAddress.objects.get(email="new@example.com")
-    stranger = _user("stranger")
-    EmailAddress.objects.create(user=stranger, email="new@example.com", verified=True)
-
-    response = client.post(
-        f"{BASE}/confirm-email",
-        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
-        content_type="application/json",
-    )
-
-    assert response.status_code == 400
+    assert registered.status_code == 200
+    assert confirmed.status_code == 400
     member.refresh_from_db()
     assert member.email == "member@example.com"
 
 
-def test_a_second_email_change_replaces_the_pending_one(client, member):
-    _change_email(client, member, "first@example.com")
-    _change_email(client, member, "second@example.com")
+def test_confirmation_emails_are_rate_limited(client, member):
+    first = _change_email(client, member, "first@example.com")
+    second = _change_email(client, member, "second@example.com")
 
-    assert sorted(EmailAddress.objects.filter(user=member).values_list("email", flat=True)) == [
-        "member@example.com",
-        "second@example.com",
-    ]
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert [m.to for m in mail.outbox] == [["first@example.com"]]
 
 
 def test_refetching_clears_the_old_evidence_and_queues_a_crawl(client, member, moderator, monkeypatch):

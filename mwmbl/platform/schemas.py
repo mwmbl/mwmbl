@@ -13,10 +13,6 @@ class UserProfileResponse(Schema):
     email: str
     plan: str
     email_confirmed: bool
-    pending_email: Optional[str] = Field(
-        default=None,
-        description="A new email address awaiting confirmation, which replaces `email` once confirmed.",
-    )
     date_joined: datetime
 
 
@@ -142,6 +138,10 @@ class ChangeUsernameRequest(Schema):
 class ChangeEmailRequest(Schema):
     email: str = Field(description="The new email address. Must not belong to another account.")
     password: str = Field(description="The account's current password.")
+
+
+class ConfirmEmailChangeRequest(Schema):
+    token: str = Field(description="The token from the link in the confirmation email.")
 
 
 class ResetPasswordRequest(Schema):
