@@ -1,14 +1,19 @@
 import logging
+from urllib.parse import urlencode
 
 from allauth.account.adapter import get_adapter
-from allauth.account.models import EmailConfirmationHMAC
+from allauth.account.models import EmailAddress, EmailConfirmationHMAC
 from allauth.account.utils import send_email_confirmation, setup_user_email
 from django.conf import settings
 from django.core import signing
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare, salted_hmac
 from ninja import Router
 from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
@@ -56,11 +61,14 @@ from mwmbl.platform.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyListItem,
     BulkDecisionRequest,
+    ChangeEmailRequest,
+    ChangeUsernameRequest,
     CheckoutRequest,
     CheckoutResponse,
     CombinedSearchPreference,
     CombinedSearchUsageResponse,
     ConfirmEmail,
+    ConfirmEmailChangeRequest,
     CreateApiKeyRequest,
     DeviceResponse,
     DomainSubmissionSchema,
@@ -105,6 +113,13 @@ logger = logging.getLogger(__name__)
 router = Router(tags=["Platform"])
 
 
+def _refuse_email_like_username(username: str) -> None:
+    # Usernames are public - on leaderboards and in upload paths - so an email address there
+    # would publish it.
+    if "@" in username:
+        raise InvalidRequest("Usernames cannot contain @, so that they can't be email addresses.")
+
+
 def check_email_verified(request):
     from_email_address = request.user.emailaddress_set.first()
     if not from_email_address.verified:
@@ -124,11 +139,12 @@ def check_email_verified(request):
     ),
 )
 def register(request, registration: Registration):
-    if MwmblUser.objects.filter(email=registration.email).exists():
+    if _email_taken(registration.email):
         raise InvalidRequest("Email already registered")
 
     username = registration.username or generate_username()
     if registration.username:
+        _refuse_email_like_username(registration.username)
         username_taken = MwmblUser.objects.filter(username=registration.username).exists()
         # Reserved even before migration 0049 makes the user, so nobody can take it first and
         # fail it - and in any case, as allauth's blacklist is, so nobody can pass for it.
@@ -173,8 +189,9 @@ def confirm_email(request, confirm: ConfirmEmail):
     if confirmation.email_address.email != confirm.email:
         raise InvalidRequest("Invalid email or key")
 
-    adapter = get_adapter()
-    adapter.confirm_email(request, confirmation.email_address)
+    # allauth refuses when another account has already verified the address.
+    if not get_adapter().confirm_email(request, confirmation.email_address):
+        raise InvalidRequest("Email already registered")
 
     return {
         "status": "ok",
@@ -1212,6 +1229,169 @@ def get_current_user(request):
         email_confirmed=email_address.verified if email_address else False,
         date_joined=user.date_joined,
     )
+
+
+@router.put(
+    "/user/username",
+    auth=JWTAuth(),
+    summary="Change username",
+    description=(
+        "Change the authenticated user's username. It must be unique, ignoring case, and may "
+        "contain only letters, digits and `.+-_`. Returns the new username."
+    ),
+    tags=["Users"],
+)
+def change_username(request, body: ChangeUsernameRequest):
+    user = request.user
+    new_username = body.username.strip()
+    if new_username == user.username:
+        raise InvalidRequest("That is already your username.")
+    _refuse_email_like_username(new_username)
+
+    # A change of case alone would otherwise collide with the user's own name, so check the
+    # database for other users here instead.
+    case_change_only = new_username.lower() == user.username.lower()
+    try:
+        get_adapter().clean_username(new_username, shallow=case_change_only)
+    except ValidationError as error:
+        raise InvalidRequest(error.messages[0])
+    if MwmblUser.objects.filter(username__iexact=new_username).exclude(id=user.id).exists():
+        raise InvalidRequest("Username already exists")
+
+    user.username = new_username
+    user.save(update_fields=["username"])
+    # Cached API keys carry the user, whose username names their crawl uploads.
+    invalidate_user_api_key_cache(user.id)
+    return {"status": "ok", "username": new_username}
+
+
+_EMAIL_CHANGE_SALT = "email-change"
+EMAIL_CHANGE_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
+# One confirmation email per user per window, so the endpoint can't be used to flood an inbox.
+EMAIL_CHANGE_COOLDOWN_SECONDS = 60
+EMAIL_CHANGE_COOLDOWN_KEY = "email-change-sent:{user_id}"
+
+
+def _password_digest(user: MwmblUser) -> str:
+    return salted_hmac(_EMAIL_CHANGE_SALT, user.password).hexdigest()
+
+
+def _email_taken(email: str, by_other_than: MwmblUser | None = None) -> bool:
+    users = MwmblUser.objects.filter(email__iexact=email)
+    addresses = EmailAddress.objects.filter(email__iexact=email)
+    if by_other_than is not None:
+        users = users.exclude(id=by_other_than.id)
+        addresses = addresses.exclude(user=by_other_than)
+    return users.exists() or addresses.exists()
+
+
+@router.post(
+    "/user/email",
+    auth=JWTAuth(),
+    summary="Change email address",
+    description=(
+        "Start changing the authenticated user's email address. Requires the current password. "
+        "A link is emailed to the new address; the current address stays in use until the link is "
+        "followed, which calls `/platform/user/email/confirm`. One email is sent per user per minute."
+    ),
+    tags=["Users"],
+)
+def change_email(request, body: ChangeEmailRequest):
+    user = request.user
+    if not user.check_password(body.password):
+        raise InvalidRequest("Incorrect password.", status=403)
+
+    new_email = body.email.strip()
+    try:
+        validate_email(new_email)
+    except ValidationError:
+        raise InvalidRequest("Enter a valid email address.")
+    if new_email.lower() == user.email.lower():
+        raise InvalidRequest("That is already your email address.")
+    if _email_taken(new_email, by_other_than=user):
+        raise InvalidRequest("Email already registered")
+
+    cooldown_key = EMAIL_CHANGE_COOLDOWN_KEY.format(user_id=user.id)
+    if not cache.add(cooldown_key, 1, timeout=EMAIL_CHANGE_COOLDOWN_SECONDS):
+        raise InvalidRequest("A confirmation email was sent a moment ago. Please wait a minute.", status=429)
+
+    # Nothing is stored until the link is followed, so an unconfirmed address neither logs in
+    # nor stops anyone else using it. The current email in the token voids the link once the
+    # email changes, and the password digest once the password does - so a user can cancel a
+    # change made by someone who learned their password by changing it.
+    token = signing.dumps(
+        {
+            "user_id": user.id,
+            "old_email": user.email,
+            "new_email": new_email,
+            "password_digest": _password_digest(user),
+        },
+        salt=_EMAIL_CHANGE_SALT,
+    )
+    confirm_url = f"{settings.FRONTEND_URL}/account/confirm-email-change?{urlencode({'token': token})}"
+    try:
+        send_mail(
+            "Confirm your new Mwmbl email address",
+            f"Hi {user.username},\n\n"
+            f"To use this address for your Mwmbl account, follow this link within three days:\n\n"
+            f"{confirm_url}\n\n"
+            "If you didn't ask for this, you can ignore this email.",
+            settings.DEFAULT_FROM_EMAIL,
+            [new_email],
+        )
+    except Exception:
+        # Lets the user try again straight away rather than wait out a cooldown for nothing.
+        cache.delete(cooldown_key)
+        raise
+
+    return {"status": "ok", "message": "Check your new email address for a confirmation link."}
+
+
+@router.post(
+    "/user/email/confirm",
+    summary="Confirm an email address change",
+    description=(
+        "Complete an email change with the token from the link emailed by `/platform/user/email`. "
+        "The account's email becomes the new, verified address, and the old address is told."
+    ),
+    tags=["Users"],
+)
+def confirm_email_change(request, body: ConfirmEmailChangeRequest):
+    try:
+        change = signing.loads(body.token, salt=_EMAIL_CHANGE_SALT, max_age=EMAIL_CHANGE_MAX_AGE_SECONDS)
+    except signing.BadSignature:
+        raise InvalidRequest("This link is invalid or has expired.")
+
+    with transaction.atomic():
+        user = MwmblUser.objects.select_for_update().filter(id=change["user_id"]).first()
+        link_is_stale = (
+            user is None
+            or not user.is_active
+            or user.email != change["old_email"]
+            or not constant_time_compare(_password_digest(user), change["password_digest"])
+        )
+        if link_is_stale:
+            raise InvalidRequest("This link is no longer valid.")
+        new_email = change["new_email"]
+        if _email_taken(new_email, by_other_than=user):
+            raise InvalidRequest("Email already registered")
+
+        user.email = new_email
+        user.save(update_fields=["email"])
+        user.emailaddress_set.all().delete()
+        EmailAddress.objects.create(user=user, email=new_email, verified=True, primary=True)
+
+    # Warns the owner if someone else, holding their password, made the change.
+    send_mail(
+        "Your Mwmbl email address has changed",
+        f"Hi {user.username},\n\n"
+        f"The email address for your Mwmbl account has been changed to {new_email}.\n\n"
+        f"If you didn't do this, contact {settings.DEFAULT_FROM_EMAIL} straight away.",
+        settings.DEFAULT_FROM_EMAIL,
+        [change["old_email"]],
+    )
+
+    return {"status": "ok", "username": user.username, "email": new_email}
 
 
 @router.get(

@@ -63,6 +63,13 @@ def test_registering_an_existing_username_is_rejected(client, owner):
     assert "Username already exists" in response.json()["message"]
 
 
+def test_registering_an_email_as_the_username_is_rejected(client, db):
+    response = _register(client, username="someone@example.com")
+
+    assert response.status_code == 400
+    assert not User.objects.filter(username="someone@example.com").exists()
+
+
 def test_registration_records_accepted_agreements(client, db):
     response = _register(client, agreements=["TERMS_OF_SERVICE_GUI"])
 

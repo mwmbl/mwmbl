@@ -1,12 +1,17 @@
 """
-Per-user platform endpoints: agreements, devices, the profile, and the moderator's
+Per-user platform endpoints: agreements, devices, the profile and changes to it, and the moderator's
 re-crawl of a submission.
 """
+
+import re
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core import mail
+from django.core.cache import cache
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import Device, DomainEvidence, DomainSubmission, UserAgreement
@@ -29,6 +34,8 @@ def _auth(user) -> dict:
 
 @pytest.fixture
 def member(db):
+    # The email change cooldown lives in the cache.
+    cache.clear()
     return _user("member")
 
 
@@ -102,6 +109,183 @@ def test_profile_reports_the_account_and_plan(client, member):
     assert body["email"] == "member@example.com"
     assert body["email_confirmed"] is True
     assert body["plan"] == "free"
+
+
+def _change_username(client, user, username: str):
+    return client.put(
+        f"{BASE}/user/username", data={"username": username}, content_type="application/json", headers=_auth(user)
+    )
+
+
+def _change_email(client, user, email: str, password: str = "correctpassword"):
+    return client.post(
+        f"{BASE}/user/email",
+        data={"email": email, "password": password},
+        content_type="application/json",
+        headers=_auth(user),
+    )
+
+
+def test_a_user_can_change_their_username(client, member):
+    response = _change_username(client, member, "new_name")
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "new_name"
+    member.refresh_from_db()
+    assert member.username == "new_name"
+
+
+def test_a_username_can_change_case_alone(client, member):
+    response = _change_username(client, member, "Member")
+
+    assert response.status_code == 200
+    member.refresh_from_db()
+    assert member.username == "Member"
+
+
+def test_a_case_change_cannot_collide_with_an_existing_case_variant(client, member):
+    _user("MEMBER")
+
+    response = _change_username(client, member, "Member")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "username", ["STRANGER", "mwmbl-seed-crawler", "has space", "", "x" * 151, "member@example.com"]
+)
+def test_taken_reserved_and_invalid_usernames_are_refused(client, member, username):
+    _user("stranger")
+
+    response = _change_username(client, member, username)
+
+    assert response.status_code == 400
+    member.refresh_from_db()
+    assert member.username == "member"
+
+
+def _confirm_url_sent_to(address: str) -> str:
+    links = [re.search(r"https://\S+/confirm-email-change\S+", m.body) for m in mail.outbox if m.to == [address]]
+    return [link for link in links if link][-1].group()
+
+
+def _confirm_email_change(client, address: str):
+    token = parse_qs(urlparse(_confirm_url_sent_to(address)).query)["token"][0]
+    return client.post(f"{BASE}/user/email/confirm", data={"token": token}, content_type="application/json")
+
+
+def _log_in(client, username: str):
+    return client.post(
+        f"{BASE}/token/pair",
+        data={"username": username, "password": "correctpassword"},
+        content_type="application/json",
+    )
+
+
+def test_changing_email_needs_the_password(client, member):
+    response = _change_email(client, member, "new@example.com", password="wrong")
+
+    assert response.status_code == 403
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize(
+    "email", ["stranger@example.com", "STRANGER@example.com", "not-an-email", "member@example.com"]
+)
+def test_taken_invalid_and_unchanged_emails_are_refused(client, member, email):
+    _user("stranger")
+
+    response = _change_email(client, member, email)
+
+    assert response.status_code == 400
+
+
+def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
+    response = _change_email(client, member, "new@example.com")
+
+    assert response.status_code == 200
+    assert _confirm_url_sent_to("new@example.com").startswith("https://mwmbl.org/account/confirm-email-change?")
+    # Until the link is followed, nothing changes and the new address can't log in.
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
+    assert not EmailAddress.objects.filter(email="new@example.com").exists()
+    assert _log_in(client, "new@example.com").status_code == 401
+
+    confirmed = _confirm_email_change(client, "new@example.com")
+
+    assert confirmed.status_code == 200
+    member.refresh_from_db()
+    assert member.email == "new@example.com"
+    assert list(EmailAddress.objects.filter(user=member).values_list("email", "verified", "primary")) == [
+        ("new@example.com", True, True)
+    ]
+    assert mail.outbox[-1].to == ["member@example.com"]
+    assert _log_in(client, "new@example.com").status_code == 200
+    assert _log_in(client, "member@example.com").status_code == 401
+
+
+def test_a_confirmation_link_works_only_once(client, member):
+    _change_email(client, member, "new@example.com")
+
+    _confirm_email_change(client, "new@example.com")
+    replayed = _confirm_email_change(client, "new@example.com")
+
+    assert replayed.status_code == 400
+
+
+def test_changing_the_password_cancels_a_pending_change(client, member):
+    _change_email(client, member, "new@example.com")
+    member.set_password("anotherpassword")
+    member.save()
+
+    response = _confirm_email_change(client, "new@example.com")
+
+    assert response.status_code == 400
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
+
+
+def test_a_failed_send_does_not_start_the_cooldown(client, member, monkeypatch):
+    def fail(*args, **kwargs):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(api, "send_mail", fail)
+    with pytest.raises(ConnectionRefusedError):
+        _change_email(client, member, "new@example.com")
+    monkeypatch.undo()
+
+    assert _change_email(client, member, "new@example.com").status_code == 200
+
+
+def test_a_tampered_token_is_refused(client, member):
+    response = client.post(f"{BASE}/user/email/confirm", data={"token": "forged"}, content_type="application/json")
+
+    assert response.status_code == 400
+
+
+def test_an_unconfirmed_change_does_not_stop_anyone_else_registering_the_address(client, member):
+    _change_email(client, member, "new@example.com")
+
+    registered = client.post(
+        f"{BASE}/register",
+        data={"email": "new@example.com", "password": "anotherpassword"},
+        content_type="application/json",
+    )
+    confirmed = _confirm_email_change(client, "new@example.com")
+
+    assert registered.status_code == 200
+    assert confirmed.status_code == 400
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
+
+
+def test_confirmation_emails_are_rate_limited(client, member):
+    first = _change_email(client, member, "first@example.com")
+    second = _change_email(client, member, "second@example.com")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert [m.to for m in mail.outbox] == [["first@example.com"]]
 
 
 def test_refetching_clears_the_old_evidence_and_queues_a_crawl(client, member, moderator, monkeypatch):
