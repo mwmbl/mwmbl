@@ -149,6 +149,9 @@ ACCOUNT_USERNAME_REQUIRED = False
 # mwmbl.models.SEED_CRAWLER_USERNAME, which settings cannot import.
 ACCOUNT_USERNAME_BLACKLIST = ["mwmbl-seed-crawler"]
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+# A new address waits beside the current one until it is confirmed, then replaces it.
+ACCOUNT_CHANGE_EMAIL = True
+ACCOUNT_MAX_EMAIL_ADDRESSES = 2
 
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
 

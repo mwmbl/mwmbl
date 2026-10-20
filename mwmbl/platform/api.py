@@ -1,11 +1,12 @@
 import logging
 
 from allauth.account.adapter import get_adapter
-from allauth.account.models import EmailConfirmationHMAC
+from allauth.account.models import EmailAddress, EmailConfirmationHMAC
 from allauth.account.utils import send_email_confirmation, setup_user_email
 from django.conf import settings
 from django.core import signing
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -56,6 +57,8 @@ from mwmbl.platform.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyListItem,
     BulkDecisionRequest,
+    ChangeEmailRequest,
+    ChangeUsernameRequest,
     CheckoutRequest,
     CheckoutResponse,
     CombinedSearchPreference,
@@ -106,8 +109,9 @@ router = Router(tags=["Platform"])
 
 
 def check_email_verified(request):
-    from_email_address = request.user.emailaddress_set.first()
-    if not from_email_address.verified:
+    # Not the first address: while an email change awaits confirmation, the user also has
+    # the new, unverified one.
+    if not request.user.emailaddress_set.filter(verified=True).exists():
         raise InvalidRequest("Email address is not verified", status=403)
 
 
@@ -1204,14 +1208,92 @@ def get_current_user(request):
     user = request.user
     billing = getattr(user, "billing", None)
     spend_cents = billing.max_monthly_spend_cents if billing else 0
-    email_address = user.emailaddress_set.first()
+    pending_email = _pending_email_addresses(user).first()
     return UserProfileResponse(
         username=user.username,
         email=user.email,
         plan="free" if spend_cents == 0 else "pay-as-you-go",
-        email_confirmed=email_address.verified if email_address else False,
+        email_confirmed=user.emailaddress_set.filter(verified=True).exists(),
+        pending_email=pending_email.email if pending_email else None,
         date_joined=user.date_joined,
     )
+
+
+def _pending_email_addresses(user: MwmblUser):
+    return user.emailaddress_set.filter(verified=False).exclude(email__iexact=user.email)
+
+
+@router.put(
+    "/user/username",
+    auth=JWTAuth(),
+    summary="Change username",
+    description=(
+        "Change the authenticated user's username. It must be unique, ignoring case, and may "
+        "contain only letters, digits and `@.+-_`. Returns the new username."
+    ),
+    tags=["Users"],
+)
+def change_username(request, body: ChangeUsernameRequest):
+    user = request.user
+    new_username = body.username.strip()
+    if new_username == user.username:
+        raise InvalidRequest("That is already your username.")
+
+    # A change of case alone would otherwise collide with the user's own name.
+    case_change_only = new_username.lower() == user.username.lower()
+    try:
+        get_adapter().clean_username(new_username, shallow=case_change_only)
+    except ValidationError as error:
+        raise InvalidRequest(error.messages[0])
+
+    user.username = new_username
+    user.save(update_fields=["username"])
+    # Cached API keys carry the user, whose username names their crawl uploads.
+    invalidate_user_api_key_cache(user.id)
+    return {"status": "ok", "username": new_username}
+
+
+@router.post(
+    "/user/email",
+    auth=JWTAuth(),
+    summary="Change email address",
+    description=(
+        "Start changing the authenticated user's email address. Requires the current password. "
+        "A confirmation email is sent to the new address; the current address stays in use until "
+        "the new one is confirmed, and is then replaced by it. Requesting another change replaces "
+        "a pending one."
+    ),
+    tags=["Users"],
+)
+def change_email(request, body: ChangeEmailRequest):
+    user = request.user
+    if not user.check_password(body.password):
+        raise InvalidRequest("Incorrect password.", status=403)
+
+    new_email = body.email.strip()
+    try:
+        validate_email(new_email)
+    except ValidationError:
+        raise InvalidRequest("Enter a valid email address.")
+    if new_email.lower() == user.email.lower():
+        raise InvalidRequest("That is already your email address.")
+
+    used_by_another_user = (
+        MwmblUser.objects.filter(email__iexact=new_email).exclude(id=user.id).exists()
+        or EmailAddress.objects.filter(email__iexact=new_email).exclude(user=user).exists()
+    )
+    if used_by_another_user:
+        raise InvalidRequest("Email already registered")
+
+    with transaction.atomic():
+        _pending_email_addresses(user).delete()
+        EmailAddress.objects.add_email(request, user, new_email, confirm=True)
+
+    return {
+        "status": "ok",
+        "pending_email": new_email,
+        "message": "Check your new email address for a confirmation link.",
+    }
 
 
 @router.get(

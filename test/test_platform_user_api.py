@@ -4,9 +4,10 @@ re-crawl of a submission.
 """
 
 import pytest
-from allauth.account.models import EmailAddress
+from allauth.account.models import EmailAddress, EmailConfirmationHMAC
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core import mail
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import Device, DomainEvidence, DomainSubmission, UserAgreement
@@ -102,6 +103,103 @@ def test_profile_reports_the_account_and_plan(client, member):
     assert body["email"] == "member@example.com"
     assert body["email_confirmed"] is True
     assert body["plan"] == "free"
+
+
+def _change_username(client, user, username: str):
+    return client.put(
+        f"{BASE}/user/username", data={"username": username}, content_type="application/json", headers=_auth(user)
+    )
+
+
+def _change_email(client, user, email: str, password: str = "correctpassword"):
+    return client.post(
+        f"{BASE}/user/email",
+        data={"email": email, "password": password},
+        content_type="application/json",
+        headers=_auth(user),
+    )
+
+
+def test_a_user_can_change_their_username(client, member):
+    response = _change_username(client, member, "new_name")
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "new_name"
+    member.refresh_from_db()
+    assert member.username == "new_name"
+
+
+def test_a_username_can_change_case_alone(client, member):
+    response = _change_username(client, member, "Member")
+
+    assert response.status_code == 200
+    member.refresh_from_db()
+    assert member.username == "Member"
+
+
+@pytest.mark.parametrize("username", ["STRANGER", "mwmbl-seed-crawler", "has space", ""])
+def test_taken_reserved_and_invalid_usernames_are_refused(client, member, username):
+    _user("stranger")
+
+    response = _change_username(client, member, username)
+
+    assert response.status_code == 400
+    member.refresh_from_db()
+    assert member.username == "member"
+
+
+def test_changing_email_needs_the_password(client, member):
+    response = _change_email(client, member, "new@example.com", password="wrong")
+
+    assert response.status_code == 403
+    assert not EmailAddress.objects.filter(email="new@example.com").exists()
+
+
+@pytest.mark.parametrize(
+    "email", ["stranger@example.com", "STRANGER@example.com", "not-an-email", "member@example.com"]
+)
+def test_taken_invalid_and_unchanged_emails_are_refused(client, member, email):
+    _user("stranger")
+
+    response = _change_email(client, member, email)
+
+    assert response.status_code == 400
+
+
+def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
+    response = _change_email(client, member, "new@example.com")
+
+    assert response.status_code == 200
+    assert mail.outbox[-1].to == ["new@example.com"]
+    # The old address keeps working until the new one is confirmed.
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
+    assert client.get(f"{BASE}/protected", headers=_auth(member)).status_code == 200
+    assert client.get(f"{BASE}/user", headers=_auth(member)).json()["pending_email"] == "new@example.com"
+
+    pending = EmailAddress.objects.get(email="new@example.com")
+    confirmed = client.post(
+        f"{BASE}/confirm-email",
+        data={"email": "new@example.com", "key": EmailConfirmationHMAC(pending).key},
+        content_type="application/json",
+    )
+
+    assert confirmed.status_code == 200
+    member.refresh_from_db()
+    assert member.email == "new@example.com"
+    assert list(EmailAddress.objects.filter(user=member).values_list("email", "verified", "primary")) == [
+        ("new@example.com", True, True)
+    ]
+
+
+def test_a_second_email_change_replaces_the_pending_one(client, member):
+    _change_email(client, member, "first@example.com")
+    _change_email(client, member, "second@example.com")
+
+    assert sorted(EmailAddress.objects.filter(user=member).values_list("email", flat=True)) == [
+        "member@example.com",
+        "second@example.com",
+    ]
 
 
 def test_refetching_clears_the_old_evidence_and_queues_a_crawl(client, member, moderator, monkeypatch):
