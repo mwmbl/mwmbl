@@ -13,6 +13,7 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare, salted_hmac
 from ninja import Router
 from ninja.pagination import paginate
 from ninja_jwt.authentication import JWTAuth
@@ -1271,6 +1272,10 @@ EMAIL_CHANGE_COOLDOWN_SECONDS = 60
 EMAIL_CHANGE_COOLDOWN_KEY = "email-change-sent:{user_id}"
 
 
+def _password_digest(user: MwmblUser) -> str:
+    return salted_hmac(_EMAIL_CHANGE_SALT, user.password).hexdigest()
+
+
 def _email_taken(email: str, by_other_than: MwmblUser | None = None) -> bool:
     users = MwmblUser.objects.filter(email__iexact=email)
     addresses = EmailAddress.objects.filter(email__iexact=email)
@@ -1312,20 +1317,32 @@ def change_email(request, body: ChangeEmailRequest):
 
     # Nothing is stored until the link is followed, so an unconfirmed address neither logs in
     # nor stops anyone else using it. The current email in the token voids the link once the
-    # email changes.
+    # email changes, and the password digest once the password does - so a user can cancel a
+    # change made by someone who learned their password by changing it.
     token = signing.dumps(
-        {"user_id": user.id, "old_email": user.email, "new_email": new_email}, salt=_EMAIL_CHANGE_SALT
+        {
+            "user_id": user.id,
+            "old_email": user.email,
+            "new_email": new_email,
+            "password_digest": _password_digest(user),
+        },
+        salt=_EMAIL_CHANGE_SALT,
     )
     confirm_url = f"{settings.FRONTEND_URL}/account/confirm-email-change?{urlencode({'token': token})}"
-    send_mail(
-        "Confirm your new Mwmbl email address",
-        f"Hi {user.username},\n\n"
-        f"To use this address for your Mwmbl account, follow this link within three days:\n\n"
-        f"{confirm_url}\n\n"
-        "If you didn't ask for this, you can ignore this email.",
-        settings.DEFAULT_FROM_EMAIL,
-        [new_email],
-    )
+    try:
+        send_mail(
+            "Confirm your new Mwmbl email address",
+            f"Hi {user.username},\n\n"
+            f"To use this address for your Mwmbl account, follow this link within three days:\n\n"
+            f"{confirm_url}\n\n"
+            "If you didn't ask for this, you can ignore this email.",
+            settings.DEFAULT_FROM_EMAIL,
+            [new_email],
+        )
+    except Exception:
+        # Lets the user try again straight away rather than wait out a cooldown for nothing.
+        cache.delete(cooldown_key)
+        raise
 
     return {"status": "ok", "message": "Check your new email address for a confirmation link."}
 
@@ -1347,7 +1364,13 @@ def confirm_email_change(request, body: ConfirmEmailChangeRequest):
 
     with transaction.atomic():
         user = MwmblUser.objects.select_for_update().filter(id=change["user_id"]).first()
-        if user is None or user.email != change["old_email"]:
+        link_is_stale = (
+            user is None
+            or not user.is_active
+            or user.email != change["old_email"]
+            or not constant_time_compare(_password_digest(user), change["password_digest"])
+        )
+        if link_is_stale:
             raise InvalidRequest("This link is no longer valid.")
         new_email = change["new_email"]
         if _email_taken(new_email, by_other_than=user):

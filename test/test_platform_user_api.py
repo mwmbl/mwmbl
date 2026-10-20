@@ -233,6 +233,30 @@ def test_a_confirmation_link_works_only_once(client, member):
     assert replayed.status_code == 400
 
 
+def test_changing_the_password_cancels_a_pending_change(client, member):
+    _change_email(client, member, "new@example.com")
+    member.set_password("anotherpassword")
+    member.save()
+
+    response = _confirm_email_change(client, "new@example.com")
+
+    assert response.status_code == 400
+    member.refresh_from_db()
+    assert member.email == "member@example.com"
+
+
+def test_a_failed_send_does_not_start_the_cooldown(client, member, monkeypatch):
+    def fail(*args, **kwargs):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(api, "send_mail", fail)
+    with pytest.raises(ConnectionRefusedError):
+        _change_email(client, member, "new@example.com")
+    monkeypatch.undo()
+
+    assert _change_email(client, member, "new@example.com").status_code == 200
+
+
 def test_a_tampered_token_is_refused(client, member):
     response = client.post(f"{BASE}/user/email/confirm", data={"token": "forged"}, content_type="application/json")
 
