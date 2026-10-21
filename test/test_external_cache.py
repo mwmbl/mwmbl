@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.cache import cache
 from django.test import override_settings
 
 from mwmbl.apps import create_index
@@ -505,11 +506,11 @@ def test_a_hit_is_served_while_the_circuit_breaker_is_open(cache_index):
     """A cached answer costs Wikipedia nothing, so backing off from a rate limit is no
     reason to withhold it."""
     store_external_results(DocumentSource.WIKIPEDIA, "python", [PYTHON])
-    rank._trip_wiki_circuit()
+    rank._trip_wiki_circuit(60)
     try:
         results = get_wiki_results("python", 3)
     finally:
-        rank._wiki_blocked_until = 0.0
+        cache.delete(rank.WIKI_CIRCUIT_KEY)
 
     assert [document.url for document in results] == [PYTHON.url]
 

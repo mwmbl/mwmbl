@@ -16,7 +16,7 @@ judge = Judge(Path(settings.SUPER_SEARCH_JUDGE_MODEL_DIR))
 out = {}
 for r in rows:
     q = r["query"]
-    docs = get_wiki_results(q)
+    docs = get_wiki_results(q, wait_out_rate_limits=True)
     scores = judge.score(q, [doc_text(d.title, d.extract) for d in docs]) if docs else []
     out[q] = [{"url": d.url, "title": d.title, "extract": d.extract, "minilm": float(s)} for d, s in zip(docs, scores)]
 json.dump(out, open("devdata/combined_providers_eval/engb/wiki_pool.json", "w"))
