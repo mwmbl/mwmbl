@@ -93,6 +93,7 @@ dev = [
     "ruff>=0.16.6",
     "ty>=0.0.78",
     "pre-commit>=4.6.2",
+    "moto>=5.2.4",
 ]
 
 [tool.uv]
