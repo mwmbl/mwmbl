@@ -128,7 +128,7 @@ def test_restore_writes_over_what_a_killed_restore_left(index_path, client):
 
 def test_reading_an_index_shorter_than_its_metadata_says_fails(index_path):
     os.truncate(index_path, index_path.stat().st_size - PAGE_SIZE)
-    reader = LockedIndexReader(index_path)
+    reader = LockedIndexReader(index_path, on_progress=lambda bytes_read: None)
 
     with pytest.raises(EOFError):
         reader.read()
@@ -228,7 +228,7 @@ def test_a_failed_backup_records_its_error(index_path, client):
 
 
 def test_the_reader_reports_its_progress(index_path, monkeypatch):
-    # Two 4 MB chunks to an interval, so it is crossed once per interval and not per chunk.
+    # Many chunks to an interval, so this checks it is reported per interval and not per chunk.
     interval = 8 * 1024 * 1024
     monkeypatch.setattr(backup, "PROGRESS_INTERVAL_BYTES", interval)
     progress = []
