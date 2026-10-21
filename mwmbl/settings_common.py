@@ -218,10 +218,11 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN is not None:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        # At 0.1, traces used up the span quota in October 2026, and the SDK then dropped
-        # what was left to backpressure, leaving no request timings at all. Most of it was
-        # "/"; a hundredth of everything still traces thousands of requests a day.
-        traces_sample_rate=0.01,
+        # The span quota is about 5M a month, or 165k a day. At 0.1, beta alone used it up
+        # in September 2026, and production sends about 3.5M spans a day at that rate, so
+        # once both were on it lasted a day. At 0.002 the two come to about 80k a day,
+        # with room for a spike, and still trace several thousand requests a day.
+        traces_sample_rate=0.002,
         # Set profiles_sample_rate to 1.0 to profile 100%
         # of sampled transactions.
         # We recommend adjusting this value in production.
