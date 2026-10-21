@@ -2,8 +2,6 @@ import html
 import json
 import math
 import re
-import threading
-import time
 import urllib
 from abc import abstractmethod
 from collections import defaultdict
@@ -16,8 +14,8 @@ from urllib.parse import urlparse
 import numpy as np
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from requests.adapters import HTTPAdapter, Retry
-from requests.exceptions import RetryError
 
 from mwmbl.format import get_query_regex
 from mwmbl.hn_top_domains_filtered import DOMAINS
@@ -527,11 +525,15 @@ WIKI_FETCH_LIMIT = NUM_WIKI_RESULTS
 # on (max_wiki_results=5 there). Changing it changes a trained-on feature: retrain.
 WIKI_TOP_SCORE = 6.0
 
-# Wikipedia rate-limits (HTTP 429, with a non-JSON body) bursts of search-API
-# calls — e.g. an evaluation run that queries it once per gold query. Retry with
-# backoff, honouring any Retry-After, so a transient 429 doesn't silently drop a
-# query's wiki results. Live search never bursts, so this adds no latency in
-# normal operation. Successful responses are cached for months (see mwmbl.indexer.external_cache).
+# Live search does not retry Wikipedia. It used to retry 429s, honouring Retry-After, on
+# the theory that live search never bursts - but it does, and in October 2026 Wikipedia
+# answered about three calls in four with a 429 and a Retry-After of tens of seconds. Each
+# such search slept through every retry, over a minute in all, and since sync views share
+# one thread per worker, every request queued behind it waited too: searches, page loads,
+# and the token refreshes whose failure logs users out.
+#
+# Evaluation runs can afford to wait, and need the results they would otherwise drop, so
+# they opt into this with wait_out_rate_limits.
 WIKI_RETRY = Retry(
     total=4,
     backoff_factor=0.5,
@@ -540,41 +542,38 @@ WIKI_RETRY = Retry(
     respect_retry_after_header=True,
 )
 
-# If Wikipedia has already rate-limited us hard enough that WIKI_RETRY exhausted its
-# retries, hammering it again on the very next query just makes things worse. Trip a
-# process-local circuit breaker instead: stop calling Wikipedia for a cooldown period
-# and let the rate limit clear, rather than every subsequent request paying for its own
-# doomed retry-with-backoff sequence.
-WIKI_CIRCUIT_COOLDOWN_SECONDS = 60
-_wiki_circuit_lock = threading.Lock()
-_wiki_blocked_until = 0.0
+WIKI_TIMEOUT_SECONDS = 5
+
+# A 429 pauses every live Wikipedia call for as long as Wikipedia asks. Held in Redis rather
+# than per process, so that one worker's 429 spares the others from collecting their own.
+WIKI_CIRCUIT_KEY = "wiki-circuit-open"
+WIKI_CIRCUIT_DEFAULT_SECONDS = 60
+# A Retry-After this long is more likely a mistake than a request; don't let one switch
+# Wikipedia off for the day.
+WIKI_CIRCUIT_MAX_SECONDS = 600
 
 
 def _wiki_circuit_open() -> bool:
-    return time.monotonic() < _wiki_blocked_until
+    return cache.get(WIKI_CIRCUIT_KEY) is not None
 
 
-def _trip_wiki_circuit():
-    global _wiki_blocked_until
-    with _wiki_circuit_lock:
-        _wiki_blocked_until = time.monotonic() + WIKI_CIRCUIT_COOLDOWN_SECONDS
+def _trip_wiki_circuit(seconds: int):
+    cache.set(WIKI_CIRCUIT_KEY, 1, timeout=seconds)
+
+
+def _wiki_cooldown_seconds(response: requests.Response) -> int:
+    """How long to pause for, from the 429's Retry-After.
+
+    Retry-After may also be an HTTP date; Wikipedia sends seconds, so anything else gets
+    the default rather than a date parser.
+    """
+    retry_after = response.headers.get("Retry-After", "")
+    seconds = int(retry_after) if retry_after.isdigit() else WIKI_CIRCUIT_DEFAULT_SECONDS
+    return min(max(seconds, 1), WIKI_CIRCUIT_MAX_SECONDS)
 
 
 def get_wiki_url(title: str):
     return WIKI_URL_FORMAT.format(title=title.replace(" ", "_"))
-
-
-def _is_wiki_rate_limited(e: RetryError) -> bool:
-    """True if a RetryError was caused by exhausting retries on 429s specifically.
-
-    Inspects the wrapped MaxRetryError's `reason` (e.g. "too many 429 error
-    responses") rather than str(e). str(e) also embeds the request URL - and with
-    it the user's (private) query - which both risks logging it and means a query
-    that happens to contain the substring "429" would be misread as a rate limit.
-    """
-    cause = e.args[0] if e.args else None
-    reason = getattr(cause, "reason", None)
-    return reason is not None and "429" in str(reason)
 
 
 HTML_TAG_REGEX = re.compile(r"<[^>]+>")
@@ -589,7 +588,9 @@ def wiki_score(rank: int) -> float:
     return WIKI_TOP_SCORE - rank
 
 
-def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[Document]:
+def get_wiki_results(
+    s: str, max_wiki_results: int = NUM_WIKI_RESULTS, *, wait_out_rate_limits: bool = False
+) -> list[Document]:
     # MAX_QUERY_CHARS was only ever applied in HeuristicAndWikiRanker, which is the eval
     # ranker - the production LTRRanker path sent the untruncated query straight out.
     query = s[:MAX_QUERY_CHARS]
@@ -606,27 +607,26 @@ def get_wiki_results(s: str, max_wiki_results: int = NUM_WIKI_RESULTS) -> list[D
             document.score = wiki_score(rank)
         return wiki_results
 
-    if _wiki_circuit_open():
+    if not wait_out_rate_limits and _wiki_circuit_open():
         return []
 
     escaped_query = urllib.parse.quote(query, safe="")
     headers = {"User-Agent": "Mwmbl/0.1.0 (https://mwmbl.org; daoud@mwmbl.org)"}
     try:
         with requests.Session() as session:
-            session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
+            if wait_out_rate_limits:
+                session.mount("https://en.wikipedia.org", HTTPAdapter(max_retries=WIKI_RETRY))
             response = session.get(
-                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT), headers=headers, timeout=5
+                WIKI_SEARCH_API_URL.format(query=escaped_query, limit=WIKI_FETCH_LIMIT),
+                headers=headers,
+                timeout=WIKI_TIMEOUT_SECONDS,
             )
+            if response.status_code == 429:
+                cooldown_seconds = _wiki_cooldown_seconds(response)
+                _trip_wiki_circuit(cooldown_seconds)
+                logger.warning("Wikipedia is rate-limiting us; pausing wiki lookups for %ds", cooldown_seconds)
+                return []
             wiki_response = response.json()
-    except RetryError as e:
-        if _is_wiki_rate_limited(e):
-            _trip_wiki_circuit()
-            logger.warning("Wikipedia is rate-limiting us; pausing wiki lookups for %ds", WIKI_CIRCUIT_COOLDOWN_SECONDS)
-        else:
-            # Don't log str(e)/exc_info here - RetryError embeds the request URL, which
-            # embeds the (private) user query, and logger.exception would log both.
-            logger.warning("Failed to fetch Wikipedia results: %s", type(e).__name__)
-        return []
     except Exception as e:
         logger.warning("Failed to fetch Wikipedia results: %s", type(e).__name__)
         return []
