@@ -4,6 +4,12 @@
       "predeploy": "rm -rf /app/static/* && cp -r /front-end-build/* /app/static/"
     }
   },
+  "cron": [
+    {
+      "command": "ionice -c2 -n7 /venv/bin/python /app/manage.py backup_index",
+      "schedule": "17 3 1 * *"
+    }
+  ],
   "healthchecks": {
     "web": [
       {
