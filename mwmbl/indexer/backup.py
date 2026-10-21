@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import os
+import time
 from datetime import datetime, timezone
 from logging import getLogger
 from pathlib import Path
@@ -31,21 +32,27 @@ import boto3
 import zstandard
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, IncompleteReadError
 
 from mwmbl.models import IndexBackup
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex, _set_page_lock
 
 logger = getLogger(__name__)
 
-PAGES_PER_CHUNK = 1024
+# Small, because writers to any page in a chunk wait while it is read: 256 KB is one quick
+# pread, even at the low I/O priority the cron runs at.
+PAGES_PER_CHUNK = 64
 # S3 allows at most 10,000 parts in a multipart upload. The part size is chosen from the
 # file size so a full index stays well inside that, with headroom for an index that grows.
 MAX_PARTS = 9000
 MIN_PART_SIZE = 64 * 1024 * 1024
 UPLOAD_CONCURRENCY = 4
 # Restore downloads in ranges, each its own request, so a dropped connection hours into a
-# 400 GB download costs one range's retries rather than the whole restore.
+# 400 GB download costs one range's retries rather than the whole restore. botocore retries
+# the request but not an error reading its body, so the retries here cover that.
 DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
+RANGE_ATTEMPTS = 5
+RANGE_RETRY_SECONDS = 2
 ZSTD_LEVEL = 3
 # How often a running backup records how far it has read, for the admin page.
 PROGRESS_INTERVAL_BYTES = 1024 * 1024 * 1024
@@ -173,6 +180,9 @@ def _upload(client, bucket, encryption_key, index_path, key, started, on_progres
     reader = LockedIndexReader(index_path, on_progress)
     part_size = max(MIN_PART_SIZE, math.ceil(reader.size / MAX_PARTS))
     transfer_config = TransferConfig(multipart_chunksize=part_size, max_concurrency=UPLOAD_CONCURRENCY)
+    # A source that cannot seek is buffered a part at a time, ten parts by default - 640 MB
+    # on the host serving search. One more than are in flight keeps the uploads busy.
+    transfer_config.max_in_memory_upload_chunks = UPLOAD_CONCURRENCY + 1
     logger.info(f"Backing up {reader.size} bytes of {index_path} to {key} in parts of {part_size} bytes")
     try:
         compressed = zstandard.ZstdCompressor(level=ZSTD_LEVEL).stream_reader(reader)
@@ -211,6 +221,19 @@ class _RangedObjectReader:
         if self._position >= self._size:
             return b""
         end = min(self._position + max(size, DOWNLOAD_RANGE_SIZE), self._size) - 1
+        for attempt in range(1, RANGE_ATTEMPTS + 1):
+            try:
+                data = self._read_range(end)
+                break
+            except BotoCoreError as e:
+                if attempt == RANGE_ATTEMPTS:
+                    raise
+                logger.warning(f"Reading bytes {self._position}-{end} of {self._key} failed ({e}); retrying")
+                time.sleep(RANGE_RETRY_SECONDS * 2 ** (attempt - 1))
+        self._position += len(data)
+        return data
+
+    def _read_range(self, end: int) -> bytes:
         response = self._client.get_object(
             Bucket=self._bucket,
             Key=self._key,
@@ -218,15 +241,18 @@ class _RangedObjectReader:
             **_encryption_args(self._encryption_key),
         )
         data = response["Body"].read()
-        self._position += len(data)
+        expected = end - self._position + 1
+        if len(data) != expected:
+            raise IncompleteReadError(actual_bytes=len(data), expected_bytes=expected)
         return data
 
 
 def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_path: Path):
     """Download a full backup to output_path, checking it against its manifest.
 
-    It is written beside output_path and renamed into place only once it checks out, so a
-    restore that fails leaves nothing that looks like an index.
+    It is written beside output_path and renamed into place only once it checks out. A
+    restore that fails removes what it wrote, which can be most of the free disk; one that
+    was killed leaves it, and the next restore to the same path writes over it.
     """
     if output_path.exists():
         raise FileExistsError(f"{output_path} already exists; restore to a new path")
@@ -236,18 +262,20 @@ def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_p
     size = 0
     source = _RangedObjectReader(client, bucket, key, encryption_key)
     decompressed = zstandard.ZstdDecompressor().stream_reader(source)
-    with open(partial_path, "xb") as output_file:
-        while chunk := decompressed.read(DOWNLOAD_RANGE_SIZE):
-            sha256.update(chunk)
-            size += len(chunk)
-            output_file.write(chunk)
-
-    if size != manifest["size"] or sha256.hexdigest() != manifest["sha256"]:
-        raise ValueError(
-            f"The restored index does not match its manifest: {size} bytes with SHA-256 "
-            f"{sha256.hexdigest()}, expected {manifest['size']} bytes with {manifest['sha256']}. "
-            f"It is left at {partial_path}."
-        )
+    try:
+        with open(partial_path, "wb") as output_file:
+            while chunk := decompressed.read(DOWNLOAD_RANGE_SIZE):
+                sha256.update(chunk)
+                size += len(chunk)
+                output_file.write(chunk)
+        if size != manifest["size"] or sha256.hexdigest() != manifest["sha256"]:
+            raise ValueError(
+                f"The restored index does not match its manifest: {size} bytes with SHA-256 "
+                f"{sha256.hexdigest()}, expected {manifest['size']} bytes with {manifest['sha256']}"
+            )
+    except Exception:
+        partial_path.unlink(missing_ok=True)
+        raise
     partial_path.rename(output_path)
     logger.info(f"Restored {key} to {output_path}")
 

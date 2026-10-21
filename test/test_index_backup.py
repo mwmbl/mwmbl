@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 
 import boto3
 import pytest
+from botocore.exceptions import ResponseStreamingError
 from moto import mock_aws
 
 from mwmbl.indexer import backup
@@ -62,6 +63,78 @@ def test_restore_gives_back_the_index_byte_for_byte(index_path, client):
         assert [document.url for document in restored.get_page(3)] == ["https://example.com/"]
 
 
+def test_restore_reads_across_many_ranges(index_path, client, monkeypatch):
+    # An odd size, so ranges end in the middle of zstd blocks.
+    monkeypatch.setattr(backup, "DOWNLOAD_RANGE_SIZE", 1_000_003)
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+
+    restored_path = index_path.with_name("restored.tinysearch")
+    restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
+
+    assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+class _FailingBody:
+    def read(self):
+        raise ResponseStreamingError(error="connection reset")
+
+
+def _fail_ranges(client, monkeypatch, failures: int):
+    """Make the body of the first `failures` ranged GETs fail part-way through reading."""
+    get_object = client.get_object
+    remaining = [failures]
+
+    def flaky_get_object(**kwargs):
+        response = get_object(**kwargs)
+        if "Range" in kwargs and remaining[0] > 0:
+            remaining[0] -= 1
+            response["Body"] = _FailingBody()
+        return response
+
+    monkeypatch.setattr(client, "get_object", flaky_get_object)
+    monkeypatch.setattr(backup, "RANGE_RETRY_SECONDS", 0)
+
+
+def test_restore_retries_a_range_whose_body_fails(index_path, client, monkeypatch):
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+    _fail_ranges(client, monkeypatch, failures=backup.RANGE_ATTEMPTS - 1)
+
+    restored_path = index_path.with_name("restored.tinysearch")
+    restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
+
+    assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+def test_a_failed_restore_removes_what_it_wrote(index_path, client, monkeypatch):
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+    _fail_ranges(client, monkeypatch, failures=backup.RANGE_ATTEMPTS)
+
+    restored_path = index_path.with_name("restored.tinysearch")
+    with pytest.raises(ResponseStreamingError):
+        restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
+    assert not restored_path.exists()
+    assert not restored_path.with_name("restored.tinysearch.partial").exists()
+
+
+def test_restore_writes_over_what_a_killed_restore_left(index_path, client):
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+    restored_path = index_path.with_name("restored.tinysearch")
+    restored_path.with_name("restored.tinysearch.partial").write_bytes(b"left by a killed restore")
+
+    restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
+
+    assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+def test_reading_an_index_shorter_than_its_metadata_says_fails(index_path):
+    os.truncate(index_path, index_path.stat().st_size - PAGE_SIZE)
+    reader = LockedIndexReader(index_path)
+
+    with pytest.raises(EOFError):
+        reader.read()
+    reader.close()
+
+
 def test_manifest_describes_the_backup(index_path, client):
     key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
 
@@ -82,12 +155,14 @@ def test_every_request_for_the_backup_carries_the_encryption_key(index_path, cli
     key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
     restore_index(client, BUCKET, ENCRYPTION_KEY, key, index_path.with_name("restored.tinysearch"))
 
-    data_operations = {"CreateMultipartUpload", "UploadPart", "HeadObject"}
+    data_operations = {"CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", "HeadObject"}
     data_calls = [call for call in calls if call[0] in data_operations]
     assert {name for name, _ in data_calls} == data_operations
     assert all(encryption_key == ENCRYPTION_KEY for _, encryption_key in data_calls)
-    ranged_gets = [call for call in calls if call[0] == "GetObject" and call[1] is not None]
-    assert ranged_gets
+    # Every GET but the one for the unencrypted manifest is a range of the backup.
+    gets = [encryption_key for name, encryption_key in calls if name == "GetObject"]
+    assert gets.count(None) == 1
+    assert gets.count(ENCRYPTION_KEY) == len(gets) - 1 > 0
 
 
 def test_a_restore_that_does_not_match_its_manifest_is_not_put_in_place(index_path, client):
@@ -100,6 +175,7 @@ def test_a_restore_that_does_not_match_its_manifest_is_not_put_in_place(index_pa
     with pytest.raises(ValueError, match="does not match its manifest"):
         restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
     assert not restored_path.exists()
+    assert not restored_path.with_name("restored.tinysearch.partial").exists()
 
 
 def test_restore_will_not_overwrite_an_existing_file(index_path, client):
