@@ -15,6 +15,7 @@ import numpy as np
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django_redis.exceptions import ConnectionInterrupted
 from requests.adapters import HTTPAdapter, Retry
 
 from mwmbl.format import get_query_regex
@@ -525,7 +526,7 @@ WIKI_FETCH_LIMIT = NUM_WIKI_RESULTS
 # on (max_wiki_results=5 there). Changing it changes a trained-on feature: retrain.
 WIKI_TOP_SCORE = 6.0
 
-# Live search does not retry Wikipedia. It used to retry 429s, honouring Retry-After, on
+# Live search does not retry Wikipedia, for 429s or 5xx alike. It used to retry 429s, honouring Retry-After, on
 # the theory that live search never bursts - but it does, and in October 2026 Wikipedia
 # answered about three calls in four with a 429 and a Retry-After of tens of seconds. Each
 # such search slept through every retry, over a minute in all, and since sync views share
@@ -544,8 +545,11 @@ WIKI_RETRY = Retry(
 
 WIKI_TIMEOUT_SECONDS = 5
 
-# A 429 pauses every live Wikipedia call for as long as Wikipedia asks. Held in Redis rather
-# than per process, so that one worker's 429 spares the others from collecting their own.
+# A 429 pauses every live Wikipedia call for as long as Wikipedia asks. Held in the shared
+# cache (Redis in production) rather than per process, so that one worker's 429 spares the
+# others from collecting their own. The breaker only saves Wikipedia calls, so a cache that
+# is down must not cost a search its results: it reads as closed, as the old per-process
+# breaker never depended on Redis.
 WIKI_CIRCUIT_KEY = "wiki-circuit-open"
 WIKI_CIRCUIT_DEFAULT_SECONDS = 60
 # A Retry-After this long is more likely a mistake than a request; don't let one switch
@@ -554,11 +558,18 @@ WIKI_CIRCUIT_MAX_SECONDS = 600
 
 
 def _wiki_circuit_open() -> bool:
-    return cache.get(WIKI_CIRCUIT_KEY) is not None
+    try:
+        return cache.get(WIKI_CIRCUIT_KEY) is not None
+    except ConnectionInterrupted:
+        logger.warning("Could not read the Wikipedia circuit breaker", exc_info=True)
+        return False
 
 
 def _trip_wiki_circuit(seconds: int):
-    cache.set(WIKI_CIRCUIT_KEY, 1, timeout=seconds)
+    try:
+        cache.set(WIKI_CIRCUIT_KEY, 1, timeout=seconds)
+    except ConnectionInterrupted:
+        logger.warning("Could not trip the Wikipedia circuit breaker", exc_info=True)
 
 
 def _wiki_cooldown_seconds(response: requests.Response) -> int:

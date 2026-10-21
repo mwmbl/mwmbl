@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
+from django_redis.exceptions import ConnectionInterrupted
 
 from mwmbl.tinysearchengine import rank
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource
@@ -193,8 +194,30 @@ def test_waiting_out_rate_limits_retries_and_ignores_the_circuit():
 
     _get_wiki_results_with_session(session, wait_out_rate_limits=True)
 
-    session.mount.assert_called_once()
+    adapter = session.mount.call_args.args[1]
+    assert adapter.max_retries is rank.WIKI_RETRY
     assert session.get.call_count == 1
+
+
+def test_a_cache_outage_does_not_cost_a_search_its_wiki_results():
+    """The breaker only saves Wikipedia calls; the old per-process one never needed Redis."""
+    session = MagicMock()
+    session.get.return_value = _wiki_response(200)
+    session.get.return_value.json.return_value = {"query": {"search": [{"title": "Python", "snippet": "A language"}]}}
+    outage = ConnectionInterrupted(connection=None)
+
+    with patch.object(rank.cache, "get", side_effect=outage), patch.object(rank.cache, "set", side_effect=outage):
+        results = _get_wiki_results_with_session(session)
+
+    assert [document.title for document in results] == ["Python"]
+
+
+def test_a_cache_outage_while_tripping_the_breaker_is_survived():
+    session = MagicMock()
+    session.get.return_value = _wiki_response(429, {"Retry-After": "11"})
+
+    with patch.object(rank.cache, "set", side_effect=ConnectionInterrupted(connection=None)):
+        assert _get_wiki_results_with_session(session) == []
 
 
 # ---------------------------------------------------------------------------
