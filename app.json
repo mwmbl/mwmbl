@@ -6,7 +6,7 @@
   },
   "cron": [
     {
-      "command": "ionice -c3 /venv/bin/python /app/manage.py backup_index",
+      "command": "ionice -c2 -n7 /venv/bin/python /app/manage.py backup_index",
       "schedule": "17 3 1 * *"
     }
   ],
