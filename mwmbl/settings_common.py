@@ -218,9 +218,10 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN is not None:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for tracing.
-        traces_sample_rate=0.1,
+        # At 0.1, traces used up the span quota in October 2026, and the SDK then dropped
+        # what was left to backpressure, leaving no request timings at all. Most of it was
+        # "/"; a hundredth of everything still traces thousands of requests a day.
+        traces_sample_rate=0.01,
         # Set profiles_sample_rate to 1.0 to profile 100%
         # of sampled transactions.
         # We recommend adjusting this value in production.
