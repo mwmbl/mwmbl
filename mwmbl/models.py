@@ -620,3 +620,27 @@ class CrawlerAgreement(models.Model):
         indexes = [
             models.Index(fields=["created_at"]),
         ]
+
+
+class IndexBackup(models.Model):
+    """One run of backup_index - see mwmbl.indexer.backup.
+
+    Written by the backup itself, so the admin page can show it without asking B2. A run
+    that the container killed stays RUNNING for good; updated_at stopping is how to tell.
+    """
+
+    class Status(models.TextChoices):
+        RUNNING = "RUNNING"
+        SUCCEEDED = "SUCCEEDED"
+        FAILED = "FAILED"
+
+    index_name = models.TextField()
+    key = models.TextField()
+    status = models.TextField(choices=Status.choices)
+    size = models.BigIntegerField()
+    bytes_read = models.BigIntegerField(default=0)
+    sha256 = models.TextField(null=True)
+    error = models.TextField(null=True)
+    started = models.DateTimeField()
+    finished = models.DateTimeField(null=True)
+    updated_at = models.DateTimeField(auto_now=True)

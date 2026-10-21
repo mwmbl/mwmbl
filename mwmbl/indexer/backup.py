@@ -26,6 +26,7 @@ import time
 from datetime import datetime, timezone
 from logging import getLogger
 from pathlib import Path
+from typing import Callable
 
 import boto3
 import zstandard
@@ -33,6 +34,7 @@ from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, IncompleteReadError
 
+from mwmbl.models import IndexBackup
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex, _set_page_lock
 
 logger = getLogger(__name__)
@@ -52,6 +54,8 @@ DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
 RANGE_ATTEMPTS = 5
 RANGE_RETRY_SECONDS = 2
 ZSTD_LEVEL = 3
+# How often a running backup records how far it has read, for the admin page.
+PROGRESS_INTERVAL_BYTES = 1024 * 1024 * 1024
 SSE_ALGORITHM = "AES256"
 
 
@@ -82,12 +86,13 @@ class LockedIndexReader:
     It also hashes what it reads, so the manifest describes exactly the bytes uploaded.
     """
 
-    def __init__(self, index_path: Path):
+    def __init__(self, index_path: Path, on_progress: Callable[[int], None]):
         index = TinyIndex(item_factory=Document, index_path=index_path)
         self.page_size = index.page_size
         self.num_pages = index.num_pages
         self.size = METADATA_SIZE + self.num_pages * self.page_size
         self.sha256 = hashlib.sha256()
+        self._on_progress = on_progress
         self._file = open(index_path, "rb")
         self._position = 0
         self._chunk = b""
@@ -127,8 +132,11 @@ class LockedIndexReader:
                 _set_page_lock(fileno, fcntl.F_UNLCK, self._position, length)
         if len(chunk) == 0:
             raise EOFError(f"The index ended at {self._position} bytes, but its metadata says {self.size}")
+        previous_position = self._position
         self._position += len(chunk)
         self.sha256.update(chunk)
+        if self._position // PROGRESS_INTERVAL_BYTES > previous_position // PROGRESS_INTERVAL_BYTES:
+            self._on_progress(self._position)
         return chunk
 
 
@@ -136,7 +144,40 @@ def backup_index(client, bucket: str, encryption_key: bytes, index_path: Path) -
     """Upload a full backup of the index, returning the key of the backup object."""
     started = datetime.now(timezone.utc)
     key = f"index/{index_path.name}/full/{started:%Y-%m-%dT%H%M%SZ}.zst"
-    reader = LockedIndexReader(index_path)
+    backup = IndexBackup.objects.create(
+        index_name=index_path.name,
+        key=key,
+        status=IndexBackup.Status.RUNNING,
+        size=_index_size(index_path),
+        started=started,
+    )
+
+    def record_progress(bytes_read: int):
+        # update() rather than save(): this runs on s3transfer's thread, and the row's other
+        # fields belong to this one.
+        IndexBackup.objects.filter(pk=backup.pk).update(bytes_read=bytes_read, updated_at=datetime.now(timezone.utc))
+
+    try:
+        sha256 = _upload(client, bucket, encryption_key, index_path, key, started, record_progress)
+    except Exception as e:
+        backup.status = IndexBackup.Status.FAILED
+        backup.error = f"{type(e).__name__}: {e}"
+        backup.finished = datetime.now(timezone.utc)
+        backup.save(update_fields=["status", "error", "finished", "updated_at"])
+        raise
+
+    backup.status = IndexBackup.Status.SUCCEEDED
+    backup.bytes_read = backup.size
+    backup.sha256 = sha256
+    backup.finished = datetime.now(timezone.utc)
+    backup.save(update_fields=["status", "bytes_read", "sha256", "finished", "updated_at"])
+    logger.info(f"Backed up {index_path} to {key}")
+    return key
+
+
+def _upload(client, bucket, encryption_key, index_path, key, started, on_progress) -> str:
+    """Upload the index and then its manifest, returning the SHA-256 of what was uploaded."""
+    reader = LockedIndexReader(index_path, on_progress)
     part_size = max(MIN_PART_SIZE, math.ceil(reader.size / MAX_PARTS))
     transfer_config = TransferConfig(multipart_chunksize=part_size, max_concurrency=UPLOAD_CONCURRENCY)
     # A source that cannot seek is buffered a part at a time, ten parts by default - 640 MB
@@ -161,8 +202,7 @@ def backup_index(client, bucket: str, encryption_key: bytes, index_path: Path) -
         "finished": datetime.now(timezone.utc).isoformat(),
     }
     client.put_object(Bucket=bucket, Key=_manifest_key(key), Body=json.dumps(manifest).encode("utf8"))
-    logger.info(f"Backed up {index_path} to {key}")
-    return key
+    return manifest["sha256"]
 
 
 class _RangedObjectReader:
@@ -238,6 +278,11 @@ def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_p
         raise
     partial_path.rename(output_path)
     logger.info(f"Restored {key} to {output_path}")
+
+
+def _index_size(index_path: Path) -> int:
+    index = TinyIndex(item_factory=Document, index_path=index_path)
+    return METADATA_SIZE + index.num_pages * index.page_size
 
 
 def _manifest_key(key: str) -> str:

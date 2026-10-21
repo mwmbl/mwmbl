@@ -1,5 +1,5 @@
 """Admin-only status pages: the blacklist filtering state in Redis, the weekly index count,
-the search traffic counters, and paying users.
+the search traffic counters, paying users, and index backups.
 
 Blacklist status: retrieval filtering, the snapshot refresh and the index purge are three
 processes talking to each other through Redis keys, and none of that state is reachable
@@ -22,7 +22,7 @@ what a bot looks like belongs to whoever is reading, and can be a different rule
 
 import os
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
 from background_task.models import CompletedTask, Task
@@ -47,7 +47,7 @@ from mwmbl.indexer.blacklist_snapshot import (
 )
 from mwmbl.indexer.purge_queue import MAX_QUEUE_SIZE, PURGE_QUEUE_KEY, peek_purge_queue
 from mwmbl.membership import TIERS, VOLUNTEER_TIERS, combined_search_monthly_limit
-from mwmbl.models import ApiKey, Membership, MwmblUser
+from mwmbl.models import ApiKey, IndexBackup, Membership, MwmblUser
 from mwmbl.traffic import (
     HEADER_LABELS,
     STATUS_LABELS,
@@ -619,3 +619,39 @@ def worst_agreements_view(request):
     ]
     context["empty"] = not any(role["buckets"] for role in context["roles"])
     return render(request, "admin/worst_agreements.html", context)
+
+
+# The backup runs monthly, so a month and a few days without a success means one was missed.
+BACKUP_OVERDUE_DAYS = 35
+# A running backup records its progress every gigabyte, which takes seconds; an hour without
+# one means the run is stuck, or was killed without getting to record that it failed.
+BACKUP_STALLED_SECONDS = 3600
+RECENT_BACKUPS = 20
+
+
+@staff_member_required
+def index_backups_view(request):
+    now = datetime.now(timezone.utc)
+    last_success = (
+        IndexBackup.objects.filter(status=IndexBackup.Status.SUCCEEDED, index_name=settings.INDEX_NAME)
+        .order_by("-started")
+        .first()
+    )
+    backups = [
+        {
+            "backup": backup,
+            "percent_done": 100 * backup.bytes_read / backup.size,
+            "stalled": backup.status == IndexBackup.Status.RUNNING
+            and (now - backup.updated_at).total_seconds() > BACKUP_STALLED_SECONDS,
+        }
+        for backup in IndexBackup.objects.order_by("-started")[:RECENT_BACKUPS]
+    ]
+    context = {
+        "title": "Index backups",
+        "index_name": settings.INDEX_NAME,
+        "last_success": last_success,
+        "overdue": last_success is None or now - last_success.finished > timedelta(days=BACKUP_OVERDUE_DAYS),
+        "overdue_days": BACKUP_OVERDUE_DAYS,
+        "backups": backups,
+    }
+    return render(request, "admin/index_backups.html", context)

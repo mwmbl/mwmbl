@@ -13,7 +13,11 @@ from moto import mock_aws
 
 from mwmbl.indexer import backup
 from mwmbl.indexer.backup import LockedIndexReader, backup_index, restore_index
+from mwmbl.models import IndexBackup
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex
+
+# Each backup records its run in the database.
+pytestmark = pytest.mark.django_db
 
 NUM_PAGES = 4000
 PAGE_SIZE = 4096
@@ -124,7 +128,7 @@ def test_restore_writes_over_what_a_killed_restore_left(index_path, client):
 
 def test_reading_an_index_shorter_than_its_metadata_says_fails(index_path):
     os.truncate(index_path, index_path.stat().st_size - PAGE_SIZE)
-    reader = LockedIndexReader(index_path)
+    reader = LockedIndexReader(index_path, on_progress=lambda bytes_read: None)
 
     with pytest.raises(EOFError):
         reader.read()
@@ -183,7 +187,7 @@ def test_restore_will_not_overwrite_an_existing_file(index_path, client):
 
 def test_reading_waits_for_a_writer_holding_a_page(index_path):
     """A page caught half-written would never decode again, so the reader must wait for it."""
-    reader = LockedIndexReader(index_path)
+    reader = LockedIndexReader(index_path, on_progress=lambda bytes_read: None)
     finished = threading.Event()
 
     def read_everything():
@@ -199,3 +203,39 @@ def test_reading_waits_for_a_writer_holding_a_page(index_path):
     reader.close()
 
     assert finished.is_set()
+
+
+def test_a_backup_records_its_run(index_path, client):
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+
+    run = IndexBackup.objects.get()
+    manifest = json.loads(client.get_object(Bucket=BUCKET, Key=key + ".json")["Body"].read())
+    assert run.status == IndexBackup.Status.SUCCEEDED
+    assert run.key == key
+    assert run.bytes_read == run.size == index_path.stat().st_size
+    assert run.sha256 == manifest["sha256"]
+    assert run.finished is not None
+
+
+def test_a_failed_backup_records_its_error(index_path, client):
+    with pytest.raises(Exception):
+        backup_index(client, "no-such-bucket", ENCRYPTION_KEY, index_path)
+
+    run = IndexBackup.objects.get()
+    assert run.status == IndexBackup.Status.FAILED
+    assert "NoSuchBucket" in run.error
+    assert run.finished is not None
+
+
+def test_the_reader_reports_its_progress(index_path, monkeypatch):
+    # Many chunks to an interval, so this checks it is reported per interval and not per chunk.
+    interval = 8 * 1024 * 1024
+    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_BYTES", interval)
+    progress = []
+    reader = LockedIndexReader(index_path, on_progress=progress.append)
+    reader.read()
+    reader.close()
+
+    assert len(progress) == reader.size // interval
+    assert progress == sorted(progress)
+    assert all(bytes_read <= reader.size for bytes_read in progress)

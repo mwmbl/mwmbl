@@ -1,0 +1,102 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block title %}Index backups | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Index backups
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .index-backups table { width: 100%; margin-bottom: 10px; }
+    .index-backups td.key { width: 30%; font-weight: bold; }
+    .index-backups .ok { color: #417690; font-weight: bold; }
+    .index-backups .bad { color: #ba2121; font-weight: bold; }
+    .index-backups .note { color: #666; font-size: 0.9em; }
+  </style>
+
+  <div id="content-main" class="index-backups">
+
+    <div class="module">
+      <h2>{{ index_name }}</h2>
+      <table>
+        <tr>
+          <td class="key">Last successful backup</td>
+          <td>
+            {% if last_success %}
+              <span class="{% if overdue %}bad{% else %}ok{% endif %}">{{ last_success.finished|naturaltime }}</span>
+              ({{ last_success.finished }})
+            {% else %}
+              <span class="bad">never</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% if last_success %}
+          <tr><td class="key">Key</td><td><code>{{ last_success.key }}</code></td></tr>
+          <tr><td class="key">Size</td><td>{{ last_success.size|filesizeformat }}</td></tr>
+          <tr><td class="key">Took</td><td>{{ last_success.started|timesince:last_success.finished }}</td></tr>
+        {% endif %}
+      </table>
+      {% if overdue %}
+        <p class="bad">No backup has succeeded in the last {{ overdue_days }} days.</p>
+      {% endif %}
+      <p class="note">
+        A backup runs on the 1st of each month from the cron entry in app.json. See
+        docs/index-backup.md for setup and restore.
+      </p>
+    </div>
+
+    <div class="module">
+      <h2>Recent runs</h2>
+      {% if backups %}
+        <table>
+          <thead>
+            <tr><th>Started (UTC)</th><th>Index</th><th>Status</th><th>Progress</th><th>Last update</th><th>Key / error</th></tr>
+          </thead>
+          <tbody>
+            {% for row in backups %}
+              <tr>
+                <td>{{ row.backup.started }}</td>
+                <td>{{ row.backup.index_name }}</td>
+                <td>
+                  {% if row.backup.status == "SUCCEEDED" %}
+                    <span class="ok">succeeded</span>
+                  {% elif row.backup.status == "FAILED" %}
+                    <span class="bad">failed</span>
+                  {% elif row.stalled %}
+                    <span class="bad">stalled</span>
+                  {% else %}
+                    running
+                  {% endif %}
+                </td>
+                <td>
+                  {{ row.backup.bytes_read|filesizeformat }} of {{ row.backup.size|filesizeformat }}
+                  ({{ row.percent_done|floatformat:1 }}%)
+                </td>
+                <td>{{ row.backup.updated_at|naturaltime }}</td>
+                <td>
+                  {% if row.backup.error %}
+                    <span class="bad">{{ row.backup.error|truncatechars:300 }}</span>
+                  {% else %}
+                    <code>{{ row.backup.key }}</code>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="note">
+          A running backup records its progress every gigabyte. One that has not for an hour
+          is shown as stalled: stuck, or killed before it could record that it failed.
+        </p>
+      {% else %}
+        <p class="note">No backup has run yet.</p>
+      {% endif %}
+    </div>
+
+  </div>
+{% endblock %}
