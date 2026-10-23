@@ -18,6 +18,7 @@ EXTERNAL_CACHE_NUM_PAGES = 10
 # drives the Django test client would hit them. Tests that exercise them turn this on with
 # override_settings and a fakeredis client of their own.
 SEARCH_TRAFFIC_COUNTING = False
+PROVIDER_USAGE_COUNTING = False
 
 # Use fakeredis for cache so tests don't need a real Redis server
 CACHES = {

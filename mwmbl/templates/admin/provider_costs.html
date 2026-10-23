@@ -1,0 +1,125 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block title %}Provider costs | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Provider costs
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .provider-costs table { width: 100%; margin-bottom: 10px; }
+    .provider-costs .note { color: #666; font-size: 0.9em; }
+    .provider-costs .bad { color: #ba2121; font-weight: bold; }
+    .provider-costs .num { text-align: right; }
+    .provider-costs .controls { margin-bottom: 12px; }
+    .provider-costs .chart { display: flex; align-items: flex-end; gap: 3px; border-bottom: 1px solid #999; padding: 0 4px; }
+    .provider-costs .bar { flex: 1; display: flex; flex-direction: column-reverse; min-width: 4px; }
+    .provider-costs .legend span { display: inline-block; margin-right: 16px; }
+    .provider-costs .swatch { display: inline-block; width: 12px; height: 12px; margin-right: 4px; vertical-align: middle; }
+    .provider-costs .staan { background: #417690; }
+  </style>
+
+  <div id="content-main" class="provider-costs">
+
+    {% if not counting_enabled %}
+      <p class="bad">Counting is off (PROVIDER_USAGE_COUNTING), so nothing below is being updated.</p>
+    {% endif %}
+
+    {% if redis_error %}
+      <div class="module">
+        <h2>Redis unreachable</h2>
+        <p class="bad">{{ redis_error }}</p>
+        <p class="note">The call counts are kept in Redis.</p>
+      </div>
+    {% else %}
+
+      <p class="controls">
+        Window:
+        {% for choice in window_choices %}
+          {% if choice == days|length %}<strong>{{ choice }} days</strong>{% else %}<a href="?days={{ choice }}&amp;metric={{ metric }}">{{ choice }} days</a>{% endif %}{% if not forloop.last %} &middot; {% endif %}
+        {% endfor %}
+        &nbsp;|&nbsp; Chart:
+        {% if metric == "cost" %}<strong>cost</strong> &middot; <a href="?days={{ days|length }}&amp;metric=calls">calls</a>
+        {% else %}<a href="?days={{ days|length }}&amp;metric=cost">cost</a> &middot; <strong>calls</strong>{% endif %}
+      </p>
+
+      <div class="module">
+        <h2>
+          {% if metric == "cost" %}Cost per day{% else %}Calls per day{% endif %}
+          &mdash; {{ days|length }} days, busiest day
+          {% if metric == "cost" %}&pound;{{ chart.busiest|floatformat:2 }}{% else %}{{ chart.busiest|intcomma }} calls{% endif %}
+        </h2>
+        <div class="legend">
+          {% for provider, label in provider_labels.items %}
+            <span><i class="swatch {{ provider }}"></i>{{ label }}</span>
+          {% endfor %}
+        </div>
+        <div class="chart" style="height: {{ chart_height_px }}px">
+          {% for bar in chart.bars %}
+            <div class="bar" style="height: {{ bar.height_px }}px"
+                 title="{{ bar.day|date:'Y-m-d' }}{% for segment in bar.segments %} | {{ segment.label }}: {{ segment.calls }} calls, {{ segment.failures }} failed{% if segment.cost_gbp is not None %}, &pound;{{ segment.cost_gbp|floatformat:2 }}{% endif %}{% endfor %}">
+              {% for segment in bar.segments %}
+                <div class="{{ segment.provider }}" style="height: {{ segment.height_px }}px"></div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+        <p class="note">
+          {{ days.0|date:"Y-m-d" }} to {{ days|last|date:"Y-m-d" }} (UTC). Hover a bar for its day. Cost is
+          calls times the price in mwmbl/pricing.py, converted to GBP at the rates set there, so a
+          change to either reprices the whole history.
+          A call is counted when it is sent, and may be billed even if it failed.
+        </p>
+      </div>
+
+      <div class="module">
+        <table>
+          <caption>Totals over {{ days|length }} days</caption>
+          <thead>
+            <tr><th>Provider</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Price per 1,000</th><th class="num">Cost</th></tr>
+          </thead>
+          <tbody>
+            {% for total in totals %}
+              <tr>
+                <td><i class="swatch {{ total.provider }}"></i>{{ total.label }}</td>
+                <td class="num">{{ total.calls|intcomma }}</td>
+                <td class="num">{{ total.failures|intcomma }}</td>
+                <td class="num">&pound;{{ total.price_per_1000_gbp|floatformat:2 }}</td>
+                <td class="num">&pound;{{ total.cost_gbp|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+            <tr><td><strong>Total</strong></td><td></td><td></td><td></td><td class="num"><strong>&pound;{{ total_cost_gbp|floatformat:2 }}</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="module">
+        <table>
+          <caption>By day</caption>
+          <thead>
+            <tr>
+              <th>Day</th>
+              {% for provider, label in provider_labels.items %}<th class="num">{{ label }} calls</th><th class="num">failed</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in by_day %}
+              <tr>
+                <td>{{ row.day|date:"Y-m-d" }}</td>
+                {% for segment in row.segments %}
+                  <td class="num">{{ segment.calls|intcomma }}</td><td class="num">{{ segment.failures|intcomma }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    {% endif %}
+  </div>
+{% endblock %}

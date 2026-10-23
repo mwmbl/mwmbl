@@ -18,6 +18,7 @@ from logging import getLogger
 import requests
 from django.conf import settings
 
+from mwmbl import provider_usage
 from mwmbl.indexer.external_cache import get_cached_external_results, store_external_results
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource
 from mwmbl.tinysearchengine.rank import MAX_QUERY_CHARS
@@ -96,6 +97,8 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
         logger.warning("STAAN_SEARCH_API_KEY is not configured")
         return []
 
+    # Counted before the request: a call that times out on our side may still be billed.
+    provider_usage.record_provider_call(provider_usage.PROVIDER_STAAN)
     try:
         response = session.get(
             settings.STAAN_SEARCH_URL,
@@ -106,6 +109,7 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
         response.raise_for_status()
         documents = _documents(response.json(), query)
     except Exception as e:
+        provider_usage.record_provider_failure(provider_usage.PROVIDER_STAAN)
         # Never log the exception or the response body: both embed the request URL, and the
         # request URL embeds the user's (private) query. rank.py makes the same trade for
         # Wikipedia - the type is enough to tell a timeout from a 401.

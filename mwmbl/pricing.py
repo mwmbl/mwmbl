@@ -12,6 +12,14 @@ PRICE_PER_1000_QUERIES_CENTS = 500  # $5.00 per 1,000 queries
 # now, but metered separately in Polar so the two can diverge.
 COMBINED_SEARCH_PRICE_PER_1000_QUERIES_CENTS = 500
 
+# What we pay upstream, as opposed to what we charge above. Each provider bills in its own
+# currency; the provider costs page reports in GBP at these fixed rates, so update them when
+# the exchange rate has moved enough to matter.
+GBP_PER_EUR = 0.86
+# Staan's "Web Search" tier, which is what /v2/search/web is. Its first 1,000 requests are free;
+# that allowance is not modelled, so the page can overstate the cost by up to EUR 2.
+STAAN_WEB_SEARCH_PRICE_PER_1000_QUERIES_EUR = 2.00
+
 # Preset spend-limit options surfaced in the UI (mirrors Brave's Free/$10/$25/$100 presets).
 SPEND_LIMIT_PRESETS_CENTS = [0, 1_000, 2_500, 10_000]
 
