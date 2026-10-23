@@ -2,11 +2,13 @@
 Tests for the public stats cache and the Seed Search totals on the stats endpoint.
 """
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import fakeredis
 import pytest
 
+from mwmbl.count_urls import INDEX_DOMAIN_COUNT_KEY, INDEX_RESULT_COUNT_KEY, INDEX_URL_COUNT_KEY
 from mwmbl.crawler.stats import (
     ALL_TIME_LEADERBOARD_CACHE_SECONDS,
     LEADERBOARD_CACHE_KEY,
@@ -95,3 +97,22 @@ def test_an_unknown_leaderboard_period_fails():
 
     with pytest.raises(ValueError):
         stats_manager.get_cached_leaderboard("last-week")
+
+
+@pytest.mark.django_db
+def test_index_history_is_the_published_measurements_oldest_first():
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    today = utc_today()
+    for days_ago, urls in ((21, 100), (14, 110), (7, 125)):
+        day = today - timedelta(days=days_ago)
+        redis.set(INDEX_URL_COUNT_KEY.format(date=day), urls)
+        redis.set(INDEX_DOMAIN_COUNT_KEY.format(date=day), urls // 10)
+        redis.set(INDEX_RESULT_COUNT_KEY.format(date=day), urls * 30)
+
+    history = StatsManager(redis).get_index_history()
+
+    assert [(m.date, m.urls, m.domains, m.results) for m in history] == [
+        (str(today - timedelta(days=21)), 100, 10, 3000),
+        (str(today - timedelta(days=14)), 110, 11, 3300),
+        (str(today - timedelta(days=7)), 125, 12, 3750),
+    ]

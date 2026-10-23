@@ -45,9 +45,10 @@ INDEX_SCAN_EXPIRE_SECONDS = 60 * 60 * 24 * 2
 # the scan state mid-scan means the next run starts again rather than waiting a week.
 INDEX_SCAN_LAST_FINISHED_KEY = "index-count-scan-last-finished"
 
-# Published counts are kept long enough that the 30 day window in get_counts always has an
-# earlier count to carry forward into its first days.
-LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 60
+# Published counts are kept for a year: the stats page plots them as the index's growth, and they
+# are only one set of small keys a week. The 30 day window in get_counts also needs an earlier
+# count to carry forward into its first days.
+LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 365
 
 # The position of the URL in a stored document's tuple - see Document.as_tuple.
 URL_INDEX = 1

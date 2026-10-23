@@ -8,7 +8,7 @@ from django.db.models.functions import TruncWeek
 from pydantic import BaseModel
 from redis import Redis
 
-from mwmbl.count_urls import get_counts, get_domain_result_count
+from mwmbl.count_urls import get_counts, get_domain_result_count, get_published_counts
 from mwmbl.crawler.batch import Results
 from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, SeedDomain, UserStats
 from mwmbl.utils import utc_today
@@ -36,11 +36,21 @@ STATS_CACHE_SECONDS = 60 * 60
 ALL_TIME_LEADERBOARD_CACHE_SECONDS = 60 * 60 * 24
 USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
 REGISTRATION_WEEKS = 52
+INDEX_HISTORY_DAYS = 365
 
 
 class DomainStats(BaseModel):
     domain_name: str
     num_index_results: int
+
+
+class IndexMeasurement(BaseModel):
+    """The size of the index as measured by one finished scan, which is about weekly."""
+
+    date: str
+    urls: int
+    domains: int
+    results: int
 
 
 class MwmblStats(BaseModel):
@@ -57,6 +67,7 @@ class MwmblStats(BaseModel):
     seed_searches_total: int
     seed_pages_indexed_total: int
     seed_sites_discovered_total: int
+    index_history: list[IndexMeasurement]
 
 
 # New stats we want per domain:
@@ -141,8 +152,22 @@ class StatsManager:
             dataset_results_daily=dataset_results_daily,
             users_registered_weekly=self.get_users_registered_weekly(),
             **self.get_seed_search_totals(),
+            index_history=self.get_index_history(),
             **index_stats,
         )
+
+    def get_index_history(self) -> list[IndexMeasurement]:
+        """Each published index measurement of the last year, oldest first."""
+        published = get_published_counts(self.redis, INDEX_HISTORY_DAYS)
+        return [
+            IndexMeasurement(
+                date=str(measurement["date"]),
+                urls=measurement["urls"],
+                domains=measurement["domains"],
+                results=measurement["results"],
+            )
+            for measurement in reversed(published)
+        ]
 
     def get_seed_search_totals(self) -> dict[str, int]:
         """Seed Search activity across all users, all time: the sums of what each user's own

@@ -20,7 +20,6 @@ JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
-
 from django.contrib.auth import get_user_model
 from ninja import Field
 from ninja_extra import NinjaExtraAPI, api_controller, http_get, http_post
