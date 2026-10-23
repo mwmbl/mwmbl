@@ -570,15 +570,20 @@ def _provider_totals(days: list[date], usage: dict) -> list[dict]:
     for provider, label in provider_usage.PROVIDER_LABELS.items():
         calls = sum(usage[day][provider][provider_usage.CALLS] for day in days)
         failures = sum(usage[day][provider][provider_usage.FAILURES] for day in days)
-        cost = provider_usage.cost_gbp(provider, calls)
+        cache_hits = sum(usage[day][provider][provider_usage.CACHE_HITS] for day in days)
+        lookups = calls + cache_hits
         totals.append(
             {
                 "provider": provider,
                 "label": label,
                 "calls": calls,
                 "failures": failures,
+                "cache_hits": cache_hits,
+                "hit_rate_percent": 100 * cache_hits / lookups if lookups else None,
                 "price_per_1000_gbp": provider_usage.PRICE_PER_1000_QUERIES_GBP[provider],
-                "cost_gbp": cost,
+                "cost_gbp": provider_usage.cost_gbp(provider, calls),
+                # What the cache hits would have cost had each been a call.
+                "saved_gbp": provider_usage.cost_gbp(provider, cache_hits),
             }
         )
     return totals
@@ -609,6 +614,12 @@ def provider_costs_view(request):
         context["chart"] = _provider_cost_chart(days, usage, metric)
         context["totals"] = totals
         context["total_cost_gbp"] = sum(total["cost_gbp"] for total in totals)
+        context["total_saved_gbp"] = sum(total["saved_gbp"] for total in totals)
+        total_calls = sum(total["calls"] for total in totals)
+        total_hits = sum(total["cache_hits"] for total in totals)
+        context["total_hit_rate_percent"] = (
+            100 * total_hits / (total_calls + total_hits) if total_calls + total_hits else None
+        )
         # Newest first, the way the traffic page lists its days.
         context["by_day"] = [
             {"day": bar["day"], "segments": bar["segments"]} for bar in reversed(context["chart"]["bars"])

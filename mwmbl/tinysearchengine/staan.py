@@ -86,6 +86,7 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
     # credentials, so a deployment that has since dropped the key still serves what it has.
     cached = get_cached_external_results(DocumentSource.STAAN, query)
     if cached is not None:
+        provider_usage.record_provider_cache_hit(provider_usage.PROVIDER_STAAN)
         # The cache stores the rank Staan gave, not a score - scoring is this function's to
         # do, and doing it here is what makes an entry mean the same thing to every caller.
         staan_results = cached[:max_results]

@@ -296,6 +296,12 @@ POLAR_PRODUCT_ID_CANOPY = os.environ.get("POLAR_PRODUCT_ID_CANOPY", "")
 POLAR_SERVER = os.environ.get("POLAR_SERVER", "sandbox")
 
 BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+# Deliberately short. Brave's Search API Terms of Use, 3(b)(i), forbid storing or caching
+# results "other than transient storage required for operation", so these must not grow into
+# a store like the week-long Staan cache without Brave's agreement.
+BRAVE_IMAGE_CACHE_TTL_SECONDS = 60 * 60
+# A query with no images is cached too, for less time, or it is asked for again every time.
+BRAVE_IMAGE_CACHE_EMPTY_TTL_SECONDS = 10 * 60
 
 GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "")
 

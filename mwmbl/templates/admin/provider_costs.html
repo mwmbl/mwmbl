@@ -50,6 +50,22 @@
       </p>
 
       <div class="module">
+        <h2>Caching</h2>
+        <p class="savings">
+          {% if total_hit_rate_percent is None %}
+            No lookups in this window.
+          {% else %}
+            Caching saved <strong>&pound;{{ total_saved_gbp|floatformat:2 }}</strong> over {{ days|length }} days:
+            {{ total_hit_rate_percent|floatformat:1 }}% of lookups were answered from our cache instead of a paid call.
+          {% endif %}
+        </p>
+        <p class="note">
+          Saved is what the cache hits would have cost as calls. Brave image results are cached for
+          an hour (its terms allow only transient storage), Staan results for a week.
+        </p>
+      </div>
+
+      <div class="module">
         <h2>
           {% if metric == "cost" %}Cost per day{% else %}Calls per day{% endif %}
           &mdash; {{ days|length }} days, busiest day
@@ -63,7 +79,7 @@
         <div class="chart" style="height: {{ chart_height_px }}px">
           {% for bar in chart.bars %}
             <div class="bar" style="height: {{ bar.height_px }}px"
-                 title="{{ bar.day|date:'Y-m-d' }}{% for segment in bar.segments %} | {{ segment.label }}: {{ segment.calls }} calls, {{ segment.failures }} failed{% if segment.cost_gbp is not None %}, &pound;{{ segment.cost_gbp|floatformat:2 }}{% endif %}{% endfor %}">
+                 title="{{ bar.day|date:'Y-m-d' }}{% for segment in bar.segments %} | {{ segment.label }}: {{ segment.calls }} calls, {{ segment.failures }} failed, {{ segment.cache_hits }} cache hits{% if segment.cost_gbp is not None %}, &pound;{{ segment.cost_gbp|floatformat:2 }}{% endif %}{% endfor %}">
               {% for segment in bar.segments %}
                 <div class="{{ segment.provider }}" style="height: {{ segment.height_px }}px"></div>
               {% endfor %}
@@ -82,7 +98,7 @@
         <table>
           <caption>Totals over {{ days|length }} days</caption>
           <thead>
-            <tr><th>Provider</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Price per 1,000</th><th class="num">Cost</th></tr>
+            <tr><th>Provider</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Cache hits</th><th class="num">Hit rate</th><th class="num">Price per 1,000</th><th class="num">Cost</th><th class="num">Saved</th></tr>
           </thead>
           <tbody>
             {% for total in totals %}
@@ -90,11 +106,14 @@
                 <td><i class="swatch {{ total.provider }}"></i>{{ total.label }}</td>
                 <td class="num">{{ total.calls|intcomma }}</td>
                 <td class="num">{{ total.failures|intcomma }}</td>
+                <td class="num">{{ total.cache_hits|intcomma }}</td>
+                <td class="num">{% if total.hit_rate_percent is None %}&mdash;{% else %}{{ total.hit_rate_percent|floatformat:1 }}%{% endif %}</td>
                 <td class="num">&pound;{{ total.price_per_1000_gbp|floatformat:2 }}</td>
                 <td class="num">&pound;{{ total.cost_gbp|floatformat:2 }}</td>
+                <td class="num">&pound;{{ total.saved_gbp|floatformat:2 }}</td>
               </tr>
             {% endfor %}
-            <tr><td><strong>Total</strong></td><td></td><td></td><td></td><td class="num"><strong>&pound;{{ total_cost_gbp|floatformat:2 }}</strong></td></tr>
+            <tr><td><strong>Total</strong></td><td></td><td></td><td></td><td class="num">{% if total_hit_rate_percent is not None %}{{ total_hit_rate_percent|floatformat:1 }}%{% endif %}</td><td></td><td class="num"><strong>&pound;{{ total_cost_gbp|floatformat:2 }}</strong></td><td class="num"><strong>&pound;{{ total_saved_gbp|floatformat:2 }}</strong></td></tr>
           </tbody>
         </table>
       </div>
@@ -105,7 +124,7 @@
           <thead>
             <tr>
               <th>Day</th>
-              {% for provider, label in provider_labels.items %}<th class="num">{{ label }} calls</th><th class="num">failed</th>{% endfor %}
+              {% for provider, label in provider_labels.items %}<th class="num">{{ label }} calls</th><th class="num">failed</th><th class="num">cache hits</th>{% endfor %}
             </tr>
           </thead>
           <tbody>
@@ -113,7 +132,7 @@
               <tr>
                 <td>{{ row.day|date:"Y-m-d" }}</td>
                 {% for segment in row.segments %}
-                  <td class="num">{{ segment.calls|intcomma }}</td><td class="num">{{ segment.failures|intcomma }}</td>
+                  <td class="num">{{ segment.calls|intcomma }}</td><td class="num">{{ segment.failures|intcomma }}</td><td class="num">{{ segment.cache_hits|intcomma }}</td>
                 {% endfor %}
               </tr>
             {% endfor %}

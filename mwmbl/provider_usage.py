@@ -43,6 +43,9 @@ EXPIRE_SECONDS = 60 * 60 * 24 * 90
 
 CALLS = "calls"
 FAILURES = "failures"
+# A request answered from our own cache, so a call we did not pay for.
+CACHE_HITS = "cache_hits"
+OUTCOMES = (CALLS, FAILURES, CACHE_HITS)
 
 
 def _record(provider: str, outcome: str) -> None:
@@ -69,8 +72,13 @@ def record_provider_failure(provider: str) -> None:
     _record(provider, FAILURES)
 
 
+def record_provider_cache_hit(provider: str) -> None:
+    """Count a request for `provider` that our cache answered instead."""
+    _record(provider, CACHE_HITS)
+
+
 def read_usage(redis: Redis, days: list[date]) -> dict[date, dict[str, dict[str, int]]]:
-    """Calls and failures per provider for each of `days`, zero where nothing was counted."""
+    """Calls, failures and cache hits per provider for each of `days`, zero where nothing was counted."""
     pipeline = redis.pipeline()
     for day in days:
         pipeline.hgetall(USAGE_KEY.format(date=day))
@@ -79,10 +87,7 @@ def read_usage(redis: Redis, days: list[date]) -> dict[date, dict[str, dict[str,
     usage = {}
     for day, counts in zip(days, hashes):
         usage[day] = {
-            provider: {
-                CALLS: int(counts.get(f"{provider}:{CALLS}", 0)),
-                FAILURES: int(counts.get(f"{provider}:{FAILURES}", 0)),
-            }
+            provider: {outcome: int(counts.get(f"{provider}:{outcome}", 0)) for outcome in OUTCOMES}
             for provider in PROVIDER_LABELS
         }
     return usage
