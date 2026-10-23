@@ -6,6 +6,8 @@ from ninja import Query, Router, Schema
 from ninja.errors import HttpError
 from pydantic import Field
 
+from mwmbl import provider_usage
+
 BRAVE_IMAGE_SEARCH_URL = "https://api.search.brave.com/res/v1/images/search"
 
 router = Router(tags=["Image Search"])
@@ -36,12 +38,19 @@ def search_images(request, params: Query[ImageSearchParams]):
     if not api_key:
         raise HttpError(503, "BRAVE_SEARCH_API_KEY is not configured")
 
-    response = httpx.get(
-        BRAVE_IMAGE_SEARCH_URL,
-        params={"q": params.q, "count": params.count, "safesearch": "strict"},
-        headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-        timeout=10,
-    )
+    provider_usage.record_provider_call(provider_usage.PROVIDER_BRAVE_IMAGES)
+    try:
+        response = httpx.get(
+            BRAVE_IMAGE_SEARCH_URL,
+            params={"q": params.q, "count": params.count, "safesearch": "strict"},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+            timeout=10,
+        )
+    except httpx.HTTPError as e:
+        provider_usage.record_provider_failure(provider_usage.PROVIDER_BRAVE_IMAGES)
+        raise HttpError(502, "Image search is unreachable") from e
+    if response.status_code != 200:
+        provider_usage.record_provider_failure(provider_usage.PROVIDER_BRAVE_IMAGES)
     if response.status_code == 429:
         raise HttpError(429, "Image search is not available right now, try again after a few seconds.")
     if response.status_code != 200:

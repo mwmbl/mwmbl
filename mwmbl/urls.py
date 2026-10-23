@@ -25,6 +25,7 @@ from mwmbl.admin_views import (
     blacklist_status_view,
     index_count_view,
     paying_users_view,
+    provider_costs_view,
     search_traffic_view,
     worst_agreements_view,
 )
@@ -64,6 +65,7 @@ urlpatterns = [
     path("admin/blacklist-status/", blacklist_status_view, name="blacklist_status"),
     path("admin/search-traffic/", search_traffic_view, name="search_traffic"),
     path("admin/paying-users/", paying_users_view, name="paying_users"),
+    path("admin/provider-costs/", provider_costs_view, name="provider_costs"),
     path("admin/index-count/", index_count_view, name="index_count"),
     path("admin/worst-agreements/", worst_agreements_view, name="worst_agreements"),
     path("admin/", admin.site.urls),
