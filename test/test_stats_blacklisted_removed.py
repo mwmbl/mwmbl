@@ -9,43 +9,9 @@ This counter is the only signal that the removals are actually happening.
 from unittest.mock import patch
 
 import fakeredis
-import pytest
 
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY, LONG_EXPIRE_SECONDS, StatsManager
 from mwmbl.utils import utc_today
-
-NO_INDEX_COUNTS = {
-    "urls_in_index_daily": {},
-    "domains_in_index_daily": {},
-    "results_in_index_daily": {},
-}
-
-
-@pytest.mark.django_db
-def test_recorded_removals_appear_in_the_stats_for_today():
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    stats_manager = StatsManager(redis)
-
-    stats_manager.record_blacklisted_removed(3)
-    stats_manager.record_blacklisted_removed(4)
-
-    with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
-        stats = stats_manager.get_stats()
-
-    today = str(utc_today())
-    assert stats.blacklisted_results_removed_daily[today] == 7
-
-
-@pytest.mark.django_db
-def test_stats_report_zero_removals_for_days_with_no_purge():
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    stats_manager = StatsManager(redis)
-
-    with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
-        stats = stats_manager.get_stats()
-
-    assert len(stats.blacklisted_results_removed_daily) == 30
-    assert set(stats.blacklisted_results_removed_daily.values()) == {0}
 
 
 def test_the_daily_count_expires_so_it_cannot_grow_without_bound():

@@ -3,14 +3,14 @@ from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
 from django.db import models
-from django.db.models import Count
+from django.db.models import Count, Sum
 from django.db.models.functions import TruncWeek
 from pydantic import BaseModel
 from redis import Redis
 
-from mwmbl.count_urls import get_counts, get_domain_result_count
+from mwmbl.count_urls import get_counts, get_domain_result_count, get_published_counts
 from mwmbl.crawler.batch import Results
-from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, UserStats
+from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, SeedDomain, UserStats
 from mwmbl.utils import utc_today
 from mwmbl.volunteer_membership import update_volunteer_memberships
 
@@ -24,15 +24,33 @@ DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
 USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
+STATS_CACHE_KEY = "stats-payload"
+LEADERBOARD_CACHE_KEY = "leaderboard-{period}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
+# The public stats page is requested far more often than its numbers change, and building it
+# reads many counters and sums over the user table, so it is served from Redis between rebuilds.
+STATS_CACHE_SECONDS = 60 * 60
+# The all-time board sums every user's daily rows - the heaviest query on the page - and a day's
+# movement barely changes the top 100, so it is rebuilt once a day.
+ALL_TIME_LEADERBOARD_CACHE_SECONDS = 60 * 60 * 24
 USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
 REGISTRATION_WEEKS = 52
+INDEX_HISTORY_DAYS = 365
 
 
 class DomainStats(BaseModel):
     domain_name: str
     num_index_results: int
+
+
+class IndexMeasurement(BaseModel):
+    """The size of the index as measured by one finished scan, which is about weekly."""
+
+    date: str
+    urls: int
+    domains: int
+    results: int
 
 
 class MwmblStats(BaseModel):
@@ -45,8 +63,11 @@ class MwmblStats(BaseModel):
     results_in_index_daily: dict[str, int]
     dataset_queries_daily: dict[str, int]
     dataset_results_daily: dict[str, int]
-    blacklisted_results_removed_daily: dict[str, int]
     users_registered_weekly: dict[str, int]
+    seed_searches_total: int
+    seed_pages_indexed_total: int
+    seed_sites_discovered_total: int
+    index_history: list[IndexMeasurement]
 
 
 # New stats we want per domain:
@@ -71,6 +92,15 @@ class StatsManager:
         self.redis = redis
 
     def get_stats(self) -> MwmblStats:
+        cached = self.redis.get(STATS_CACHE_KEY)
+        if cached is not None:
+            return MwmblStats.model_validate_json(cached)
+
+        stats = self._build_stats()
+        self.redis.set(STATS_CACHE_KEY, stats.model_dump_json(), ex=STATS_CACHE_SECONDS)
+        return stats
+
+    def _build_stats(self) -> MwmblStats:
         date_time = datetime.now(timezone.utc)
         date = date_time.date()
 
@@ -78,7 +108,6 @@ class StatsManager:
         results_indexed_daily = {}
         dataset_queries_daily = {}
         dataset_results_daily = {}
-        blacklisted_results_removed_daily = {}
 
         # Collect all unique users over 30 days for users_crawled_30d
         keys = [USERS_KEY.format(date=date - timedelta(days=i)) for i in range(30)]
@@ -109,12 +138,6 @@ class StatsManager:
                 dataset_results_count = 0
             dataset_results_daily[str(date_i)] = dataset_results_count
 
-            blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=date_i)
-            blacklisted_removed_count = self.redis.get(blacklisted_removed_count_key)
-            if blacklisted_removed_count is None:
-                blacklisted_removed_count = 0
-            blacklisted_results_removed_daily[str(date_i)] = blacklisted_removed_count
-
         index_stats = get_counts()
 
         user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
@@ -127,10 +150,55 @@ class StatsManager:
             top_user_results=user_results_counts,
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
-            blacklisted_results_removed_daily=blacklisted_results_removed_daily,
             users_registered_weekly=self.get_users_registered_weekly(),
+            **self.get_seed_search_totals(),
+            index_history=self.get_index_history(),
             **index_stats,
         )
+
+    def get_index_history(self) -> list[IndexMeasurement]:
+        """Each published index measurement of the last year, oldest first."""
+        published = get_published_counts(self.redis, INDEX_HISTORY_DAYS)
+        return [
+            IndexMeasurement(
+                date=str(measurement["date"]),
+                urls=measurement["urls"],
+                domains=measurement["domains"],
+                results=measurement["results"],
+            )
+            for measurement in reversed(published)
+        ]
+
+    def get_seed_search_totals(self) -> dict[str, int]:
+        """Seed Search activity across all users, all time: the sums of what each user's own
+        stats page shows. There is no per-day record, so these are aggregates only."""
+        user_totals = MwmblUser.objects.aggregate(
+            searches=Sum("seed_searches"), pages_indexed=Sum("seed_search_pages_indexed")
+        )
+        return {
+            "seed_searches_total": user_totals["searches"] or 0,
+            "seed_pages_indexed_total": user_totals["pages_indexed"] or 0,
+            "seed_sites_discovered_total": SeedDomain.objects.count(),
+        }
+
+    def get_cached_leaderboard(self, period: str) -> list[tuple[str, int]]:
+        """The "yesterday" or "all" leaderboard, rebuilt at most once per STATS_CACHE_SECONDS
+        ("yesterday") or ALL_TIME_LEADERBOARD_CACHE_SECONDS ("all")."""
+        cache_key = LEADERBOARD_CACHE_KEY.format(period=period)
+        cached = self.redis.get(cache_key)
+        if cached is not None:
+            return [(username, score) for username, score in json.loads(cached)]
+
+        if period == "yesterday":
+            leaderboard = self.get_leaderboard_for_date(utc_today() - timedelta(days=1))
+            expire_seconds = STATS_CACHE_SECONDS
+        elif period == "all":
+            leaderboard = self.get_all_time_leaderboard()
+            expire_seconds = ALL_TIME_LEADERBOARD_CACHE_SECONDS
+        else:
+            raise ValueError(f"Unknown leaderboard period: {period}")
+        self.redis.set(cache_key, json.dumps(leaderboard), ex=expire_seconds)
+        return leaderboard
 
     def get_users_registered_weekly(self) -> dict[str, int]:
         """Registrations per week for the last year, keyed by the Monday starting each week.
@@ -188,8 +256,6 @@ class StatsManager:
 
     def get_all_time_leaderboard(self) -> list[tuple[str, int]]:
         """Get all-time leaderboard by querying the UserStats table."""
-        from django.db.models import Sum
-
         results = (
             UserStats.objects.values("user__username")
             .annotate(total_results=Sum("num_results"))

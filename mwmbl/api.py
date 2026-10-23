@@ -20,8 +20,6 @@ JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
 """
 
-from datetime import timedelta
-
 from django.contrib.auth import get_user_model
 from ninja import Field
 from ninja_extra import NinjaExtraAPI, api_controller, http_get, http_post
@@ -37,7 +35,6 @@ from scalar_ninja.scalar_ninja import AgentConfig
 
 from mwmbl.crawler.app import stats_manager
 from mwmbl.exceptions import InvalidRequest
-from mwmbl.utils import utc_today
 
 _schema = SchemaControl(api_settings)
 
@@ -146,15 +143,9 @@ class LeaderboardController:
         Supported periods: 'yesterday', 'all'
         Returns list of [username, score] pairs sorted by score descending.
         """
-        if period == "yesterday":
-            yesterday = utc_today() - timedelta(days=1)
-            results = stats_manager.get_leaderboard_for_date(yesterday)
-            return [[username, score] for username, score in results]
-        elif period == "all":
-            results = stats_manager.get_all_time_leaderboard()
-            return [[username, score] for username, score in results]
-        else:
-            return []
+        if period in ("yesterday", "all"):
+            return [[username, score] for username, score in stats_manager.get_cached_leaderboard(period)]
+        return []
 
 
 api.register_controllers(LeaderboardController)
