@@ -134,7 +134,7 @@ coverage-quick:
 
 run:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
-		uv run python manage.py runserver --settings=$(DJANGO_SETTINGS_MODULE)
+		uv run $(if $(wildcard .env),--env-file .env) python manage.py runserver --settings=$(DJANGO_SETTINGS_MODULE)
 
 run-background:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \

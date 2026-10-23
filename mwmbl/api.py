@@ -204,6 +204,7 @@ def register_routers(ranker, combined_ranker, tiny_index):
     import mwmbl.tinysearchengine.combined_search as combined_search_module
     import mwmbl.tinysearchengine.search as search_module
     import mwmbl.tinysearchengine.super_search as super_search_module
+    from mwmbl.image_search import router as image_search_router
     from mwmbl.platform.api import router as platform_router
     from mwmbl.platform.membership_v2 import router as membership_v2_router
     from mwmbl.platform.notifications import router as notifications_router
@@ -218,6 +219,7 @@ def register_routers(ranker, combined_ranker, tiny_index):
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])
     api.add_router("/platform/", platform_router, tags=["Platform"])
+    api.add_router("/images/", image_search_router, tags=["Image Search"])
 
     v2_api.add_router("/search/", search_module.v2_router, tags=["Search"])
     v2_api.add_router("/super-search/", super_search_module.router, tags=["Super Search"])
