@@ -24,15 +24,17 @@ DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 
 USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
-STATS_CACHE_KEY = "stats-payload"
-LEADERBOARD_CACHE_KEY = "leaderboard-{period}"
+# Dated, so a payload built before UTC midnight is never served after it.
+STATS_CACHE_KEY = "stats-payload-{date}"
+LEADERBOARD_CACHE_KEY = "leaderboard-{period}-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 # The public stats page is requested far more often than its numbers change, and building it
 # reads many counters and sums over the user table, so it is served from Redis between rebuilds.
 STATS_CACHE_SECONDS = 60 * 60
 # The all-time board sums every user's daily rows - the heaviest query on the page - and a day's
-# movement barely changes the top 100, so it is rebuilt once a day.
+# movement barely changes the top 100, so it is rebuilt once a day. Yesterday's board cannot change
+# once the day is over, so it is cached for as long.
 ALL_TIME_LEADERBOARD_CACHE_SECONDS = 60 * 60 * 24
 USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
 REGISTRATION_WEEKS = 52
@@ -63,6 +65,9 @@ class MwmblStats(BaseModel):
     results_in_index_daily: dict[str, int]
     dataset_queries_daily: dict[str, int]
     dataset_results_daily: dict[str, int]
+    # Always empty: kept for one release because front-ends older than mwmbl/front-end#94 read it
+    # unguarded and would 500 without it.
+    blacklisted_results_removed_daily: dict[str, int]
     users_registered_weekly: dict[str, int]
     seed_searches_total: int
     seed_pages_indexed_total: int
@@ -92,12 +97,13 @@ class StatsManager:
         self.redis = redis
 
     def get_stats(self) -> MwmblStats:
-        cached = self.redis.get(STATS_CACHE_KEY)
+        cache_key = STATS_CACHE_KEY.format(date=utc_today())
+        cached = self.redis.get(cache_key)
         if cached is not None:
             return MwmblStats.model_validate_json(cached)
 
         stats = self._build_stats()
-        self.redis.set(STATS_CACHE_KEY, stats.model_dump_json(), ex=STATS_CACHE_SECONDS)
+        self.redis.set(cache_key, stats.model_dump_json(), ex=STATS_CACHE_SECONDS)
         return stats
 
     def _build_stats(self) -> MwmblStats:
@@ -150,6 +156,7 @@ class StatsManager:
             top_user_results=user_results_counts,
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
+            blacklisted_results_removed_daily={},
             users_registered_weekly=self.get_users_registered_weekly(),
             **self.get_seed_search_totals(),
             index_history=self.get_index_history(),
@@ -182,22 +189,19 @@ class StatsManager:
         }
 
     def get_cached_leaderboard(self, period: str) -> list[tuple[str, int]]:
-        """The "yesterday" or "all" leaderboard, rebuilt at most once per STATS_CACHE_SECONDS
-        ("yesterday") or ALL_TIME_LEADERBOARD_CACHE_SECONDS ("all")."""
-        cache_key = LEADERBOARD_CACHE_KEY.format(period=period)
+        """The "yesterday" or "all" leaderboard, rebuilt at most once per UTC day."""
+        cache_key = LEADERBOARD_CACHE_KEY.format(period=period, date=utc_today())
         cached = self.redis.get(cache_key)
         if cached is not None:
             return [(username, score) for username, score in json.loads(cached)]
 
         if period == "yesterday":
             leaderboard = self.get_leaderboard_for_date(utc_today() - timedelta(days=1))
-            expire_seconds = STATS_CACHE_SECONDS
         elif period == "all":
             leaderboard = self.get_all_time_leaderboard()
-            expire_seconds = ALL_TIME_LEADERBOARD_CACHE_SECONDS
         else:
             raise ValueError(f"Unknown leaderboard period: {period}")
-        self.redis.set(cache_key, json.dumps(leaderboard), ex=expire_seconds)
+        self.redis.set(cache_key, json.dumps(leaderboard), ex=ALL_TIME_LEADERBOARD_CACHE_SECONDS)
         return leaderboard
 
     def get_users_registered_weekly(self) -> dict[str, int]:

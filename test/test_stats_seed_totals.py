@@ -63,7 +63,7 @@ def test_stats_are_built_once_then_served_from_redis():
 
     assert get_counts.call_count == 1
     assert second == first
-    assert 0 < redis.ttl(STATS_CACHE_KEY) <= STATS_CACHE_SECONDS
+    assert 0 < redis.ttl(STATS_CACHE_KEY.format(date=utc_today())) <= STATS_CACHE_SECONDS
 
 
 @pytest.mark.django_db
@@ -86,9 +86,27 @@ def test_the_all_time_leaderboard_is_cached_for_a_day():
     redis = fakeredis.FakeRedis(decode_responses=True)
     StatsManager(redis).get_cached_leaderboard("all")
 
-    ttl = redis.ttl(LEADERBOARD_CACHE_KEY.format(period="all"))
+    ttl = redis.ttl(LEADERBOARD_CACHE_KEY.format(period="all", date=utc_today()))
     assert STATS_CACHE_SECONDS < ttl <= ALL_TIME_LEADERBOARD_CACHE_SECONDS
     assert ALL_TIME_LEADERBOARD_CACHE_SECONDS == 24 * 60 * 60
+
+
+@pytest.mark.django_db
+def test_payloads_cached_before_midnight_are_not_served_after_it():
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    stats_manager = StatsManager(redis)
+    today = utc_today()
+    alice = _user("alice", 0, 0)
+    UserStats.objects.create(user=alice, date=today, num_results=10)
+    UserStats.objects.create(user=alice, date=today - timedelta(days=1), num_results=3)
+
+    with patch("mwmbl.crawler.stats.utc_today", return_value=today):
+        before = stats_manager.get_cached_leaderboard("yesterday")
+    with patch("mwmbl.crawler.stats.utc_today", return_value=today + timedelta(days=1)):
+        after = stats_manager.get_cached_leaderboard("yesterday")
+
+    assert before == [("alice", 3)]
+    assert after == [("alice", 10)]
 
 
 @pytest.mark.django_db
