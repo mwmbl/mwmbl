@@ -11,6 +11,7 @@ from redis import Redis
 
 from mwmbl.crawler.domains import TOP_DOMAINS, DomainLinkDatabase
 from mwmbl.crawler.env_vars import CRAWL_ALLOWED_DOMAINS, CRAWL_BATCH_SIZE
+from mwmbl.crawler.politeness import claim_domain
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
@@ -146,7 +147,17 @@ class RedisURLQueue:
         # blacklist filter as the rest: it is a URL we are about to fetch.
         seed_domains = [domain for domain in seed_domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
         random_domain = seed_random.choice(seed_domains)
-        urls = [f"https://{random_domain}/"]
+        # A domain another batch holds, or fetched too recently, is left for a later batch,
+        # with its URLs still queued - see mwmbl.crawler.politeness.
+        claimed_domains = set()
+
+        def claim(domain: str) -> bool:
+            if domain not in claimed_domains and not claim_domain(self.redis, domain):
+                return False
+            claimed_domains.add(domain)
+            return True
+
+        urls = [f"https://{random_domain}/"] if claim(random_domain) else []
 
         # At most one URL per domain, since the batch is crawled concurrently: the samples
         # above can pick a core domain again, and the seed can repeat any of them. Unless the
@@ -161,6 +172,13 @@ class RedisURLQueue:
 
         # Pop the highest scoring URL from each domain
         for domain in domains:
+            # Checked before claiming, so a domain with nothing queued is not held for a
+            # batch that has nothing of it to release.
+            if not self.redis.exists(DOMAIN_URLS_KEY.format(domain=domain)):
+                self.redis.zrem(DOMAIN_SCORE_KEY, domain)
+                continue
+            if not claim(domain):
+                continue
             domain_urls_scores = self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain))
 
             # Update the domain score if we removed a URL
