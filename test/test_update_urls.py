@@ -82,6 +82,13 @@ def test_recording_a_batch_classifies_every_url(recorded):
             _item("https://slow.example/", error=ItemError(name="AbortError")),
             _item("https://robots.example/", error=ItemError(name="RobotsDenied")),
             _item("https://odd.example/", status=500),
+            # A challenge page has content, but neither it nor its links are the site's.
+            _item(
+                "https://challenge.example/",
+                status=403,
+                content=ItemContent(title="Just a moment...", extract="", links=["https://challenge.example/help"]),
+            ),
+            _item("https://flaky.example/", error=ItemError(name="RobotsUnavailable")),
         ],
     )
 
@@ -94,6 +101,8 @@ def test_recording_a_batch_classifies_every_url(recorded):
         "https://slow.example/": URLStatus.ERROR_TIMEOUT,
         "https://robots.example/": URLStatus.ERROR_ROBOTS_DENIED,
         "https://odd.example/": URLStatus.ERROR_OTHER,
+        "https://challenge.example/": URLStatus.ERROR_OTHER,
+        "https://flaky.example/": URLStatus.ERROR_TIMEOUT,
         "https://linked.example/a": URLStatus.NEW,
         "https://linked.example/": URLStatus.NEW,
     }

@@ -76,13 +76,13 @@ def _unreachable(url):
     raise ConnectionError("refused")
 
 
-@pytest.mark.parametrize("unreachable", ["refused", "server error"])
+@pytest.mark.parametrize("unreachable", ["refused", "server error", "rate limited"])
 def test_unavailable_robots_disallows_everything_and_is_cached_briefly(monkeypatch, redis, unreachable):
     """RFC 9309: a robots.txt we cannot get, as opposed to one that is not there, disallows all."""
     if unreachable == "refused":
         monkeypatch.setattr(retrieve, "fetch", _unreachable)
     else:
-        _fetching(monkeypatch, 503, b"")
+        _fetching(monkeypatch, 503 if unreachable == "server error" else 429, b"")
 
     with pytest.raises(RobotsUnavailable):
         robots_allowed(URL, redis)

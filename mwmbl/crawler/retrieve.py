@@ -221,7 +221,9 @@ def _fetch_robots(robots_url: str) -> tuple[list[str], bool]:
         logger.debug(f"Robots error: {robots_url}, {e}")
         return [], True
 
-    if status_code >= 500:
+    # RFC 9309 files a 429 with the other 4xx answers, but a server that is rate limiting us
+    # has said nothing about its rules - it is unavailable like a 5xx, as Google treats it.
+    if status_code >= 500 or status_code == 429:
         logger.debug(f"Robots status code: {status_code}")
         return [], True
 

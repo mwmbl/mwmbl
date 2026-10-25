@@ -11,10 +11,14 @@ from mwmbl.crawler.politeness import (
     BLOCK_COOL_OFF_SECONDS,
     DEFAULT_DOMAIN_DELAY_SECONDS,
     DOMAIN_CLAIM_KEY,
+    DOMAIN_CLAIM_SECONDS,
     MAX_BLOCK_COOL_OFF_SECONDS,
+    MAX_DOMAIN_DELAY_SECONDS,
+    abandon_domains,
     claim_domain,
     release_domains,
 )
+from mwmbl.crawler.retrieve import ROBOTS_CACHE_ERROR_TTL_SECONDS
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.indexer.index_batches import get_documents_from_batches
@@ -65,15 +69,51 @@ def test_release_holds_the_domain_for_at_least_the_default_delay(redis, robots):
     assert DEFAULT_DOMAIN_DELAY_SECONDS - 2 <= redis.ttl(CLAIM) <= DEFAULT_DOMAIN_DELAY_SECONDS
 
 
-def test_unavailable_robots_still_gets_the_default_delay(redis, monkeypatch):
+def test_unavailable_robots_holds_the_domain_until_robots_is_checked_again(redis, monkeypatch):
+    """Otherwise every batch would pop one of its URLs, skip it unfetched and mark it an error."""
+
     def unreachable(url):
         raise ConnectionError("refused")
 
     monkeypatch.setattr(retrieve, "fetch", unreachable)
+    retrieve.crawl_url(URL, redis)
 
     release_domains(redis, [_result(None)])
 
-    assert DEFAULT_DOMAIN_DELAY_SECONDS - 2 <= redis.ttl(CLAIM) <= DEFAULT_DOMAIN_DELAY_SECONDS
+    assert ROBOTS_CACHE_ERROR_TTL_SECONDS - 2 <= redis.ttl(CLAIM) <= ROBOTS_CACHE_ERROR_TTL_SECONDS
+
+
+def test_an_enormous_crawl_delay_is_capped(redis, robots):
+    """Redis refuses an expiry past 64 bits, which would lose the whole batch's results."""
+    robots["content"] = b"User-agent: *\nCrawl-delay: 99999999999999999999\n"
+
+    release_domains(redis, [_result(200)])
+
+    assert redis.ttl(CLAIM) == MAX_DOMAIN_DELAY_SECONDS
+
+
+def test_a_redirect_target_waits_too_unless_a_batch_holds_it(redis, robots):
+    held = DOMAIN_CLAIM_KEY.format(domain="held.test")
+    claim_domain(redis, "held.test")
+
+    release_domains(
+        redis,
+        [
+            {"url": URL, "status": 200, "resolved_url": "https://www.example.test/page"},
+            {"url": "https://short.test/x", "status": 200, "resolved_url": "https://held.test/page"},
+        ],
+    )
+
+    assert DEFAULT_DOMAIN_DELAY_SECONDS - 2 <= redis.ttl(DOMAIN_CLAIM_KEY.format(domain="www.example.test"))
+    assert redis.ttl(held) > DOMAIN_CLAIM_SECONDS - 5
+
+
+def test_a_failed_batch_gives_its_domains_back(redis):
+    claim_domain(redis, "example.test")
+
+    abandon_domains(redis, [URL])
+
+    assert redis.ttl(CLAIM) == DEFAULT_DOMAIN_DELAY_SECONDS
 
 
 @pytest.mark.parametrize("status", [403, 429, 503])
