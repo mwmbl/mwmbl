@@ -1,0 +1,58 @@
+name: Release the crawler Docker image
+
+# Push a tag crawler-vX.Y.Z matching mwmbl/crawler/version.py to publish mwmbl/crawler:X.Y.Z,
+# :X.Y and :stable. :latest still follows main (docker-publish.yml).
+on:
+  push:
+    tags:
+      - "crawler-v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check the tag matches CRAWLER_VERSION
+        run: |
+          tag_version="${GITHUB_REF_NAME#crawler-v}"
+          code_version=$(python3 -c "import runpy; print(runpy.run_path('mwmbl/crawler/version.py')['CRAWLER_VERSION'])")
+          if [[ "$tag_version" != "$code_version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match CRAWLER_VERSION $code_version"
+            exit 1
+          fi
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: mwmbl/crawler
+          flavor: latest=false
+          tags: |
+            type=match,pattern=crawler-v(\d+\.\d+\.\d+),group=1
+            type=match,pattern=crawler-v(\d+\.\d+)\.\d+,group=1
+            type=raw,value=stable
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.crawler
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64

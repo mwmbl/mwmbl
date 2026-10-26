@@ -12,7 +12,7 @@ TODAY = date(2026, 9, 22)
 
 
 def _record(stats_manager: StatsManager, day: date, num_results: int, user: MwmblUser) -> None:
-    results = SimpleNamespace(results=[object()] * num_results)
+    results = SimpleNamespace(results=[object()] * num_results, crawler_version=None, device_name=None)
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
         stats_manager.record_results(results, user)
 

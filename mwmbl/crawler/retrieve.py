@@ -21,6 +21,7 @@ from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
 from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
+from mwmbl.crawler.version import CRAWLER_VERSION
 from mwmbl.justext import core, utils
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
@@ -55,7 +56,6 @@ MAX_FALLBACK_PARAGRAPH_LINK_DENSITY = 0.5
 DEFAULT_ENCODING = "utf8"
 DEFAULT_ENC_ERRORS = "replace"
 MAX_SITE_URLS = 100
-CRAWLER_VERSION: str = "0.2.0"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
 ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
