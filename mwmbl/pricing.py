@@ -16,8 +16,9 @@ COMBINED_SEARCH_PRICE_PER_1000_QUERIES_CENTS = 500
 # currency; the provider costs page reports in GBP at these fixed rates, so update them when
 # the exchange rate has moved enough to matter.
 GBP_PER_EUR = 0.86
-# Staan's "Web Search" tier, which is what /v2/search/web is. Its first 1,000 requests are free;
-# that allowance is not modelled, so the page can overstate the cost by up to EUR 2.
+# Staan's "Web Search" tier, which is what /v2/search/web is. The first 1,000 requests each
+# month are free (staan.ai FAQ); that allowance is not modelled, so the page can overstate the
+# cost by up to EUR 2 a month.
 STAAN_WEB_SEARCH_PRICE_PER_1000_QUERIES_EUR = 2.00
 
 # Preset spend-limit options surfaced in the UI (mirrors Brave's Free/$10/$25/$100 presets).

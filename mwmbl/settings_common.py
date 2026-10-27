@@ -426,6 +426,7 @@ SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lowe
 
 # Counting calls to the paid providers (mwmbl.provider_usage), for the provider costs page.
 PROVIDER_USAGE_COUNTING = os.environ.get("PROVIDER_USAGE_COUNTING", "true").lower() != "false"
+
 # The default TTL, for any provider that does not name its own below. Wikipedia articles
 # move rarely, which is what justifies six months.
 EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks

@@ -97,8 +97,6 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
         logger.warning("STAAN_SEARCH_API_KEY is not configured")
         return []
 
-    # Counted before the request: a call that times out on our side may still be billed.
-    provider_usage.record_provider_call(provider_usage.PROVIDER_STAAN)
     try:
         response = session.get(
             settings.STAAN_SEARCH_URL,
@@ -109,13 +107,15 @@ def get_staan_results(query: str, max_results: int = NUM_STAAN_RESULTS) -> list[
         response.raise_for_status()
         documents = _documents(response.json(), query)
     except Exception as e:
-        provider_usage.record_provider_failure(provider_usage.PROVIDER_STAAN)
+        # Counted as a call too: one that timed out on our side may still have been billed.
+        provider_usage.record_provider_call(provider_usage.PROVIDER_STAAN, failed=True)
         # Never log the exception or the response body: both embed the request URL, and the
         # request URL embeds the user's (private) query. rank.py makes the same trade for
         # Wikipedia - the type is enough to tell a timeout from a 401.
         logger.warning("Failed to fetch Staan results: %s", type(e).__name__)
         return []
 
+    provider_usage.record_provider_call(provider_usage.PROVIDER_STAAN, failed=False)
     # Only a well-formed answer is stored, including one with no results in it. Every path
     # above returns [] without storing, so a transient failure is never remembered as
     # "Staan has nothing for this".

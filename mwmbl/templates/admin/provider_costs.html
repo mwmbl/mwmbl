@@ -21,7 +21,6 @@
     .provider-costs .bar { flex: 1; display: flex; flex-direction: column-reverse; min-width: 4px; }
     .provider-costs .legend span { display: inline-block; margin-right: 16px; }
     .provider-costs .swatch { display: inline-block; width: 12px; height: 12px; margin-right: 4px; vertical-align: middle; }
-    .provider-costs .staan { background: #417690; }
   </style>
 
   <div id="content-main" class="provider-costs">
@@ -55,16 +54,16 @@
           {% if metric == "cost" %}&pound;{{ chart.busiest|floatformat:2 }}{% else %}{{ chart.busiest|intcomma }} calls{% endif %}
         </h2>
         <div class="legend">
-          {% for provider, label in provider_labels.items %}
-            <span><i class="swatch {{ provider }}"></i>{{ label }}</span>
+          {% for provider in providers %}
+            <span><i class="swatch" style="background: {{ provider.colour }}"></i>{{ provider.label }}</span>
           {% endfor %}
         </div>
         <div class="chart" style="height: {{ chart_height_px }}px">
           {% for bar in chart.bars %}
             <div class="bar" style="height: {{ bar.height_px }}px"
-                 title="{{ bar.day|date:'Y-m-d' }}{% for segment in bar.segments %} | {{ segment.label }}: {{ segment.calls }} calls, {{ segment.failures }} failed{% if segment.cost_gbp is not None %}, &pound;{{ segment.cost_gbp|floatformat:2 }}{% endif %}{% endfor %}">
+                 title="{{ bar.day|date:'Y-m-d' }}{% for segment in bar.segments %} | {{ segment.label }}: {{ segment.calls }} calls, {{ segment.failures }} failed, &pound;{{ segment.cost_gbp|floatformat:2 }}{% endfor %}">
               {% for segment in bar.segments %}
-                <div class="{{ segment.provider }}" style="height: {{ segment.height_px }}px"></div>
+                <div style="height: {{ segment.height_px }}px; background: {{ segment.colour }}"></div>
               {% endfor %}
             </div>
           {% endfor %}
@@ -86,7 +85,7 @@
           <tbody>
             {% for total in totals %}
               <tr>
-                <td><i class="swatch {{ total.provider }}"></i>{{ total.label }}</td>
+                <td><i class="swatch" style="background: {{ total.colour }}"></i>{{ total.label }}</td>
                 <td class="num">{{ total.calls|intcomma }}</td>
                 <td class="num">{{ total.failures|intcomma }}</td>
                 <td class="num">&pound;{{ total.price_per_1000_gbp|floatformat:2 }}</td>
@@ -104,7 +103,7 @@
           <thead>
             <tr>
               <th>Day</th>
-              {% for provider, label in provider_labels.items %}<th class="num">{{ label }} calls</th><th class="num">failed</th>{% endfor %}
+              {% for provider in providers %}<th class="num">{{ provider.label }} calls</th><th class="num">failed</th>{% endfor %}
             </tr>
           </thead>
           <tbody>

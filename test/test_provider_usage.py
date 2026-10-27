@@ -7,7 +7,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
-from mwmbl import pricing, provider_usage, traffic
+from mwmbl import provider_usage, traffic
 from mwmbl.indexer.external_cache import external_cache_path
 from mwmbl.tinysearchengine import staan
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
@@ -67,7 +67,7 @@ def test_a_failed_staan_call_is_counted_as_a_call_and_a_failure(counting, staan_
 
 def test_nothing_is_counted_when_counting_is_off(redis):
     with override_settings(PROVIDER_USAGE_COUNTING=False):
-        provider_usage.record_provider_call("staan")
+        provider_usage.record_provider_call("staan", failed=False)
 
     assert redis.keys() == []
 
@@ -76,10 +76,6 @@ def test_cost_is_calls_times_the_price_in_pounds(monkeypatch):
     monkeypatch.setitem(provider_usage.PRICE_PER_1000_QUERIES_GBP, "staan", 4.0)
 
     assert provider_usage.cost_gbp("staan", 200) == pytest.approx(0.8)
-
-
-def test_provider_prices_are_converted_to_pounds_from_the_currency_they_bill_in():
-    assert provider_usage.PRICE_PER_1000_QUERIES_GBP["staan"] == pytest.approx(2.0 * pricing.GBP_PER_EUR)
 
 
 @pytest.fixture

@@ -554,7 +554,16 @@ def _provider_cost_chart(days: list[date], usage: dict, metric: str) -> dict:
             counts = usage[day][provider]
             cost = provider_usage.cost_gbp(provider, counts[provider_usage.CALLS])
             value = counts[provider_usage.CALLS] if metric == "calls" else cost
-            segments.append({"provider": provider, "label": label, "value": value, "cost_gbp": cost, **counts})
+            segments.append(
+                {
+                    "provider": provider,
+                    "label": label,
+                    "colour": provider_usage.PROVIDER_COLOURS[provider],
+                    "value": value,
+                    "cost_gbp": cost,
+                    **counts,
+                }
+            )
         bars.append({"day": day, "segments": segments, "total": sum(segment["value"] for segment in segments)})
 
     busiest = max((bar["total"] for bar in bars), default=0)
@@ -575,6 +584,7 @@ def _provider_totals(days: list[date], usage: dict) -> list[dict]:
             {
                 "provider": provider,
                 "label": label,
+                "colour": provider_usage.PROVIDER_COLOURS[provider],
                 "calls": calls,
                 "failures": failures,
                 "price_per_1000_gbp": provider_usage.PRICE_PER_1000_QUERIES_GBP[provider],
@@ -593,10 +603,12 @@ def provider_costs_view(request):
         "days": days,
         "metric": metric,
         "window_choices": PROVIDER_COST_WINDOW_CHOICES,
-        "max_days": PROVIDER_COST_MAX_DAYS,
         "chart_height_px": CHART_HEIGHT_PX,
         "counting_enabled": settings.PROVIDER_USAGE_COUNTING,
-        "provider_labels": provider_usage.PROVIDER_LABELS,
+        "providers": [
+            {"label": label, "colour": provider_usage.PROVIDER_COLOURS[provider]}
+            for provider, label in provider_usage.PROVIDER_LABELS.items()
+        ],
     }
 
     try:

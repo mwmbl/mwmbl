@@ -1,9 +1,9 @@
 """Counting calls to the paid search providers, so what they cost can be read off a dashboard.
 
 Counts calls, not cost: the price changes and the history must not, so cost is worked out
-from the price in mwmbl.pricing when the numbers are read. A call is counted when it is
-sent, not when it succeeds, because a request that times out on our side may still be billed;
-failures are counted on top, so the dashboard shows how much of the spend bought nothing.
+from the price in mwmbl.pricing when the numbers are read. A call is counted whether or not
+it succeeds, because a request that times out on our side may still be billed; failures are
+counted on top, so the dashboard shows how much of the spend bought nothing.
 
 Like traffic counting, this never raises: a counter that costs a search its results is worse
 than no counter.
@@ -27,6 +27,10 @@ PROVIDER_LABELS = {
     PROVIDER_STAAN: "Staan (EUSP)",
 }
 
+PROVIDER_COLOURS = {
+    PROVIDER_STAAN: "#417690",
+}
+
 # In GBP, whatever currency the provider bills in.
 PRICE_PER_1000_QUERIES_GBP = {
     PROVIDER_STAAN: pricing.STAAN_WEB_SEARCH_PRICE_PER_1000_QUERIES_EUR * pricing.GBP_PER_EUR,
@@ -42,28 +46,22 @@ CALLS = "calls"
 FAILURES = "failures"
 
 
-def _record(provider: str, outcome: str) -> None:
+def record_provider_call(provider: str, failed: bool) -> None:
+    """Count a request sent to `provider`, and a failure if it gave us no usable answer."""
     if not settings.PROVIDER_USAGE_COUNTING:
         return
 
     key = USAGE_KEY.format(date=utc_today())
     try:
+        # One pipeline, so counting costs the caller a single round trip.
         pipeline = traffic.get_redis().pipeline()
-        pipeline.hincrby(key, f"{provider}:{outcome}", 1)
+        pipeline.hincrby(key, f"{provider}:{CALLS}", 1)
+        if failed:
+            pipeline.hincrby(key, f"{provider}:{FAILURES}", 1)
         pipeline.expire(key, EXPIRE_SECONDS)
         pipeline.execute()
     except RedisError as e:
-        logger.warning("Could not count a %s %s: %s", provider, outcome, type(e).__name__)
-
-
-def record_provider_call(provider: str) -> None:
-    """Count a request about to be sent to `provider`."""
-    _record(provider, CALLS)
-
-
-def record_provider_failure(provider: str) -> None:
-    """Count a request to `provider` that did not give us a usable answer."""
-    _record(provider, FAILURES)
+        logger.warning("Could not count a %s call: %s", provider, type(e).__name__)
 
 
 def read_usage(redis: Redis, days: list[date]) -> dict[date, dict[str, dict[str, int]]]:
