@@ -147,24 +147,25 @@ def test_staff_get_the_spread(client, staff, alice, stats_manager):
     assert body["total_crawlers"] == [0] * 6 + [1]
 
 
-def test_a_version_longer_than_an_error_tag_is_cut_to_that_length(stats_manager, alice):
-    _submit(stats_manager, alice, TODAY, "1." * 500, "a")
+@pytest.mark.parametrize(
+    "claimed_version",
+    ["1." * 500, "0.2.0-rc1", "1.\u00b2", "1.\u0663.0", "1." + "9" * 5000, "latest", "1.2", ""],
+)
+def test_a_version_that_is_not_a_release_is_counted_as_unknown(stats_manager, alice, claimed_version):
+    _submit(stats_manager, alice, TODAY, claimed_version, "a")
 
     spread = _spread(stats_manager)
 
     [row] = spread.rows
-    assert len(row.version) == MAX_ERROR_TAG_LENGTH
+    assert row.version == "unknown"
 
 
-def test_a_version_that_is_not_all_numbers_does_not_break_the_ordering(stats_manager, alice):
-    _submit(stats_manager, alice, TODAY, "0.2.0", "a")
-    _submit(stats_manager, alice, TODAY, "0.2.0-rc1", "b")
-    _submit(stats_manager, alice, TODAY, "0.10.0", "c")
+def test_a_device_name_longer_than_an_error_tag_is_cut_to_that_length(stats_manager, alice):
+    _submit(stats_manager, alice, TODAY, "0.2.0", "d" * 5000)
 
-    spread = _spread(stats_manager)
-
-    assert spread.rows[0].version == "0.10.0"
-    assert {row.version for row in spread.rows} == {"0.10.0", "0.2.0", "0.2.0-rc1"}
+    devices_key = CRAWLER_VERSION_DEVICES_KEY.format(date=TODAY, version="0.2.0")
+    [crawler_id] = stats_manager.redis.smembers(devices_key)
+    assert crawler_id == f"{alice.id}:" + "d" * MAX_ERROR_TAG_LENGTH
 
 
 def test_the_counters_expire_with_the_other_stats(stats_manager, alice):

@@ -14,6 +14,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # :stable must never point at code that was not merged to main.
+      - name: Check the tag is on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
 
       - name: Check the tag matches CRAWLER_VERSION
         run: |
