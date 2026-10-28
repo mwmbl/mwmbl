@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count, get_published_counts
-from mwmbl.crawler.batch import Results
+from mwmbl.crawler.batch import MAX_ERROR_TAG_LENGTH, Results
 from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, SeedDomain, UserStats
 from mwmbl.utils import utc_today
 from mwmbl.volunteer_membership import update_volunteer_memberships
@@ -22,6 +23,12 @@ USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
 DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
 DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
+CRAWLER_VERSION_RESULTS_KEY = "crawler-version-results-{date}"
+CRAWLER_VERSION_DEVICES_KEY = "crawler-version-devices-{date}:{version}"
+UNKNOWN_CRAWLER_VERSION = "unknown"
+# ASCII digits only, and few of them: \d matches digits that int() rejects, and int() rejects
+# very long digit strings.
+RELEASED_CRAWLER_VERSION = re.compile(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}")
 
 USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
 # Dated, so a payload built before UTC midnight is never served after it.
@@ -53,6 +60,27 @@ class IndexMeasurement(BaseModel):
     urls: int
     domains: int
     results: int
+
+
+class CrawlerVersionDay(BaseModel):
+    crawlers: int
+    results: int
+
+
+class CrawlerVersionRow(BaseModel):
+    version: str
+    days: list[CrawlerVersionDay]
+
+
+class CrawlerVersionSpread(BaseModel):
+    dates: list[date]
+    rows: list[CrawlerVersionRow]
+    total_crawlers: list[int]
+
+
+def _version_sort_key(version: str) -> tuple[int, ...]:
+    """Orders numerically, so 0.10.0 sorts above 0.9.0."""
+    return tuple(int(part) for part in version.split("."))
 
 
 class MwmblStats(BaseModel):
@@ -283,6 +311,8 @@ class StatsManager:
         self.redis.sadd(users_key, user.username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
+        self._record_crawler_version(results, user, today)
+
         # Persist to Postgres for all-time leaderboard.
         updated = UserStats.objects.filter(
             user=user,
@@ -297,6 +327,63 @@ class StatsManager:
             )
 
         update_volunteer_memberships(user, today)
+
+    def _record_crawler_version(self, results: Results, user: MwmblUser, today: date) -> None:
+        # The version is client-supplied, so only release-shaped ones get a label of their own:
+        # anything else would let a client mint a new row, and new Redis keys, per request.
+        claimed_version = results.crawler_version or ""
+        version = claimed_version if RELEASED_CRAWLER_VERSION.fullmatch(claimed_version) else UNKNOWN_CRAWLER_VERSION
+
+        version_results_key = CRAWLER_VERSION_RESULTS_KEY.format(date=today)
+        self.redis.hincrby(version_results_key, version, len(results.results))
+        self.redis.expire(version_results_key, LONG_EXPIRE_SECONDS)
+
+        # A crawler is its user and device name, not its API key: one key can serve several
+        # crawlers and one user can hold several keys. Crawlers sending no device name count
+        # as one per user.
+        device_name = (results.device_name or "")[:MAX_ERROR_TAG_LENGTH]
+        crawler_id = f"{user.id}:{device_name}"
+        version_devices_key = CRAWLER_VERSION_DEVICES_KEY.format(date=today, version=version)
+        self.redis.sadd(version_devices_key, crawler_id)
+        self.redis.expire(version_devices_key, LONG_EXPIRE_SECONDS)
+
+    def get_crawler_version_spread(self, days: int) -> CrawlerVersionSpread:
+        """Crawlers and results per crawler version for each of the last `days` days, oldest first.
+
+        A crawler that changed version during a day is counted under both, so the per-day
+        total is the distinct crawlers across all versions rather than the column sum.
+        """
+        today = utc_today()
+        dates = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+        results_by_date = {day: self.redis.hgetall(CRAWLER_VERSION_RESULTS_KEY.format(date=day)) for day in dates}
+
+        all_versions = {version for counts in results_by_date.values() for version in counts}
+        known_versions = sorted(all_versions - {UNKNOWN_CRAWLER_VERSION}, key=_version_sort_key, reverse=True)
+        unknown_versions = [UNKNOWN_CRAWLER_VERSION] if UNKNOWN_CRAWLER_VERSION in all_versions else []
+
+        ordered_versions = known_versions + unknown_versions
+        pipeline = self.redis.pipeline(transaction=False)
+        for version in ordered_versions:
+            for day in dates:
+                pipeline.scard(CRAWLER_VERSION_DEVICES_KEY.format(date=day, version=version))
+        crawler_counts = iter(pipeline.execute())
+
+        rows = []
+        for version in ordered_versions:
+            version_days = [
+                CrawlerVersionDay(crawlers=next(crawler_counts), results=int(results_by_date[day].get(version, 0)))
+                for day in dates
+            ]
+            rows.append(CrawlerVersionRow(version=version, days=version_days))
+
+        total_crawlers = []
+        for day in dates:
+            day_keys = [
+                CRAWLER_VERSION_DEVICES_KEY.format(date=day, version=version) for version in results_by_date[day]
+            ]
+            total_crawlers.append(len(self.redis.sunion(day_keys)) if day_keys else 0)
+
+        return CrawlerVersionSpread(dates=dates, rows=rows, total_crawlers=total_crawlers)
 
     def record_blacklisted_removed(self, num_results: int) -> None:
         """Record documents removed from the index by the background blacklist purge.
