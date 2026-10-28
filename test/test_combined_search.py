@@ -30,6 +30,7 @@ from mwmbl.quota import (
     _combined_search_monthly_key,
     _monthly_key,
     get_monthly_combined_search_api_count,
+    get_monthly_combined_search_count,
     get_monthly_count,
 )
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
@@ -593,6 +594,38 @@ def test_a_seed_search_that_cannot_start_a_crawl_is_not_counted(
 
     assert body["crawl_outcome"] == "already_running"
     assert user.seed_searches == 1
+
+
+@pytest.mark.django_db
+def test_a_search_refused_a_crawl_by_a_running_one_skips_staan_and_is_not_charged(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources
+):
+    calls = crawl_sources()
+    first = _crawl(client, access_token, query="tokio").json()
+    calls.pop("staan_query")
+
+    second = _crawl(client, access_token, query="rust").json()
+
+    assert second["crawl_outcome"] == "already_running"
+    assert second["active_crawl_query"] == "tokio"
+    assert "staan_query" not in calls
+    assert calls["retrieve_query"] == "rust"
+    assert second["monthly_usage"] == first["monthly_usage"]
+    assert get_monthly_combined_search_count(user.id) == first["monthly_usage"]
+
+
+@pytest.mark.django_db
+def test_a_search_refused_a_crawl_by_a_full_queue_skips_staan_and_is_not_charged(
+    client, user, access_token, fresh_quota, redis_cache, crawl_sources, settings
+):
+    calls = crawl_sources()
+    settings.SEED_CRAWL_MAX_QUEUED = 0
+
+    body = _crawl(client, access_token).json()
+
+    assert body["crawl_outcome"] == "queue_full"
+    assert "staan_query" not in calls
+    assert body["monthly_usage"] == 0
 
 
 @pytest.mark.django_db

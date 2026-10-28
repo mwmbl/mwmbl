@@ -45,6 +45,7 @@ from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
     CrawlOutcome,
+    crawl_blocked_without_staan,
     get_active_seed_crawl_query,
     get_seed_crawl,
     get_seed_crawl_summary,
@@ -56,6 +57,7 @@ from mwmbl.models import UserBilling
 from mwmbl.quota import (
     check_rate_limit,
     decrement_monthly_combined_search,
+    get_monthly_combined_search_count,
     get_monthly_count,
     increment_monthly_combined_search,
     increment_monthly_combined_search_api_if_below,
@@ -267,6 +269,13 @@ def init_router(ranker) -> None:
         if crawl and request.headers.get("X-API-Key"):
             raise HttpError(403, "crawl=true is not yet available with an API key.")
 
+        blocked_outcome = None
+        active_crawl_query = None
+        if crawl:
+            blocked_outcome = await sync_to_async(crawl_blocked_without_staan)(user.id, q)
+            if blocked_outcome == CrawlOutcome.ALREADY_RUNNING:
+                active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
+
         if not await sync_to_async(check_rate_limit)(user.id):
             raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
 
@@ -287,36 +296,43 @@ def init_router(ranker) -> None:
                 )
         else:
             monthly_limit = await sync_to_async(user_combined_search_monthly_limit)(user.id)
-            # Increment first, then check: this makes the quota check atomic under concurrent
-            # requests (a check-then-increment would let racing requests both pass). Refund the
-            # increment if the caller is over the limit.
-            monthly_usage = await sync_to_async(increment_monthly_combined_search)(user.id)
-            if monthly_usage > monthly_limit:
-                await sync_to_async(decrement_monthly_combined_search)(user.id)
-                raise HttpError(429, f"Combined Search monthly quota exceeded: {monthly_limit} requests per month.")
+            if blocked_outcome:
+                monthly_usage = await sync_to_async(get_monthly_combined_search_count)(user.id)
+            else:
+                # Increment first, then check: this makes the quota check atomic under concurrent
+                # requests (a check-then-increment would let racing requests both pass). Refund the
+                # increment if the caller is over the limit.
+                monthly_usage = await sync_to_async(increment_monthly_combined_search)(user.id)
+                if monthly_usage > monthly_limit:
+                    await sync_to_async(decrement_monthly_combined_search)(user.id)
+                    raise HttpError(429, f"Combined Search monthly quota exceeded: {monthly_limit} requests per month.")
 
-        # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
-        # rather than after it. get_staan_results returns [] on failure by itself.
-        retrieval, staan_results = await asyncio.gather(
-            asyncio.to_thread(ranker.retrieve, q),
-            asyncio.to_thread(get_staan_results, q),
-        )
-        # Ranking only reads what was already retrieved, so the index write can overlap it.
-        results, new_staan_urls = await asyncio.gather(
-            asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results),
-            asyncio.to_thread(index_staan_results, q, staan_results),
-        )
-
-        crawl_outcome = None
-        active_crawl_query = None
-        if crawl:
-            crawl_outcome = await sync_to_async(start_seed_crawl)(
-                user.id, q, retrieval.pages, staan_results, new_staan_urls
+        crawl_outcome = blocked_outcome
+        if blocked_outcome:
+            # No Staan call, so no cost to us and no charge: the search is the index's results alone.
+            retrieval = await asyncio.to_thread(ranker.retrieve, q)
+            results = await asyncio.to_thread(ranker.search_retrieved, retrieval, [])
+            new_staan_urls = set()
+        else:
+            # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
+            # rather than after it. get_staan_results returns [] on failure by itself.
+            retrieval, staan_results = await asyncio.gather(
+                asyncio.to_thread(ranker.retrieve, q),
+                asyncio.to_thread(get_staan_results, q),
             )
-            if crawl_outcome == CrawlOutcome.SCHEDULED:
-                await sync_to_async(record_seed_search)(user.id)
-            if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
-                active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
+            # Ranking only reads what was already retrieved, so the index write can overlap it.
+            results, new_staan_urls = await asyncio.gather(
+                asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results),
+                asyncio.to_thread(index_staan_results, q, staan_results),
+            )
+            if crawl:
+                crawl_outcome = await sync_to_async(start_seed_crawl)(
+                    user.id, q, retrieval.pages, staan_results, new_staan_urls
+                )
+                if crawl_outcome == CrawlOutcome.SCHEDULED:
+                    await sync_to_async(record_seed_search)(user.id)
+                if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
+                    active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(

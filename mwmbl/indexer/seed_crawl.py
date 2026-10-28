@@ -321,6 +321,29 @@ def queue_seed_crawl(
     return CrawlOutcome(outcome.decode())
 
 
+def crawl_blocked_without_staan(user_id: int, query: str) -> CrawlOutcome | None:
+    """Why a crawl of this query cannot be queued whatever Staan returns, or None if it might.
+
+    Mirrors the checks in _QUEUE_SCRIPT that need nothing from Staan, so Combined Search can
+    skip the (billed) Staan call when they would refuse the crawl anyway. Not atomic with the
+    script: a crawl queued in between is still refused there, after Staan has been called.
+    """
+    redis = get_redis_connection("default")
+    record_key = _record_key(user_id, query)
+    if redis.zscore(READY_KEY, record_key) is not None:
+        return CrawlOutcome.ALREADY_RUNNING
+    # The script refuses an already crawled query before anything else, so Staan is needed
+    # to report it.
+    if redis.hget(record_key, "status") == STATUS_DONE.encode():
+        return None
+    active_record_key = redis.get(_active_key(user_id))
+    if active_record_key is not None and redis.exists(active_record_key):
+        return CrawlOutcome.ALREADY_RUNNING
+    if redis.zcard(READY_KEY) >= settings.SEED_CRAWL_MAX_QUEUED:
+        return CrawlOutcome.QUEUE_FULL
+    return None
+
+
 def get_active_seed_crawl_query(user_id: int) -> str | None:
     """The query of this user's queued or running crawl, or None if they have none."""
     redis = get_redis_connection("default")
