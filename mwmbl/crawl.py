@@ -21,8 +21,8 @@ logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
 # The mwmbl imports below reach Django models, so the app registry has to be ready before
-# any of them run. The app registry creates the index on startup, so the data path has to
-# exist before that.
+# any of them run. The app registry creates the external cache on startup, so the data path
+# has to exist before that.
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
@@ -33,6 +33,7 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
+from mwmbl.apps import create_index
 from mwmbl.crawler.batch import (
     MAX_ERROR_MESSAGE_LENGTH,
     CrawlerErrorReport,
@@ -645,6 +646,8 @@ def main():
     )
     args = parser.parse_args()
 
+    # Volunteers start the crawler with no setup step, so it creates its own index.
+    create_index(settings.INDEX_NAME, settings.NUM_PAGES)
     if args.once:
         run_once()
     else:

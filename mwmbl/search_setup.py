@@ -2,6 +2,7 @@ from pathlib import Path
 
 from django.conf import settings
 
+from mwmbl.apps import index_shape_mismatch
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -16,7 +17,16 @@ get_snapshot_blacklist()
 
 completer = Completer()
 index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
+# Nothing creates the index on startup, so a missing file here is most likely a data volume
+# that did not mount - which an empty index would have hidden.
+if not index_path.exists():
+    raise FileNotFoundError(f"No search index at {index_path}: create it with `manage.py create_index`")
 tiny_index = TinyIndex(item_factory=Document, index_path=index_path)
+# A size that disagrees with settings means NUM_PAGES was changed against the only copy of
+# the crawl. Refuse to serve rather than read it with the wrong geometry.
+index_mismatch = index_shape_mismatch(tiny_index, settings.NUM_PAGES)
+if index_mismatch is not None:
+    raise ValueError(f"{index_mismatch} for {index_path}")
 tiny_index.__enter__()
 
 ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))

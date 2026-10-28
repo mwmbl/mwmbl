@@ -25,7 +25,7 @@ IMAGE_BUILD_INPUTS = ("Dockerfile.crawler", "pyproject.toml", "uv.lock")
 CRAWLER_DIRECTORIES = ("mwmbl_rank/", "mwmbl/resources/", "mwmbl/justext/stoplists/")
 VERSION_PATTERN = re.compile(r'^CRAWLER_VERSION: str = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
 
-# Importing mwmbl.crawl creates its ~400MB index under $HOME/.mwmbl, so it runs in a child
+# Importing mwmbl.crawl creates the external cache under $HOME/.mwmbl, so it runs in a child
 # process with a throwaway HOME. It also prints to stdout, hence the output file; its stderr
 # is left alone so an import error shows in the CI log.
 LIST_MODULES = """
