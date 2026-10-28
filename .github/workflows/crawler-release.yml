@@ -11,7 +11,10 @@ on:
     paths:
       - mwmbl/crawler/version.py
 
-# Two merges in quick succession must not race to publish :stable out of order.
+# Two merges in quick succession must not race to publish :stable out of order. GitHub keeps
+# one pending run per group, so a third bump arriving while one runs and one waits cancels
+# the waiting one: that version is skipped and never tagged, but :stable still ends on the
+# newest.
 concurrency:
   group: crawler-release
   cancel-in-progress: false

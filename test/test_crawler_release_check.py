@@ -19,12 +19,19 @@ def test_changed_crawler_files_ignore_server_only_changes_and_the_version_itself
         "mwmbl/crawler/version.py",
         "uv.lock",
         "mwmbl_rank/src/lib.rs",
+        "mwmbl/resources/document_counts.json",
+        "mwmbl/templates/index.html",
         "README.md",
     ]
 
     crawler_changes = changed_crawler_files(changed, {"mwmbl/crawler/retrieve.py", "mwmbl/crawler/version.py"})
 
-    assert crawler_changes == ["mwmbl/crawler/retrieve.py", "uv.lock", "mwmbl_rank/src/lib.rs"]
+    assert crawler_changes == [
+        "mwmbl/crawler/retrieve.py",
+        "uv.lock",
+        "mwmbl_rank/src/lib.rs",
+        "mwmbl/resources/document_counts.json",
+    ]
 
 
 def test_parse_version_compares_numerically():

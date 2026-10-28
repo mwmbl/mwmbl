@@ -46,7 +46,7 @@ def _auth(user) -> dict:
 
 
 def test_crawler_version_is_what_the_release_tags_match():
-    # .github/workflows/crawler-release.yml only publishes crawler-vX.Y.Z tags.
+    # .github/workflows/crawler-release.yml tags each release crawler-vX.Y.Z.
     assert re.fullmatch(r"\d+\.\d+\.\d+", CRAWLER_VERSION)
 
 
