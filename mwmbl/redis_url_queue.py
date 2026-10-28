@@ -157,17 +157,20 @@ class RedisURLQueue:
             claimed_domains.add(domain)
             return True
 
-        urls = [f"https://{random_domain}/"] if claim(random_domain) else []
-
         # At most one URL per domain, since the batch is crawled concurrently: the samples
-        # above can pick a core domain again, and the seed can repeat any of them. Unless the
-        # seed's domain is the only one, as with a single-domain allowlist: dropping it then
-        # would leave that domain's queued URLs never popped.
+        # above can pick a core domain again, and the seed can repeat any of them. When the
+        # seed's domain is the only one, as with a single-domain allowlist, a queued URL takes
+        # the seed's place: crawling only the seed would leave the queue never popped, and
+        # crawling both fetched from the site twice at once - Hacker News answers that with a
+        # 503 - and let one result's delay overwrite the other's in release_domains.
         domains = [
             domain for domain in dict.fromkeys(domains) if not self.blacklist_provider.is_domain_blacklisted(domain)
         ]
-        if domains != [random_domain]:
+        if domains == [random_domain] and self.redis.exists(DOMAIN_URLS_KEY.format(domain=random_domain)):
+            urls = []
+        else:
             domains = [domain for domain in domains if domain != random_domain]
+            urls = [f"https://{random_domain}/"] if claim(random_domain) else []
         logger.info(f"Getting batch from domains {domains}")
 
         # Pop the highest scoring URL from each domain
