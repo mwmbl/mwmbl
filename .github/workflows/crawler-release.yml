@@ -1,9 +1,10 @@
 name: Release the crawler Docker image
 
 # Raising CRAWLER_VERSION in mwmbl/crawler/version.py on main publishes mwmbl/crawler:X.Y.Z,
-# :X.Y and :stable, then tags the commit crawler-vX.Y.Z. :latest still follows main
-# (docker-publish.yml). CI fails a pull request that changes the crawler without raising
-# the version, so every crawler change reaches :stable.
+# :X.Y, :stable and :latest, then tags the commit crawler-vX.Y.Z. :latest moves with releases
+# rather than with every merge, so existing setups pulling the untagged image get each
+# release and nothing in between. CI fails a pull request that changes the crawler without
+# raising the version, so every crawler change reaches a release.
 on:
   push:
     branches: [main]
@@ -69,6 +70,7 @@ jobs:
             mwmbl/crawler:${{ steps.version.outputs.version }}
             mwmbl/crawler:${{ steps.version.outputs.minor }}
             mwmbl/crawler:stable
+            mwmbl/crawler:latest
           platforms: linux/amd64,linux/arm64
 
       # Tagged only after the push succeeds, so an existing tag means a published image.

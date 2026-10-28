@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.crawler
-    image: mwmbl/crawler
+    image: mwmbl/crawler:stable
     container_name: mwmbl-crawler
     pull_policy: always
     depends_on:
