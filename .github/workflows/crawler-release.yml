@@ -1,11 +1,22 @@
 name: Release the crawler Docker image
 
-# Push a tag crawler-vX.Y.Z matching mwmbl/crawler/version.py to publish mwmbl/crawler:X.Y.Z,
-# :X.Y and :stable. :latest still follows main (docker-publish.yml).
+# Raising CRAWLER_VERSION in mwmbl/crawler/version.py on main publishes mwmbl/crawler:X.Y.Z,
+# :X.Y and :stable, then tags the commit crawler-vX.Y.Z. :latest still follows main
+# (docker-publish.yml). CI fails a pull request that changes the crawler without raising
+# the version, so every crawler change reaches :stable.
 on:
   push:
-    tags:
-      - "crawler-v[0-9]+.[0-9]+.[0-9]+"
+    branches: [main]
+    paths:
+      - mwmbl/crawler/version.py
+
+# Two merges in quick succession must not race to publish :stable out of order.
+concurrency:
+  group: crawler-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   release:
@@ -14,56 +25,55 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # :stable must never point at code that was not merged to main.
-      - name: Check the tag is on main
+      - name: Read CRAWLER_VERSION
+        id: version
         run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::Tag $GITHUB_REF_NAME is not on main"
-            exit 1
-          fi
+          version=$(python3 -c "import runpy; print(runpy.run_path('mwmbl/crawler/version.py')['CRAWLER_VERSION'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
 
-      - name: Check the tag matches CRAWLER_VERSION
+      # An edit to version.py that leaves the version alone, or a revert to an older one,
+      # must not move :stable.
+      - name: Check the version is not already released
+        id: released
         run: |
-          tag_version="${GITHUB_REF_NAME#crawler-v}"
-          code_version=$(python3 -c "import runpy; print(runpy.run_path('mwmbl/crawler/version.py')['CRAWLER_VERSION'])")
-          if [[ "$tag_version" != "$code_version" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match CRAWLER_VERSION $code_version"
-            exit 1
+          if git ls-remote --exit-code --tags origin "refs/tags/crawler-v${{ steps.version.outputs.version }}"; then
+            echo "Crawler ${{ steps.version.outputs.version }} is already released"
+            echo "released=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Image tags
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: mwmbl/crawler
-          flavor: latest=false
-          tags: |
-            type=match,pattern=crawler-v(\d+\.\d+\.\d+),group=1
-            type=match,pattern=crawler-v(\d+\.\d+)\.\d+,group=1
-            type=raw,value=stable
 
       - name: Set up QEMU
+        if: steps.released.outputs.released != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.released.outputs.released != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: steps.released.outputs.released != 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
+        if: steps.released.outputs.released != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.crawler
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            mwmbl/crawler:${{ steps.version.outputs.version }}
+            mwmbl/crawler:${{ steps.version.outputs.minor }}
+            mwmbl/crawler:stable
           platforms: linux/amd64,linux/arm64
+
+      # Tagged only after the push succeeds, so an existing tag means a published image.
+      - name: Tag the release
+        if: steps.released.outputs.released != 'true'
+        run: |
+          git tag "crawler-v${{ steps.version.outputs.version }}"
+          git push origin "crawler-v${{ steps.version.outputs.version }}"
