@@ -2,7 +2,11 @@
 
 import pytest
 
-from mwmbl.crawler.release_check import changed_crawler_files, crawler_source_files, parse_version
+from mwmbl.crawler import release_check
+from mwmbl.crawler.release_check import changed_crawler_files, crawler_source_files, main, parse_version
+from mwmbl.crawler.version import CRAWLER_VERSION
+
+CRAWLER_FILE = "mwmbl/crawler/retrieve.py"
 
 
 def test_crawler_source_files_follow_the_entry_point():
@@ -41,3 +45,39 @@ def test_parse_version_compares_numerically():
 def test_parse_version_rejects_a_version_it_cannot_compare():
     with pytest.raises(AssertionError):
         parse_version('CRAWLER_VERSION: str = "1.0"\n')
+
+
+def _fake_git(monkeypatch, changed_files: list[str], base_version: str):
+    def git(*args: str) -> str:
+        if args[0] == "diff":
+            return "\n".join(changed_files) + "\n"
+        assert args == ("show", "base:mwmbl/crawler/version.py")
+        return f'CRAWLER_VERSION: str = "{base_version}"\n'
+
+    monkeypatch.setattr(release_check, "_git", git)
+    monkeypatch.setattr(release_check, "crawler_source_files", lambda: {CRAWLER_FILE})
+
+
+def test_main_passes_when_no_crawler_code_changed(monkeypatch):
+    _fake_git(monkeypatch, ["mwmbl/platform/api.py"], CRAWLER_VERSION)
+
+    assert main("base") == 0
+
+
+def test_main_passes_when_the_version_was_raised(monkeypatch):
+    _fake_git(monkeypatch, [CRAWLER_FILE], "0.0.1")
+
+    assert main("base") == 0
+
+
+def test_main_fails_and_lists_crawler_changes_without_a_version_bump(monkeypatch, capsys):
+    _fake_git(monkeypatch, [CRAWLER_FILE, "mwmbl/platform/api.py"], CRAWLER_VERSION)
+
+    assert main("base") == 1
+    output = capsys.readouterr().out
+    assert CRAWLER_FILE in output
+    assert "mwmbl/platform/api.py" not in output
+
+
+def test_git_runs_in_the_repository():
+    assert release_check._git("rev-parse", "--is-inside-work-tree") == "true\n"
