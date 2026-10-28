@@ -294,6 +294,35 @@ def test_nothing_is_queued_once_the_queue_is_full(redis_cache, monkeypatch, sett
     assert seed_crawl.get_seed_crawl(2, "tokio") is None
 
 
+def test_a_crawl_is_not_blocked_without_staan_when_nothing_refuses_it(redis_cache):
+    assert seed_crawl.crawl_blocked_without_staan(1, "tokio") is None
+
+
+def test_a_users_running_crawl_blocks_any_query_without_staan(redis_cache, monkeypatch):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set())
+
+    assert seed_crawl.crawl_blocked_without_staan(1, "tokio") == seed_crawl.CrawlOutcome.ALREADY_RUNNING
+    assert seed_crawl.crawl_blocked_without_staan(1, "rust") == seed_crawl.CrawlOutcome.ALREADY_RUNNING
+    assert seed_crawl.crawl_blocked_without_staan(2, "tokio") is None
+
+
+def test_a_full_queue_blocks_a_crawl_without_staan(redis_cache, monkeypatch, settings):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_QUEUED = 1
+    seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set())
+
+    assert seed_crawl.crawl_blocked_without_staan(2, "tokio") == seed_crawl.CrawlOutcome.QUEUE_FULL
+
+
+@pytest.mark.django_db
+def test_a_query_already_crawled_still_needs_staan_to_report_it(fake_web, redis_cache, user, index_path, worker):
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    worker(index_path)
+
+    assert seed_crawl.crawl_blocked_without_staan(user.id, "tokio") is None
+
+
 # ---------------------------------------------------------------------------
 # Running a crawl
 # ---------------------------------------------------------------------------

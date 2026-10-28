@@ -269,15 +269,15 @@ def init_router(ranker) -> None:
         if crawl and request.headers.get("X-API-Key"):
             raise HttpError(403, "crawl=true is not yet available with an API key.")
 
+        if not await sync_to_async(check_rate_limit)(user.id):
+            raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
+
         blocked_outcome = None
         active_crawl_query = None
         if crawl:
             blocked_outcome = await sync_to_async(crawl_blocked_without_staan)(user.id, q)
             if blocked_outcome == CrawlOutcome.ALREADY_RUNNING:
                 active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
-
-        if not await sync_to_async(check_rate_limit)(user.id):
-            raise HttpError(429, "Rate limit exceeded: maximum 5 requests per second.")
 
         # authenticate_user takes the API key over a bearer token whenever the header is
         # present, so this is how the caller authenticated. Keyed requests are billed against
