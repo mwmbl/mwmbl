@@ -4,8 +4,10 @@ from pathlib import Path
 
 from django.apps import apps
 from django.core.management import call_command
+from django.core.management.base import BaseCommand
 
 from mwmbl import crawl
+from mwmbl.management.commands.create_index import Command
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 
@@ -25,6 +27,21 @@ def test_create_index_command_creates_an_index_of_the_configured_size(settings, 
 
     index = TinyIndex(item_factory=Document, index_path=tmp_path / settings.INDEX_NAME)
     assert index.num_pages == settings.NUM_PAGES
+
+
+def test_create_index_command_skips_system_checks(settings, tmp_path, monkeypatch):
+    # The checks import search_setup via the URLconf, which fails when there is no index yet.
+    settings.DATA_PATH = str(tmp_path)
+
+    def fail_checks(*args, **kwargs):
+        raise AssertionError("create_index must not run the system checks")
+
+    monkeypatch.setattr(BaseCommand, "check", fail_checks)
+
+    # Run it as manage.py does: call_command skips the checks by default.
+    Command().run_from_argv(["manage.py", "create_index"])
+
+    assert (tmp_path / settings.INDEX_NAME).exists()
 
 
 def test_crawler_main_creates_its_index(settings, tmp_path, monkeypatch):

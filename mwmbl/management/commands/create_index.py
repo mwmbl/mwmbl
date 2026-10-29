@@ -14,6 +14,9 @@ from mwmbl.apps import create_index
 
 class Command(BaseCommand):
     help = "Create the search index at DATA_PATH/INDEX_NAME if it does not exist"
+    # The system checks import the URLconf, which imports search_setup, which fails while
+    # the index is missing - the very case this command exists for.
+    requires_system_checks = []
 
     def handle(self, *args, **options):
         create_index(settings.INDEX_NAME, settings.NUM_PAGES)
