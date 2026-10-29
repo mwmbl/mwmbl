@@ -75,6 +75,20 @@ Don't add further end-to-end NDCG runs that grade newly surfaced pages with Haik
 
 ## Pull requests
 
-Keep them small: at most about 500 added lines, tests included. Say what changed, why,
+Create a pull request for each production code change.
+
+Keep them small: at most 500 added lines, tests included. Say what changed, why,
 and how it was verified. Reference the issue with `Part of #<N>`, or `Closes #<N>` when
 it finishes the issue.
+
+Use subagents to review each pull request with a standard code review, and where
+appropriate:
+ - Security review
+ - Trust and safety review
+   - Does this change allow bad actors to negatively influence search results?
+ - Holistic review that answers these questions:
+   - Does it move the project goals forward?
+   - Is it consistent with our values?
+ 
+Fix and push changes for any issues that can be fixed straightforwardly, and
+raise other issues with the user.
