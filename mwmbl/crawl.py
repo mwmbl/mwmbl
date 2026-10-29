@@ -55,6 +55,7 @@ from mwmbl.crawler.env_vars import (
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
+from mwmbl.crawler.politeness import abandon_domains, release_domains
 from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
@@ -349,9 +350,18 @@ class Crawler:
         """
         user_id = "test"
         urls = self.url_queue.get_batch(user_id)
+        if not urls:
+            logger.info("Every queued domain was crawled too recently. Sleeping for 10 seconds.")
+            time.sleep(10)
+            return
         logger.info(f"Processing batch of {len(urls)} URLs on {CRAWL_THREADS} threads")
 
-        results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
+        try:
+            results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
+        except Exception:
+            abandon_domains(self.redis, urls)
+            raise
+        release_domains(self.redis, results)
 
         js_timestamp = int(time.time() * 1000)
         batch = HashedBatch.parse_obj(

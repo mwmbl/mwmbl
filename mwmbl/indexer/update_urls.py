@@ -36,7 +36,8 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
             timestamp = get_datetime_from_timestamp(item.timestamp / 1000.0)
             url_timestamps[item.url] = timestamp
             url_users[item.url] = batch.user_id_hash
-            if item.content is None:
+            page = item.page
+            if page is None:
                 url_statuses[item.url] = get_url_error_status(item)
             else:
                 url_statuses[item.url] = URLStatus.CRAWLED
@@ -45,7 +46,7 @@ def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: Re
                 except ValueError:
                     logger.info(f"Couldn't parse URL {item.url}")
                     continue
-                for link in item.content.all_links:
+                for link in page.all_links:
                     process_link(
                         batch.user_id_hash,
                         crawled_page_domain,

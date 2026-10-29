@@ -110,6 +110,19 @@ class Item(Schema):
         description="Error details. Present only when the crawl failed.",
     )
 
+    @property
+    def page(self) -> Optional[ItemContent]:
+        """The page's content, or None if the item holds an error or a server's refusal.
+
+        A 403, 429 or 5xx usually still has a body: a Cloudflare challenge ("Just a moment..."),
+        a rate limit notice, an error page. Indexing that would put it in the index under the
+        URL it stands in for, and following its links would crawl the block page's links.
+        Items from crawlers that do not report a status are taken at their word.
+        """
+        if self.status is not None and not 200 <= self.status < 300:
+            return None
+        return self.content
+
 
 class NewBatchRequest(Schema):
     """Request for a new batch of URLs to crawl."""
