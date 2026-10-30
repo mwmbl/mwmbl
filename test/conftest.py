@@ -14,7 +14,15 @@ accidental sync calls leaking into async paths.
 import os
 
 import pytest
+from django.conf import settings
 from django_redis import get_redis_connection
+
+from mwmbl.apps import create_index
+
+
+def pytest_sessionstart(session):
+    """Create the test search index before collection, which imports mwmbl.search_setup."""
+    create_index(settings.INDEX_NAME, settings.NUM_PAGES)
 
 
 @pytest.fixture
