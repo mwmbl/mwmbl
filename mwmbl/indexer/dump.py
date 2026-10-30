@@ -1,22 +1,19 @@
-"""Full backups of the search index to B2.
+"""Full dumps of the search index to B2.
 
-The index is the only copy of much of what it holds - seed crawls, curation, Staan copies
-- so rebuilding it from the crawl batches would recover only part of it. A full backup
-streams the whole file, zstd-compressed, into one object, and a manifest written beside
+A dump is both the index's backup and its public release. The index is the only copy of
+much of what it holds - seed crawls, curation, Staan copies - so rebuilding it from the
+crawl batches would recover only part of it. And it is open data: /page already serves it
+a page at a time, and a dump is the same bytes in one download. A full dump streams the whole file, zstd-compressed, into one object, and a manifest written beside
 it once the upload has finished records its size and SHA-256. An object with no manifest
 is an upload that did not finish.
 
 The file is written to in place all the time, and a page caught half-written will never
 decode again, so it is read in chunks under a shared lock on each chunk's byte range.
 Writers take an exclusive lock on the page they change (TinyIndex.page), so every page in
-the backup is one that some writer actually stored. Pages are independent, so consistency
+the dump is one that some writer actually stored. Pages are independent, so consistency
 across the file is not needed.
-
-The objects are encrypted with SSE-C: B2 holds the data but not the key, which is kept off
-the host. Losing the key loses the backups.
 """
 
-import base64
 import fcntl
 import hashlib
 import json
@@ -52,28 +49,23 @@ DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
 RANGE_ATTEMPTS = 5
 RANGE_RETRY_SECONDS = 2
 ZSTD_LEVEL = 3
-SSE_ALGORITHM = "AES256"
 
 
-def backup_settings_from_environment():
-    """The B2 client, bucket and encryption key for backups.
+def dump_settings_from_environment():
+    """The B2 client and bucket for dumps.
 
-    Read from the environment when a backup runs rather than in settings, so that a server
-    with backups not yet configured still starts. The backup key is its own, separate from
-    the crawl bucket's, and should be one that cannot delete files.
+    Read from the environment when a dump runs rather than in settings, so that a server
+    with dumps not yet configured still starts. The dump key is its own, separate from the
+    crawl bucket's, and should be one that cannot delete files.
     """
     client = boto3.client(
         "s3",
-        endpoint_url=os.environ["MWMBL_BACKUP_ENDPOINT_URL"],
-        aws_access_key_id=os.environ["MWMBL_BACKUP_KEY_ID"],
-        aws_secret_access_key=os.environ["MWMBL_BACKUP_APPLICATION_KEY"],
+        endpoint_url=os.environ["MWMBL_DUMP_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["MWMBL_DUMP_KEY_ID"],
+        aws_secret_access_key=os.environ["MWMBL_DUMP_APPLICATION_KEY"],
         config=Config(retries={"mode": "standard", "max_attempts": 10}),
     )
-    # 32 random bytes, base64-encoded: `openssl rand -base64 32`.
-    encryption_key = base64.b64decode(os.environ["MWMBL_BACKUP_ENCRYPTION_KEY"], validate=True)
-    if len(encryption_key) != 32:
-        raise ValueError(f"MWMBL_BACKUP_ENCRYPTION_KEY must be 32 bytes, base64-encoded; it is {len(encryption_key)}")
-    return client, os.environ["MWMBL_BACKUP_BUCKET"], encryption_key
+    return client, os.environ["MWMBL_DUMP_BUCKET"]
 
 
 class LockedIndexReader:
@@ -132,8 +124,8 @@ class LockedIndexReader:
         return chunk
 
 
-def backup_index(client, bucket: str, encryption_key: bytes, index_path: Path) -> str:
-    """Upload a full backup of the index, returning the key of the backup object."""
+def dump_index(client, bucket: str, index_path: Path) -> str:
+    """Upload a full dump of the index, returning the key of the dump object."""
     started = datetime.now(timezone.utc)
     key = f"index/{index_path.name}/full/{started:%Y-%m-%dT%H%M%SZ}.zst"
     reader = LockedIndexReader(index_path)
@@ -142,12 +134,10 @@ def backup_index(client, bucket: str, encryption_key: bytes, index_path: Path) -
     # A source that cannot seek is buffered a part at a time, ten parts by default - 640 MB
     # on the host serving search. One more than are in flight keeps the uploads busy.
     transfer_config.max_in_memory_upload_chunks = UPLOAD_CONCURRENCY + 1
-    logger.info(f"Backing up {reader.size} bytes of {index_path} to {key} in parts of {part_size} bytes")
+    logger.info(f"Dumping {reader.size} bytes of {index_path} to {key} in parts of {part_size} bytes")
     try:
         compressed = zstandard.ZstdCompressor(level=ZSTD_LEVEL).stream_reader(reader)
-        client.upload_fileobj(
-            compressed, bucket, key, ExtraArgs=_encryption_args(encryption_key), Config=transfer_config
-        )
+        client.upload_fileobj(compressed, bucket, key, Config=transfer_config)
     finally:
         reader.close()
 
@@ -161,19 +151,18 @@ def backup_index(client, bucket: str, encryption_key: bytes, index_path: Path) -
         "finished": datetime.now(timezone.utc).isoformat(),
     }
     client.put_object(Bucket=bucket, Key=_manifest_key(key), Body=json.dumps(manifest).encode("utf8"))
-    logger.info(f"Backed up {index_path} to {key}")
+    logger.info(f"Dumped {index_path} to {key}")
     return key
 
 
 class _RangedObjectReader:
     """A file-like view of an object, fetched a range at a time."""
 
-    def __init__(self, client, bucket: str, key: str, encryption_key: bytes):
+    def __init__(self, client, bucket: str, key: str):
         self._client = client
         self._bucket = bucket
         self._key = key
-        self._encryption_key = encryption_key
-        head = client.head_object(Bucket=bucket, Key=key, **_encryption_args(encryption_key))
+        head = client.head_object(Bucket=bucket, Key=key)
         self._size = head["ContentLength"]
         self._position = 0
 
@@ -198,7 +187,6 @@ class _RangedObjectReader:
             Bucket=self._bucket,
             Key=self._key,
             Range=f"bytes={self._position}-{end}",
-            **_encryption_args(self._encryption_key),
         )
         data = response["Body"].read()
         expected = end - self._position + 1
@@ -207,8 +195,8 @@ class _RangedObjectReader:
         return data
 
 
-def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_path: Path):
-    """Download a full backup to output_path, checking it against its manifest.
+def restore_index(client, bucket: str, key: str, output_path: Path):
+    """Download a full dump to output_path, checking it against its manifest.
 
     It is written beside output_path and renamed into place only once it checks out. A
     restore that fails removes what it wrote, which can be most of the free disk; one that
@@ -220,7 +208,7 @@ def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_p
     partial_path = output_path.with_name(output_path.name + ".partial")
     sha256 = hashlib.sha256()
     size = 0
-    source = _RangedObjectReader(client, bucket, key, encryption_key)
+    source = _RangedObjectReader(client, bucket, key)
     decompressed = zstandard.ZstdDecompressor().stream_reader(source)
     try:
         with open(partial_path, "wb") as output_file:
@@ -242,8 +230,3 @@ def restore_index(client, bucket: str, encryption_key: bytes, key: str, output_p
 
 def _manifest_key(key: str) -> str:
     return key + ".json"
-
-
-def _encryption_args(encryption_key: bytes) -> dict:
-    # boto3 base64-encodes the key and adds its MD5 itself.
-    return {"SSECustomerAlgorithm": SSE_ALGORITHM, "SSECustomerKey": encryption_key}
