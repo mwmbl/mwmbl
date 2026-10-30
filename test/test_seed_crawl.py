@@ -276,6 +276,20 @@ def test_a_user_can_queue_several_crawls_up_to_their_limit(redis_cache, monkeypa
     assert len(_queued_jobs(redis_cache)) == 3
 
 
+@pytest.mark.django_db
+def test_a_finished_crawl_frees_its_place_for_the_users_next(fake_web, redis_cache, user, index_path, worker, settings):
+    settings.SEED_CRAWL_MAX_PER_USER = 1
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    assert (
+        seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
+        == seed_crawl.CrawlOutcome.TOO_MANY_CRAWLS
+    )
+
+    worker(index_path)
+
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
 def test_a_queued_crawl_counts_the_crawls_ahead_of_it(redis_cache):
     seed_crawl.queue_seed_crawl(1, "tokio", [SEED], [], {"tokio.rs": 1})
     seed_crawl.queue_seed_crawl(2, "tokio", [SEED], [], {"tokio.rs": 1})
