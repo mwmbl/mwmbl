@@ -26,8 +26,9 @@ the next claim changes. So there is nothing to clean up after a worker, however 
 
 The crawls run in their own process rather than on the django-background-tasks queue: they
 take minutes, and in series with the periodic tasks they would hold up the usage sync and
-the Polar report. One crawl runs at a time, each user has at most one
-queued or running, and at most SEED_CRAWL_MAX_QUEUED are, so nobody can fill the queue.
+the Polar report. One crawl runs at a time, each user has at most
+SEED_CRAWL_MAX_PER_USER queued or running, and at most SEED_CRAWL_MAX_QUEUED are, so nobody
+can fill the queue.
 
 The new pages a crawl added are counted on the user for their stats, and what it found on
 each of Staan's domains is scored for crawlers as seed domains - see
@@ -78,6 +79,7 @@ class CrawlOutcome(StrEnum):
     ALREADY_INDEXED = "already_indexed"
     ALREADY_RUNNING = "already_running"
     ALREADY_CRAWLED = "already_crawled"
+    TOO_MANY_CRAWLS = "too_many_crawls"
     QUEUE_FULL = "queue_full"
 
 
@@ -88,10 +90,14 @@ READY_KEY = "seed-crawl:ready"
 POLL_SECONDS = 1
 
 
+def _user_prefix(user_id: int) -> str:
+    return f"seed-crawl:{user_id}:"
+
+
 def _record_key(user_id: int, query: str) -> str:
     # Hashed so that a user's private query is not spelled out in the key space.
     query_hash = hashlib.sha256(query.encode()).hexdigest()
-    return f"seed-crawl:{user_id}:{query_hash}"
+    return f"{_user_prefix(user_id)}{query_hash}"
 
 
 def _pages_key(record_key: str) -> str:
@@ -104,12 +110,6 @@ def _counted_urls_key(record_key: str) -> str:
 
 def _domain_pages_key(record_key: str) -> str:
     return f"{record_key}:domain-pages"
-
-
-def _active_key(user_id: int) -> str:
-    # Named apart from the expiring lock that held the user's query before crawls were
-    # leased, so those left behind by the deploy cannot block anyone.
-    return f"seed-crawl:{user_id}:active-crawl"
 
 
 def _now() -> str:
@@ -234,8 +234,9 @@ def start_seed_crawl(
     the index - count as pages the crawl added; the rest the index already held.
 
     Nothing is queued when Staan returned nothing crawlable, when every Staan result is
-    already in the index, when this user has already crawled the query, when they already
-    have a crawl queued or running, or when the queue is full.
+    already in the index, when this user has already crawled the query or has it queued or
+    running, when they have SEED_CRAWL_MAX_PER_USER crawls queued or running, or when the
+    queue is full.
     """
     blacklisted_urls = find_blacklisted_urls(staan_results)
     allowed = [document for document in staan_results if document.url not in blacklisted_urls]
@@ -253,36 +254,46 @@ def start_seed_crawl(
     return queue_seed_crawl(user_id, query, seed_urls, new_seed_urls, domains)
 
 
-# Queues a crawl, unless the user already has one queued or running, has crawled the query
-# already, or the queue is full. One script, so the user's active crawl, the ready set and
-# the record can never disagree. A failed earlier crawl's pages are kept: the new one adds
+# Queues a crawl, unless the user has this query queued or running or has crawled it
+# already, has too many crawls queued or running, or the queue is full. The ready set is the
+# only record of what is queued or running, so the counts are taken from it, in the same
+# script as the queueing, and can never disagree with it. It holds at most
+# SEED_CRAWL_MAX_QUEUED crawls, so walking it is cheap. One whose record has expired is not
+# counted: the next claim drops it. A failed earlier crawl's pages are kept: the new one adds
 # to them, and the user's total already includes them. Its progress and domains are this
 # crawl's alone. The token is bumped so that no worker still holding an earlier crawl of the
-# query can write to this one. The user's active crawl key expires with the record, so
-# neither can outlive the other, and one left pointing at a record that has gone is ignored.
+# query can write to this one.
 _QUEUE_SCRIPT = """
-local record, active, ready, domain_pages = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
+local record, ready, domain_pages = KEYS[1], KEYS[2], KEYS[3]
+local max_queued, max_per_user, user_prefix = tonumber(ARGV[1]), tonumber(ARGV[2]), ARGV[3]
 if redis.call('ZSCORE', ready, record) then
     return 'already_running'
 end
 if redis.call('HGET', record, 'status') == 'done' then
     return 'already_crawled'
 end
-local current = redis.call('GET', active)
-if current and redis.call('EXISTS', current) == 1 then
-    return 'already_running'
+local queued, users_queued = 0, 0
+for _, member in ipairs(redis.call('ZRANGE', ready, 0, -1)) do
+    if redis.call('EXISTS', member) == 1 then
+        queued = queued + 1
+        if string.sub(member, 1, #user_prefix) == user_prefix then
+            users_queued = users_queued + 1
+        end
+    end
 end
-if redis.call('ZCARD', ready) >= tonumber(ARGV[1]) then
+if users_queued >= max_per_user then
+    return 'too_many_crawls'
+end
+if queued >= max_queued then
     return 'queue_full'
 end
-redis.call('HSET', record, unpack(ARGV, 4))
+redis.call('HSET', record, unpack(ARGV, 6))
 redis.call('HSETNX', record, 'pages_crawled', 0)
 redis.call('HDEL', record, 'finished_at', 'crawl_started_at', 'discovered', 'attempts', 'last_round_started')
 redis.call('HINCRBY', record, 'token', 1)
-redis.call('EXPIRE', record, ARGV[3])
+redis.call('EXPIRE', record, ARGV[5])
 redis.call('DEL', domain_pages)
-redis.call('SET', active, record, 'EX', ARGV[3])
-redis.call('ZADD', ready, ARGV[2], record)
+redis.call('ZADD', ready, ARGV[4], record)
 return 'scheduled'
 """
 
@@ -303,17 +314,17 @@ def queue_seed_crawl(
         "domains": json.dumps(domains),
         "new_seed_urls": json.dumps(new_seed_urls),
         "frontier": Frontier.from_seeds(seed_urls, set(domains)).to_json(),
-        "active_key": _active_key(user_id),
     }
     fields = [item for pair in record.items() for item in pair]
     outcome = get_redis_connection("default").eval(
         _QUEUE_SCRIPT,
-        4,
+        3,
         record_key,
-        _active_key(user_id),
         READY_KEY,
         _domain_pages_key(record_key),
         settings.SEED_CRAWL_MAX_QUEUED,
+        settings.SEED_CRAWL_MAX_PER_USER,
+        _user_prefix(user_id),
         queued_at,
         settings.SEED_CRAWL_RECORD_TTL_SECONDS,
         *fields,
@@ -321,16 +332,42 @@ def queue_seed_crawl(
     return CrawlOutcome(outcome.decode())
 
 
-def get_active_seed_crawl_query(user_id: int) -> str | None:
-    """The query of this user's queued or running crawl, or None if they have none."""
+def _queued_crawls(redis) -> list[tuple[str, str, float]]:
+    """The record key, query and queue time of every crawl queued or running, oldest first.
+
+    Ordered by when each was queued rather than by its score, which while a worker holds the
+    crawl is when its lease ends.
+    """
+    record_keys = [record_key.decode() for record_key in redis.zrange(READY_KEY, 0, -1)]
+    pipeline = redis.pipeline()
+    for record_key in record_keys:
+        pipeline.hmget(record_key, ["query", "queued_at"])
+    crawls = [
+        (record_key, query.decode(), float(queued_at))
+        for record_key, (query, queued_at) in zip(record_keys, pipeline.execute())
+        # Its record has expired; the next claim drops it.
+        if query is not None
+    ]
+    return sorted(crawls, key=lambda crawl: crawl[2])
+
+
+def get_active_seed_crawl_queries(user_id: int) -> list[str]:
+    """The queries of this user's queued or running crawls, oldest first."""
+    user_prefix = _user_prefix(user_id)
     redis = get_redis_connection("default")
-    record_key = redis.get(_active_key(user_id))
-    if record_key is None:
-        return None
-    query = redis.hget(record_key, "query")
-    if query is None:
-        return None
-    return query.decode()
+    return [query for record_key, query, _ in _queued_crawls(redis) if record_key.startswith(user_prefix)]
+
+
+def get_crawls_ahead(user_id: int, query: str) -> int:
+    """How many crawls will be crawled before this user's queued crawl of this query starts."""
+    redis = get_redis_connection("default")
+    queued_at = float(redis.hget(_record_key(user_id, query), "queued_at"))
+    return _crawls_ahead(redis, queued_at)
+
+
+def _crawls_ahead(redis, queued_at: float) -> int:
+    """How many crawls, anyone's, will be crawled before one queued at this time starts."""
+    return sum(1 for _, _, crawl_queued_at in _queued_crawls(redis) if crawl_queued_at < queued_at)
 
 
 def run_seed_crawl_worker() -> None:
@@ -348,8 +385,8 @@ def run_seed_crawl_worker() -> None:
 # Claims the crawl due soonest, if one is due, by pushing its score out to when the lease
 # ends, and returns its record's key and a fresh token. A crawl whose round has been claimed
 # SEED_CRAWL_MAX_ATTEMPTS times without finishing is failed instead: the round may be what
-# keeps killing its workers. A crawl whose record has expired is dropped; its user's active
-# crawl key expires with it. Either way the next crawl due is claimed in its place.
+# keeps killing its workers. A crawl whose record has expired is dropped. Either way the
+# next crawl due is claimed in its place.
 _CLAIM_SCRIPT = """
 local ready = KEYS[1]
 while true do
@@ -367,10 +404,6 @@ while true do
             redis.call('HSET', record, 'status', 'failed', 'finished_at', ARGV[4])
             redis.call('HDEL', record, 'frontier')
             redis.call('ZREM', ready, record)
-            local active = redis.call('HGET', record, 'active_key')
-            if active then
-                redis.call('DEL', active)
-            end
         else
             if redis.call('HGET', record, 'status') == 'queued' then
                 redis.call('HSET', record, 'status', 'crawling', 'crawl_started_at', ARGV[4])
@@ -409,7 +442,7 @@ def run_next_seed_crawl_round(index_path: str) -> bool:
     except Exception:
         # Failed rather than retried: whatever went wrong would most likely go wrong again.
         logger.exception("Seed crawl for user %d failed", user_id)
-        _finish(redis, record_key, token, user_id, STATUS_FAILED)
+        _finish(redis, record_key, token, STATUS_FAILED)
     return True
 
 
@@ -453,7 +486,7 @@ def _run_round(redis, record_key: str, token: int, fields: dict[str, str], index
     # The per-domain cap already bounds the rounds; this bounds their slow fetches.
     batch = frontier.next_batch() if elapsed_seconds < settings.SEED_CRAWL_MAX_SECONDS else []
     if not batch:
-        _finish(redis, record_key, token, user_id, STATUS_DONE, domains)
+        _finish(redis, record_key, token, STATUS_DONE, domains)
         return
 
     if "last_round_started" in fields:
@@ -491,7 +524,6 @@ def _run_round(redis, record_key: str, token: int, fields: dict[str, str], index
         pipeline.hincrby(record_key, "pages_crawled", len(batch))
         pipeline.hincrby(record_key, "rounds", 1)
         pipeline.expire(record_key, ttl)
-        pipeline.expire(_active_key(user_id), ttl)
         if new_documents:
             pages = [{"url": doc.url, "title": doc.title, "extract": doc.extract} for doc in new_documents]
             pipeline.sadd(counted_urls_key, *[document.url for document in new_documents])
@@ -514,10 +546,8 @@ def _run_round(redis, record_key: str, token: int, fields: dict[str, str], index
         )
 
 
-def _finish(
-    redis, record_key: str, token: int, user_id: int, status: str, domains: dict[str, int] | None = None
-) -> None:
-    """End the crawl with this status, freeing the user for another, then score its domains if it is done."""
+def _finish(redis, record_key: str, token: int, status: str, domains: dict[str, int] | None = None) -> None:
+    """End the crawl with this status, making room for another of the user's, then score its domains if it is done."""
 
     def write(pipeline: Pipeline) -> None:
         pipeline.hset(record_key, mapping={"status": status, "finished_at": _now()})
@@ -526,7 +556,6 @@ def _finish(
         pipeline.hincrby(record_key, "token", 1)
         pipeline.expire(record_key, settings.SEED_CRAWL_RECORD_TTL_SECONDS)
         pipeline.zrem(READY_KEY, record_key)
-        pipeline.delete(_active_key(user_id))
 
     if not _write_if_still_claimed(redis, record_key, token, write) or status != STATUS_DONE:
         return
@@ -546,6 +575,7 @@ _SUMMARY_FIELDS = [
     "crawl_started_at",
     "domains",
     "discovered",
+    "queued_at",
 ]
 
 
@@ -565,6 +595,7 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
     # were leased, whose workers died, are not, and are no longer being crawled.
     if fields["status"] in (STATUS_QUEUED, STATUS_CRAWLING) and redis.zscore(READY_KEY, record_key) is None:
         fields["status"] = STATUS_FAILED
+    crawls_ahead = _crawls_ahead(redis, float(fields["queued_at"])) if fields["status"] == STATUS_QUEUED else None
     domain_pages = {key.decode(): int(value) for key, value in redis.hgetall(_domain_pages_key(record_key)).items()}
     # Records written before seed domains existed have no domains; they expire within a week.
     domains = list(json.loads(fields.get("domains", "{}")))
@@ -581,6 +612,7 @@ def get_seed_crawl_summary(user_id: int, query: str) -> dict | None:
         "pages_crawled": int(fields["pages_crawled"]),
         "pages_indexed": redis.llen(_pages_key(record_key)),
         "progress": _progress(fields),
+        "crawls_ahead": crawls_ahead,
         "domains": _domain_results(domains, discovered, domain_pages),
     }
 

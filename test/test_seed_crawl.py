@@ -4,6 +4,7 @@ rest of Combined Search, in test_combined_search.py.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -262,15 +263,89 @@ def test_nothing_starts_when_staan_returned_nothing_crawlable(redis_cache, monke
     assert _queued_jobs(redis_cache) == []
 
 
-def test_a_user_has_one_crawl_at_a_time(redis_cache, monkeypatch):
+def test_a_user_can_queue_several_crawls_up_to_their_limit(redis_cache, monkeypatch, settings):
     monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_PER_USER = 2
 
     assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
     assert seed_crawl.start_seed_crawl(1, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.ALREADY_RUNNING
-    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.ALREADY_RUNNING
-    assert seed_crawl.get_active_seed_crawl_query(1) == "tokio"
-    assert seed_crawl.start_seed_crawl(2, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
-    assert len(_queued_jobs(redis_cache)) == 2
+    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    assert seed_crawl.start_seed_crawl(1, "async", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.TOO_MANY_CRAWLS
+    assert seed_crawl.get_active_seed_crawl_queries(1) == ["tokio", "rust"]
+    # User 12's keys share user 1's digit, not their prefix.
+    assert seed_crawl.start_seed_crawl(12, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+    assert len(_queued_jobs(redis_cache)) == 3
+
+
+def test_concurrent_searches_by_one_user_queue_no_more_than_their_limit(redis_cache, monkeypatch, settings):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_PER_USER = 2
+    # Two of each query, so the same query racing itself is covered too.
+    queries = ["tokio", "rust", "async", "futures", "tokio", "rust", "async", "futures"]
+
+    with ThreadPoolExecutor(max_workers=len(queries)) as executor:
+        outcomes = list(
+            executor.map(lambda query: seed_crawl.start_seed_crawl(1, query, [], STAAN_RESULTS, set()), queries)
+        )
+
+    scheduled = [query for query, outcome in zip(queries, outcomes) if outcome == seed_crawl.CrawlOutcome.SCHEDULED]
+    assert len(scheduled) == 2
+    assert len(set(scheduled)) == 2
+    assert sorted(seed_crawl.get_active_seed_crawl_queries(1)) == sorted(scheduled)
+    assert set(outcomes) <= {
+        seed_crawl.CrawlOutcome.SCHEDULED,
+        seed_crawl.CrawlOutcome.ALREADY_RUNNING,
+        seed_crawl.CrawlOutcome.TOO_MANY_CRAWLS,
+    }
+
+
+@pytest.mark.django_db
+def test_a_finished_crawl_frees_its_place_for_the_users_next(fake_web, redis_cache, user, index_path, worker, settings):
+    settings.SEED_CRAWL_MAX_PER_USER = 1
+    seed_crawl.start_seed_crawl(user.id, "tokio", [], STAAN_RESULTS, set())
+    assert (
+        seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set())
+        == seed_crawl.CrawlOutcome.TOO_MANY_CRAWLS
+    )
+
+    worker(index_path)
+
+    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
+
+
+def test_a_queued_crawl_counts_the_crawls_ahead_of_it(redis_cache):
+    seed_crawl.queue_seed_crawl(1, "tokio", [SEED], [], {"tokio.rs": 1})
+    seed_crawl.queue_seed_crawl(2, "tokio", [SEED], [], {"tokio.rs": 1})
+    # Held by a worker, so its score is when its lease ends, but it is still ahead.
+    _claim(redis_cache)
+    seed_crawl.queue_seed_crawl(1, "rust", [SEED], [], {"tokio.rs": 1})
+
+    assert seed_crawl.get_crawls_ahead(1, "tokio") == 0
+    assert seed_crawl.get_crawls_ahead(2, "tokio") == 1
+    assert seed_crawl.get_crawls_ahead(1, "rust") == 2
+
+
+@pytest.mark.django_db
+def test_the_summary_says_how_many_crawls_are_ahead_until_it_starts(fake_web, redis_cache, user, index_path):
+    other = User.objects.create_user(username="other", email="other@example.com", password="x")
+    seed_crawl.queue_seed_crawl(other.id, "tokio", [SEED], [], {"tokio.rs": 1})
+    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
+
+    assert seed_crawl.get_seed_crawl_summary(user.id, "tokio")["crawls_ahead"] == 1
+    assert seed_crawl.get_seed_crawl_summary(other.id, "tokio")["crawls_ahead"] == 0
+    seed_crawl.run_next_seed_crawl_round(index_path)
+    assert seed_crawl.get_seed_crawl_summary(other.id, "tokio")["crawls_ahead"] is None
+
+
+def test_a_crawl_whose_record_has_expired_counts_against_nobody(redis_cache, monkeypatch, settings):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_PER_USER = 1
+    settings.SEED_CRAWL_MAX_QUEUED = 1
+    seed_crawl.queue_seed_crawl(1, "tokio", [SEED], [], {"tokio.rs": 1})
+    redis_cache.delete(seed_crawl._record_key(1, "tokio"))
+
+    assert seed_crawl.get_active_seed_crawl_queries(1) == []
+    assert seed_crawl.start_seed_crawl(1, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
 
 
 @pytest.mark.django_db
@@ -762,10 +837,10 @@ def test_a_worker_that_lost_its_claim_writes_nothing(redis_cache, user, settings
     # Too slow: another worker has claimed the crawl since.
     _claim(redis_cache)
 
-    seed_crawl._finish(redis_cache, record_key.decode(), stale_token, user.id, "failed")
+    seed_crawl._finish(redis_cache, record_key.decode(), stale_token, "failed")
 
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "crawling"
-    assert seed_crawl.get_active_seed_crawl_query(user.id) == "tokio"
+    assert seed_crawl.get_active_seed_crawl_queries(user.id) == ["tokio"]
 
 
 @pytest.mark.django_db
@@ -846,26 +921,6 @@ def test_a_crawl_whose_record_has_expired_is_dropped_and_the_next_one_claimed(
 
 
 @pytest.mark.django_db
-def test_an_active_crawl_whose_record_has_expired_blocks_nothing(redis_cache, user, monkeypatch):
-    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
-    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
-    redis_cache.delete(seed_crawl._record_key(user.id, "tokio"))
-    redis_cache.delete(seed_crawl.READY_KEY)
-
-    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
-    assert seed_crawl.start_seed_crawl(user.id, "rust", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
-
-
-@pytest.mark.django_db
-def test_the_users_active_crawl_expires_with_its_record(redis_cache, user, settings):
-    seed_crawl.queue_seed_crawl(user.id, "tokio", [SEED], [], {"tokio.rs": 1})
-
-    ttl = redis_cache.ttl(seed_crawl._active_key(user.id))
-
-    assert 0 < ttl <= settings.SEED_CRAWL_RECORD_TTL_SECONDS
-
-
-@pytest.mark.django_db
 def test_a_crawl_out_of_attempts_gives_way_to_the_next_due(redis_cache, user, settings):
     other = User.objects.create_user(username="other", email="other@example.com", password="x")
     settings.SEED_CRAWL_LEASE_SECONDS = 0
@@ -878,7 +933,7 @@ def test_a_crawl_out_of_attempts_gives_way_to_the_next_due(redis_cache, user, se
 
     assert record_key.decode() == seed_crawl._record_key(other.id, "tokio")
     assert seed_crawl.get_seed_crawl(user.id, "tokio")["status"] == "failed"
-    assert seed_crawl.get_active_seed_crawl_query(user.id) is None
+    assert seed_crawl.get_active_seed_crawl_queries(user.id) == []
 
 
 @pytest.mark.django_db

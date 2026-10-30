@@ -26,6 +26,13 @@ names, which the tests flush. `make test` defaults it to `redis://127.0.0.1:6379
 `make check` and `make test` are the two gates. Both must pass before you open a pull
 request, and `.pre-commit-config.yaml` runs the first of them on every commit.
 
+CI also fails a pull request that changes what the crawler runs without raising
+`CRAWLER_VERSION` (`mwmbl/crawler/release_check.py`). The crawler imports the shared
+settings, so this includes settings only the server reads. When a commit leaves the
+crawler's behaviour unchanged, put `No functional changes to the crawler.` on a line of
+its own in its message instead of raising the version. The commit-msg hook catches a
+commit that needs one or the other.
+
 ## Layout
 
 - `mwmbl/` — the Django project. `crawler/` (crawl queue and batches), `indexer/` (the
