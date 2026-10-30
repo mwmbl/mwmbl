@@ -4,6 +4,7 @@ rest of Combined Search, in test_combined_search.py.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -274,6 +275,28 @@ def test_a_user_can_queue_several_crawls_up_to_their_limit(redis_cache, monkeypa
     # User 12's keys share user 1's digit, not their prefix.
     assert seed_crawl.start_seed_crawl(12, "tokio", [], STAAN_RESULTS, set()) == seed_crawl.CrawlOutcome.SCHEDULED
     assert len(_queued_jobs(redis_cache)) == 3
+
+
+def test_concurrent_searches_by_one_user_queue_no_more_than_their_limit(redis_cache, monkeypatch, settings):
+    monkeypatch.setattr(seed_crawl, "find_blacklisted_urls", lambda documents: set())
+    settings.SEED_CRAWL_MAX_PER_USER = 2
+    # Two of each query, so the same query racing itself is covered too.
+    queries = ["tokio", "rust", "async", "futures", "tokio", "rust", "async", "futures"]
+
+    with ThreadPoolExecutor(max_workers=len(queries)) as executor:
+        outcomes = list(
+            executor.map(lambda query: seed_crawl.start_seed_crawl(1, query, [], STAAN_RESULTS, set()), queries)
+        )
+
+    scheduled = [query for query, outcome in zip(queries, outcomes) if outcome == seed_crawl.CrawlOutcome.SCHEDULED]
+    assert len(scheduled) == 2
+    assert len(set(scheduled)) == 2
+    assert sorted(seed_crawl.get_active_seed_crawl_queries(1)) == sorted(scheduled)
+    assert set(outcomes) <= {
+        seed_crawl.CrawlOutcome.SCHEDULED,
+        seed_crawl.CrawlOutcome.ALREADY_RUNNING,
+        seed_crawl.CrawlOutcome.TOO_MANY_CRAWLS,
+    }
 
 
 @pytest.mark.django_db
