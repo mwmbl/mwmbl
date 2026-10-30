@@ -105,6 +105,9 @@ REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
 # request's time - but not forever.
 RESULTS_POST_TIMEOUT_SECONDS = 120
 
+# Two downloads of up to 60 seconds each, then parsing and hashing.
+SNAPSHOT_PUBLISH_TIMEOUT_SECONDS = 600
+
 
 def _fetch_curated_domains() -> set[str]:
     global _curated_domains_cache, _curated_domains_fetched_at
@@ -353,7 +356,11 @@ class Crawler:
         """
         process = Process(target=self.publish_blacklist_snapshot)
         process.start()
-        process.join()
+        process.join(SNAPSHOT_PUBLISH_TIMEOUT_SECONDS)
+        if process.is_alive():
+            process.kill()
+            process.join()
+            raise RuntimeError(f"Publishing the blacklist snapshot took over {SNAPSHOT_PUBLISH_TIMEOUT_SECONDS}s")
         if process.exitcode != 0:
             raise RuntimeError(f"Publishing the blacklist snapshot failed with exit code {process.exitcode}")
 

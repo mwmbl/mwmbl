@@ -106,6 +106,16 @@ def test_a_failed_snapshot_publisher_is_an_error():
             Crawler().refresh_blacklist_snapshot()
 
 
+def test_a_snapshot_publisher_that_hangs_is_killed():
+    process = _process(alive=True)
+    with patch.object(crawl, "Process", return_value=process):
+        with pytest.raises(RuntimeError, match="took over"):
+            Crawler().refresh_blacklist_snapshot()
+
+    process.join.assert_any_call(crawl.SNAPSHOT_PUBLISH_TIMEOUT_SECONDS)
+    process.kill.assert_called_once()
+
+
 def test_the_queue_and_each_batch_share_one_snapshot():
     crawler = Crawler()
     with patch.object(crawl, "SnapshotBlacklist") as snapshot_blacklist:
