@@ -193,6 +193,7 @@ def test_run_once_does_one_pass_and_returns():
     with (
         patch("mwmbl.crawl.validate_environment"),
         patch.object(Crawler, "check_redis"),
+        patch.object(Crawler, "refresh_blacklist_snapshot"),
         patch.object(Crawler, "process_batch") as process_batch,
         patch.object(Crawler, "run_indexing") as run_indexing,
     ):
@@ -209,6 +210,7 @@ def test_run_once_propagates_errors_instead_of_restarting():
     with (
         patch("mwmbl.crawl.validate_environment"),
         patch.object(Crawler, "check_redis"),
+        patch.object(Crawler, "refresh_blacklist_snapshot"),
         patch.object(Crawler, "process_batch", side_effect=RuntimeError("crawl failed")),
         patch.object(Crawler, "run_indexing") as run_indexing,
     ):

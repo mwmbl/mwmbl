@@ -8,7 +8,7 @@ import requests
 from mwmbl.crawler.batch import HashedBatch, Link
 from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.urls import FoundURL, URLDatabase, URLStatus
-from mwmbl.indexer.blacklist import get_default_blacklist_provider
+from mwmbl.indexer.blacklist_providers import BlacklistProvider
 from mwmbl.indexer.index_batches import get_url_error_status
 from mwmbl.redis_url_queue import RedisURLQueue, get_domain_max_urls
 from mwmbl.utils import get_domain, parse_url
@@ -16,16 +16,11 @@ from mwmbl.utils import get_domain, parse_url
 logger = getLogger(__name__)
 
 
-def record_urls_in_database(batches: Collection[HashedBatch], new_item_queue: RedisURLQueue):
+def record_urls_in_database(
+    batches: Collection[HashedBatch], new_item_queue: RedisURLQueue, blacklist_provider: BlacklistProvider
+):
     start = datetime.now(timezone.utc)
-    # Take the approved domains from the queue rather than the database: the standalone
-    # crawler is the live caller of this, and it fetches them over HTTP.
-    blacklist_provider = get_default_blacklist_provider(new_item_queue.get_curated_domains_function)
-    blacklist_retrieval_time = datetime.now(timezone.utc) - start
-    logger.info(
-        f"Recording URLs in database for {len(batches)} batches, blacklist provider ready "
-        f"in {blacklist_retrieval_time.total_seconds()} seconds"
-    )
+    logger.info(f"Recording URLs in database for {len(batches)} batches")
 
     url_users = {}
     url_timestamps = {}

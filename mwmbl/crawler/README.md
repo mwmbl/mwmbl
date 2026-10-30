@@ -16,6 +16,8 @@ The crawler can be configured using the following environment variables:
 
 **Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 2 crawler processes × 20 threads = 40 total crawling threads, plus 1 indexing process. The queue gives each batch at most one URL per domain, so the threads of one batch never fetch pages from the same site at once.
 
+**Memory**: Memory use scales with `CRAWLER_WORKERS`, not `CRAWL_THREADS`, so on a small machine prefer fewer workers with more threads. The blocklists (about 1.3 million domains) are downloaded once when the crawler starts, and again every 6 hours, by a short-lived process that publishes them to Redis as an ~11MB hash array that every worker loads. Because that first download has to succeed before any worker starts, the crawler exits at startup if it cannot reach the lists. If a later refresh fails, the crawler keeps the lists it has.
+
 Batches crawled by different workers at the same time can share domains, since each worker samples its domains independently. The core domains (Wikipedia, GitHub and so on) are in every batch, so they are the usual overlap. With the default 2 workers, about 0.7% of fetches start while another fetch to the same domain is in flight. Overlap grows with `CRAWLER_WORKERS`. The crawler records it in Redis, and `redis-cli HGETALL crawl-domain-overlap` gives the totals: `fetches`, `overlapped` (fetches that started while another fetch to their domain was in flight) and `duplicate_domains` (should stay 0).
 
 ### Rate Limiting Configuration
