@@ -45,7 +45,8 @@ from mwmbl.format import format_result_v2
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
     CrawlOutcome,
-    get_active_seed_crawl_query,
+    get_active_seed_crawl_queries,
+    get_crawls_ahead,
     get_seed_crawl,
     get_seed_crawl_summary,
     record_seed_search,
@@ -88,14 +89,22 @@ class CombinedSearchResponse(SearchResponse):
         default=None,
         description="What `crawl=true` did: `scheduled` a crawl, or none because EUSP returned "
         "nothing to crawl (`no_results`), every EUSP result is already in the index "
-        "(`already_indexed`), you have already crawled this query (`already_crawled`), one of your crawls is still queued or running (`already_running`), "
+        "(`already_indexed`), you have already crawled this query (`already_crawled`), your crawl of "
+        "this query is still queued or running (`already_running`), you already have "
+        f"{settings.SEED_CRAWL_MAX_PER_USER} crawls queued or running (`too_many_crawls`), "
         "or the crawl queue is full (`queue_full`). Null without `crawl=true`.",
         examples=["scheduled"],
     )
-    active_crawl_query: str | None = Field(
+    crawls_ahead: int | None = Field(
         default=None,
-        description="With `already_running`, the query of your crawl that is queued or running.",
-        examples=["rust async runtimes"],
+        description="With `scheduled`, how many crawls, yours included, will be crawled before this one "
+        "starts. 0 means it is next.",
+        examples=[2],
+    )
+    active_crawl_queries: list[str] | None = Field(
+        default=None,
+        description="With `too_many_crawls`, the queries of your crawls that are queued or running, oldest first.",
+        examples=[["rust async runtimes"]],
     )
 
 
@@ -151,6 +160,11 @@ class SeedCrawlSummaryResponse(Schema):
         description="How far through the latest crawl of this query, from 0 (queued) to 1 (done or failed).",
         examples=[0.25],
     )
+    crawls_ahead: int | None = Field(
+        description="While the crawl is `queued`, how many crawls will be crawled before it starts. "
+        "Null once it has started.",
+        examples=[None],
+    )
     domains: list[SeedCrawlDomain] = Field(
         description="The domains EUSP returned, which the latest crawl stays within, with what it has "
         "found on each, most new pages first. Empty until the crawl starts."
@@ -186,7 +200,8 @@ DESCRIPTION = (
     "With `crawl=true` (JWT only), the search also starts a background crawl of the EUSP results "
     "that were not already in the Mwmbl index, following their links within the domains EUSP "
     f"returned, up to {settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN:,} pages per domain. You can have "
-    "one crawl queued or running at a time. "
+    f"up to {settings.SEED_CRAWL_MAX_PER_USER} crawls queued or running at a time; they are crawled "
+    "one after another, and `crawl_outcome` says whether this search's crawl was queued or skipped. "
     "`GET /api/v2/combined-search/new-pages?q=...` lists what it has added, and "
     "`GET /api/v2/combined-search/new-pages/count?q=...` counts it.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
@@ -308,15 +323,17 @@ def init_router(ranker) -> None:
         )
 
         crawl_outcome = None
-        active_crawl_query = None
+        crawls_ahead = None
+        active_crawl_queries = None
         if crawl:
             crawl_outcome = await sync_to_async(start_seed_crawl)(
                 user.id, q, retrieval.pages, staan_results, new_staan_urls
             )
             if crawl_outcome == CrawlOutcome.SCHEDULED:
                 await sync_to_async(record_seed_search)(user.id)
-            if crawl_outcome == CrawlOutcome.ALREADY_RUNNING:
-                active_crawl_query = await sync_to_async(get_active_seed_crawl_query)(user.id)
+                crawls_ahead = await sync_to_async(get_crawls_ahead)(user.id, q)
+            if crawl_outcome == CrawlOutcome.TOO_MANY_CRAWLS:
+                active_crawl_queries = await sync_to_async(get_active_seed_crawl_queries)(user.id)
 
         formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
         return CombinedSearchResponse(
@@ -328,7 +345,8 @@ def init_router(ranker) -> None:
             pages_indexed=len(new_staan_urls),
             crawl_scheduled=crawl_outcome == CrawlOutcome.SCHEDULED,
             crawl_outcome=crawl_outcome,
-            active_crawl_query=active_crawl_query,
+            crawls_ahead=crawls_ahead,
+            active_crawl_queries=active_crawl_queries,
         )
 
     @router.get(

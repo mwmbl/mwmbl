@@ -328,6 +328,9 @@ SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
 SEED_CRAWL_MAX_SECONDS = 15 * 60
 # Crawls queued or running, across all users, beyond which crawl=true queues nothing.
 SEED_CRAWL_MAX_QUEUED = 10
+# Each user's share of that queue, so that their searches with crawl=true can queue up
+# while one is crawled, but no one user can fill the queue.
+SEED_CRAWL_MAX_PER_USER = 3
 SEED_CRAWL_THREADS = 8
 # The least time between two fetches from one domain.
 SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
