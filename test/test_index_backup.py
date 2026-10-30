@@ -1,5 +1,6 @@
 """Full backups of the index to B2, against moto's S3. See mwmbl.indexer.backup."""
 
+import base64
 import json
 import os
 import threading
@@ -9,10 +10,11 @@ from tempfile import TemporaryDirectory
 import boto3
 import pytest
 from botocore.exceptions import ResponseStreamingError
+from django.core.management import call_command
 from moto import mock_aws
 
 from mwmbl.indexer import backup
-from mwmbl.indexer.backup import LockedIndexReader, backup_index, restore_index
+from mwmbl.indexer.backup import LockedIndexReader, backup_index, backup_settings_from_environment, restore_index
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex
 
 NUM_PAGES = 4000
@@ -98,6 +100,36 @@ def test_restore_retries_a_range_whose_body_fails(index_path, client, monkeypatc
     restored_path = index_path.with_name("restored.tinysearch")
     restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
 
+    assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+class _ShortBody:
+    def __init__(self, body):
+        self._body = body
+
+    def read(self):
+        return self._body.read()[:-1]
+
+
+def test_restore_retries_a_range_that_comes_back_short(index_path, client, monkeypatch):
+    key = backup_index(client, BUCKET, ENCRYPTION_KEY, index_path)
+    get_object = client.get_object
+    shortened = []
+
+    def short_get_object(**kwargs):
+        response = get_object(**kwargs)
+        if "Range" in kwargs and not shortened:
+            shortened.append(kwargs["Range"])
+            response["Body"] = _ShortBody(response["Body"])
+        return response
+
+    monkeypatch.setattr(client, "get_object", short_get_object)
+    monkeypatch.setattr(backup, "RANGE_RETRY_SECONDS", 0)
+
+    restored_path = index_path.with_name("restored.tinysearch")
+    restore_index(client, BUCKET, ENCRYPTION_KEY, key, restored_path)
+
+    assert shortened
     assert restored_path.read_bytes() == index_path.read_bytes()
 
 
@@ -199,3 +231,40 @@ def test_reading_waits_for_a_writer_holding_a_page(index_path):
     reader.close()
 
     assert finished.is_set()
+
+
+@pytest.fixture
+def backup_environment(monkeypatch, client):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    # An AWS endpoint rather than B2's, so moto answers it.
+    monkeypatch.setenv("MWMBL_BACKUP_ENDPOINT_URL", "https://s3.us-east-1.amazonaws.com")
+    monkeypatch.setenv("MWMBL_BACKUP_KEY_ID", "testing")
+    monkeypatch.setenv("MWMBL_BACKUP_APPLICATION_KEY", "testing")
+    monkeypatch.setenv("MWMBL_BACKUP_BUCKET", BUCKET)
+    monkeypatch.setenv("MWMBL_BACKUP_ENCRYPTION_KEY", base64.b64encode(ENCRYPTION_KEY).decode("ascii"))
+
+
+def test_backup_settings_come_from_the_environment(backup_environment):
+    _, bucket, encryption_key = backup_settings_from_environment()
+
+    assert bucket == BUCKET
+    assert encryption_key == ENCRYPTION_KEY
+
+
+def test_an_encryption_key_of_the_wrong_length_is_refused(backup_environment, monkeypatch):
+    monkeypatch.setenv("MWMBL_BACKUP_ENCRYPTION_KEY", base64.b64encode(bytes(16)).decode("ascii"))
+
+    with pytest.raises(ValueError, match="must be 32 bytes"):
+        backup_settings_from_environment()
+
+
+def test_the_commands_back_up_and_restore_the_index(index_path, backup_environment, settings, capsys):
+    settings.DATA_PATH = str(index_path.parent)
+
+    call_command("backup_index", "--index-name", index_path.name)
+    key = capsys.readouterr().out.strip().rsplit(" ", 1)[-1]
+    restored_path = index_path.with_name("restored.tinysearch")
+    call_command("restore_index", key, str(restored_path))
+
+    assert f"Restored {key} to {restored_path}" in capsys.readouterr().out
+    assert restored_path.read_bytes() == index_path.read_bytes()
