@@ -63,12 +63,12 @@ jobs:
       #----------------------------------------------
       #       check-out repo and set-up python
       #----------------------------------------------
-      # Depth 2 so a pull request's merge commit has its first parent, the base branch,
-      # for the crawler version check to diff against.
+      # Full history so the crawler version check can read the message of every commit
+      # between the base branch and the pull request's merge commit.
       - name: Check out repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Set up python
         id: setup-python
         uses: actions/setup-python@v4
