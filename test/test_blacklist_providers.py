@@ -291,3 +291,10 @@ def test_default_provider_takes_the_curated_domains_it_is_given():
     provider = get_default_blacklist_provider(lambda: {"badsite.example"})
 
     assert provider.get_exempt_domains() == {"badsite.example"}
+
+
+def test_opted_out_domains_are_blacklisted():
+    provider = BuiltInRulesBlacklistProvider()
+
+    assert provider.is_domain_blacklisted("lain.ovh") is True
+    assert provider.is_domain_blacklisted("www.lain.ovh") is True

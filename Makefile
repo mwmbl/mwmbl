@@ -43,7 +43,7 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks patch-xgboost migrate test test-file coverage coverage-python coverage-rust \
+.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file coverage coverage-python coverage-rust \
         coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
@@ -51,6 +51,7 @@ help:
 	@echo "Available targets:"
 	@echo "  install        Install all dependencies with uv"
 	@echo "  migrate        Apply Django migrations"
+	@echo "  create-index   Create the search index for DJANGO_SETTINGS_MODULE (run by install)"
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
 	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
@@ -74,6 +75,12 @@ help:
 install:
 	uv sync
 	$(MAKE) patch-xgboost
+	$(MAKE) create-index
+
+# The server does not create its search index on startup, so a new checkout needs this once.
+create-index:
+	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
+		uv run python manage.py create_index --settings=$(DJANGO_SETTINGS_MODULE)
 
 # Copy libxgboost.so into the mwmbl_rank package dir and set RPATH to $ORIGIN,
 # matching the Dockerfile post-build step so the extension is self-contained.

@@ -204,7 +204,7 @@ def collect(dataset: pd.DataFrame, fraction: float, include_brave: bool, judge: 
             continue
         gold = gold_scores_for(rankings)
         staan_docs = get_staan_results(query)
-        wiki_docs = get_wiki_results(query)
+        wiki_docs = get_wiki_results(query, wait_out_rate_limits=True)
         lists = {name: arm(query, staan_docs, wiki_docs) for name, arm in arms.items()}
 
         pool = {result["url"]: result for results in lists.values() for result in results}

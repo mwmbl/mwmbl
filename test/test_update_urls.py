@@ -12,12 +12,13 @@ import pytest
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent, ItemError, Link
 from mwmbl.crawler.urls import URLStatus
 from mwmbl.indexer import update_urls
+from mwmbl.indexer.blacklist_providers import BlacklistProvider
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp, process_link, record_urls_in_database
 
 TIMESTAMP = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
 
-class FakeBlacklist:
+class FakeBlacklist(BlacklistProvider):
     def is_domain_blacklisted(self, domain: str) -> bool:
         return domain == "blocked.example"
 
@@ -55,12 +56,11 @@ def test_unparseable_and_blacklisted_links_are_dropped(link_url):
 
 @pytest.fixture
 def recorded(monkeypatch):
-    """Patch the database and blacklist, returning the URLs that would have been queued."""
+    """Patch the database, returning the URLs that would have been queued."""
     found_urls = []
     domain_link_db = MagicMock()
     domain_link_db.__enter__.return_value = domain_link_db
 
-    monkeypatch.setattr(update_urls, "get_default_blacklist_provider", lambda curated: FakeBlacklist())
     monkeypatch.setattr(update_urls, "_add_found_urls_to_db_and_queue", lambda urls, queue: found_urls.extend(urls))
     monkeypatch.setattr(update_urls, "DomainLinkDatabase", lambda: domain_link_db)
     return found_urls, domain_link_db
@@ -82,10 +82,17 @@ def test_recording_a_batch_classifies_every_url(recorded):
             _item("https://slow.example/", error=ItemError(name="AbortError")),
             _item("https://robots.example/", error=ItemError(name="RobotsDenied")),
             _item("https://odd.example/", status=500),
+            # A challenge page has content, but neither it nor its links are the site's.
+            _item(
+                "https://challenge.example/",
+                status=403,
+                content=ItemContent(title="Just a moment...", extract="", links=["https://challenge.example/help"]),
+            ),
+            _item("https://flaky.example/", error=ItemError(name="RobotsUnavailable")),
         ],
     )
 
-    record_urls_in_database([batch], MagicMock())
+    record_urls_in_database([batch], MagicMock(), FakeBlacklist())
 
     statuses = {found.url: found.status for found in found_urls}
     assert statuses == {
@@ -94,6 +101,8 @@ def test_recording_a_batch_classifies_every_url(recorded):
         "https://slow.example/": URLStatus.ERROR_TIMEOUT,
         "https://robots.example/": URLStatus.ERROR_ROBOTS_DENIED,
         "https://odd.example/": URLStatus.ERROR_OTHER,
+        "https://challenge.example/": URLStatus.ERROR_OTHER,
+        "https://flaky.example/": URLStatus.ERROR_TIMEOUT,
         "https://linked.example/a": URLStatus.NEW,
         "https://linked.example/": URLStatus.NEW,
     }
@@ -106,7 +115,7 @@ def test_a_crawled_page_with_an_unparseable_url_contributes_no_links(recorded):
     content = ItemContent(title="T", extract="E", links=["https://linked.example/a"])
     batch = HashedBatch(user_id_hash="hash", timestamp=1704067200.0, items=[_item("no-scheme", content=content)])
 
-    record_urls_in_database([batch], MagicMock())
+    record_urls_in_database([batch], MagicMock(), FakeBlacklist())
 
     assert [found.url for found in found_urls] == ["no-scheme"]
     domain_link_db.update_domain_links.assert_not_called()

@@ -29,6 +29,7 @@ from polar_sdk.webhooks import WebhookVerificationError
 
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
+from mwmbl.crawler.stats import CrawlerVersionSpread
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
@@ -1416,6 +1417,28 @@ def get_current_user_stats(request):
         "seed_searches": user.seed_searches,
         "seed_sites_discovered": user.discovered_seed_domains.count(),
     }
+
+
+CRAWLER_VERSION_DAYS = 7
+
+
+@router.get(
+    "/crawler-versions",
+    auth=JWTAuth(),
+    response=CrawlerVersionSpread,
+    summary="Crawler version spread",
+    description=(
+        "Crawlers and results submitted per crawler version for each of the last seven days, "
+        "oldest first. A crawler is a user and a device name, so several crawlers sharing one "
+        "API key count separately; crawlers that send no device name count as one per user. "
+        "A crawler updated during a day counts under both versions, so `total_crawlers` is the "
+        "distinct crawlers that day rather than the column's sum. Staff only."
+    ),
+)
+def get_crawler_versions(request):
+    if not request.user.is_staff:
+        raise InvalidRequest("Only staff can see the crawler versions.", status=403)
+    return stats_manager.get_crawler_version_spread(CRAWLER_VERSION_DAYS)
 
 
 # ---------------------------------------------------------------------------

@@ -167,7 +167,7 @@ def refresh_snapshot(provider: Optional[BlacklistProvider] = None, redis_client:
 # ---------------------------------------------------------------------------
 
 
-class SnapshotBlacklist:
+class SnapshotBlacklist(BlacklistProvider):
     """Membership queries against the published snapshot, plus the local built-in rules.
 
     One instance per process. Nothing here ever blocks a request on the network: the

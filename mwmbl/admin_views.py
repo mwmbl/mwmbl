@@ -34,7 +34,7 @@ from django.http import HttpRequest, HttpResponseBadRequest
 from django.shortcuts import render
 from redis import RedisError
 
-from mwmbl import count_urls, pricing, quota, search_callers, search_setup, traffic
+from mwmbl import count_urls, pricing, provider_usage, quota, search_callers, search_setup, traffic
 from mwmbl.crawler import worst_agreements
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
@@ -526,6 +526,107 @@ def search_traffic_view(request):
         context["redis_error"] = str(e)
 
     return render(request, "admin/search_traffic.html", context)
+
+
+PROVIDER_COST_MAX_DAYS = provider_usage.EXPIRE_SECONDS // SECONDS_PER_DAY
+PROVIDER_COST_DEFAULT_DAYS = 30
+PROVIDER_COST_WINDOW_CHOICES = [7, PROVIDER_COST_DEFAULT_DAYS, PROVIDER_COST_MAX_DAYS]
+CHART_HEIGHT_PX = 220
+
+
+def _provider_cost_days(request: HttpRequest) -> list[date]:
+    """The days to report on, oldest first, so the chart reads left to right."""
+    try:
+        requested = int(request.GET.get("days", PROVIDER_COST_DEFAULT_DAYS))
+    except ValueError:
+        requested = PROVIDER_COST_DEFAULT_DAYS
+    count = min(max(requested, 1), PROVIDER_COST_MAX_DAYS)
+    today = utc_today()
+    return [today - timedelta(days=offset) for offset in reversed(range(count))]
+
+
+def _provider_cost_chart(days: list[date], usage: dict, metric: str) -> dict:
+    """One stacked bar per day, a segment per provider, scaled to the busiest day."""
+    bars = []
+    for day in days:
+        segments = []
+        for provider, label in provider_usage.PROVIDER_LABELS.items():
+            counts = usage[day][provider]
+            cost = provider_usage.cost_gbp(provider, counts[provider_usage.CALLS])
+            value = counts[provider_usage.CALLS] if metric == "calls" else cost
+            segments.append(
+                {
+                    "provider": provider,
+                    "label": label,
+                    "colour": provider_usage.PROVIDER_COLOURS[provider],
+                    "value": value,
+                    "cost_gbp": cost,
+                    **counts,
+                }
+            )
+        bars.append({"day": day, "segments": segments, "total": sum(segment["value"] for segment in segments)})
+
+    busiest = max((bar["total"] for bar in bars), default=0)
+    for bar in bars:
+        bar["height_px"] = round(bar["total"] / busiest * CHART_HEIGHT_PX) if busiest else 0
+        for segment in bar["segments"]:
+            segment["height_px"] = round(segment["value"] / busiest * CHART_HEIGHT_PX) if busiest else 0
+    return {"bars": bars, "busiest": busiest}
+
+
+def _provider_totals(days: list[date], usage: dict) -> list[dict]:
+    totals = []
+    for provider, label in provider_usage.PROVIDER_LABELS.items():
+        calls = sum(usage[day][provider][provider_usage.CALLS] for day in days)
+        failures = sum(usage[day][provider][provider_usage.FAILURES] for day in days)
+        cost = provider_usage.cost_gbp(provider, calls)
+        totals.append(
+            {
+                "provider": provider,
+                "label": label,
+                "colour": provider_usage.PROVIDER_COLOURS[provider],
+                "calls": calls,
+                "failures": failures,
+                "price_per_1000_gbp": provider_usage.PRICE_PER_1000_QUERIES_GBP[provider],
+                "cost_gbp": cost,
+            }
+        )
+    return totals
+
+
+@staff_member_required
+def provider_costs_view(request):
+    metric = "calls" if request.GET.get("metric") == "calls" else "cost"
+    days = _provider_cost_days(request)
+    context = {
+        "title": "Provider costs",
+        "days": days,
+        "metric": metric,
+        "window_choices": PROVIDER_COST_WINDOW_CHOICES,
+        "chart_height_px": CHART_HEIGHT_PX,
+        "counting_enabled": settings.PROVIDER_USAGE_COUNTING,
+        "providers": [
+            {"label": label, "colour": provider_usage.PROVIDER_COLOURS[provider]}
+            for provider, label in provider_usage.PROVIDER_LABELS.items()
+        ],
+    }
+
+    try:
+        usage = provider_usage.read_usage(traffic.get_redis(), days)
+    except RedisError as e:
+        logger.exception("Could not read provider usage from Redis")
+        context["redis_error"] = str(e)
+    else:
+        totals = _provider_totals(days, usage)
+        context["chart"] = _provider_cost_chart(days, usage, metric)
+        context["totals"] = totals
+        context["total_cost_gbp"] = sum(total["cost_gbp"] for total in totals)
+        # Newest first, the way the traffic page lists its days.
+        context["by_day"] = [
+            {"day": bar["day"], "segments": bar["segments"]} for bar in reversed(context["chart"]["bars"])
+        ]
+
+    return render(request, "admin/provider_costs.html", context)
 
 
 @staff_member_required

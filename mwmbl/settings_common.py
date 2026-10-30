@@ -218,9 +218,11 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN is not None:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for tracing.
-        traces_sample_rate=0.1,
+        # The span quota is about 5M a month, or 165k a day. At 0.1, beta alone used it up
+        # in September 2026, and production sends about 3.5M spans a day at that rate, so
+        # once both were on it lasted a day. At 0.002 the two come to about 80k a day,
+        # with room for a spike, and still trace several thousand requests a day.
+        traces_sample_rate=0.002,
         # Set profiles_sample_rate to 1.0 to profile 100%
         # of sampled transactions.
         # We recommend adjusting this value in production.
@@ -421,6 +423,10 @@ EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower(
 # Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
 # the request path that reaches for Redis, and the CI test job runs none.
 SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
+
+# Counting calls to the paid providers (mwmbl.provider_usage), for the provider costs page.
+PROVIDER_USAGE_COUNTING = os.environ.get("PROVIDER_USAGE_COUNTING", "true").lower() != "false"
+
 # The default TTL, for any provider that does not name its own below. Wikipedia articles
 # move rarely, which is what justifies six months.
 EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks

@@ -11,6 +11,7 @@ from redis import Redis
 
 from mwmbl.crawler.domains import TOP_DOMAINS, DomainLinkDatabase
 from mwmbl.crawler.env_vars import CRAWL_ALLOWED_DOMAINS, CRAWL_BATCH_SIZE
+from mwmbl.crawler.politeness import claim_domain
 from mwmbl.crawler.urls import FoundURL
 from mwmbl.hn_top_domains_filtered import DOMAINS
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
@@ -146,21 +147,41 @@ class RedisURLQueue:
         # blacklist filter as the rest: it is a URL we are about to fetch.
         seed_domains = [domain for domain in seed_domains if not self.blacklist_provider.is_domain_blacklisted(domain)]
         random_domain = seed_random.choice(seed_domains)
-        urls = [f"https://{random_domain}/"]
+        # A domain another batch holds, or fetched too recently, is left for a later batch,
+        # with its URLs still queued - see mwmbl.crawler.politeness.
+        claimed_domains = set()
+
+        def claim(domain: str) -> bool:
+            if domain not in claimed_domains and not claim_domain(self.redis, domain):
+                return False
+            claimed_domains.add(domain)
+            return True
 
         # At most one URL per domain, since the batch is crawled concurrently: the samples
-        # above can pick a core domain again, and the seed can repeat any of them. Unless the
-        # seed's domain is the only one, as with a single-domain allowlist: dropping it then
-        # would leave that domain's queued URLs never popped.
+        # above can pick a core domain again, and the seed can repeat any of them. When the
+        # seed's domain is the only one, as with a single-domain allowlist, a queued URL takes
+        # the seed's place: crawling only the seed would leave the queue never popped, and
+        # crawling both fetched from the site twice at once - Hacker News answers that with a
+        # 503 - and let one result's delay overwrite the other's in release_domains.
         domains = [
             domain for domain in dict.fromkeys(domains) if not self.blacklist_provider.is_domain_blacklisted(domain)
         ]
-        if domains != [random_domain]:
+        if domains == [random_domain] and self.redis.exists(DOMAIN_URLS_KEY.format(domain=random_domain)):
+            urls = []
+        else:
             domains = [domain for domain in domains if domain != random_domain]
+            urls = [f"https://{random_domain}/"] if claim(random_domain) else []
         logger.info(f"Getting batch from domains {domains}")
 
         # Pop the highest scoring URL from each domain
         for domain in domains:
+            # Checked before claiming, so a domain with nothing queued is not held for a
+            # batch that has nothing of it to release.
+            if not self.redis.exists(DOMAIN_URLS_KEY.format(domain=domain)):
+                self.redis.zrem(DOMAIN_SCORE_KEY, domain)
+                continue
+            if not claim(domain):
+                continue
             domain_urls_scores = self.redis.zpopmax(DOMAIN_URLS_KEY.format(domain=domain))
 
             # Update the domain score if we removed a URL

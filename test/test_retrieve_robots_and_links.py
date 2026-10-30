@@ -13,12 +13,14 @@ from mwmbl.crawler import retrieve
 from mwmbl.crawler.retrieve import (
     ROBOTS_CACHE_ERROR_TTL_SECONDS,
     ROBOTS_CACHE_TTL_SECONDS,
+    RobotsUnavailable,
     crawl_counting_overlap,
     crawl_url,
     get_dom_links,
     get_new_links,
     record_overlap,
     robots_allowed,
+    robots_crawl_delay,
 )
 from mwmbl.justext.core import Paragraph, PathInfo, html_to_dom
 
@@ -70,14 +72,42 @@ def test_missing_robots_allows_everything_and_is_cached_briefly(monkeypatch, red
     assert ROBOTS_CACHE_ERROR_TTL_SECONDS - 5 <= redis.ttl("robots:example.test") <= ROBOTS_CACHE_ERROR_TTL_SECONDS
 
 
-def test_unreachable_robots_allows_everything_and_is_cached_briefly(monkeypatch, redis):
-    def unreachable(url):
-        raise ConnectionError("refused")
+def _unreachable(url):
+    raise ConnectionError("refused")
 
-    monkeypatch.setattr(retrieve, "fetch", unreachable)
 
-    assert robots_allowed(URL, redis) is True
+@pytest.mark.parametrize("unreachable", ["refused", "server error", "rate limited"])
+def test_unavailable_robots_disallows_everything_and_is_cached_briefly(monkeypatch, redis, unreachable):
+    """RFC 9309: a robots.txt we cannot get, as opposed to one that is not there, disallows all."""
+    if unreachable == "refused":
+        monkeypatch.setattr(retrieve, "fetch", _unreachable)
+    else:
+        _fetching(monkeypatch, 503 if unreachable == "server error" else 429, b"")
+
+    with pytest.raises(RobotsUnavailable):
+        robots_allowed(URL, redis)
     assert ROBOTS_CACHE_ERROR_TTL_SECONDS - 5 <= redis.ttl("robots:example.test") <= ROBOTS_CACHE_ERROR_TTL_SECONDS
+
+    calls = _fetching(monkeypatch, 200, b"")
+    with pytest.raises(RobotsUnavailable):
+        robots_allowed(URL, redis)
+    assert calls == []
+
+
+def test_crawl_url_reports_unavailable_robots_without_fetching_the_page(monkeypatch, redis):
+    monkeypatch.setattr(retrieve, "fetch", _unreachable)
+
+    result = crawl_url(URL, redis)
+
+    assert result["error"]["name"] == "RobotsUnavailable"
+    assert result["content"] is None
+
+
+@pytest.mark.parametrize(("robots", "expected"), [(b"User-agent: *\nCrawl-delay: 30\n", 30), (ROBOTS, None)])
+def test_crawl_delay_is_read_from_robots(monkeypatch, redis, robots, expected):
+    _fetching(monkeypatch, 200, robots)
+
+    assert robots_crawl_delay(URL, redis) == expected
 
 
 def test_robots_in_latin_1_are_decoded(monkeypatch, redis):
@@ -95,7 +125,15 @@ def test_expired_cache_entry_is_refetched(monkeypatch, redis):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("entry", ["not json", json.dumps({"content": []})])
+# The last is the shape entries had before they recorded whether robots.txt was unavailable.
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "not json",
+        json.dumps({"content": []}),
+        json.dumps({"content": [], "cached_at": 0, "expires_at": int(time.time()) + 3600}),
+    ],
+)
 def test_corrupt_cache_entry_is_dropped_and_refetched(monkeypatch, redis, entry):
     redis.set("robots:example.test", entry)
     calls = _fetching(monkeypatch, 200, ROBOTS)

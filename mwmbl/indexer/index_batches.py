@@ -49,11 +49,12 @@ def _merge_user_ids(existing: Optional[list[int]], incoming: Optional[list[int]]
 def get_documents_from_batches(batches: Collection[HashedBatch]) -> Iterable[Document]:
     for batch in batches:
         for item in batch.items:
-            if item.content is not None and not item.content.links_only:
+            page = item.page
+            if page is not None and not page.links_only:
                 yield Document(
-                    item.content.title,
+                    page.title,
                     item.url,
-                    item.content.extract,
+                    page.extract,
                     last_crawled=int(item.timestamp / 1000),
                 )
 
@@ -390,7 +391,7 @@ def get_url_error_status(item: Item):
     if item.status == 404:
         return URLStatus.ERROR_404
     if item.error is not None:
-        if item.error.name == "AbortError":
+        if item.error.name in ("AbortError", "RobotsUnavailable"):
             return URLStatus.ERROR_TIMEOUT
         elif item.error.name == "RobotsDenied":
             return URLStatus.ERROR_ROBOTS_DENIED
