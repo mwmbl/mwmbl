@@ -7,6 +7,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 
 from mwmbl import crawl
 from mwmbl.crawl import Crawler
@@ -29,6 +30,7 @@ def supervisor_environment():
     with (
         patch.object(crawl, "validate_environment"),
         patch.object(Crawler, "check_redis"),
+        patch.object(Crawler, "refresh_blacklist_snapshot"),
         patch.object(crawl, "CRAWLER_WORKERS", 2),
     ):
         yield
@@ -81,11 +83,46 @@ def test_run_rejects_zero_workers():
             Crawler().run()
 
 
+def test_run_keeps_crawling_when_a_snapshot_refresh_fails(supervisor_environment):
+    def stop_after_first_pass(seconds):
+        if seconds == 10:
+            raise LoopStopped
+
+    with (
+        override_settings(BLACKLIST_SNAPSHOT_REFRESH_SECONDS=0),
+        patch.object(Crawler, "refresh_blacklist_snapshot", side_effect=[None, RuntimeError("no network")]) as refresh,
+        patch.object(crawl, "Process", side_effect=lambda target: _process(alive=True)),
+        patch.object(crawl.time, "sleep", side_effect=stop_after_first_pass),
+    ):
+        with pytest.raises(LoopStopped):
+            Crawler().run()
+
+    assert refresh.call_count == 2
+
+
+def test_a_failed_snapshot_publisher_is_an_error():
+    with patch.object(crawl, "Process", return_value=_process(alive=False, exitcode=1)):
+        with pytest.raises(RuntimeError, match="exit code 1"):
+            Crawler().refresh_blacklist_snapshot()
+
+
+def test_the_queue_and_each_batch_share_one_snapshot():
+    crawler = Crawler()
+    with patch.object(crawl, "SnapshotBlacklist") as snapshot_blacklist:
+        first = crawler.new_blacklist_provider()
+        second = crawler.new_blacklist_provider()
+
+    snapshot_blacklist.assert_called_once()
+    assert first is not second
+    assert first.providers == second.providers == [snapshot_blacklist.return_value]
+
+
 def test_run_once_checks_the_environment_then_crawls_and_indexes():
     crawler = Crawler()
     with (
         patch.object(crawl, "validate_environment") as validate,
         patch.object(Crawler, "check_redis") as check_redis,
+        patch.object(Crawler, "refresh_blacklist_snapshot") as refresh_blacklist_snapshot,
         patch.object(Crawler, "process_batch") as process_batch,
         patch.object(Crawler, "run_indexing") as run_indexing,
     ):
@@ -93,6 +130,7 @@ def test_run_once_checks_the_environment_then_crawls_and_indexes():
 
     validate.assert_called_once()
     check_redis.assert_called_once()
+    refresh_blacklist_snapshot.assert_called_once()
     process_batch.assert_called_once()
     run_indexing.assert_called_once()
 

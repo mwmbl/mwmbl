@@ -57,6 +57,8 @@ from mwmbl.crawler.env_vars import (
 )
 from mwmbl.crawler.politeness import abandon_domains, release_domains
 from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
+from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider
+from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist, refresh_snapshot
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
@@ -304,6 +306,7 @@ class Crawler:
         self.redis_url = redis_url or settings.REDIS_URL
         self._redis = None
         self._url_queue = None
+        self._snapshot_blacklist = None
 
     @property
     def redis(self):
@@ -320,8 +323,39 @@ class Crawler:
     def url_queue(self):
         """Lazy initialization of URL queue."""
         if self._url_queue is None:
-            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains)
+            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains, self.new_blacklist_provider())
         return self._url_queue
+
+    @property
+    def snapshot_blacklist(self) -> SnapshotBlacklist:
+        """The remote lists as a hash array, ~11MB, where the sets of domains they come from take ~300MB.
+
+        Lazy so that each process loads its own after the fork. The client is not the one above
+        because the snapshot is binary and that one decodes responses as text.
+        """
+        if self._snapshot_blacklist is None:
+            self._snapshot_blacklist = SnapshotBlacklist(redis_client=Redis.from_url(self.redis_url))
+            self._snapshot_blacklist.load_now()
+        return self._snapshot_blacklist
+
+    def new_blacklist_provider(self) -> CombinedBlacklistProvider:
+        # A provider of its own because it holds the approved domains from when it first needs
+        # them, so one kept for the life of the process would never see a later approval.
+        return CombinedBlacklistProvider([self.snapshot_blacklist], get_exempt_domains=_fetch_curated_domains)
+
+    def publish_blacklist_snapshot(self):
+        refresh_snapshot(redis_client=Redis.from_url(self.redis_url))
+
+    def refresh_blacklist_snapshot(self):
+        """Download the blocklists and publish them for the workers, from a process that then exits.
+
+        Parsing them takes ~300MB, and exiting is what reliably gives that back to the OS.
+        """
+        process = Process(target=self.publish_blacklist_snapshot)
+        process.start()
+        process.join()
+        if process.exitcode != 0:
+            raise RuntimeError(f"Publishing the blacklist snapshot failed with exit code {process.exitcode}")
 
     def check_redis(self):
         """Check Redis connection health.
@@ -371,7 +405,7 @@ class Crawler:
                 "items": results,
             }
         )
-        record_urls_in_database([batch], self.url_queue)
+        record_urls_in_database([batch], self.url_queue, self.new_blacklist_provider())
 
         # Push the batch into the Redis queue
         batch_json = batch.json()
@@ -534,6 +568,7 @@ class Crawler:
         """
         validate_environment()
         self.check_redis()
+        self.refresh_blacklist_snapshot()
         self.process_batch()
         self.run_indexing()
 
@@ -549,6 +584,9 @@ class Crawler:
         workers: int = CRAWLER_WORKERS
         assert workers > 0, f"Invalid value for CRAWLER_WORKERS: {workers}"
 
+        self.refresh_blacklist_snapshot()
+        last_snapshot_refresh = time.monotonic()
+
         batch_processes: list[Process] = []
         for i in range(workers):
             process = Process(target=self.process_batch_continuously)
@@ -563,6 +601,14 @@ class Crawler:
         index_crash_history: list[tuple[datetime, int, int]] = []
 
         while True:
+            if time.monotonic() - last_snapshot_refresh >= settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS:
+                last_snapshot_refresh = time.monotonic()
+                # The workers keep the snapshot they have, so a failed refresh costs only staleness.
+                try:
+                    self.refresh_blacklist_snapshot()
+                except RuntimeError:
+                    logger.exception("Could not refresh the blacklist snapshot, keeping the current one")
+
             if not index_process.is_alive():
                 crash_time = datetime.now(timezone.utc)
                 exit_code = index_process.exitcode or -1
