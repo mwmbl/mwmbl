@@ -349,6 +349,11 @@ SEED_DOMAIN_RECENT_CRAWLS = 5
 SEED_DOMAINS_PUBLISH_SECONDS = 24 * 60 * 60
 SEED_DOMAINS_PUBLISHED = 1000
 
+# Crawlers submitting results with a version below this are rejected with 426 Upgrade Required.
+# 0.0.0 accepts every crawler, including ones too old to report a version; raise it once the
+# crawler version spread dashboard (/api/v1/platform/crawler-versions) shows the fleet has moved.
+MIN_CRAWLER_VERSION = "0.0.0"
+
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
 # order instead.

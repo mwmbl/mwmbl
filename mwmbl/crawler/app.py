@@ -26,6 +26,7 @@ from mwmbl.crawler.batch import (
     StatusResponse,
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
+from mwmbl.crawler.version import parse_release_version
 from mwmbl.devices import record_device
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey
@@ -226,7 +227,7 @@ def _register_routes(r: Router | NinjaAPI):
 
     @r.post(
         "/results",
-        response={200: PostResultsResponse, 400: Error, 401: Error},
+        response={200: PostResultsResponse, 400: Error, 401: Error, 426: Error},
         summary="Submit indexed results",
         description=(
             "Submit a set of pre-indexed search results directly into the Mwmbl index. "
@@ -235,7 +236,9 @@ def _register_routes(r: Router | NinjaAPI):
             "Results are indexed immediately and also stored in object storage. "
             "This endpoint is intended for trusted crawlers.\n\n"
             "Pass `?dry_run=true` to authenticate and validate the request without indexing "
-            "or storing anything. Useful for exercising the submission path from CI."
+            "or storing anything. Useful for exercising the submission path from CI.\n\n"
+            "Returns 426 Upgrade Required when `crawler_version` is below the server's "
+            "`MIN_CRAWLER_VERSION` setting."
         ),
     )
     def post_results(request, results: Results, dry_run: bool = False):
@@ -247,6 +250,20 @@ def _register_routes(r: Router | NinjaAPI):
         api_key = _get_crawl_api_key(raw_key)
         if api_key is None:
             return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
+
+        min_version = settings.MIN_CRAWLER_VERSION
+        min_version_tuple = parse_release_version(min_version)
+        assert min_version_tuple is not None, f"MIN_CRAWLER_VERSION must be X.Y.Z, got {min_version!r}"
+        # A crawler too old to report a release version counts as 0.0.0: it passes while the
+        # minimum is 0.0.0 and is rejected once the minimum is raised above that.
+        claimed_version_tuple = parse_release_version(results.crawler_version or "") or (0, 0, 0)
+        if claimed_version_tuple < min_version_tuple:
+            return 426, {
+                "message": (
+                    f"Crawler version {results.crawler_version or 'unknown'} is below the minimum "
+                    f"{min_version}. Upgrade the crawler, e.g. `docker compose pull && docker compose up -d`."
+                )
+            }
 
         now = datetime.now(timezone.utc)
         ApiKey.objects.filter(pk=api_key.pk).update(last_used=now)

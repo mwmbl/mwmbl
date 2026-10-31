@@ -9,14 +9,16 @@ from unittest.mock import MagicMock, patch
 
 import fakeredis
 import pytest
+import requests
 from django.test import override_settings
 
-from mwmbl.crawl import REMOTE_INDEX_CACHE_EXPIRY, Crawler
+from mwmbl.crawl import REMOTE_INDEX_CACHE_EXPIRY, UPGRADE_REQUIRED_WAIT_SECONDS, Crawler
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent
 from mwmbl.crawler.retrieve import crawl_url
 from mwmbl.crawler.urls import FoundURL, URLStatus
 from mwmbl.indexer.blacklist_providers import StaticBlacklistProvider
 from mwmbl.redis_url_queue import RedisURLQueue
+from mwmbl.tinysearchengine.indexer import Document
 
 
 @pytest.fixture
@@ -219,6 +221,65 @@ class TestCrawlFunctional:
                             # see test_request_cache.py
                             mock_remote_index.assert_called_once()
                             assert mock_remote_index.call_args.kwargs["expire_after"] == REMOTE_INDEX_CACHE_EXPIRY
+
+    def _indexing_with_post_response(self, fake_redis, status_code, response_text):
+        """Run one indexing pass with a batch whose term has a new item, posting to a mocked
+        /results endpoint that answers with the given status."""
+        sample_item = Item(
+            url="https://example.com",
+            status=200,
+            timestamp=int(time.time() * 1000),
+            content=ItemContent(title="Example", extract="Test content"),
+        )
+        sample_batch = HashedBatch(user_id_hash="test_user", timestamp=int(time.time() * 1000), items=[sample_item])
+        fake_redis.rpush("batch-queue", sample_batch.json())
+
+        crawler = Crawler()
+        crawler._redis = fake_redis
+
+        new_doc = Document(title="Example", url="https://example.com/new", extract="New content")
+        mock_counter = Counter({"example": 1})
+        with patch("mwmbl.crawl.index_batches", return_value=mock_counter):
+            with patch("mwmbl.crawl.RemoteIndex") as mock_remote_index:
+                with patch("mwmbl.crawl.TinyIndex") as mock_tiny_index:
+                    with patch("mwmbl.crawl.index_pages"):
+                        with patch("requests.post") as mock_post:
+                            with patch("mwmbl.crawl.time.sleep") as mock_sleep:
+                                mock_remote_index_instance = MagicMock()
+                                mock_remote_index.return_value = mock_remote_index_instance
+                                mock_remote_index_instance.retrieve.return_value = []
+
+                                mock_tiny_index_instance = MagicMock()
+                                mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
+                                mock_tiny_index_instance.retrieve.return_value = [new_doc]
+                                mock_tiny_index_instance.get_key_page_index.return_value = 0
+                                mock_tiny_index_instance.get_page.return_value = "test page content"
+
+                                mock_post.return_value.status_code = status_code
+                                mock_post.return_value.text = response_text
+                                mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(response_text)
+
+                                crawler.run_indexing()
+
+                                return mock_post, mock_sleep
+
+    def test_indexing_waits_on_426_instead_of_crashing(
+        self, fake_redis, mock_settings, mock_environment, temp_data_path
+    ):
+        """A 426 Upgrade Required makes the crawler wait for an update, not crash-loop."""
+        mock_post, mock_sleep = self._indexing_with_post_response(
+            fake_redis, 426, '{"message": "Crawler version 0.2.0 is below the minimum 1.0.0."}'
+        )
+
+        mock_post.assert_called_once()
+        mock_sleep.assert_called_once_with(UPGRADE_REQUIRED_WAIT_SECONDS)
+
+    def test_indexing_still_raises_on_other_error_statuses(
+        self, fake_redis, mock_settings, mock_environment, temp_data_path
+    ):
+        """Only 426 waits; any other error status is still fatal to the pass."""
+        with pytest.raises(requests.HTTPError):
+            self._indexing_with_post_response(fake_redis, 500, "Server Error")
 
     def test_crawl_url_functionality(self, mock_environment):
         """Test individual URL crawling functionality"""
