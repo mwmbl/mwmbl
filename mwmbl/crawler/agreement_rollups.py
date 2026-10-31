@@ -48,7 +48,7 @@ class CrawlerRollup(BaseModel):
     median_extract_similarity_as_submitter: float | None
     median_extract_similarity_as_stored: float | None
     median_title_similarity: float | None
-    empty_extract_rate: float
+    empty_extract_rate: float | None
     """Share of its copies in its comparisons with an empty extract."""
     recent_comparisons: int
     median_recent_score: float | None
@@ -111,7 +111,7 @@ _TAIL_THRESHOLD_SQL = f"""
 SELECT PERCENTILE_CONT({TAIL_SHARE}) WITHIN GROUP (ORDER BY score) FROM comparisons WHERE recent
 """
 
-_CRAWLERS_SQL = f"""
+_CRAWLERS_SQL = """
 , sides AS (
     SELECT user_id AS crawler_id, existing_user_id AS partner_id, TRUE AS submitter,
            extract_empty AS own_extract_empty, title_similarity, extract_similarity, both_extracts, score, recent
@@ -122,17 +122,19 @@ _CRAWLERS_SQL = f"""
     FROM comparisons
 )
 SELECT
-    crawler_id,
-    COUNT(*),
-    COUNT(*) FILTER (WHERE submitter),
-    COUNT(DISTINCT partner_id),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE submitter AND both_extracts),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE NOT submitter AND both_extracts),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY title_similarity),
-    AVG(own_extract_empty::int),
-    COUNT(*) FILTER (WHERE recent),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) FILTER (WHERE recent),
-    COUNT(*) FILTER (WHERE recent AND score <= ({_TAIL_THRESHOLD_SQL}))
+    crawler_id AS user_id,
+    COUNT(*) AS comparisons,
+    COUNT(*) FILTER (WHERE submitter) AS submitted_comparisons,
+    COUNT(DISTINCT partner_id) AS partners,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE submitter AND both_extracts)
+        AS median_extract_similarity_as_submitter,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE NOT submitter AND both_extracts)
+        AS median_extract_similarity_as_stored,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY title_similarity) AS median_title_similarity,
+    AVG(own_extract_empty::int) AS empty_extract_rate,
+    COUNT(*) FILTER (WHERE recent) AS recent_comparisons,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) FILTER (WHERE recent) AS median_recent_score,
+    COUNT(*) FILTER (WHERE recent AND score <= %(tail_threshold)s) AS recent_tail_comparisons
 FROM sides
 GROUP BY crawler_id
 """
@@ -141,19 +143,20 @@ _PAIRS_SQL = """
 SELECT
     user_id,
     existing_user_id,
-    COUNT(*),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY title_similarity),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE both_extracts),
-    COUNT(*) FILTER (WHERE recent),
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) FILTER (WHERE recent)
+    COUNT(*) AS comparisons,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) AS median_score,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY title_similarity) AS median_title_similarity,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE both_extracts)
+        AS median_extract_similarity,
+    COUNT(*) FILTER (WHERE recent) AS recent_comparisons,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) FILTER (WHERE recent) AS median_recent_score
 FROM comparisons
 GROUP BY user_id, existing_user_id
 """
 
 
 def get_agreement_rollups(client: Redis, days: int) -> AgreementRollups:
-    """The rollups for the last days days up to today, from the cache or worked out now."""
+    """The rollups over the last `days` days, today included, from the cache or worked out now."""
     end = utc_today()
     key = ROLLUPS_KEY.format(days=days, end=end.isoformat())
     cached = client.get(key)
@@ -172,43 +175,52 @@ def compute_agreement_rollups(start: date, end: date) -> AgreementRollups:
     with connection.cursor() as cursor:
         cursor.execute(_COMPARISONS_SQL + _TAIL_THRESHOLD_SQL, window)
         (tail_threshold,) = cursor.fetchone()
-        cursor.execute(_COMPARISONS_SQL + _CRAWLERS_SQL, window)
-        crawler_rows = cursor.fetchall()
+        # Counted against the threshold just worked out, not a fresh one: comparisons keep
+        # arriving between the queries.
+        cursor.execute(_COMPARISONS_SQL + _CRAWLERS_SQL, {**window, "tail_threshold": tail_threshold})
+        crawler_rows = _named_rows(cursor)
         cursor.execute(_COMPARISONS_SQL + _PAIRS_SQL, window)
-        pair_rows = cursor.fetchall()
+        pair_rows = _named_rows(cursor)
 
     submissions = _submissions(start, end)
-    crawlers = [
-        CrawlerRollup(
-            user_id=row[0],
-            comparisons=row[1],
-            submitted_comparisons=row[2],
-            submissions=submissions.get(row[0], 0),
-            partners=row[3],
-            median_extract_similarity_as_submitter=row[4],
-            median_extract_similarity_as_stored=row[5],
-            median_title_similarity=row[6],
-            empty_extract_rate=row[7],
-            recent_comparisons=row[8],
-            median_recent_score=row[9],
-            recent_tail_comparisons=row[10],
-        )
-        for row in crawler_rows
+    compared_crawlers = [CrawlerRollup(**row, submissions=submissions.get(row["user_id"], 0)) for row in crawler_rows]
+    # A crawler whose submissions never met another crawler's copy stands furthest apart of all.
+    compared_ids = {crawler.user_id for crawler in compared_crawlers}
+    unmet_crawlers = [
+        _unmet_rollup(user_id, user_submissions)
+        for user_id, user_submissions in submissions.items()
+        if user_id not in compared_ids
     ]
-    pairs = [
-        PairRollup(
-            user_id=row[0],
-            existing_user_id=row[1],
-            comparisons=row[2],
-            median_score=row[3],
-            median_title_similarity=row[4],
-            median_extract_similarity=row[5],
-            recent_comparisons=row[6],
-            median_recent_score=row[7],
-        )
-        for row in pair_rows
-    ]
-    return AgreementRollups(start=start, end=end, tail_threshold=tail_threshold, crawlers=crawlers, pairs=pairs)
+    pairs = [PairRollup(**row) for row in pair_rows]
+    return AgreementRollups(
+        start=start,
+        end=end,
+        tail_threshold=tail_threshold,
+        crawlers=compared_crawlers + unmet_crawlers,
+        pairs=pairs,
+    )
+
+
+def _named_rows(cursor) -> list[dict]:
+    names = [column.name for column in cursor.description]
+    return [dict(zip(names, row)) for row in cursor.fetchall()]
+
+
+def _unmet_rollup(user_id: int, submissions: int) -> CrawlerRollup:
+    return CrawlerRollup(
+        user_id=user_id,
+        comparisons=0,
+        submitted_comparisons=0,
+        submissions=submissions,
+        partners=0,
+        median_extract_similarity_as_submitter=None,
+        median_extract_similarity_as_stored=None,
+        median_title_similarity=None,
+        empty_extract_rate=None,
+        recent_comparisons=0,
+        median_recent_score=None,
+        recent_tail_comparisons=0,
+    )
 
 
 def _submissions(start: date, end: date) -> dict[int, int]:

@@ -1,11 +1,11 @@
-from datetime import timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import fakeredis
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from mwmbl.crawler.agreement_rollups import compute_agreement_rollups, get_agreement_rollups
+from mwmbl.crawler.agreement_rollups import ROLLUPS_EXPIRE_SECONDS, compute_agreement_rollups, get_agreement_rollups
 from mwmbl.models import CrawlerAgreement, UserStats
 from mwmbl.utils import utc_today
 
@@ -170,3 +170,69 @@ def test_get_agreement_rollups_caches_them(crawlers):
     assert second == first
     assert second.start == utc_today() - timedelta(days=6)
     assert _crawler(second, magpie).comparisons == 1
+
+
+def test_crawlers_whose_submissions_met_no_one_are_listed(crawlers):
+    magpie, wren, plover = crawlers
+    UserStats.objects.create(user=plover, date=utc_today(), num_results=4)
+    CrawlerAgreement.objects.bulk_create([_agreement(magpie, wren)])
+
+    plover_rollup = _crawler(_today_rollups(), plover)
+
+    assert plover_rollup.comparisons == 0
+    assert plover_rollup.submissions == 4
+    assert plover_rollup.met_rate == 0.0
+    assert plover_rollup.empty_extract_rate is None
+    assert plover_rollup.tail_rate is None
+
+
+def test_empty_window(crawlers):
+    rollups = _today_rollups()
+
+    assert rollups.tail_threshold is None
+    assert rollups.crawlers == []
+    assert rollups.pairs == []
+
+
+def test_window_includes_its_first_day(crawlers):
+    magpie, wren, _ = crawlers
+    today = utc_today()
+    CrawlerAgreement.objects.bulk_create([_agreement(magpie, wren)])
+    start_of_yesterday = datetime.combine(today - timedelta(days=1), time(), tzinfo=UTC)
+    CrawlerAgreement.objects.update(created_at=start_of_yesterday)
+
+    assert compute_agreement_rollups(today - timedelta(days=1), today).crawlers != []
+    assert compute_agreement_rollups(today, today).crawlers == []
+
+
+def test_pair_medians_leave_out_empty_extracts_and_old_copies(crawlers):
+    magpie, wren, _ = crawlers
+    CrawlerAgreement.objects.bulk_create(
+        [
+            _agreement(magpie, wren, title=0.6, extract=0.0, extract_empty=True),
+            _agreement(magpie, wren, title=0.9, extract=0.8),
+            _agreement(magpie, wren, title=0.2, extract=0.2, gap=30 * 24 * HOUR),
+        ]
+    )
+
+    rollups = _today_rollups()
+    (pair,) = rollups.pairs
+
+    assert pair.median_extract_similarity == pytest.approx(0.5)
+    assert pair.recent_comparisons == 2
+    assert pair.median_recent_score == pytest.approx(0.7)
+    assert _crawler(rollups, magpie).median_title_similarity == pytest.approx(0.6)
+
+
+def test_get_agreement_rollups_expires_and_keys_by_days(crawlers):
+    magpie, wren, _ = crawlers
+    client = fakeredis.FakeRedis()
+    CrawlerAgreement.objects.bulk_create([_agreement(magpie, wren)])
+
+    get_agreement_rollups(client, 7)
+    CrawlerAgreement.objects.bulk_create([_agreement(wren, magpie)])
+    one_day = get_agreement_rollups(client, 1)
+
+    assert all(0 < client.ttl(key) <= ROLLUPS_EXPIRE_SECONDS for key in client.keys())
+    assert len(client.keys()) == 2
+    assert _crawler(one_day, magpie).comparisons == 2
