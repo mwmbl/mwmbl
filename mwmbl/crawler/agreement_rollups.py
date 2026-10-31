@@ -77,6 +77,17 @@ class PairRollup(BaseModel):
     median_recent_score: float | None
 
 
+class DailyRollup(BaseModel):
+    """A crawler's comparisons as submitter on one day, for following it over the window."""
+
+    user_id: int
+    day: date
+    comparisons: int
+    median_extract_similarity: float | None
+    crawler_version: str | None
+    """Of its last submission that day, so that a step in the median can be put against a release."""
+
+
 class AgreementRollups(BaseModel):
     start: date
     end: date
@@ -85,6 +96,7 @@ class AgreementRollups(BaseModel):
     """The score at the network's lowest-agreeing TAIL_SHARE of recent comparisons."""
     crawlers: list[CrawlerRollup]
     pairs: list[PairRollup]
+    daily: list[DailyRollup]
 
 
 # The lower of title and extract similarity, or the title alone when either extract is empty,
@@ -101,7 +113,9 @@ WITH comparisons AS (
         NOT (extract_empty OR existing_extract_empty) AS both_extracts,
         CASE WHEN extract_empty OR existing_extract_empty THEN title_similarity
              ELSE LEAST(title_similarity, extract_similarity) END AS score,
-        COALESCE(ABS(last_crawled_delta) < {RECENT_GAP_SECONDS}, FALSE) AS recent
+        COALESCE(ABS(last_crawled_delta) < {RECENT_GAP_SECONDS}, FALSE) AS recent,
+        crawler_version,
+        created_at
     FROM {CrawlerAgreement._meta.db_table}
     WHERE created_at >= %(start)s AND created_at < %(end)s
 )
@@ -155,6 +169,19 @@ GROUP BY user_id, existing_user_id
 """
 
 
+_DAILY_SQL = """
+SELECT
+    user_id,
+    (created_at AT TIME ZONE 'UTC')::date AS day,
+    COUNT(*) AS comparisons,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE both_extracts)
+        AS median_extract_similarity,
+    (ARRAY_AGG(crawler_version ORDER BY created_at DESC))[1] AS crawler_version
+FROM comparisons
+GROUP BY user_id, day
+"""
+
+
 def get_agreement_rollups(client: Redis, days: int) -> AgreementRollups:
     """The rollups over the last `days` days, today included, from the cache or worked out now."""
     end = utc_today()
@@ -181,6 +208,8 @@ def compute_agreement_rollups(start: date, end: date) -> AgreementRollups:
         crawler_rows = _named_rows(cursor)
         cursor.execute(_COMPARISONS_SQL + _PAIRS_SQL, window)
         pair_rows = _named_rows(cursor)
+        cursor.execute(_COMPARISONS_SQL + _DAILY_SQL, window)
+        daily_rows = _named_rows(cursor)
 
     submissions = _submissions(start, end)
     compared_crawlers = [CrawlerRollup(**row, submissions=submissions.get(row["user_id"], 0)) for row in crawler_rows]
@@ -198,6 +227,7 @@ def compute_agreement_rollups(start: date, end: date) -> AgreementRollups:
         tail_threshold=tail_threshold,
         crawlers=compared_crawlers + unmet_crawlers,
         pairs=pairs,
+        daily=[DailyRollup(**row) for row in daily_rows],
     )
 
 
