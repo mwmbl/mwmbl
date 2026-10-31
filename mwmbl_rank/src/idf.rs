@@ -1,7 +1,5 @@
 /// TF-IDF feature computation.
-/// Replicates get_tf_idf_features from mwmbl/tinysearchengine/rank.py.
-/// Note: TF-IDF features are currently commented out in the Python code but kept here
-/// for completeness and future use.
+/// TF-IDF features are not part of the ranking model; this is kept for future use.
 
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
