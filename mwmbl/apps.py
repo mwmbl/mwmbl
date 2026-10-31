@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 from django.apps import AppConfig
 from django.conf import settings
@@ -15,7 +16,7 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     re-fetching.
     """
     # Imports here to avoid AppRegistryNotReady exception
-    from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
+    from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
     index_path = Path(settings.DATA_PATH) / index_name
     index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,17 +44,22 @@ def create_index(index_name, num_pages, rebuild_on_mismatch=False):
     print("======================================")
     print(f"Found existing index at {index_path}")
     print("======================================")
-    if existing_index.page_size == PAGE_SIZE and existing_index.num_pages == num_pages:
+    message = index_shape_mismatch(existing_index, num_pages)
+    if message is None:
         return
 
-    message = (
-        f"Existing index page sizes ({existing_index.page_size}) or number of pages "
-        f"({existing_index.num_pages}) do not match"
-    )
     if not rebuild_on_mismatch:
         raise ValueError(message)
     print(f"{message} - rebuilding {index_path}")
     _replace_index_file(index_path, num_pages)
+
+
+def index_shape_mismatch(index, num_pages) -> Optional[str]:
+    from mwmbl.tinysearchengine.indexer import PAGE_SIZE
+
+    if index.page_size == PAGE_SIZE and index.num_pages == num_pages:
+        return None
+    return f"Existing index page sizes ({index.page_size}) or number of pages ({index.num_pages}) do not match"
 
 
 def _create_index_file(index_path, num_pages):
@@ -83,7 +89,12 @@ class MwmblConfig(AppConfig):
     verbose_name = "Mwmbl Application"
 
     def ready(self):
-        create_index(settings.INDEX_NAME, settings.NUM_PAGES)
+        # The search index is not created here but by `manage.py create_index` (and by the
+        # crawler's main()). Creating it on startup turned a data volume that failed to
+        # mount into a server running happily on an empty index, and made every process
+        # that set Django up - tests, management commands, an import of mwmbl.crawl - write
+        # one. The external cache is disposable, so it is still created and resized here.
+        #
         # Note this writes num_pages * 4 KB page by page rather than sparsely, so the first
         # boot after a size change pays for the whole file up front - ~17s for the 15 GB
         # production cache at the ~0.9 GB/s measured locally, which is what the healthcheck

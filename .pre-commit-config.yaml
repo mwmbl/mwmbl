@@ -6,6 +6,11 @@
 # Nothing here should touch the front end, generated data, or the Rust build outputs.
 exclude: ^(devdata/|front-end/|test_env/|mwmbl_rank/target/)
 
+# The commit-msg hook is the crawler release check, which needs the message. Every other hook
+# runs before the message is written.
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep this pinned to the same ruff version as the dev dependency group in
@@ -27,6 +32,15 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      # CI's check that crawler changes raise CRAWLER_VERSION, for the commit about to be
+      # made: see mwmbl/crawler/release_check.py. pre-commit passes it the message file.
+      - id: crawler-release-check
+        name: crawler release check
+        entry: uv run python -m mwmbl.crawler.release_check --commit-msg
+        language: system
+        stages: [commit-msg]
+        always_run: true
 
   # Deliberately no end-of-file-fixer or trailing-whitespace here: ruff already handles
   # both for Python, and repo-wide they rewrite generated artifacts (the bundled XGBoost

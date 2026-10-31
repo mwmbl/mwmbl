@@ -149,8 +149,10 @@ ACCOUNT_USERNAME_REQUIRED = False
 # mwmbl.models.SEED_CRAWLER_USERNAME, which settings cannot import.
 ACCOUNT_USERNAME_BLACKLIST = ["mwmbl-seed-crawler"]
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"
-
 DEFAULT_FROM_EMAIL = "admin@mwmbl.org"
+
+# Where links in emails, such as the one confirming an email change, send the user.
+FRONTEND_URL = "https://mwmbl.org"
 
 LOGIN_REDIRECT_URL = "/"
 
@@ -216,9 +218,11 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN is not None:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for tracing.
-        traces_sample_rate=0.1,
+        # The span quota is about 5M a month, or 165k a day. At 0.1, beta alone used it up
+        # in September 2026, and production sends about 3.5M spans a day at that rate, so
+        # once both were on it lasted a day. At 0.002 the two come to about 80k a day,
+        # with room for a spike, and still trace several thousand requests a day.
+        traces_sample_rate=0.002,
         # Set profiles_sample_rate to 1.0 to profile 100%
         # of sampled transactions.
         # We recommend adjusting this value in production.
@@ -324,6 +328,9 @@ SEED_CRAWL_MAX_STALE_PAGES_PER_DOMAIN = 10
 SEED_CRAWL_MAX_SECONDS = 15 * 60
 # Crawls queued or running, across all users, beyond which crawl=true queues nothing.
 SEED_CRAWL_MAX_QUEUED = 10
+# Each user's share of that queue, so that their searches with crawl=true can queue up
+# while one is crawled, but no one user can fill the queue.
+SEED_CRAWL_MAX_PER_USER = 3
 SEED_CRAWL_THREADS = 8
 # The least time between two fetches from one domain.
 SEED_CRAWL_DOMAIN_DELAY_SECONDS = 1.0
@@ -341,6 +348,11 @@ SEED_DOMAIN_RECENT_CRAWLS = 5
 # diffed to learn what one private query returned - see mwmbl.indexer.seed_domains.
 SEED_DOMAINS_PUBLISH_SECONDS = 24 * 60 * 60
 SEED_DOMAINS_PUBLISHED = 1000
+
+# Crawlers submitting results with a version below this are rejected with 426 Upgrade Required.
+# 0.0.0 accepts every crawler, including ones too old to report a version; raise it once the
+# crawler version spread dashboard (/api/v1/platform/crawler-versions) shows the fleet has moved.
+MIN_CRAWLER_VERSION = "0.0.0"
 
 # Jev (TypeSafe), which orders Combined Search's results - see mwmbl.tinysearchengine.jev_rank.
 # Without a key, or when a request fails or times out, Combined Search serves the LTR's
@@ -419,6 +431,10 @@ EXTERNAL_CACHE_ENABLED = os.environ.get("EXTERNAL_CACHE_ENABLED", "true").lower(
 # Counting search traffic (mwmbl.traffic). Off in the test settings: it is the only thing in
 # the request path that reaches for Redis, and the CI test job runs none.
 SEARCH_TRAFFIC_COUNTING = os.environ.get("SEARCH_TRAFFIC_COUNTING", "true").lower() != "false"
+
+# Counting calls to the paid providers (mwmbl.provider_usage), for the provider costs page.
+PROVIDER_USAGE_COUNTING = os.environ.get("PROVIDER_USAGE_COUNTING", "true").lower() != "false"
+
 # The default TTL, for any provider that does not name its own below. Wikipedia articles
 # move rarely, which is what justifies six months.
 EXTERNAL_CACHE_TTL_SECONDS = 26 * 7 * 24 * 60 * 60  # 6 months; the disk cache kept 10 weeks

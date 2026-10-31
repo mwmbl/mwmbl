@@ -12,7 +12,8 @@ on:
 
 jobs:
   smoke:
-    runs-on: ubuntu-24.04  # setup-python has no 3.11.12 build for ubuntu-latest (26.04) yet
+    # Not ubuntu-latest: setup-python has no Python 3.11.12 build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
 
     services:
       postgres:

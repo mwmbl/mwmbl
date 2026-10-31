@@ -3,9 +3,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.cache import cache
 from django.test import override_settings
-from requests.exceptions import RetryError
-from urllib3.exceptions import MaxRetryError, ResponseError
+from django_redis.exceptions import ConnectionInterrupted
 
 from mwmbl.tinysearchengine import rank
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource
@@ -103,62 +103,81 @@ def test_a_staan_copy_from_the_index_keeps_its_source():
     assert result.source == DocumentSource.STAAN_INDEXED
 
 
-def _make_retry_error(status_code: int) -> RetryError:
-    reason = ResponseError(f"too many {status_code} error responses")
-    max_retry_error = MaxRetryError(
-        pool=None, url="https://en.wikipedia.org/w/api.php?srsearch=secret-query", reason=reason
-    )
-    return RetryError(max_retry_error)
-
-
 @pytest.fixture(autouse=True)
 def _reset_wiki_circuit():
-    rank._wiki_blocked_until = 0.0
+    cache.delete(rank.WIKI_CIRCUIT_KEY)
     yield
-    rank._wiki_blocked_until = 0.0
+    cache.delete(rank.WIKI_CIRCUIT_KEY)
 
 
-def _get_wiki_results_with_session(session):
+def _wiki_response(status_code: int, headers: dict | None = None) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    response.headers = headers or {}
+    response.json.return_value = {"query": {"search": []}}
+    return response
+
+
+def _get_wiki_results_with_session(session, **kwargs):
     # The cache is off in these tests: they are about what the fetch does when Wikipedia
     # misbehaves, and a hit would return before the fetch ever ran.
     with override_settings(EXTERNAL_CACHE_ENABLED=False), patch.object(rank.requests, "Session") as mock_session:
         mock_session.return_value.__enter__.return_value = session
-        return get_wiki_results("query", 5)
+        return get_wiki_results("query", 5, **kwargs)
 
 
-def test_wiki_429_retry_error_trips_circuit_breaker():
+def test_a_wiki_429_trips_the_circuit_for_as_long_as_retry_after_says():
     session = MagicMock()
-    session.get.side_effect = _make_retry_error(429)
+    session.get.return_value = _wiki_response(429, {"Retry-After": "43"})
 
-    results = _get_wiki_results_with_session(session)
+    with patch.object(rank.cache, "set") as cache_set:
+        results = _get_wiki_results_with_session(session)
 
     assert results == []
-    assert rank._wiki_circuit_open()
+    cache_set.assert_called_once_with(rank.WIKI_CIRCUIT_KEY, 1, timeout=43)
 
 
-def test_wiki_non_429_retry_error_does_not_trip_circuit_breaker():
+def test_live_search_does_not_retry_or_wait_on_a_wiki_429():
+    """Regression: retrying with Retry-After held a search for over a minute, and with it
+    every request queued on the same worker."""
     session = MagicMock()
-    session.get.side_effect = _make_retry_error(503)
-
-    results = _get_wiki_results_with_session(session)
-
-    assert results == []
-    assert not rank._wiki_circuit_open()
-
-
-def test_wiki_query_text_containing_429_is_not_mistaken_for_rate_limit():
-    # Regression: matching on str(e) (which embeds the request URL/query) meant a
-    # query merely containing "429" could be misread as a 429 rate limit.
-    session = MagicMock()
-    session.get.side_effect = _make_retry_error(503)
+    session.get.return_value = _wiki_response(429, {"Retry-After": "43"})
 
     _get_wiki_results_with_session(session)
 
+    session.mount.assert_not_called()
+    assert session.get.call_count == 1
+    assert rank._wiki_circuit_open()
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [
+        ("11", 11),
+        ("0", 1),
+        ("86400", rank.WIKI_CIRCUIT_MAX_SECONDS),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", rank.WIKI_CIRCUIT_DEFAULT_SECONDS),
+        (None, rank.WIKI_CIRCUIT_DEFAULT_SECONDS),
+    ],
+)
+def test_the_cooldown_comes_from_retry_after_within_bounds(retry_after, expected):
+    headers = {} if retry_after is None else {"Retry-After": retry_after}
+
+    assert rank._wiki_cooldown_seconds(_wiki_response(429, headers)) == expected
+
+
+def test_a_wiki_error_other_than_429_does_not_trip_the_circuit():
+    session = MagicMock()
+    session.get.side_effect = ConnectionError("reset")
+
+    results = _get_wiki_results_with_session(session)
+
+    assert results == []
     assert not rank._wiki_circuit_open()
 
 
 def test_open_wiki_circuit_short_circuits_without_calling_wikipedia():
-    rank._trip_wiki_circuit()
+    rank._trip_wiki_circuit(60)
 
     with override_settings(EXTERNAL_CACHE_ENABLED=False), patch.object(rank.requests, "Session") as mock_session:
         results = get_wiki_results("query", 5)
@@ -167,12 +186,38 @@ def test_open_wiki_circuit_short_circuits_without_calling_wikipedia():
     assert results == []
 
 
-def test_is_wiki_rate_limited_detects_429_reason():
-    assert rank._is_wiki_rate_limited(_make_retry_error(429))
+def test_waiting_out_rate_limits_retries_and_ignores_the_circuit():
+    """Evaluation runs would rather wait than lose a query's wiki results."""
+    rank._trip_wiki_circuit(60)
+    session = MagicMock()
+    session.get.return_value = _wiki_response(200)
+
+    _get_wiki_results_with_session(session, wait_out_rate_limits=True)
+
+    adapter = session.mount.call_args.args[1]
+    assert adapter.max_retries is rank.WIKI_RETRY
+    assert session.get.call_count == 1
 
 
-def test_is_wiki_rate_limited_ignores_non_429_reason():
-    assert not rank._is_wiki_rate_limited(_make_retry_error(503))
+def test_a_cache_outage_does_not_cost_a_search_its_wiki_results():
+    """The breaker only saves Wikipedia calls; the old per-process one never needed Redis."""
+    session = MagicMock()
+    session.get.return_value = _wiki_response(200)
+    session.get.return_value.json.return_value = {"query": {"search": [{"title": "Python", "snippet": "A language"}]}}
+    outage = ConnectionInterrupted(connection=None)
+
+    with patch.object(rank.cache, "get", side_effect=outage), patch.object(rank.cache, "set", side_effect=outage):
+        results = _get_wiki_results_with_session(session)
+
+    assert [document.title for document in results] == ["Python"]
+
+
+def test_a_cache_outage_while_tripping_the_breaker_is_survived():
+    session = MagicMock()
+    session.get.return_value = _wiki_response(429, {"Retry-After": "11"})
+
+    with patch.object(rank.cache, "set", side_effect=ConnectionInterrupted(connection=None)):
+        assert _get_wiki_results_with_session(session) == []
 
 
 # ---------------------------------------------------------------------------

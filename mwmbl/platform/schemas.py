@@ -131,6 +131,19 @@ class ForgotPasswordRequest(Schema):
     email: str
 
 
+class ChangeUsernameRequest(Schema):
+    username: str = Field(description="The new username. Must be unique, ignoring case, and may not contain `@`.")
+
+
+class ChangeEmailRequest(Schema):
+    email: str = Field(description="The new email address. Must not belong to another account.")
+    password: str = Field(description="The account's current password.")
+
+
+class ConfirmEmailChangeRequest(Schema):
+    token: str = Field(description="The token from the link in the confirmation email.")
+
+
 class ResetPasswordRequest(Schema):
     email: str
     key: str
@@ -256,7 +269,8 @@ class Registration(Schema):
         default=None,
         description=(
             "Optional username. If omitted, one is generated automatically in the form "
-            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided."
+            "`adjective_noun_NNN` (e.g. `swift_falcon_379`). Must be unique if provided, and may not "
+            "contain `@`, since usernames are public."
         ),
     )
     agreements: list[AgreementType] = Field(

@@ -117,13 +117,23 @@ def test_allowed_domains_pick_the_seed_deterministically(url_queue):
 
 
 def test_single_allowed_domain_still_pops_its_queued_urls(url_queue):
-    """The seed is the only domain, so leaving it out of the batch would strand its queue."""
+    """The seed is the only domain, so crawling only the seed would strand its queue.
+
+    Crawling both would fetch from the one site twice at once, so the queued URL replaces it.
+    """
     url_queue.queue_urls([found_url("https://mwmbl.org/page")])
 
     with patch("mwmbl.redis_url_queue.CRAWL_ALLOWED_DOMAINS", frozenset({"mwmbl.org"})):
         batch = url_queue.get_batch("test_user")
 
-    assert batch == ["https://mwmbl.org/", "https://mwmbl.org/page"]
+    assert batch == ["https://mwmbl.org/page"]
+
+
+def test_single_allowed_domain_seeds_when_nothing_is_queued(url_queue):
+    with patch("mwmbl.redis_url_queue.CRAWL_ALLOWED_DOMAINS", frozenset({"mwmbl.org"})):
+        batch = url_queue.get_batch("test_user")
+
+    assert batch == ["https://mwmbl.org/"]
 
 
 def test_no_allowlist_leaves_domain_selection_alone(url_queue):
@@ -183,6 +193,7 @@ def test_run_once_does_one_pass_and_returns():
     with (
         patch("mwmbl.crawl.validate_environment"),
         patch.object(Crawler, "check_redis"),
+        patch.object(Crawler, "refresh_blacklist_snapshot"),
         patch.object(Crawler, "process_batch") as process_batch,
         patch.object(Crawler, "run_indexing") as run_indexing,
     ):
@@ -199,6 +210,7 @@ def test_run_once_propagates_errors_instead_of_restarting():
     with (
         patch("mwmbl.crawl.validate_environment"),
         patch.object(Crawler, "check_redis"),
+        patch.object(Crawler, "refresh_blacklist_snapshot"),
         patch.object(Crawler, "process_batch", side_effect=RuntimeError("crawl failed")),
         patch.object(Crawler, "run_indexing") as run_indexing,
     ):

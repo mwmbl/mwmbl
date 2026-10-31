@@ -9,7 +9,7 @@ from logging import getLogger
 from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
 from typing import List, Optional
-from urllib.parse import urljoin, urlparse, urlunsplit
+from urllib.parse import ParseResult, urljoin, urlparse, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
@@ -21,6 +21,7 @@ from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 from mwmbl.crawler.env_vars import MWMBL_CONTACT_INFO
 from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
+from mwmbl.crawler.version import CRAWLER_VERSION
 from mwmbl.justext import core, utils
 from mwmbl.justext.core import html_to_dom
 from mwmbl.justext.paragraph import Paragraph
@@ -55,7 +56,6 @@ MAX_FALLBACK_PARAGRAPH_LINK_DENSITY = 0.5
 DEFAULT_ENCODING = "utf8"
 DEFAULT_ENC_ERRORS = "replace"
 MAX_SITE_URLS = 100
-CRAWLER_VERSION: str = "0.2.0"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
 ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
@@ -161,6 +161,16 @@ def fetch(url):
     raise ValueError(f"Too many redirects for URL {url}")
 
 
+class RobotsUnavailable(Exception):
+    """robots.txt could not be fetched for a reason that says nothing about what it holds.
+
+    RFC 9309 has a crawler that cannot reach robots.txt - a 5xx, a timeout, a refused
+    connection - assume the whole site is disallowed. Only a 4xx means there are no rules.
+    Allowing everything instead meant a struggling server got crawled just when it could
+    least afford it.
+    """
+
+
 def robots_allowed(url: str, redis: Redis) -> bool:
     try:
         parsed_url = urlparse(url)
@@ -168,54 +178,70 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         logger.info(f"Unable to parse URL: {url}")
         return False
 
-    domain = parsed_url.netloc
-    robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "robots.txt", "", ""))
-
-    cached_content = _get_robots_from_cache(redis, domain)
-    if cached_content is not None:
-        logger.debug(f"Robots cache hit for {domain}")
-        parse_robots = RobotFileParser()
-        parse_robots.parse(cached_content)
-        allowed = parse_robots.can_fetch(USER_AGENT, url)
-        logger.debug(f"Robots allowed for {url} (cached): {allowed}")
-        return allowed
-
-    try:
-        status_code, content, _ = fetch(robots_url)
-    except ALLOWED_EXCEPTIONS as e:
-        logger.debug(f"Robots error: {robots_url}, {e}")
-        _cache_robots_content(redis, domain, [], error=True)
-        return True
-
-    if status_code != 200:
-        logger.debug(f"Robots status code: {status_code}")
-        _cache_robots_content(redis, domain, [], error=True)
-        return True
-
-    decoded = None
-    for encoding in ["utf-8", "iso-8859-1"]:
-        try:
-            decoded = content.decode(encoding).splitlines()
-            break
-        except UnicodeDecodeError:
-            pass
-
-    if decoded is None:
-        logger.info(f"Unable to decode robots file {robots_url}")
-        _cache_robots_content(redis, domain, [], error=True)
-        return True
-
-    parse_robots = RobotFileParser()
-    parse_robots.parse(decoded)
-    allowed = parse_robots.can_fetch(USER_AGENT, url)
-
-    _cache_robots_content(redis, domain, decoded, error=False)
-
+    allowed = get_robots(parsed_url, redis).can_fetch(USER_AGENT, url)
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
 
-def _get_robots_from_cache(redis: Redis, domain: str) -> Optional[List[str]]:
+def robots_crawl_delay(url: str, redis: Redis) -> int | None:
+    """The Crawl-delay robots.txt asks of us, in seconds, if it asks for one."""
+    # typeshed says str, but RobotFileParser only ever stores an int.
+    crawl_delay = get_robots(urlparse(url), redis).crawl_delay(USER_AGENT)
+    return int(crawl_delay) if crawl_delay is not None else None
+
+
+def get_robots(parsed_url: ParseResult, redis: Redis) -> RobotFileParser:
+    """The site's robots.txt rules, from the cache when they are there. Raises RobotsUnavailable."""
+    domain = parsed_url.netloc
+    cached = _get_robots_from_cache(redis, domain)
+    if cached is not None:
+        logger.debug(f"Robots cache hit for {domain}")
+        content, unavailable = cached
+    else:
+        robots_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, "robots.txt", "", ""))
+        content, unavailable = _fetch_robots(robots_url)
+        # No rules, whether robots.txt was missing, empty or unavailable, is worth checking
+        # again sooner: an unavailable one stops us crawling the site at all.
+        ttl = ROBOTS_CACHE_TTL_SECONDS if content else ROBOTS_CACHE_ERROR_TTL_SECONDS
+        _cache_robots_content(redis, domain, content, unavailable, ttl)
+
+    if unavailable:
+        raise RobotsUnavailable(f"robots.txt unavailable for {domain}")
+
+    parse_robots = RobotFileParser()
+    parse_robots.parse(content)
+    return parse_robots
+
+
+def _fetch_robots(robots_url: str) -> tuple[list[str], bool]:
+    """The lines of a robots.txt, and whether it was unavailable rather than merely absent."""
+    try:
+        status_code, content, _ = fetch(robots_url)
+    except ALLOWED_EXCEPTIONS as e:
+        logger.debug(f"Robots error: {robots_url}, {e}")
+        return [], True
+
+    # RFC 9309 files a 429 with the other 4xx answers, but a server that is rate limiting us
+    # has said nothing about its rules - it is unavailable like a 5xx, as Google treats it.
+    if status_code >= 500 or status_code == 429:
+        logger.debug(f"Robots status code: {status_code}")
+        return [], True
+
+    if status_code != 200:
+        logger.debug(f"Robots status code: {status_code}")
+        return [], False
+
+    for encoding in ["utf-8", "iso-8859-1"]:
+        try:
+            return content.decode(encoding).splitlines(), False
+        except UnicodeDecodeError:
+            pass
+
+    logger.info(f"Unable to decode robots file {robots_url}")
+    return [], False
+
+
+def _get_robots_from_cache(redis: Redis, domain: str) -> Optional[tuple[list[str], bool]]:
     cache_key = f"robots:{domain}"
     cached = redis.get(cache_key)
     if cached is None:
@@ -226,19 +252,23 @@ def _get_robots_from_cache(redis: Redis, domain: str) -> Optional[List[str]]:
         if time.time() > data["expires_at"]:
             redis.delete(cache_key)
             return None
-        return data["content"]
+        return data["content"], data["unavailable"]
     except (json.JSONDecodeError, KeyError) as e:
         logger.warning(f"Invalid cache entry for {cache_key}: {e}, removing")
         redis.delete(cache_key)
         return None
 
 
-def _cache_robots_content(redis: Redis, domain: str, content: List[str], error: bool = False):
+def _cache_robots_content(redis: Redis, domain: str, content: List[str], unavailable: bool, ttl: int):
     cache_key = f"robots:{domain}"
     now = time.time()
-    ttl = ROBOTS_CACHE_ERROR_TTL_SECONDS if error else ROBOTS_CACHE_TTL_SECONDS
 
-    cache_data = {"content": content, "cached_at": int(now), "expires_at": int(now + ttl)}
+    cache_data = {
+        "content": content,
+        "unavailable": unavailable,
+        "cached_at": int(now),
+        "expires_at": int(now + ttl),
+    }
 
     redis.setex(cache_key, ttl, json.dumps(cache_data))
     logger.debug(f"Cached robots.txt for {domain}, expires in {ttl}s")
@@ -370,7 +400,19 @@ def _truncate(text: str, limit: int) -> str:
 def crawl_url(url, redis: Redis):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
-    allowed = robots_allowed(url, redis)
+    try:
+        allowed = robots_allowed(url, redis)
+    except RobotsUnavailable as e:
+        return {
+            "url": url,
+            "status": None,
+            "timestamp": js_timestamp,
+            "content": None,
+            "error": {
+                "name": "RobotsUnavailable",
+                "message": str(e),
+            },
+        }
     if not allowed:
         return {
             "url": url,

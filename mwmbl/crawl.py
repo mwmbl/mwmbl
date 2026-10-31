@@ -21,8 +21,8 @@ logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
 # The mwmbl imports below reach Django models, so the app registry has to be ready before
-# any of them run. The app registry creates the index on startup, so the data path has to
-# exist before that.
+# any of them run. The app registry creates the external cache on startup, so the data path
+# has to exist before that.
 os.environ["DJANGO_SETTINGS_MODULE"] = "mwmbl.settings_crawler"
 
 data_path = Path(settings.DATA_PATH)
@@ -33,6 +33,7 @@ print("Mwmbl crawling statistics: https://mwmbl.org/stats")
 
 django.setup()
 
+from mwmbl.apps import create_index
 from mwmbl.crawler.batch import (
     MAX_ERROR_MESSAGE_LENGTH,
     CrawlerErrorReport,
@@ -55,7 +56,10 @@ from mwmbl.crawler.env_vars import (
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
+from mwmbl.crawler.politeness import abandon_domains, release_domains
 from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
+from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider
+from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist, refresh_snapshot
 from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
@@ -101,6 +105,14 @@ REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
 # The server indexes submitted results before it answers, so allow it well over a typical
 # request's time - but not forever.
 RESULTS_POST_TIMEOUT_SECONDS = 120
+
+# On 426 Upgrade Required the server wants a newer crawler: waiting out the hour gives an
+# external updater (compose timer, systemd timer) time to replace this process, where exiting
+# or retrying in a tight loop would crash-loop and report the same error every few seconds.
+UPGRADE_REQUIRED_WAIT_SECONDS = 60 * 60
+
+# Two downloads of up to 60 seconds each, then parsing and hashing.
+SNAPSHOT_PUBLISH_TIMEOUT_SECONDS = 600
 
 
 def _fetch_curated_domains() -> set[str]:
@@ -303,6 +315,7 @@ class Crawler:
         self.redis_url = redis_url or settings.REDIS_URL
         self._redis = None
         self._url_queue = None
+        self._snapshot_blacklist = None
 
     @property
     def redis(self):
@@ -319,8 +332,43 @@ class Crawler:
     def url_queue(self):
         """Lazy initialization of URL queue."""
         if self._url_queue is None:
-            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains)
+            self._url_queue = RedisURLQueue(self.redis, _fetch_curated_domains, self.new_blacklist_provider())
         return self._url_queue
+
+    @property
+    def snapshot_blacklist(self) -> SnapshotBlacklist:
+        """The remote lists as a hash array, ~11MB, where the sets of domains they come from take ~300MB.
+
+        Lazy so that each process loads its own after the fork. The client is not the one above
+        because the snapshot is binary and that one decodes responses as text.
+        """
+        if self._snapshot_blacklist is None:
+            self._snapshot_blacklist = SnapshotBlacklist(redis_client=Redis.from_url(self.redis_url))
+            self._snapshot_blacklist.load_now()
+        return self._snapshot_blacklist
+
+    def new_blacklist_provider(self) -> CombinedBlacklistProvider:
+        # A provider of its own because it holds the approved domains from when it first needs
+        # them, so one kept for the life of the process would never see a later approval.
+        return CombinedBlacklistProvider([self.snapshot_blacklist], get_exempt_domains=_fetch_curated_domains)
+
+    def publish_blacklist_snapshot(self):
+        refresh_snapshot(redis_client=Redis.from_url(self.redis_url))
+
+    def refresh_blacklist_snapshot(self):
+        """Download the blocklists and publish them for the workers, from a process that then exits.
+
+        Parsing them takes ~300MB, and exiting is what reliably gives that back to the OS.
+        """
+        process = Process(target=self.publish_blacklist_snapshot)
+        process.start()
+        process.join(SNAPSHOT_PUBLISH_TIMEOUT_SECONDS)
+        if process.is_alive():
+            process.kill()
+            process.join()
+            raise RuntimeError(f"Publishing the blacklist snapshot took over {SNAPSHOT_PUBLISH_TIMEOUT_SECONDS}s")
+        if process.exitcode != 0:
+            raise RuntimeError(f"Publishing the blacklist snapshot failed with exit code {process.exitcode}")
 
     def check_redis(self):
         """Check Redis connection health.
@@ -349,9 +397,18 @@ class Crawler:
         """
         user_id = "test"
         urls = self.url_queue.get_batch(user_id)
+        if not urls:
+            logger.info("Every queued domain was crawled too recently. Sleeping for 10 seconds.")
+            time.sleep(10)
+            return
         logger.info(f"Processing batch of {len(urls)} URLs on {CRAWL_THREADS} threads")
 
-        results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
+        try:
+            results = crawl_batch(urls, CRAWL_THREADS, CRAWL_DELAY_SECONDS, self.redis)
+        except Exception:
+            abandon_domains(self.redis, urls)
+            raise
+        release_domains(self.redis, results)
 
         js_timestamp = int(time.time() * 1000)
         batch = HashedBatch.parse_obj(
@@ -361,7 +418,7 @@ class Crawler:
                 "items": results,
             }
         )
-        record_urls_in_database([batch], self.url_queue)
+        record_urls_in_database([batch], self.url_queue, self.new_blacklist_provider())
 
         # Push the batch into the Redis queue
         batch_json = batch.json()
@@ -458,6 +515,14 @@ class Crawler:
                             timeout=RESULTS_POST_TIMEOUT_SECONDS,
                         )
                         logger.info(f"Response: {response.text}")
+                        if response.status_code == 426:
+                            logger.error(
+                                f"The server requires a newer crawler: {response.text} "
+                                f"Waiting {UPGRADE_REQUIRED_WAIT_SECONDS} seconds for an update "
+                                "instead of submitting results the server would reject."
+                            )
+                            time.sleep(UPGRADE_REQUIRED_WAIT_SECONDS)
+                            return
                         response.raise_for_status()
 
                 new_remote_items = remote_index.retrieve(term, refresh=True)
@@ -524,6 +589,7 @@ class Crawler:
         """
         validate_environment()
         self.check_redis()
+        self.refresh_blacklist_snapshot()
         self.process_batch()
         self.run_indexing()
 
@@ -539,6 +605,9 @@ class Crawler:
         workers: int = CRAWLER_WORKERS
         assert workers > 0, f"Invalid value for CRAWLER_WORKERS: {workers}"
 
+        self.refresh_blacklist_snapshot()
+        last_snapshot_refresh = time.monotonic()
+
         batch_processes: list[Process] = []
         for i in range(workers):
             process = Process(target=self.process_batch_continuously)
@@ -553,6 +622,14 @@ class Crawler:
         index_crash_history: list[tuple[datetime, int, int]] = []
 
         while True:
+            if time.monotonic() - last_snapshot_refresh >= settings.BLACKLIST_SNAPSHOT_REFRESH_SECONDS:
+                last_snapshot_refresh = time.monotonic()
+                # The workers keep the snapshot they have, so a failed refresh costs only staleness.
+                try:
+                    self.refresh_blacklist_snapshot()
+                except RuntimeError:
+                    logger.exception("Could not refresh the blacklist snapshot, keeping the current one")
+
             if not index_process.is_alive():
                 crash_time = datetime.now(timezone.utc)
                 exit_code = index_process.exitcode or -1
@@ -645,6 +722,8 @@ def main():
     )
     args = parser.parse_args()
 
+    # Volunteers start the crawler with no setup step, so it creates its own index.
+    create_index(settings.INDEX_NAME, settings.NUM_PAGES)
     if args.once:
         run_once()
     else:

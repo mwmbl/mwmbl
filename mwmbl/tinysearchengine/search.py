@@ -1,12 +1,14 @@
 import dataclasses
+from datetime import datetime
 from logging import getLogger
 from typing import Optional
 
-from ninja import NinjaAPI, Router, Schema
+from ninja import Field, NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
 from mwmbl import pricing
 from mwmbl.format import format_result, format_result_v2
+from mwmbl.indexer.dump import get_cached_dumps
 from mwmbl.models import MwmblUser
 from mwmbl.quota import (
     check_rate_limit,
@@ -122,6 +124,24 @@ class RawDocument(Schema):
                 }
             ]
         }
+
+
+class IndexDump(Schema):
+    """A full dump of the index, as written by `manage.py dump_index`."""
+
+    key: str
+    url: str = Field(description="Where to download the zstd-compressed index file.")
+    manifest_url: str
+    index_name: str
+    page_size: int
+    num_pages: int
+    size: int = Field(description="Size of the index once decompressed, in bytes.")
+    compressed_size: int
+    sha256: str = Field(description="SHA-256 of the decompressed index.")
+    started: datetime
+    finished: datetime
+    license: str = Field(description="SPDX identifier of the dump's licence: CC-BY-NC-SA-4.0.")
+    license_url: str
 
 
 class RawSearchResponse(Schema):
@@ -471,6 +491,23 @@ def _register_page_route(r: Router | NinjaAPI, tiny_index: TinyIndex):
         return tiny_index._get_page_tuples(n)
 
 
+def _register_dumps_route(r: Router | NinjaAPI):
+    @r.get(
+        "/dumps",
+        response=list[IndexDump],
+        auth=None,
+        summary="Index dumps",
+        description=(
+            "List the full dumps of the index available for download, newest first. A dump "
+            "is the index file as `/page/{n}` serves it, compressed with zstd, and is released "
+            "under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). The "
+            "list is refreshed hourly."
+        ),
+    )
+    def dumps(request):
+        return get_cached_dumps()
+
+
 def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"search-{version}")
@@ -484,6 +521,7 @@ def init_router(ranker: HeuristicRanker, tiny_index: TinyIndex):
     _register_search_v1(router, ranker)
     _register_common_routes(router, ranker)
     _register_page_route(router, tiny_index)
+    _register_dumps_route(router)
 
 
 def init_v2_router(ranker: HeuristicRanker):

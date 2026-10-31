@@ -93,6 +93,7 @@ dev = [
     "ruff>=0.16.6",
     "ty>=0.0.78",
     "pre-commit>=4.6.2",
+    "moto>=5.2.4",
 ]
 
 [tool.uv]
@@ -124,6 +125,7 @@ markers = [
     "live: hits real external endpoints; excluded from the default run. Run with -m live (used by the weekly Super Search smoke workflow).",
     "slow: heavy CPU (e.g. XGBoost feature selection); excluded from the default run. Run with -m slow.",
 ]
+norecursedirs = ["rust-xgboost", "mwmbl_rank/vendor"]
 
 [tool.coverage.run]
 source = ["mwmbl"]

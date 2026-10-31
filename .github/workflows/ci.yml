@@ -9,7 +9,8 @@ jobs:
   # it needs neither the Rust toolchain nor a database, so it gives fast feedback.
   # `make check` here is exactly what .pre-commit-config.yaml runs on commit.
   lint:
-    runs-on: ubuntu-24.04  # setup-python has no 3.11.12 build for ubuntu-latest (26.04) yet
+    # Not ubuntu-latest: setup-python has no Python 3.11.12 build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -34,7 +35,8 @@ jobs:
         run: make check
 
   test:
-    runs-on: ubuntu-24.04  # setup-python has no 3.11.12 build for ubuntu-latest (26.04) yet
+    # Not ubuntu-latest: setup-python has no Python 3.11.12 build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     
     services:
       postgres:
@@ -63,8 +65,12 @@ jobs:
       #----------------------------------------------
       #       check-out repo and set-up python
       #----------------------------------------------
+      # Full history so the crawler version check can read the message of every commit
+      # between the base branch and the pull request's merge commit.
       - name: Check out repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - name: Set up python
         id: setup-python
         uses: actions/setup-python@v4
@@ -118,6 +124,9 @@ jobs:
       #----------------------------------------------
       - name: Check the crawler entry point imports standalone
         run: uv run python -c "from mwmbl.crawl import run"
+      - name: Check crawler changes raise CRAWLER_VERSION
+        if: github.event_name == 'pull_request'
+        run: uv run python -m mwmbl.crawler.release_check HEAD^1
       - name: Run Python and Rust tests with coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_mwmbl

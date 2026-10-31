@@ -560,6 +560,7 @@ def test_crawl_schedules_a_seed_crawl_of_what_the_index_lacked(
 
     assert body["crawl_scheduled"] is True
     assert body["crawl_outcome"] == "scheduled"
+    assert body["crawls_ahead"] == 0
     record_key = seed_crawl._record_key(user.id, "tokio")
     assert redis_cache.zrange(seed_crawl.READY_KEY, 0, -1) == [record_key.encode()]
     record = {key.decode(): value.decode() for key, value in redis_cache.hgetall(record_key).items()}
@@ -588,7 +589,7 @@ def test_a_seed_search_that_cannot_start_a_crawl_is_not_counted(
     crawl_sources()
     _crawl(client, access_token, query="tokio")
 
-    body = _crawl(client, access_token, query="rust").json()
+    body = _crawl(client, access_token, query="tokio").json()
     user.refresh_from_db()
 
     assert body["crawl_outcome"] == "already_running"
@@ -630,15 +631,33 @@ def test_no_crawl_when_the_index_already_has_every_staan_result(
 
 
 @pytest.mark.django_db
-def test_a_crawl_already_running_is_named(client, access_token, fresh_quota, redis_cache, crawl_sources):
+def test_a_second_crawl_is_queued_behind_the_first(client, access_token, fresh_quota, redis_cache, crawl_sources):
     crawl_sources()
     _crawl(client, access_token, query="tokio")
 
     body = _crawl(client, access_token, query="rust").json()
 
+    assert body["crawl_scheduled"] is True
+    assert body["crawl_outcome"] == "scheduled"
+    assert body["crawls_ahead"] == 1
+    assert body["active_crawl_queries"] is None
+
+
+@pytest.mark.django_db
+def test_a_crawl_skipped_for_too_many_names_those_queued(
+    client, access_token, fresh_quota, redis_cache, crawl_sources, settings
+):
+    settings.SEED_CRAWL_MAX_PER_USER = 2
+    crawl_sources()
+    _crawl(client, access_token, query="tokio")
+    _crawl(client, access_token, query="rust")
+
+    body = _crawl(client, access_token, query="async").json()
+
     assert body["crawl_scheduled"] is False
-    assert body["crawl_outcome"] == "already_running"
-    assert body["active_crawl_query"] == "tokio"
+    assert body["crawl_outcome"] == "too_many_crawls"
+    assert body["crawls_ahead"] is None
+    assert body["active_crawl_queries"] == ["tokio", "rust"]
 
 
 @pytest.mark.django_db

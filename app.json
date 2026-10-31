@@ -4,14 +4,21 @@
       "predeploy": "rm -rf /app/static/* && cp -r /front-end-build/* /app/static/"
     }
   },
+  "cron": [
+    {
+      "command": "ionice -c2 -n7 /venv/bin/python /app/manage.py dump_index",
+      "schedule": "17 3 1 * *"
+    }
+  ],
   "healthchecks": {
     "web": [
       {
-        "type": "http",
+        "type": "startup",
+        "name": "search answers",
         "path": "/api/v1/search/?s=rydnik",
-        "attempts": 1,
-        "interval": 600,
-        "grace": 300,
+        "initialDelay": 30,
+        "attempts": 20,
+        "wait": 10,
         "timeout": 10
       }
     ]
