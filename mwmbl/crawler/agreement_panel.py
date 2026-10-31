@@ -190,7 +190,7 @@ def build_panel(rollups: AgreementRollups, usernames: dict[int, str], selected_i
         },
         "columns": COLUMNS,
         "grid": _grid(rollups, crawlers, selected),
-        "scatter": _scatter(crawlers, network["median_extract_similarity_as_submitter"], selected, top_ids),
+        "scatter": _scatter(crawlers, submitter_spread, selected, top_ids),
         "funnel": _funnel(crawlers, p0, selected),
         "rows": _rows(crawlers, network, trends, num_days, selected),
         "trend": _trend(crawlers, trends, num_days, selected, days),
@@ -220,8 +220,10 @@ def _grid(rollups: AgreementRollups, crawlers: list[_Crawler], selected: int) ->
 
     def cell(row: _Crawler, column: _Crawler) -> dict:
         pair = pairs.get((row.rollup.user_id, column.rollup.user_id))
-        if pair is None or pair.median_extract_similarity is None or pair.comparisons < MIN_PAIR_COMPARISONS:
+        if pair is None or pair.comparisons < MIN_PAIR_COMPARISONS:
             return {"background": HATCH, "ring": "none", "tip": f"{row.name} over {column.name}: too few shared URLs"}
+        if pair.median_extract_similarity is None:
+            return {"background": HATCH, "ring": "none", "tip": f"{row.name} over {column.name}: every extract empty"}
         on_cross = selected in (row.rollup.user_id, column.rollup.user_id)
         similarity = pair.median_extract_similarity
         return {
@@ -375,15 +377,16 @@ def _medians(trend: dict[int, tuple[float | None, str | None]]) -> dict[int, flo
 
 
 def _versions(trend: dict[int, tuple[float | None, str | None]]) -> list[tuple[int, str]]:
-    """The days its version changed, starting with the first version seen."""
-    changes = []
+    """The day each version was first seen. An operator running several machines can switch
+    back and forth between versions, and only a version not seen before is a change."""
+    first_seen = {}
     for day, (_, version) in sorted(trend.items()):
-        if version is not None and (not changes or changes[-1][1] != version):
-            changes.append((day, version))
-    return changes
+        if version is not None and version not in first_seen:
+            first_seen[version] = day
+    return [(day, version) for version, day in first_seen.items()]
 
 
-def _network_daily(trends, num_days: int) -> dict[int, Spread]:
+def _network_daily(trends) -> dict[int, Spread]:
     by_day = defaultdict(list)
     for trend in trends.values():
         for day, value in _medians(trend).items():
@@ -397,7 +400,7 @@ def _rows(crawlers: list[_Crawler], network: dict, trends, num_days: int, select
         for col in COLUMNS
         if col.is_rate
     }
-    network_spark = _spark_points({day: s.median for day, s in _network_daily(trends, num_days).items()}, num_days)
+    network_spark = _spark_points({day: s.median for day, s in _network_daily(trends).items()}, num_days)
     furthest = max(c.off_network or 0 for c in crawlers)
     rows = []
     for c in crawlers:
@@ -440,7 +443,7 @@ def _trend(crawlers: list[_Crawler], trends, num_days: int, selected: int, days:
     def ty(value: float) -> str:
         return f"{TREND_HEIGHT - value * TREND_HEIGHT:.1f}"
 
-    network = _network_daily(trends, num_days)
+    network = _network_daily(trends)
     upper = [f"{tx(day):.1f},{ty(s.p75)}" for day, s in network.items()]
     lower = [f"{tx(day):.1f},{ty(s.p25)}" for day, s in network.items()]
     own = _medians(trends[selected])
@@ -451,6 +454,7 @@ def _trend(crawlers: list[_Crawler], trends, num_days: int, selected: int, days:
         "band": " ".join(upper + lower[::-1]),
         "network": " ".join(f"{tx(day):.1f},{ty(s.median)}" for day, s in network.items()),
         "own": " ".join(f"{tx(day):.1f},{ty(value)}" for day, value in sorted(own.items())),
+        "has_own": bool(own),
         "changes": [
             {"x": f"{tx(day):.1f}", "left": f"{tx(day) / TREND_WIDTH * 100:.2f}", "label": f"version {version}"}
             for day, version in changes

@@ -262,7 +262,7 @@
       <div class="head">
         <div>
           <h2><span class="mono">{{ selected.name }}</span> over time</h2>
-          <p class="note">Daily median extract similarity as submitter, against the network's middle half. A step that lines up with a version change points at the crawler's code rather than its operator.</p>
+          <p class="note">Daily median extract similarity as submitter, against the network's middle half. A step that lines up with a version change points at the crawler's code rather than its operator, though the version is the crawler's own claim, and an operator can change it as they start misbehaving.</p>
         </div>
         <div class="legend">
           <span><span style="width: 18px; height: 3px; background: var(--sel)"></span>{{ selected.name }}</span>
@@ -284,6 +284,9 @@
               {% endfor %}
               <polyline points="{{ trend.own }}" fill="none" stroke="#1F5FBF" stroke-width="2.5" vector-effect="non-scaling-stroke"></polyline>
             </svg>
+            {% if not trend.has_own %}
+              <p class="note" style="position: absolute; left: 12px; top: 12px">No comparisons as submitter with both extracts in this window: only other crawlers' copies met its own.</p>
+            {% endif %}
             {% for change in trend.changes %}
               <span class="mono" style="position: absolute; top: 6px; font-size: 12px; background: #FFF; padding: 1px 4px; border: 1px solid #D9D6CE; border-radius: 3px; left: {{ change.left }}%; transform: translateX(6px)">{{ change.label }}</span>
             {% endfor %}

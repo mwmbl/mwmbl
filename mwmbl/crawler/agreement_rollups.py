@@ -85,7 +85,7 @@ class DailyRollup(BaseModel):
     comparisons: int
     median_extract_similarity: float | None
     crawler_version: str | None
-    """Of its last submission that day, so that a step in the median can be put against a release."""
+    """Of its last submission that day that gave one, so that a step in the median can be put against a release."""
 
 
 class AgreementRollups(BaseModel):
@@ -176,7 +176,8 @@ SELECT
     COUNT(*) AS comparisons,
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY extract_similarity) FILTER (WHERE both_extracts)
         AS median_extract_similarity,
-    (ARRAY_AGG(crawler_version ORDER BY created_at DESC))[1] AS crawler_version
+    (ARRAY_AGG(crawler_version ORDER BY created_at DESC) FILTER (WHERE crawler_version IS NOT NULL))[1]
+        AS crawler_version
 FROM comparisons
 GROUP BY user_id, day
 """

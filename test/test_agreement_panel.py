@@ -139,6 +139,23 @@ def test_version_changes_are_marked_on_the_trend():
     assert dunlin["version"] == "0.9.2 → 0.9.4"
 
 
+def test_switching_back_to_an_older_version_is_not_a_change():
+    versions = ["0.9.2", "0.9.4", "0.9.2", "0.9.4"]
+    daily = [
+        DailyRollup(
+            user_id=3,
+            day=START + timedelta(days=day),
+            comparisons=10,
+            median_extract_similarity=0.8,
+            crawler_version=version,
+        )
+        for day, version in enumerate(versions)
+    ]
+    panel = build_panel(_rollups(_network(), daily=daily), NAMES, 3, 30)
+
+    assert [change["label"] for change in panel["trend"]["changes"]] == ["version 0.9.4"]
+
+
 def test_crawlers_that_met_no_one_are_listed_apart():
     unmet = _crawler(5, comparisons=0, recent=0, tail=0).model_copy(update={"submissions": 12})
     panel = build_panel(_rollups(_network()[:4] + [unmet]), NAMES, None, 30)
@@ -194,6 +211,6 @@ def test_admin_page_with_no_comparisons(admin_browser):
     assert "No crawler's copy met another crawler's" in response.content.decode()
 
 
-@pytest.mark.parametrize("params", [{"days": "8"}, {"days": "abc"}, {"crawler": "sneaky"}])
+@pytest.mark.parametrize("params", [{"days": "8"}, {"days": "abc"}, {"crawler": "sneaky"}, {"crawler": "²"}])
 def test_admin_page_rejects_bad_parameters(admin_browser, params):
     assert admin_browser.get("/admin/crawler-agreement/", params).status_code == 400

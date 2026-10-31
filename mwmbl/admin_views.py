@@ -21,6 +21,7 @@ what a bot looks like belongs to whoever is reading, and can be a different rule
 """
 
 import os
+import re
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from logging import getLogger
@@ -735,7 +736,7 @@ def crawler_agreement_view(request):
         return HttpResponseBadRequest(f"days must be one of {AGREEMENT_DAYS}")
     days = int(days_param)
     crawler_param = request.GET.get("crawler")
-    if crawler_param is not None and not crawler_param.isdigit():
+    if crawler_param is not None and not re.fullmatch(r"[0-9]+", crawler_param):
         return HttpResponseBadRequest("crawler must be a user id")
     context = {"title": "Crawler agreement", "days": days, "day_choices": AGREEMENT_DAYS}
 
