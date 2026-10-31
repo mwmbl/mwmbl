@@ -106,6 +106,11 @@ REMOTE_INDEX_CACHE_EXPIRY = timedelta(hours=1)
 # request's time - but not forever.
 RESULTS_POST_TIMEOUT_SECONDS = 120
 
+# On 426 Upgrade Required the server wants a newer crawler: waiting out the hour gives an
+# external updater (compose timer, systemd timer) time to replace this process, where exiting
+# or retrying in a tight loop would crash-loop and report the same error every few seconds.
+UPGRADE_REQUIRED_WAIT_SECONDS = 60 * 60
+
 # Two downloads of up to 60 seconds each, then parsing and hashing.
 SNAPSHOT_PUBLISH_TIMEOUT_SECONDS = 600
 
@@ -510,6 +515,14 @@ class Crawler:
                             timeout=RESULTS_POST_TIMEOUT_SECONDS,
                         )
                         logger.info(f"Response: {response.text}")
+                        if response.status_code == 426:
+                            logger.error(
+                                f"The server requires a newer crawler: {response.text} "
+                                f"Waiting {UPGRADE_REQUIRED_WAIT_SECONDS} seconds for an update "
+                                "instead of submitting results the server would reject."
+                            )
+                            time.sleep(UPGRADE_REQUIRED_WAIT_SECONDS)
+                            return
                         response.raise_for_status()
 
                 new_remote_items = remote_index.retrieve(term, refresh=True)
