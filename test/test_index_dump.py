@@ -10,16 +10,25 @@ import boto3
 import pytest
 import sentry_sdk.crons.decorator
 from botocore.exceptions import ResponseStreamingError
+from django.core.cache import cache
 from django.core.management import call_command
+from django.test import Client
 from moto import mock_aws
 
 from mwmbl.indexer import dump
-from mwmbl.indexer.dump import LockedIndexReader, dump_index, dump_settings_from_environment, restore_index
+from mwmbl.indexer.dump import (
+    LockedIndexReader,
+    dump_index,
+    dump_settings_from_environment,
+    list_dumps,
+    restore_index,
+)
 from mwmbl.management.commands import dump_index as dump_index_command
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex
 
 NUM_PAGES = 4000
 PAGE_SIZE = 4096
+PUBLIC_URL = "https://dumps.example.com"
 BUCKET = "index-dumps"
 
 
@@ -239,6 +248,46 @@ def test_the_commands_dump_and_restore_the_index(index_path, dump_environment, s
 
     assert f"Restored {key} to {restored_path}" in capsys.readouterr().out
     assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+def _put_earlier_dump(client) -> str:
+    key = "index/index.tinysearch/full/2020-01-01T000000Z.zst"
+    client.put_object(Bucket=BUCKET, Key=key, Body=b"dump")
+    manifest = {"started": "2020-01-01T00:00:00+00:00", "finished": "2020-01-01T01:00:00+00:00"}
+    client.put_object(Bucket=BUCKET, Key=key + ".json", Body=json.dumps(manifest).encode("utf8"))
+    return key
+
+
+def test_list_dumps_gives_finished_dumps_newest_first(index_path, client):
+    key = dump_index(client, BUCKET, index_path)
+    earlier_key = _put_earlier_dump(client)
+    client.put_object(Bucket=BUCKET, Key="index/index.tinysearch/full/2030-01-01T000000Z.zst", Body=b"unfinished")
+
+    dumps = list_dumps(client, BUCKET, PUBLIC_URL)
+
+    assert [listed["key"] for listed in dumps] == [key, earlier_key]
+    latest = dumps[0]
+    assert latest["url"] == f"{PUBLIC_URL}/{key}"
+    assert latest["manifest_url"] == f"{PUBLIC_URL}/{key}.json"
+    assert latest["compressed_size"] == client.head_object(Bucket=BUCKET, Key=key)["ContentLength"]
+    assert latest["size"] == index_path.stat().st_size
+
+
+def test_the_dumps_endpoint_lists_the_dumps_and_caches_them(index_path, client, dump_environment, monkeypatch):
+    monkeypatch.setenv("MWMBL_DUMP_PUBLIC_URL", PUBLIC_URL)
+    cache.delete(dump.DUMPS_CACHE_KEY)
+    key = dump_index(client, BUCKET, index_path)
+
+    response = Client().get("/api/v1/search/dumps")
+    _put_earlier_dump(client)
+    cached_response = Client().get("/api/v1/search/dumps")
+    cache.delete(dump.DUMPS_CACHE_KEY)
+
+    assert response.status_code == 200
+    assert [listed["key"] for listed in response.json()] == [key]
+    assert response.json()[0]["url"] == f"{PUBLIC_URL}/{key}"
+    assert response.json()[0]["license"] == "CC-BY-NC-SA-4.0"
+    assert cached_response.json() == response.json()
 
 
 @pytest.fixture

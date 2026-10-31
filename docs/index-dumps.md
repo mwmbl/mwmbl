@@ -46,8 +46,12 @@ conditions), and each manifest says so.
      MWMBL_DUMP_ENDPOINT_URL=https://s3.eu-central-003.backblazeb2.com \
      MWMBL_DUMP_BUCKET=<bucket> \
      MWMBL_DUMP_KEY_ID=<key id> \
-     MWMBL_DUMP_APPLICATION_KEY=<application key>
+     MWMBL_DUMP_APPLICATION_KEY=<application key> \
+     MWMBL_DUMP_PUBLIC_URL=https://f003.backblazeb2.com/file/<bucket>
    ```
+
+   `MWMBL_DUMP_PUBLIC_URL` is where the bucket's files can be downloaded, with no trailing
+   slash: B2's friendly URL for the bucket, or a CDN's in front of it.
 
 4. Run the first dump by hand rather than waiting for the cron:
    `dokku run mwmbl ionice -c2 -n7 /venv/bin/python /app/manage.py dump_index`.
@@ -61,7 +65,8 @@ a test checks that the two agree.
 
 A dump object is `index/<index name>/full/<start time>.zst`. Its manifest,
 `<object>.json`, is written only once the upload has finished, so an object without one
-is an upload that failed part-way.
+is an upload that failed part-way. `GET /api/v1/search/dumps` lists the finished dumps
+with their download URLs, refreshed hourly.
 
 ## Restore
 
