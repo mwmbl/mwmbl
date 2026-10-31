@@ -29,6 +29,7 @@ import zstandard
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, IncompleteReadError
+from django.core.cache import cache
 
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex, _set_page_lock
 
@@ -49,12 +50,21 @@ DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
 RANGE_ATTEMPTS = 5
 RANGE_RETRY_SECONDS = 2
 ZSTD_LEVEL = 3
+DUMPS_PREFIX = "index/"
+# A dump takes hours to upload, so an hour's delay before it is listed hardly matters, and
+# it keeps the public listing from costing a B2 request per page view.
+DUMPS_CACHE_KEY = "index-dumps"
+DUMPS_CACHE_SECONDS = 60 * 60
+# The dump and restore keep retrying through hours of transfer. Listing runs inside a web
+# request, so it gives up quickly rather than hold a worker while B2 is down.
+TRANSFER_CLIENT_CONFIG = Config(retries={"mode": "standard", "max_attempts": 10})
+LISTING_CLIENT_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={"mode": "standard", "max_attempts": 2})
 # The terms and conditions release user contributions and crawled data under this licence.
 LICENSE = "CC-BY-NC-SA-4.0"
 LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
 
 
-def dump_settings_from_environment():
+def dump_settings_from_environment(client_config: Config = TRANSFER_CLIENT_CONFIG):
     """The B2 client and bucket for dumps.
 
     Read from the environment when a dump runs rather than in settings, so that a server
@@ -66,7 +76,7 @@ def dump_settings_from_environment():
         endpoint_url=os.environ["MWMBL_DUMP_ENDPOINT_URL"],
         aws_access_key_id=os.environ["MWMBL_DUMP_KEY_ID"],
         aws_secret_access_key=os.environ["MWMBL_DUMP_APPLICATION_KEY"],
-        config=Config(retries={"mode": "standard", "max_attempts": 10}),
+        config=client_config,
     )
     return client, os.environ["MWMBL_DUMP_BUCKET"]
 
@@ -130,7 +140,7 @@ class LockedIndexReader:
 def dump_index(client, bucket: str, index_path: Path) -> str:
     """Upload a full dump of the index, returning the key of the dump object."""
     started = datetime.now(timezone.utc)
-    key = f"index/{index_path.name}/full/{started:%Y-%m-%dT%H%M%SZ}.zst"
+    key = f"{DUMPS_PREFIX}{index_path.name}/full/{started:%Y-%m-%dT%H%M%SZ}.zst"
     reader = LockedIndexReader(index_path)
     part_size = max(MIN_PART_SIZE, math.ceil(reader.size / MAX_PARTS))
     transfer_config = TransferConfig(multipart_chunksize=part_size, max_concurrency=UPLOAD_CONCURRENCY)
@@ -231,6 +241,43 @@ def restore_index(client, bucket: str, key: str, output_path: Path):
         raise
     partial_path.rename(output_path)
     logger.info(f"Restored {key} to {output_path}")
+
+
+def list_dumps(client, bucket: str, public_url: str) -> list[dict]:
+    """Every finished dump in the bucket, newest first: its manifest and where to download it."""
+    paginator = client.get_paginator("list_objects_v2")
+    # S3 leaves Contents out of a page with no objects on it.
+    sizes = {
+        listed["Key"]: listed["Size"]
+        for page in paginator.paginate(Bucket=bucket, Prefix=DUMPS_PREFIX)
+        for listed in page.get("Contents", [])
+    }
+    # A manifest is written only once its dump has finished uploading, and manifests have
+    # none of their own, so this keeps just the finished dumps.
+    finished_keys = [key for key in sizes if _manifest_key(key) in sizes]
+    dumps = []
+    for key in finished_keys:
+        manifest_key = _manifest_key(key)
+        manifest = json.loads(client.get_object(Bucket=bucket, Key=manifest_key)["Body"].read())
+        dumps.append(
+            manifest
+            | {
+                "key": key,
+                "compressed_size": sizes[key],
+                "url": f"{public_url}/{key}",
+                "manifest_url": f"{public_url}/{manifest_key}",
+            }
+        )
+    return sorted(dumps, key=lambda dump: dump["started"], reverse=True)
+
+
+def get_cached_dumps() -> list[dict]:
+    dumps = cache.get(DUMPS_CACHE_KEY)
+    if dumps is None:
+        client, bucket = dump_settings_from_environment(LISTING_CLIENT_CONFIG)
+        dumps = list_dumps(client, bucket, os.environ["MWMBL_DUMP_PUBLIC_URL"])
+        cache.set(DUMPS_CACHE_KEY, dumps, DUMPS_CACHE_SECONDS)
+    return dumps
 
 
 def _manifest_key(key: str) -> str:
