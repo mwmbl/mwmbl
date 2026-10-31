@@ -17,6 +17,10 @@ once_cell = "1"
 url = "2"
 zstd = "0.13"
 
+[build-dependencies]
+# The same features as the runtime dependency, so both parse numbers identically.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -34,8 +34,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN uv venv /venv
 
 # Copy only the necessary files to build/install the python package.
-# mwmbl/resources is needed because idf.rs and wiki.rs embed JSON files at
-# compile time via include_str!("../../mwmbl/resources/...").
+# mwmbl/resources is needed because build.rs turns wiki_stats.json into the table
+# wiki.rs embeds at compile time.
 COPY pyproject.toml uv.lock /app/
 COPY mwmbl /app/mwmbl
 COPY mwmbl_rank /app/mwmbl_rank

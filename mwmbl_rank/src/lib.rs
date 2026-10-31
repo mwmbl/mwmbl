@@ -5,7 +5,6 @@
 
 mod domain;
 mod features;
-mod idf;
 mod index;
 mod pipeline;
 mod text;
@@ -245,11 +244,18 @@ fn get_features_py(
     features::get_features(&term_refs, title, url, extract, score, is_complete)
 }
 
+/// The normalised Wikipedia page view score of a URL, in [0, 1]: 0 for a page not in the stats.
+#[pyfunction]
+fn wiki_score(url: &str) -> f64 {
+    wiki::get_wiki_score(url)
+}
+
 /// The mwmbl_rank Python extension module.
 #[pymodule]
 fn mwmbl_rank(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyXGBPipeline>()?;
     m.add_function(wrap_pyfunction!(get_features_py, m)?)?;
+    m.add_function(wrap_pyfunction!(wiki_score, m)?)?;
     m.add_function(wrap_pyfunction!(index::read_index_page, m)?)?;
     m.add_function(wrap_pyfunction!(index::write_index_page, m)?)?;
     m.add_function(wrap_pyfunction!(index::pack_index_page, m)?)?;

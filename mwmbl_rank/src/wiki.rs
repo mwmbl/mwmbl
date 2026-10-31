@@ -1,23 +1,44 @@
 /// Wikipedia score lookup.
 /// Replicates get_wiki_score from mwmbl/tinysearchengine/rank.py.
+///
+/// The scores are a sorted table that build.rs generates from wiki_stats.json; see there for
+/// the layout and why it is not a HashMap.
 
-use std::collections::HashMap;
-use once_cell::sync::Lazy;
-use serde_json;
+static WIKI_TABLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin"));
 
-static WIKI_SCORES_JSON: &str = include_str!("../../mwmbl/resources/wiki_stats.json");
+fn read_u32(at: usize) -> usize {
+    u32::from_le_bytes(WIKI_TABLE[at..at + 4].try_into().unwrap()) as usize
+}
 
-static WIKI_SCORES: Lazy<HashMap<String, f64>> = Lazy::new(|| {
-    serde_json::from_str(WIKI_SCORES_JSON).expect("Failed to parse wiki_stats.json")
-});
+fn len() -> usize {
+    read_u32(0)
+}
 
-static WIKI_MAX_SCORE: Lazy<f64> = Lazy::new(|| {
-    // The Python code uses `next(iter(WIKI_SCORES.values()))` which is the first value.
-    // JSON object iteration order is insertion order in serde_json (via IndexMap if needed),
-    // but the Python dict is ordered by insertion. We replicate by taking the max value,
-    // which is equivalent since the file is sorted descending.
-    WIKI_SCORES.values().cloned().fold(f64::NEG_INFINITY, f64::max)
-});
+fn key(i: usize) -> &'static [u8] {
+    let n = len();
+    let keys_start = 4 + (n + 1) * 4 + n * 8;
+    &WIKI_TABLE[keys_start + read_u32(4 + i * 4)..keys_start + read_u32(4 + (i + 1) * 4)]
+}
+
+fn score(i: usize) -> f64 {
+    let at = 4 + (len() + 1) * 4 + i * 8;
+    f64::from_le_bytes(WIKI_TABLE[at..at + 8].try_into().unwrap())
+}
+
+/// The page view count of an article divided by the largest, or 0 for one not in the stats.
+fn lookup(title: &str) -> f64 {
+    let target = title.as_bytes();
+    let (mut low, mut high) = (0, len());
+    while low < high {
+        let mid = low + (high - low) / 2;
+        match key(mid).cmp(target) {
+            std::cmp::Ordering::Less => low = mid + 1,
+            std::cmp::Ordering::Greater => high = mid,
+            std::cmp::Ordering::Equal => return score(mid),
+        }
+    }
+    0.0
+}
 
 /// Get a normalised wiki score for the given URL.
 /// Extracts the last path segment as the Wikipedia article title.
@@ -26,11 +47,7 @@ pub fn get_wiki_score(url: &str) -> f64 {
     if title.is_empty() {
         return 0.0;
     }
-    let max = *WIKI_MAX_SCORE;
-    if max <= 0.0 {
-        return 0.0;
-    }
-    WIKI_SCORES.get(title).cloned().unwrap_or(0.0) / max
+    lookup(title)
 }
 
 #[cfg(test)]
@@ -47,20 +64,21 @@ mod tests {
     fn test_wiki_score_range() {
         // Any known article should be in [0, 1]
         let score = get_wiki_score("https://en.wikipedia.org/wiki/Python_(programming_language)");
-        assert!(score >= 0.0);
+        assert!(score > 0.0);
         assert!(score <= 1.0);
     }
 
     #[test]
     fn test_wiki_max_score_normalised() {
-        // The top article should have score 1.0
-        // Find the article with max score
-        let max_title = WIKI_SCORES.iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .map(|(k, _)| k.clone())
-            .unwrap();
-        let url = format!("https://en.wikipedia.org/wiki/{}", max_title);
-        let score = get_wiki_score(&url);
-        assert!((score - 1.0).abs() < 1e-9, "Max wiki score should be 1.0, got {}", score);
+        let max = (0..len()).map(score).fold(f64::NEG_INFINITY, f64::max);
+        assert!((max - 1.0).abs() < 1e-9, "Max wiki score should be 1.0, got {}", max);
+    }
+
+    #[test]
+    fn test_every_key_is_found() {
+        for i in 0..len() {
+            let title = std::str::from_utf8(key(i)).unwrap();
+            assert_eq!(lookup(title), score(i));
+        }
     }
 }

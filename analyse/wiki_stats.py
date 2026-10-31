@@ -1,5 +1,8 @@
 """
 Download Wikipedia statistics, aggregate and store in a file.
+
+mwmbl_rank embeds the scores at build time (see mwmbl_rank/build.rs), so rebuild it after
+regenerating the file: uv run --no-sync maturin develop --release -m mwmbl_rank/Cargo.toml
 """
 
 import gzip
