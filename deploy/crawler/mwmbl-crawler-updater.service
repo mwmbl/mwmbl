@@ -1,0 +1,14 @@
+[Unit]
+Description=Pull the latest stable Mwmbl crawler image and restart it
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# MWMBL_REPO_DIR points at the clone of mwmbl/mwmbl that docker-compose.yml lives in,
+# e.g. /home/crawler/mwmbl - see README.md in this directory. systemd expands env-file
+# variables in Exec* command lines only, not in path settings like WorkingDirectory, so the
+# directory is passed to compose explicitly.
+EnvironmentFile=/etc/default/mwmbl-crawler-updater
+ExecStart=/usr/bin/docker compose --project-directory "$MWMBL_REPO_DIR" pull mwmbl-crawler
+ExecStart=/usr/bin/docker compose --project-directory "$MWMBL_REPO_DIR" up -d mwmbl-crawler
