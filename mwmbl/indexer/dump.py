@@ -49,6 +49,9 @@ DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
 RANGE_ATTEMPTS = 5
 RANGE_RETRY_SECONDS = 2
 ZSTD_LEVEL = 3
+# The terms and conditions release user contributions and crawled data under this licence.
+LICENSE = "CC-BY-NC-SA-4.0"
+LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
 
 
 def dump_settings_from_environment():
@@ -149,6 +152,8 @@ def dump_index(client, bucket: str, index_path: Path) -> str:
         "sha256": reader.sha256.hexdigest(),
         "started": started.isoformat(),
         "finished": datetime.now(timezone.utc).isoformat(),
+        "license": LICENSE,
+        "license_url": LICENSE_URL,
     }
     client.put_object(Bucket=bucket, Key=_manifest_key(key), Body=json.dumps(manifest).encode("utf8"))
     logger.info(f"Dumped {index_path} to {key}")

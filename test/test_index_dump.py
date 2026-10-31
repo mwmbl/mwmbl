@@ -168,6 +168,7 @@ def test_manifest_describes_the_dump(index_path, client):
     assert manifest["num_pages"] == NUM_PAGES
     assert manifest["page_size"] == PAGE_SIZE
     assert manifest["size"] == index_path.stat().st_size
+    assert manifest["license"] == "CC-BY-NC-SA-4.0"
 
 
 def test_a_restore_that_does_not_match_its_manifest_is_not_put_in_place(index_path, client):

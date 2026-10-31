@@ -6,6 +6,10 @@ public release. The index is the only copy of much of what it holds (seed crawls
 Staan copies). It is also open data: `/page/{n}` already serves it one page at a time, and
 a dump holds the same data as a single download. See `mwmbl/indexer/dump.py` for how.
 
+Like everything Mwmbl's crawlers and contributors provide, the dumps are released under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) (see the terms and
+conditions), and each manifest says so.
+
 ## Setup
 
 1. Create a public B2 bucket for the dumps, separate from `mwmbl-eu-crawl`. Every dump is
