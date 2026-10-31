@@ -5,7 +5,6 @@
 
 mod domain;
 mod features;
-mod idf;
 mod index;
 mod pipeline;
 mod text;

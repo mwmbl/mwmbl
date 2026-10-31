@@ -21,17 +21,18 @@ fn main() {
     let json = fs::read_to_string(WIKI_STATS).expect("Failed to read wiki_stats.json");
     let counts: HashMap<String, f64> = serde_json::from_str(&json).expect("Failed to parse wiki_stats.json");
     let max = counts.values().cloned().fold(0.0, f64::max);
+    assert!(max > 0.0, "wiki_stats.json has no positive counts");
 
-    let mut entries: Vec<(&String, f64)> = counts.iter().map(|(k, v)| (k, if max > 0.0 { v / max } else { 0.0 })).collect();
+    let mut entries: Vec<(&String, f64)> = counts.iter().map(|(k, v)| (k, v / max)).collect();
     entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
 
-    let n = entries.len() as u32;
+    let n = u32::try_from(entries.len()).unwrap();
     let mut out = Vec::new();
     out.extend_from_slice(&n.to_le_bytes());
     let mut offset = 0u32;
     out.extend_from_slice(&offset.to_le_bytes());
     for (key, _) in &entries {
-        offset += key.len() as u32;
+        offset = offset.checked_add(u32::try_from(key.len()).unwrap()).unwrap();
         out.extend_from_slice(&offset.to_le_bytes());
     }
     for (_, score) in &entries {
