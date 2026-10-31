@@ -16,9 +16,9 @@ services:
       - MWMBL_CONTACT_INFO=${MWMBL_CONTACT_INFO}
 
       # Set value of ./mwmbl/crawler/env_vars.py
-      - CRAWLER_WORKERS=2
-      - CRAWL_THREADS=20
-      - CRAWL_DELAY_SECONDS=0.0
+      - CRAWLER_WORKERS=${CRAWLER_WORKERS:-2}
+      - CRAWL_THREADS=${CRAWL_THREADS:-20}
+      - CRAWL_DELAY_SECONDS=${CRAWL_DELAY_SECONDS:-0.0}
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
     volumes:
