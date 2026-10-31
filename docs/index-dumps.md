@@ -53,6 +53,12 @@ conditions), and each manifest says so.
    `dokku run mwmbl ionice -c2 -n7 /venv/bin/python /app/manage.py dump_index`.
    Once it has finished, restore it somewhere with room to spare (below).
 
+The command checks in with Sentry Crons as the `dump-index` monitor, which Sentry creates
+on the first check-in. Sentry alerts if a dump fails, runs past a day (killed part-way),
+or doesn't start within an hour of the schedule. If you change the cron schedule in
+`app.json`, change `MONITOR_CONFIG` in `mwmbl/management/commands/dump_index.py` to match;
+a test checks that the two agree.
+
 A dump object is `index/<index name>/full/<start time>.zst`. Its manifest,
 `<object>.json`, is written only once the upload has finished, so an object without one
 is an upload that failed part-way.

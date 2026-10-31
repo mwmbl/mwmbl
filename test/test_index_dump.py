@@ -8,12 +8,14 @@ from tempfile import TemporaryDirectory
 
 import boto3
 import pytest
+import sentry_sdk.crons.decorator
 from botocore.exceptions import ResponseStreamingError
 from django.core.management import call_command
 from moto import mock_aws
 
 from mwmbl.indexer import dump
 from mwmbl.indexer.dump import LockedIndexReader, dump_index, dump_settings_from_environment, restore_index
+from mwmbl.management.commands import dump_index as dump_index_command
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex
 
 NUM_PAGES = 4000
@@ -237,3 +239,41 @@ def test_the_commands_dump_and_restore_the_index(index_path, dump_environment, s
 
     assert f"Restored {key} to {restored_path}" in capsys.readouterr().out
     assert restored_path.read_bytes() == index_path.read_bytes()
+
+
+@pytest.fixture
+def check_ins(monkeypatch):
+    recorded = []
+
+    def record_check_in(**check_in):
+        recorded.append(check_in)
+        return f"check-in-{len(recorded)}"
+
+    monkeypatch.setattr(sentry_sdk.crons.decorator, "capture_checkin", record_check_in)
+    return recorded
+
+
+def test_the_dump_command_checks_in_with_sentry(index_path, dump_environment, settings, check_ins):
+    settings.DATA_PATH = str(index_path.parent)
+
+    call_command("dump_index", "--index-name", index_path.name)
+
+    statuses = [check_in["status"] for check_in in check_ins]
+    assert statuses == ["in_progress", "ok"]
+    assert all(check_in["monitor_slug"] == "dump-index" for check_in in check_ins)
+
+
+def test_a_failed_dump_checks_in_as_an_error(index_path, dump_environment, settings, check_ins):
+    settings.DATA_PATH = str(index_path.parent)
+
+    with pytest.raises(FileNotFoundError):
+        call_command("dump_index", "--index-name", "missing.tinysearch")
+
+    assert [check_in["status"] for check_in in check_ins] == ["in_progress", "error"]
+
+
+def test_the_monitor_schedule_matches_the_cron_entry():
+    app_json = json.loads((Path(__file__).parent.parent / "app.json").read_text())
+    (cron_entry,) = [entry for entry in app_json["cron"] if entry["command"].endswith("manage.py dump_index")]
+
+    assert dump_index_command.MONITOR_CONFIG["schedule"]["value"] == cron_entry["schedule"]
