@@ -24,6 +24,15 @@ conditions), and each manifest says so.
    That keeps the last three monthly dumps. It also cleans up uploads that failed
    part-way, which the dump's own key cannot delete.
 
+   Enable Object Lock on the bucket, with a default retention of 90 days in governance
+   mode. The dump's key already cannot delete files. The lock also protects the dumps from
+   a mistake made with any key that can delete. The retention has to end before the
+   lifecycle rule deletes, at 101 days, or the rule cannot delete them and old dumps pile
+   up. Governance mode lets a key with `bypassGovernance`, such as the master key, still
+   remove a bad dump. Compliance mode would also survive a compromised B2 account, but
+   then nothing can remove a locked file early. Every dump and manifest is a new file
+   name, so the lock never blocks an upload.
+
    B2's free egress is three times the data stored, about 3.6 TB a month for three
    ~400 GB dumps, which covers roughly nine full downloads. If downloads outgrow that,
    put a CDN in B2's Bandwidth Alliance, such as bunny.net or Fastly, in front of the
