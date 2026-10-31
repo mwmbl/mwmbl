@@ -1,0 +1,284 @@
+"""Full dumps of the search index to B2.
+
+A dump is both the index's backup and its public release. The index is the only copy of
+much of what it holds - seed crawls, curation, Staan copies - so rebuilding it from the
+crawl batches would recover only part of it. And it is open data: /page already serves it
+a page at a time, and a dump is the same bytes in one download. A full dump streams the whole file, zstd-compressed, into one object, and a manifest written beside
+it once the upload has finished records its size and SHA-256. An object with no manifest
+is an upload that did not finish.
+
+The file is written to in place all the time, and a page caught half-written will never
+decode again, so it is read in chunks under a shared lock on each chunk's byte range.
+Writers take an exclusive lock on the page they change (TinyIndex.page), so every page in
+the dump is one that some writer actually stored. Pages are independent, so consistency
+across the file is not needed.
+"""
+
+import fcntl
+import hashlib
+import json
+import math
+import os
+import time
+from datetime import datetime, timezone
+from logging import getLogger
+from pathlib import Path
+
+import boto3
+import zstandard
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, IncompleteReadError
+from django.core.cache import cache
+
+from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, TinyIndex, _set_page_lock
+
+logger = getLogger(__name__)
+
+# Small, because writers to any page in a chunk wait while it is read: 256 KB is one quick
+# pread, even at the low I/O priority the cron runs at.
+PAGES_PER_CHUNK = 64
+# S3 allows at most 10,000 parts in a multipart upload. The part size is chosen from the
+# file size so a full index stays well inside that, with headroom for an index that grows.
+MAX_PARTS = 9000
+MIN_PART_SIZE = 64 * 1024 * 1024
+UPLOAD_CONCURRENCY = 4
+# Restore downloads in ranges, each its own request, so a dropped connection hours into a
+# 400 GB download costs one range's retries rather than the whole restore. botocore retries
+# the request but not an error reading its body, so the retries here cover that.
+DOWNLOAD_RANGE_SIZE = 64 * 1024 * 1024
+RANGE_ATTEMPTS = 5
+RANGE_RETRY_SECONDS = 2
+ZSTD_LEVEL = 3
+DUMPS_PREFIX = "index/"
+# A dump takes hours to upload, so an hour's delay before it is listed hardly matters, and
+# it keeps the public listing from costing a B2 request per page view.
+DUMPS_CACHE_KEY = "index-dumps"
+DUMPS_CACHE_SECONDS = 60 * 60
+# The dump and restore keep retrying through hours of transfer. Listing runs inside a web
+# request, so it gives up quickly rather than hold a worker while B2 is down.
+TRANSFER_CLIENT_CONFIG = Config(retries={"mode": "standard", "max_attempts": 10})
+LISTING_CLIENT_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={"mode": "standard", "max_attempts": 2})
+# The terms and conditions release user contributions and crawled data under this licence.
+LICENSE = "CC-BY-NC-SA-4.0"
+LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
+
+
+def dump_settings_from_environment(client_config: Config = TRANSFER_CLIENT_CONFIG):
+    """The B2 client and bucket for dumps.
+
+    Read from the environment when a dump runs rather than in settings, so that a server
+    with dumps not yet configured still starts. The dump key is its own, separate from the
+    crawl bucket's, and should be one that cannot delete files.
+    """
+    client = boto3.client(
+        "s3",
+        endpoint_url=os.environ["MWMBL_DUMP_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["MWMBL_DUMP_KEY_ID"],
+        aws_secret_access_key=os.environ["MWMBL_DUMP_APPLICATION_KEY"],
+        config=client_config,
+    )
+    return client, os.environ["MWMBL_DUMP_BUCKET"]
+
+
+class LockedIndexReader:
+    """A file-like view of the index, read a chunk at a time under a shared page lock.
+
+    It also hashes what it reads, so the manifest describes exactly the bytes uploaded.
+    """
+
+    def __init__(self, index_path: Path):
+        index = TinyIndex(item_factory=Document, index_path=index_path)
+        self.page_size = index.page_size
+        self.num_pages = index.num_pages
+        self.size = METADATA_SIZE + self.num_pages * self.page_size
+        self.sha256 = hashlib.sha256()
+        self._file = open(index_path, "rb")
+        self._position = 0
+        self._chunk = b""
+        self._chunk_offset = 0
+
+    def close(self):
+        self._file.close()
+
+    def read(self, size: int = -1) -> bytes:
+        # zstd asks for ~128 KB at a time out of 4 MB chunks, so slice the chunk at an
+        # offset rather than re-copying what is left of it on every read.
+        parts = []
+        remaining = self.size if size < 0 else size
+        while remaining > 0:
+            if self._chunk_offset == len(self._chunk):
+                if self._position == self.size:
+                    break
+                self._chunk = self._read_next_chunk()
+                self._chunk_offset = 0
+            part = self._chunk[self._chunk_offset : self._chunk_offset + remaining]
+            self._chunk_offset += len(part)
+            remaining -= len(part)
+            parts.append(part)
+        return b"".join(parts)
+
+    def _read_next_chunk(self) -> bytes:
+        # The metadata is written once, when the index is created, and has no lock of its own.
+        if self._position == 0:
+            chunk = os.pread(self._file.fileno(), METADATA_SIZE, 0)
+        else:
+            length = min(PAGES_PER_CHUNK * self.page_size, self.size - self._position)
+            fileno = self._file.fileno()
+            _set_page_lock(fileno, fcntl.F_RDLCK, self._position, length)
+            try:
+                chunk = os.pread(fileno, length, self._position)
+            finally:
+                _set_page_lock(fileno, fcntl.F_UNLCK, self._position, length)
+        if len(chunk) == 0:
+            raise EOFError(f"The index ended at {self._position} bytes, but its metadata says {self.size}")
+        self._position += len(chunk)
+        self.sha256.update(chunk)
+        return chunk
+
+
+def dump_index(client, bucket: str, index_path: Path) -> str:
+    """Upload a full dump of the index, returning the key of the dump object."""
+    started = datetime.now(timezone.utc)
+    key = f"{DUMPS_PREFIX}{index_path.name}/full/{started:%Y-%m-%dT%H%M%SZ}.zst"
+    reader = LockedIndexReader(index_path)
+    part_size = max(MIN_PART_SIZE, math.ceil(reader.size / MAX_PARTS))
+    transfer_config = TransferConfig(multipart_chunksize=part_size, max_concurrency=UPLOAD_CONCURRENCY)
+    # A source that cannot seek is buffered a part at a time, ten parts by default - 640 MB
+    # on the host serving search. One more than are in flight keeps the uploads busy.
+    transfer_config.max_in_memory_upload_chunks = UPLOAD_CONCURRENCY + 1
+    logger.info(f"Dumping {reader.size} bytes of {index_path} to {key} in parts of {part_size} bytes")
+    try:
+        compressed = zstandard.ZstdCompressor(level=ZSTD_LEVEL).stream_reader(reader)
+        client.upload_fileobj(compressed, bucket, key, Config=transfer_config)
+    finally:
+        reader.close()
+
+    manifest = {
+        "index_name": index_path.name,
+        "page_size": reader.page_size,
+        "num_pages": reader.num_pages,
+        "size": reader.size,
+        "sha256": reader.sha256.hexdigest(),
+        "started": started.isoformat(),
+        "finished": datetime.now(timezone.utc).isoformat(),
+        "license": LICENSE,
+        "license_url": LICENSE_URL,
+    }
+    client.put_object(Bucket=bucket, Key=_manifest_key(key), Body=json.dumps(manifest).encode("utf8"))
+    logger.info(f"Dumped {index_path} to {key}")
+    return key
+
+
+class _RangedObjectReader:
+    """A file-like view of an object, fetched a range at a time."""
+
+    def __init__(self, client, bucket: str, key: str):
+        self._client = client
+        self._bucket = bucket
+        self._key = key
+        head = client.head_object(Bucket=bucket, Key=key)
+        self._size = head["ContentLength"]
+        self._position = 0
+
+    def read(self, size: int) -> bytes:
+        if self._position >= self._size:
+            return b""
+        end = min(self._position + max(size, DOWNLOAD_RANGE_SIZE), self._size) - 1
+        for attempt in range(1, RANGE_ATTEMPTS + 1):
+            try:
+                data = self._read_range(end)
+                break
+            except BotoCoreError as e:
+                if attempt == RANGE_ATTEMPTS:
+                    raise
+                logger.warning(f"Reading bytes {self._position}-{end} of {self._key} failed ({e}); retrying")
+                time.sleep(RANGE_RETRY_SECONDS * 2 ** (attempt - 1))
+        self._position += len(data)
+        return data
+
+    def _read_range(self, end: int) -> bytes:
+        response = self._client.get_object(
+            Bucket=self._bucket,
+            Key=self._key,
+            Range=f"bytes={self._position}-{end}",
+        )
+        data = response["Body"].read()
+        expected = end - self._position + 1
+        if len(data) != expected:
+            raise IncompleteReadError(actual_bytes=len(data), expected_bytes=expected)
+        return data
+
+
+def restore_index(client, bucket: str, key: str, output_path: Path):
+    """Download a full dump to output_path, checking it against its manifest.
+
+    It is written beside output_path and renamed into place only once it checks out. A
+    restore that fails removes what it wrote, which can be most of the free disk; one that
+    was killed leaves it, and the next restore to the same path writes over it.
+    """
+    if output_path.exists():
+        raise FileExistsError(f"{output_path} already exists; restore to a new path")
+    manifest = json.loads(client.get_object(Bucket=bucket, Key=_manifest_key(key))["Body"].read())
+    partial_path = output_path.with_name(output_path.name + ".partial")
+    sha256 = hashlib.sha256()
+    size = 0
+    source = _RangedObjectReader(client, bucket, key)
+    decompressed = zstandard.ZstdDecompressor().stream_reader(source)
+    try:
+        with open(partial_path, "wb") as output_file:
+            while chunk := decompressed.read(DOWNLOAD_RANGE_SIZE):
+                sha256.update(chunk)
+                size += len(chunk)
+                output_file.write(chunk)
+        if size != manifest["size"] or sha256.hexdigest() != manifest["sha256"]:
+            raise ValueError(
+                f"The restored index does not match its manifest: {size} bytes with SHA-256 "
+                f"{sha256.hexdigest()}, expected {manifest['size']} bytes with {manifest['sha256']}"
+            )
+    except Exception:
+        partial_path.unlink(missing_ok=True)
+        raise
+    partial_path.rename(output_path)
+    logger.info(f"Restored {key} to {output_path}")
+
+
+def list_dumps(client, bucket: str, public_url: str) -> list[dict]:
+    """Every finished dump in the bucket, newest first: its manifest and where to download it."""
+    paginator = client.get_paginator("list_objects_v2")
+    # S3 leaves Contents out of a page with no objects on it.
+    sizes = {
+        listed["Key"]: listed["Size"]
+        for page in paginator.paginate(Bucket=bucket, Prefix=DUMPS_PREFIX)
+        for listed in page.get("Contents", [])
+    }
+    # A manifest is written only once its dump has finished uploading, and manifests have
+    # none of their own, so this keeps just the finished dumps.
+    finished_keys = [key for key in sizes if _manifest_key(key) in sizes]
+    dumps = []
+    for key in finished_keys:
+        manifest_key = _manifest_key(key)
+        manifest = json.loads(client.get_object(Bucket=bucket, Key=manifest_key)["Body"].read())
+        dumps.append(
+            manifest
+            | {
+                "key": key,
+                "compressed_size": sizes[key],
+                "url": f"{public_url}/{key}",
+                "manifest_url": f"{public_url}/{manifest_key}",
+            }
+        )
+    return sorted(dumps, key=lambda dump: dump["started"], reverse=True)
+
+
+def get_cached_dumps() -> list[dict]:
+    dumps = cache.get(DUMPS_CACHE_KEY)
+    if dumps is None:
+        client, bucket = dump_settings_from_environment(LISTING_CLIENT_CONFIG)
+        dumps = list_dumps(client, bucket, os.environ["MWMBL_DUMP_PUBLIC_URL"])
+        cache.set(DUMPS_CACHE_KEY, dumps, DUMPS_CACHE_SECONDS)
+    return dumps
+
+
+def _manifest_key(key: str) -> str:
+    return key + ".json"
