@@ -9,7 +9,7 @@ jobs:
   # it needs neither the Rust toolchain nor a database, so it gives fast feedback.
   # `make check` here is exactly what .pre-commit-config.yaml runs on commit.
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # setup-python has no 3.11.12 build for ubuntu-latest (26.04) yet
 
     steps:
       - name: Check out repository
@@ -34,7 +34,7 @@ jobs:
         run: make check
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # setup-python has no 3.11.12 build for ubuntu-latest (26.04) yet
     
     services:
       postgres:
