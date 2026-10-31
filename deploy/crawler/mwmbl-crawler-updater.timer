@@ -1,0 +1,12 @@
+[Unit]
+Description=Update the Mwmbl crawler to the latest stable release
+
+[Timer]
+OnCalendar=hourly
+# Stagger the fleet: each crawler restarts at a different point within the hour, so a bad
+# release does not take down every crawler at once.
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
