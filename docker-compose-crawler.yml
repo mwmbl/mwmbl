@@ -6,12 +6,15 @@ services:
     image: mwmbl/crawler:stable
     container_name: mwmbl-crawler
     pull_policy: always
+    # can be used to communicate with a index on the same local machine
+    extra_hosts:
+      - host.docker.internal:host-gateway
     depends_on:
-      - redis
+      - redis_crawler
     environment:
       # REQUIRED: API key
       - MWMBL_API_KEY=${MWMBL_API_KEY}
-
+      - MWMBL_REMOTE_SERVER=${MWMBL_REMOTE_SERVER:-https://api.mwmbl.org}
       # REQUIRED: Contact info for website administrators
       - MWMBL_CONTACT_INFO=${MWMBL_CONTACT_INFO}
 
@@ -20,7 +23,7 @@ services:
       - CRAWL_THREADS=${CRAWL_THREADS:-20}
       - CRAWL_DELAY_SECONDS=${CRAWL_DELAY_SECONDS:-0.0}
       - PYTHONUNBUFFERED=1
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://redis_crawler:6379
     volumes:
       - crawler_data:/home/mwmbl/.mwmbl
     # Compose applies deploy.restart_policy in swarm mode only, so what was here was no
@@ -37,7 +40,7 @@ services:
     #         limits:
     #           cpus: '0.50'
 
-  redis:
+  redis_crawler:
     image: redis:alpine
     restart: unless-stopped
     # save "": no snapshots at all. What is in here is a work queue that allkeys-lru is
@@ -52,8 +55,8 @@ services:
       redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
       --save "" --stop-writes-on-bgsave-error no
     volumes:
-      - redis_data:/data
+      - redis_crawler_data:/data
 
 volumes:
-  redis_data:
+  redis_crawler_data:
   crawler_data:
