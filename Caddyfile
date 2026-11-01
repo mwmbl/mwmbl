@@ -1,0 +1,18 @@
+{
+    http_port 5000
+    auto_https off
+}
+
+*, *:5000, host.docker.internal, host.docker.internal:5000 {
+    handle_path /static/* {
+        root /static
+        file_server 
+    }
+    handle_path /public/* {
+        root /public
+	    file_server
+    }
+    handle {
+        reverse_proxy mwmbl:5000
+    }
+}

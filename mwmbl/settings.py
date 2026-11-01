@@ -10,6 +10,8 @@ MIN_COUNT = 10
 PROBABILITY_THRESHOLD = 0.8
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://username:password@localhost/dbname")
 
+STORAGE_DRIVER=os.environ.get("MWMBL_STORAGE_DRIVER", "s3")
+STORAGE_BASE_PATH=os.environ.get("MWMBL_STORAGE_BASE_PATH", "/public")
 APPLICATION_KEY = os.environ.get("MWMBL_APPLICATION_KEY", "SECRETAPPLICATIONKEY")
 KEY_ID = os.environ.get("MWMBL_KEY_ID", "SECRETKEYID")
 ENDPOINT_URL = os.environ.get("MWMBL_ENDPOINT_URL", "https://s3.eu-central-003.backblazeb2.com")
@@ -18,7 +20,7 @@ USER_ID_LENGTH = 36
 PUBLIC_USER_ID_LENGTH = 64
 VERSION = "v1"
 DATE_REGEX = re.compile(r"\d{4}-\d{2}-\d{2}")
-PUBLIC_URL_PREFIX = f"https://f003.backblazeb2.com/file/{BUCKET_NAME}/"
+PUBLIC_URL_PREFIX = os.environ.get("MWMBL_PUBLIC_URL_PREFIX", f"https://f003.backblazeb2.com/file/{BUCKET_NAME}/")
 FILE_NAME_SUFFIX = ".json.gz"
 
 NUM_TITLE_CHARS = 65

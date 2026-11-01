@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from logging import getLogger
 from uuid import uuid4
 
-import boto3
 import requests
 import sentry_sdk
 from django.conf import settings
@@ -31,12 +30,8 @@ from mwmbl.devices import record_device
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey
 from mwmbl.settings import (
-    APPLICATION_KEY,
-    BUCKET_NAME,
     DATE_REGEX,
-    ENDPOINT_URL,
     FILE_NAME_SUFFIX,
-    KEY_ID,
     NUM_EXTRACT_CHARS,
     NUM_TITLE_CHARS,
     PUBLIC_URL_PREFIX,
@@ -46,6 +41,7 @@ from mwmbl.settings import (
 )
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.utils import utc_today
+from mwmbl.storage_drivers import get_batches_for_prefix, get_subfolders, upload
 
 stats_manager = StatsManager(
     Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"), decode_responses=True)
@@ -65,21 +61,6 @@ INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope 
 
 # Module-level router used by the unified v1 API
 router = Router(tags=["Crawler"])
-
-
-def get_bucket(name):
-    s3 = boto3.resource(
-        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
-    )
-    return s3.Object(BUCKET_NAME, name)
-
-
-def upload(data: bytes, name: str):
-    logger.info(f"Uploading {len(data)} bytes to {name}")
-    bucket = get_bucket(name)
-    result = bucket.put(Body=data)
-    return result
-
 
 def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object_type: str):
     seconds = (now - datetime(now.year, now.month, now.day, tzinfo=timezone.utc)).seconds
@@ -473,26 +454,6 @@ def get_batch_ids_for_prefix(prefix):
     results = {"batch_ids": [get_batch_id_from_file_name(name) for name in filename_endings]}
     return results
 
-
-def get_batches_for_prefix(prefix):
-    s3 = boto3.resource(
-        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
-    )
-    bucket = s3.Bucket(BUCKET_NAME)
-    items = bucket.objects.filter(Prefix=prefix)
-    filenames = [item.key for item in items]
-    return filenames
-
-
 def check_date_str(date_str):
     if not DATE_REGEX.match(date_str):
         raise HttpError(400, "Incorrect date format, should be YYYY-MM-DD")
-
-
-def get_subfolders(prefix):
-    client = boto3.client(
-        "s3", endpoint_url=ENDPOINT_URL, aws_access_key_id=KEY_ID, aws_secret_access_key=APPLICATION_KEY
-    )
-    items = client.list_objects(Bucket=BUCKET_NAME, Prefix=prefix, Delimiter="/")
-    item_keys = [item["Prefix"][len(prefix) :].strip("/") for item in items["CommonPrefixes"]]
-    return item_keys

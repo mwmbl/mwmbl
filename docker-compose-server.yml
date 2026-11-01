@@ -1,0 +1,80 @@
+services:
+  router:
+    image: docker.io/library/caddy:alpine
+    command: caddy run --config /etc/caddy/Caddyfile
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:z
+      - public_storage:/public
+      - static_storage:/static
+
+  mwmbl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mwmbl-front-end
+    depends_on:
+      - redis_server
+      - postgres
+    environment:
+      - DJANGO_SETTINGS_MODULE=mwmbl.settings_compose
+      - DATABASE_URL=postgresql://${MWMBL_PG_USER}:${MWMBL_PG_PASS}@postgres:5432/mwmbl
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - REDIS_URL=redis://redis_server:6379
+      - RUN_BACKGROUND_TASKS=true
+      - MWMBL_APP=server
+      - MWMBL_PUBLIC_URL_PREFIX=${MWMBL_PUBLIC_URL_PREFIX}
+      - MWMBL_STORAGE_DRIVER=${MWMBL_STORAGE_DRIVER:-s3}
+      # if MWMBL_STORAGE_DRIVER = local
+      # - MWMBL_STORAGE_BASE_PATH=${MWMBL_STORAGE_BASE_PATH:-/public} # 
+      # if MWMBL_STORAGE_DRIVER = s3
+      # - MWMBL_ENDPOINT_URL=${MWMBL_ENDPOINT_URL} 
+      # - MWMBL_BUCKET_NAME=${MWMBL_BUCKET_NAME} # if MWMBL_STORAGE_DRIVER = s3
+      # - MWMBL_APPLICATION_KEY=${MWMBL_APPLICATION_KEY} # if MWMBL_STORAGE_DRIVER = s3
+      # - MWMBL_KEY_ID=${MWMBL_KEY_ID} # if MWMBL_STORAGE_DRIVER = s3
+    restart: unless-stopped
+    # CPU restrictions if needed (deploy.resources.limits compose does apply):
+    #     deploy:
+    #       resources:
+    #         limits:
+    #           cpus: '0.50'
+    volumes:
+      - public_storage:/public
+      - private_storage:/private
+      - static_storage:/static
+
+  redis_server:
+    image: redis:alpine
+    restart: unless-stopped
+    # save "": no snapshots at all. What is in here is a work queue that allkeys-lru is
+    # already free to evict, so there is nothing worth the cost of saving it, and the cost
+    # was real - a crawler host was found with 8.5GB of temp-*.rdb next to a 209MB dump.rdb.
+    # A snapshot forks a Redis holding up to maxmemory and writes a second copy of the data
+    # beside the first, and every one of those children that the OOM killer took left its
+    # temp file behind for good. That filled the disk, which failed the next snapshot, which
+    # (before stop-writes-on-bgsave-error no, kept below for a save anyone triggers by hand)
+    # made Redis reject every write and stopped the crawler.
+    command: >
+      redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+      --save "" --stop-writes-on-bgsave-error no
+    volumes:
+      - redis_server_data:/data
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MWMBL_PG_USER}
+      POSTGRES_PASSWORD: ${MWMBL_PG_PASS}
+      POSTGRES_DB: mwmbl
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+  redis_server_data:
+  public_storage:
+  private_storage:
+  static_storage:
