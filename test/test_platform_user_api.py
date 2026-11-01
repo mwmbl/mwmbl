@@ -14,7 +14,7 @@ from django.core import mail
 from django.core.cache import cache
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.models import Device, DomainEvidence, DomainSubmission, UserAgreement
+from mwmbl.models import CrawlerError, Device, DomainEvidence, DomainSubmission, UserAgreement
 from mwmbl.platform import api
 
 User = get_user_model()
@@ -98,6 +98,27 @@ def test_a_device_can_be_renamed_by_its_owner_only(client, member):
     assert renamed.json()["friendly_name"] == "Office"
     device.refresh_from_db()
     assert device.friendly_name == "Office"
+
+
+def test_crawler_errors_are_listed_newest_first_and_only_for_their_owner(client, member):
+    stranger = _user("stranger")
+    for owner, message in [(member, "first"), (member, "second"), (stranger, "not mine")]:
+        CrawlerError.objects.create(
+            user=owner,
+            device_name="laptop",
+            context="indexing",
+            exception_type="ValueError",
+            message=message,
+            location="mwmbl/crawl.py:1 in run",
+            crawler_version="1.0.0",
+        )
+
+    response = client.get(f"{BASE}/crawler-errors/?limit=1", headers=_auth(member))
+    next_page = client.get(f"{BASE}/crawler-errors/?limit=1&offset=1", headers=_auth(member))
+
+    assert response.json()["count"] == 2
+    assert [e["message"] for e in response.json()["items"]] == ["second"]
+    assert [e["message"] for e in next_page.json()["items"]] == ["first"]
 
 
 def test_profile_reports_the_account_and_plan(client, member):
