@@ -1,0 +1,303 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block title %}Crawler agreement | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; Crawler agreement
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .agree { --ink: #1B1D21; --muted: #4F535A; --faint: #5D6168; --line: #E3E1DB; --hair: #EFEDE7; --band: #DCE3EE; --tick: #8A9BB8; --sel: #1F5FBF;
+      box-sizing: border-box; color: var(--ink); background: #F6F5F1; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+    .agree p { margin: 0; }
+    .agree .mono { font-family: ui-monospace, "IBM Plex Mono", monospace; }
+    .agree .lede { font-size: 15px; line-height: 1.5; color: var(--muted); max-width: 760px; }
+    .agree .note { font-size: 14px; line-height: 1.5; color: var(--muted); }
+    .agree .small { font-size: 13px; color: var(--muted); }
+    .agree .card { background: #FFF; border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .agree .card h2 { margin: 0; font-size: 18px; font-weight: 600; background: none; color: var(--ink); padding: 0; text-transform: none; letter-spacing: 0; }
+    .agree .head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; }
+    .agree .head > div:first-child { display: flex; flex-direction: column; gap: 4px; max-width: 820px; }
+    .agree .window { display: flex; gap: 8px; align-items: center; }
+    .agree .window a { font-size: 14px; padding: 10px 14px; border-radius: 6px; border: 1px solid #D9D6CE; background: #FFF; color: var(--ink); text-decoration: none; }
+    .agree .window a[aria-current] { background: var(--ink); border-color: var(--ink); color: #FFF; }
+    .agree .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .agree .totals .card { padding: 16px; gap: 4px; }
+    .agree .totals .value { font-size: 24px; font-weight: 500; }
+    .agree .pair { display: flex; flex-wrap: wrap; gap: 20px; }
+    .agree .pair > .card { flex: 1 1 520px; }
+    .agree .scroll { overflow-x: auto; }
+    .agree .grid { display: flex; flex-direction: column; gap: 2px; width: max-content; }
+    .agree .grid-row { display: flex; gap: 2px; align-items: center; }
+    .agree .grid-col { width: 26px; height: 74px; display: flex; align-items: flex-end; justify-content: center; }
+    .agree .grid-col span { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; }
+    .agree .grid-name { width: 88px; padding-right: 4px; text-align: right; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agree .cell { width: 26px; height: 22px; border-radius: 2px; }
+    .agree .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font-size: 13px; color: var(--muted); }
+    .agree .legend > span { display: flex; align-items: center; gap: 6px; }
+    .agree .chart { display: flex; gap: 8px; }
+    .agree .y-axis { position: relative; width: 36px; font-size: 12px; color: var(--faint); }
+    .agree .y-axis span { position: absolute; right: 0; transform: translateY(50%); }
+    .agree .plot-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .agree .plot { position: relative; border-left: 1px solid #C9C6BE; border-bottom: 1px solid #C9C6BE; background: #FCFBF9; }
+    .agree .plot svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+    .agree .gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--hair); }
+    .agree .x-axis { position: relative; height: 18px; font-size: 12px; color: var(--faint); }
+    .agree .x-axis span { position: absolute; transform: translateX(-50%); }
+    .agree .axis-title { font-size: 13px; color: var(--muted); text-align: center; }
+    .agree .dot { position: absolute; display: block; border-radius: 50%; }
+    .agree .dot-label { position: absolute; font-size: 12px; padding: 1px 4px; background: rgba(255,255,255,0.9); border-radius: 3px; transform: translate(12px, 50%); pointer-events: none; white-space: nowrap; }
+    .agree .table { min-width: 1290px; display: flex; flex-direction: column; border: 1px solid var(--hair); border-radius: 6px; }
+    .agree .tr { display: grid; grid-template-columns: 170px 110px 92px 70px 70px repeat(5, 140px) 130px 90px; gap: 0 12px; padding: 6px 14px; border-top: 1px solid var(--hair); align-items: center; font-size: 13px; }
+    .agree .tr.th { background: #F6F5F1; font-size: 12px; font-weight: 600; color: var(--muted); align-items: end; padding: 10px 14px; border-top: none; }
+    .agree .tr.on { background: #EEF3FB; }
+    .agree .num { text-align: right; }
+    .agree .pick { font-weight: 500; padding: 8px; min-height: 36px; box-sizing: border-box; display: inline-flex; align-items: center; border: 1px solid #D9D6CE; border-radius: 4px; color: var(--ink); text-decoration: none; }
+    .agree .on .pick { border-color: var(--sel); color: var(--sel); }
+    .agree .strip { display: flex; align-items: center; gap: 8px; }
+    .agree .strip > div { position: relative; height: 18px; flex: 1; }
+    .agree .strip > div > div { position: absolute; }
+    .agree .strip span { font-size: 12px; width: 34px; text-align: right; }
+  </style>
+
+  <div id="content-main" class="agree">
+
+    <div class="head">
+      <div>
+        <p class="lede">When a crawler submits a URL another crawler already holds, the two copies are compared. Every crawler is shown against the rest of the network, so an outlier stands out by position rather than by crossing a fixed line.</p>
+      </div>
+      <nav class="window" aria-label="Window">
+        <span class="small">Window</span>
+        {% for choice in day_choices %}
+          <a href="?days={{ choice }}{% if selected %}&amp;crawler={{ selected.rollup.user_id }}{% endif %}" {% if choice == days %}aria-current="page"{% endif %}>{{ choice }} days</a>
+        {% endfor %}
+      </nav>
+    </div>
+
+    {% if redis_error %}
+      <div class="card"><h2>Redis unreachable</h2><p class="note">{{ redis_error }}</p></div>
+    {% elif empty %}
+      <div class="card"><p class="note">No crawler's copy met another crawler's in the last {{ days }} days.</p></div>
+    {% else %}
+
+    <section class="totals" aria-label="Totals">
+      <div class="card"><div class="small">Comparisons</div><div class="value mono">{{ totals.comparisons|intcomma }}</div></div>
+      <div class="card"><div class="small">Crawlers compared</div><div class="value mono">{{ totals.crawlers }}</div></div>
+      <div class="card"><div class="small">Median crawler's extract similarity</div><div class="value mono">{{ totals.median }}</div></div>
+      <div class="card"><div class="small">Copies compared with an empty extract</div><div class="value mono">{{ totals.empty_share }}</div></div>
+    </section>
+
+    <div class="pair">
+      <section class="card">
+        <div>
+          <h2>Who disagrees with whom</h2>
+          <p class="note">Median extract similarity for each pair of the {{ grid.rows|length }} busiest crawlers. Rows submit, columns wrote the stored copy. One dark cell is a pair that disagrees; a dark row <em>and</em> column is a crawler that disagrees with everyone.</p>
+        </div>
+        <div class="scroll">
+          <div class="grid mono">
+            <div class="grid-row" style="padding-left: 92px">
+              {% for column in grid.columns %}
+                <div class="grid-col"><span style="color: {{ column.colour }}; font-weight: {{ column.weight }}">{{ column.name }}</span></div>
+              {% endfor %}
+            </div>
+            {% for row in grid.rows %}
+              <div class="grid-row">
+                <div class="grid-name" style="color: {{ row.colour }}; font-weight: {{ row.weight }}">{{ row.name }}</div>
+                {% for cell in row.cells %}
+                  <div class="cell" title="{{ cell.tip }}" style="background: {{ cell.background }}; box-shadow: {{ cell.ring }}"></div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="legend">
+          <span>0 <span style="width: 180px; height: 10px; border-radius: 2px; background: linear-gradient(90deg, #6B2208, #B4441A, #E08A4B, #F2D3B3, #F4F1EA)"></span> 1 · extract similarity</span>
+          <span><span style="width: 14px; height: 10px; border-radius: 2px; background: repeating-linear-gradient(45deg, #ECEAE4 0 2px, #FFFFFF 2px 5px)"></span>too few shared URLs</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div>
+          <h2>Breadth against agreement</h2>
+          <p class="note">Each dot is a crawler, sized by comparisons. Low agreement with one partner is noise; low agreement across many partners is the pattern to look for, bottom right. The shaded band is the middle half of the network.</p>
+        </div>
+        <div class="chart">
+          <div class="y-axis mono" style="height: 380px">
+            {% for tick in scatter.y_ticks %}<span style="bottom: {{ tick.pos }}%">{{ tick.label }}</span>{% endfor %}
+          </div>
+          <div class="plot-wrap">
+            <div class="plot" style="height: 380px">
+              {% for tick in scatter.y_ticks %}<div class="gridline" style="bottom: {{ tick.pos }}%"></div>{% endfor %}
+              {% if scatter.band %}
+                <div style="position: absolute; left: 0; right: 0; background: var(--band); opacity: 0.8; bottom: {{ scatter.band.bottom }}%; height: {{ scatter.band.height }}%"></div>
+                <div style="position: absolute; left: 0; right: 0; height: 2px; background: var(--tick); bottom: {{ scatter.band.median }}%"></div>
+              {% endif %}
+              {% for dot in scatter.dots %}
+                <a class="dot" href="?days={{ days }}&amp;crawler={{ dot.user_id }}" aria-label="{{ dot.label }}" title="{{ dot.label }}" style="left: {{ dot.x }}%; bottom: {{ dot.y }}%; width: {{ dot.size }}px; height: {{ dot.size }}px; margin-left: {{ dot.offset }}px; margin-bottom: {{ dot.offset }}px; background: {{ dot.fill }}; border: {{ dot.border }}; box-sizing: border-box"></a>
+              {% endfor %}
+              {% for label in scatter.labels %}
+                <span class="dot-label mono" style="left: {{ label.x }}%; bottom: {{ label.y }}%; color: {{ label.colour }}; font-weight: {{ label.weight }}">{{ label.name }}</span>
+              {% endfor %}
+            </div>
+            <div class="x-axis mono">
+              {% for tick in scatter.x_ticks %}<span style="left: {{ tick.pos }}%">{{ tick.label }}</span>{% endfor %}
+            </div>
+            <div class="axis-title">Distinct crawlers it was compared with (log scale) · vertical: median extract similarity as submitter</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    {% if funnel %}
+    <section class="card">
+      <div class="head">
+        <div>
+          <h2>The odd bad item</h2>
+          <p class="note">A crawler that slips in the occasional spam page keeps a normal median. What changes is how often its comparisons land in the network's own lowest-agreeing tail, counting only copies crawled within a day of each other. Every crawler should land there about as often as the typical one, give or take chance, and chance narrows as volume grows: the funnel is that allowance. A dot above the funnel lands in the tail more often than chance explains.</p>
+        </div>
+        <div class="legend">
+          <span><span style="width: 18px; height: 2px; background: var(--tick)"></span>typical rate, {{ funnel.p0 }}</span>
+          <span><span style="width: 14px; height: 10px; background: var(--band)"></span>chance, 2 and 3 standard errors</span>
+        </div>
+      </div>
+      <div class="chart">
+        <div class="y-axis mono" style="height: 340px">
+          {% for tick in funnel.y_ticks %}<span style="bottom: {{ tick.pos }}%">{{ tick.label }}</span>{% endfor %}
+        </div>
+        <div class="plot-wrap">
+          <div class="plot" style="height: 340px">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              <polygon points="{{ funnel.outer }}" fill="#E8EDF4"></polygon>
+              <polygon points="{{ funnel.inner }}" fill="#D3DCEA"></polygon>
+              <line x1="0" x2="100" y1="{{ funnel.p0_y }}" y2="{{ funnel.p0_y }}" stroke="#8A9BB8" stroke-width="2" vector-effect="non-scaling-stroke"></line>
+            </svg>
+            {% for dot in funnel.dots %}
+              <a class="dot" href="?days={{ days }}&amp;crawler={{ dot.user_id }}" aria-label="{{ dot.label }}" title="{{ dot.label }}" style="left: {{ dot.x }}%; bottom: {{ dot.y }}%; width: 12px; height: 12px; margin-left: -6px; margin-bottom: -6px; background: {{ dot.fill }}; border: {{ dot.border }}; box-sizing: border-box"></a>
+            {% endfor %}
+            {% for label in funnel.labels %}
+              <span class="dot-label mono" style="left: {{ label.x }}%; {% if label.drop is not None %}top: {{ label.drop }}px; transform: translateX(12px){% else %}bottom: {{ label.y }}%{% endif %}; color: {{ label.colour }}; font-weight: {{ label.weight }}">{{ label.name }}</span>
+            {% endfor %}
+          </div>
+          <div class="x-axis mono">
+            {% for tick in funnel.x_ticks %}<span style="left: {{ tick.pos }}%">{{ tick.label }}</span>{% endfor %}
+          </div>
+          <div class="axis-title">Comparisons with a crawl gap under a day (log scale) · vertical: share in the network's lowest-agreeing 5%</div>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <div class="head">
+        <div>
+          <h2>Every crawler against the network</h2>
+          <p class="note">The grey band in each column is the middle half of all crawlers and the tick their median; the dot is this crawler. Sorted by how far the crawler sits from the network on any column or in the funnel, measured in the network's own spread, so nothing here is a fixed cut-off. Select a crawler to follow it through the charts.</p>
+        </div>
+        <p class="small" style="max-width: 380px">Checked: share of its submissions that met another crawler's copy; the rest can't be checked this way. Similarity columns leave out comparisons where either extract is empty. Crawl gaps are the crawlers' own claims.</p>
+      </div>
+      <div class="scroll">
+        <div role="table" aria-label="Crawlers" class="table">
+          <div role="row" class="tr th">
+            <div role="columnheader">Crawler</div>
+            <div role="columnheader">Version</div>
+            <div role="columnheader" class="num">Comparisons</div>
+            <div role="columnheader" class="num">Partners</div>
+            <div role="columnheader" class="num">Checked</div>
+            {% for column in columns %}<div role="columnheader">{{ column.label }}</div>{% endfor %}
+            <div role="columnheader">Daily, {{ days }} days</div>
+            <div role="columnheader">Off network</div>
+          </div>
+          {% for row in rows %}
+            <div role="row" class="tr{% if row.selected %} on{% endif %}">
+              <div role="cell" style="display: flex; align-items: center; gap: 6px">
+                <a class="pick mono" href="?days={{ days }}&amp;crawler={{ row.user_id }}" {% if row.selected %}aria-current="true"{% endif %}>{{ row.name }}</a>
+                {% if row.has_username %}<a href="{% url 'worst_agreements' %}?username={{ row.name|urlencode }}" aria-label="Worst agreements of {{ row.name }}" style="font-size: 12px">worst</a>{% endif %}
+              </div>
+              <div role="cell" class="mono" style="font-size: 12px; color: var(--muted)">{{ row.version }}</div>
+              <div role="cell" class="mono num">{{ row.comparisons|intcomma }}</div>
+              <div role="cell" class="mono num">{{ row.partners }}</div>
+              <div role="cell" class="mono num">{{ row.checked }}</div>
+              {% for strip in row.strips %}
+                <div role="cell" class="strip">
+                  <div>
+                    <div style="left: 0; right: 0; top: 8px; height: 2px; background: #EAE8E2"></div>
+                    {% if strip.median is not None %}
+                      <div style="top: 3px; height: 12px; border-radius: 2px; background: var(--band); left: {{ strip.band_left }}%; width: {{ strip.band_width }}%"></div>
+                      <div style="top: 1px; height: 16px; width: 2px; background: var(--tick); left: {{ strip.median }}%"></div>
+                    {% endif %}
+                    {% if strip.pos is not None %}
+                      <div style="top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; left: {{ strip.pos }}%; background: {% if row.selected %}var(--sel){% else %}var(--ink){% endif %}"></div>
+                    {% endif %}
+                  </div>
+                  <span class="mono">{{ strip.text }}</span>
+                </div>
+              {% endfor %}
+              <div role="cell">
+                <svg width="130" height="30" viewBox="0 0 130 30" role="img" aria-label="{{ row.name }} daily median extract similarity, last {{ days }} days">
+                  <polyline points="{{ row.network_spark }}" fill="none" stroke="#B9C3D4" stroke-width="1.5"></polyline>
+                  <polyline points="{{ row.spark }}" fill="none" stroke="{% if row.selected %}#1F5FBF{% else %}#1B1D21{% endif %}" stroke-width="1.5"></polyline>
+                </svg>
+              </div>
+              <div role="cell" style="display: flex; align-items: center; gap: 6px">
+                <div style="height: 8px; border-radius: 2px; background: var(--ink); width: {{ row.score_width }}px"></div>
+                <span class="mono" style="font-size: 12px">{{ row.score }}</span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% if unmet %}
+        <p class="small">Submitted in the window without meeting another crawler's copy, so not compared:
+          {% for crawler in unmet %}<span class="mono">{{ crawler.name }}</span> ({{ crawler.submissions|intcomma }}){% if not forloop.last %}, {% endif %}{% endfor %}.
+        </p>
+      {% endif %}
+    </section>
+
+    <section class="card" id="trend">
+      <div class="head">
+        <div>
+          <h2><span class="mono">{{ selected.name }}</span> over time</h2>
+          <p class="note">Daily median extract similarity as submitter, against the network's middle half. A step that lines up with a version change points at the crawler's code rather than its operator, though the version is the crawler's own claim, and an operator can change it as they start misbehaving.</p>
+        </div>
+        <div class="legend">
+          <span><span style="width: 18px; height: 3px; background: var(--sel)"></span>{{ selected.name }}</span>
+          <span><span style="width: 18px; height: 10px; background: var(--band)"></span>network middle half</span>
+          <span><span style="width: 2px; height: 14px; background: var(--ink)"></span>version change</span>
+        </div>
+      </div>
+      <div class="chart">
+        <div class="y-axis mono" style="height: 240px">
+          {% for tick in trend.y_ticks %}<span style="bottom: {{ tick.pos }}%">{{ tick.label }}</span>{% endfor %}
+        </div>
+        <div class="plot-wrap">
+          <div class="plot" style="height: 240px; background: #FFF">
+            <svg viewBox="0 0 600 240" preserveAspectRatio="none" role="img" aria-label="{{ trend.label }}">
+              <polygon points="{{ trend.band }}" fill="#DCE3EE"></polygon>
+              <polyline points="{{ trend.network }}" fill="none" stroke="#8A9BB8" stroke-width="2" vector-effect="non-scaling-stroke"></polyline>
+              {% for change in trend.changes %}
+                <line x1="{{ change.x }}" x2="{{ change.x }}" y1="0" y2="240" stroke="#1B1D21" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"></line>
+              {% endfor %}
+              <polyline points="{{ trend.own }}" fill="none" stroke="#1F5FBF" stroke-width="2.5" vector-effect="non-scaling-stroke"></polyline>
+            </svg>
+            {% if not trend.has_own %}
+              <p class="note" style="position: absolute; left: 12px; top: 12px">No comparisons as submitter with both extracts in this window: only other crawlers' copies met its own.</p>
+            {% endif %}
+            {% for change in trend.changes %}
+              <span class="mono" style="position: absolute; top: 6px; font-size: 12px; background: #FFF; padding: 1px 4px; border: 1px solid #D9D6CE; border-radius: 3px; left: {{ change.left }}%; transform: translateX(6px)">{{ change.label }}</span>
+            {% endfor %}
+          </div>
+          <div class="mono" style="display: flex; justify-content: space-between; font-size: 12px; color: var(--faint)">
+            {% for label in trend.x_labels %}<span>{{ label }}</span>{% endfor %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {% endif %}
+  </div>
+{% endblock %}

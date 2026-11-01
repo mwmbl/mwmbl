@@ -21,6 +21,7 @@ what a bot looks like belongs to whoever is reading, and can be a different rule
 """
 
 import os
+import re
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from logging import getLogger
@@ -36,6 +37,8 @@ from redis import RedisError
 
 from mwmbl import count_urls, pricing, provider_usage, quota, search_callers, search_setup, traffic
 from mwmbl.crawler import worst_agreements
+from mwmbl.crawler.agreement_panel import build_panel
+from mwmbl.crawler.agreement_rollups import get_agreement_rollups
 from mwmbl.crawler.stats import BLACKLISTED_REMOVED_COUNT_KEY
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer import blacklist_snapshot, purge_queue
@@ -720,3 +723,33 @@ def worst_agreements_view(request):
     ]
     context["empty"] = not any(role["buckets"] for role in context["roles"])
     return render(request, "admin/worst_agreements.html", context)
+
+
+AGREEMENT_DAYS = [7, 30, 90]
+DEFAULT_AGREEMENT_DAYS = 30
+
+
+@staff_member_required
+def crawler_agreement_view(request):
+    days_param = request.GET.get("days", str(DEFAULT_AGREEMENT_DAYS))
+    if days_param not in {str(choice) for choice in AGREEMENT_DAYS}:
+        return HttpResponseBadRequest(f"days must be one of {AGREEMENT_DAYS}")
+    days = int(days_param)
+    crawler_param = request.GET.get("crawler")
+    if crawler_param is not None and not re.fullmatch(r"[0-9]+", crawler_param):
+        return HttpResponseBadRequest("crawler must be a user id")
+    context = {"title": "Crawler agreement", "days": days, "day_choices": AGREEMENT_DAYS}
+
+    try:
+        rollups = get_agreement_rollups(worst_agreements.get_redis(), days)
+    except RedisError as e:
+        logger.exception("Could not read the crawler agreement rollups from Redis")
+        context["redis_error"] = str(e)
+        return render(request, "admin/crawler_agreement.html", context)
+
+    user_ids = {crawler.user_id for crawler in rollups.crawlers}
+    # The index keeps the ids of deleted users, so some have no name left.
+    usernames = dict(MwmblUser.objects.filter(id__in=user_ids).values_list("id", "username"))
+    selected_id = int(crawler_param) if crawler_param is not None else None
+    context |= build_panel(rollups, usernames, selected_id, days)
+    return render(request, "admin/crawler_agreement.html", context)

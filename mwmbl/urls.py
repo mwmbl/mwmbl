@@ -23,6 +23,7 @@ from django.views.generic import RedirectView
 import mwmbl.crawler.app as crawler
 from mwmbl.admin_views import (
     blacklist_status_view,
+    crawler_agreement_view,
     index_count_view,
     paying_users_view,
     provider_costs_view,
@@ -68,6 +69,7 @@ urlpatterns = [
     path("admin/provider-costs/", provider_costs_view, name="provider_costs"),
     path("admin/index-count/", index_count_view, name="index_count"),
     path("admin/worst-agreements/", worst_agreements_view, name="worst_agreements"),
+    path("admin/crawler-agreement/", crawler_agreement_view, name="crawler_agreement"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", index, name="index"),
