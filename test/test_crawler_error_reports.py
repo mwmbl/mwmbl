@@ -104,6 +104,17 @@ def test_a_report_is_kept_for_its_user_with_the_innermost_frame_as_its_location(
 
 
 @pytest.mark.django_db
+def test_a_frame_without_a_line_number_has_a_location_without_one():
+    user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
+    frame = {"filename": "mwmbl/crawl.py", "lineno": None, "function": "run_indexing", "line": None}
+
+    post_report(raw_key, {**REPORT, "frames": [frame]})
+
+    [error] = CrawlerError.objects.filter(user=user)
+    assert error.location == "mwmbl/crawl.py in run_indexing"
+
+
+@pytest.mark.django_db
 def test_only_a_users_newest_errors_are_kept(monkeypatch):
     monkeypatch.setattr(crawler_errors, "MAX_ERRORS_PER_USER", 3)
     user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
