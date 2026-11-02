@@ -21,6 +21,11 @@ zstd = "0.13"
 # The same features as the runtime dependency, so both parse numbers identically.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
+# Vendored xgboost_lib-sys (headers only) that restricts bindgen to the XGBoost C API, so builds
+# don't fail on libc layout assertions when libclang is misconfigured. See third_party/xgboost_lib-sys/build.rs.
+[patch.crates-io]
+xgboost_lib-sys = { path = "third_party/xgboost_lib-sys" }
+
 [profile.release]
 lto = true
 codegen-units = 1
