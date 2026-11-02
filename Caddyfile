@@ -1,0 +1,15 @@
+# caddy ignore '.internal' addresses from wildcards by default
+# so for 'host.docker.internal' to work we need to add it directly
+http://*:5000, http://host.docker.internal:5000 {
+    handle_path /static/* {
+        root /static
+        file_server 
+    }
+    handle_path /public/* {
+        root /public
+	    file_server
+    }
+    handle {
+        reverse_proxy mwmbl:5000
+    }
+}
