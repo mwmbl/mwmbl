@@ -15,9 +15,9 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from sentry_sdk.transport import Transport
 
-from mwmbl import crawl
+from mwmbl import crawl, crawler_errors
 from mwmbl.crawler.batch import MAX_ERROR_MESSAGE_LENGTH, MAX_ERROR_TAG_LENGTH
-from mwmbl.models import ApiKey, generate_api_key
+from mwmbl.models import ApiKey, CrawlerError, generate_api_key
 
 User = get_user_model()
 
@@ -87,6 +87,54 @@ def test_a_report_goes_to_sentry_once_as_a_crawler_exception(sentry_events):
     assert event["release"] == "mwmbl-crawler@1.2.0"
     assert event["server_name"] == "crawler-3f7a1c9e"
     assert event["user"] == {"id": str(user.id)}
+
+
+@pytest.mark.django_db
+def test_a_report_is_kept_for_its_user_with_the_innermost_frame_as_its_location():
+    user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
+
+    post_report(raw_key)
+
+    [error] = CrawlerError.objects.filter(user=user)
+    assert error.device_name == "crawler-3f7a1c9e"
+    assert error.exception_type == "requests.exceptions.HTTPError"
+    assert error.message == "502 Server Error: Bad Gateway"
+    assert error.location == "mwmbl/crawl.py:312 in run_indexing"
+    assert error.crawler_version == "1.2.0"
+
+
+@pytest.mark.django_db
+def test_a_frame_without_a_line_number_has_a_location_without_one():
+    user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
+    frame = {"filename": "mwmbl/crawl.py", "lineno": None, "function": "run_indexing", "line": None}
+
+    post_report(raw_key, {**REPORT, "frames": [frame]})
+
+    [error] = CrawlerError.objects.filter(user=user)
+    assert error.location == "mwmbl/crawl.py in run_indexing"
+
+
+@pytest.mark.django_db
+def test_only_a_users_newest_errors_are_kept(monkeypatch):
+    monkeypatch.setattr(crawler_errors, "MAX_ERRORS_PER_USER", 3)
+    user, raw_key = make_api_key(ApiKey.Scope.CRAWL)
+    other_user = User.objects.create_user(username="other", email="other@example.com", password="pass")
+    CrawlerError.objects.create(
+        user=other_user,
+        device_name="d",
+        context="batch",
+        exception_type="E",
+        message="m",
+        location="l",
+        crawler_version="1",
+    )
+
+    for number in range(5):
+        post_report(raw_key, {**REPORT, "message": f"error {number}"})
+
+    kept = CrawlerError.objects.filter(user=user).order_by("-id").values_list("message", flat=True)
+    assert list(kept) == ["error 4", "error 3", "error 2"]
+    assert CrawlerError.objects.filter(user=other_user).count() == 1
 
 
 @pytest.mark.django_db

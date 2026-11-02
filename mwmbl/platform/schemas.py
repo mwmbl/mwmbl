@@ -254,6 +254,17 @@ class DeviceResponse(Schema):
     last_seen: datetime
 
 
+class CrawlerErrorResponse(Schema):
+    id: int
+    device_name: str
+    context: str
+    exception_type: str
+    message: str
+    location: str
+    crawler_version: str
+    created_at: datetime
+
+
 class UpdateDeviceRequest(Schema):
     friendly_name: str = Field(
         max_length=255,

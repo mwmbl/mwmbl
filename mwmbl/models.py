@@ -374,6 +374,28 @@ class Device(models.Model):
         unique_together = ("user", "hostname")
 
 
+class CrawlerError(models.Model):
+    """An error one of a user's crawlers caught and reported, kept so the user can see it.
+
+    Only the innermost frame is kept as `location`: the full traceback goes to Sentry, and
+    this is for a volunteer to tell at a glance what is failing.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="crawler_errors")
+    device_name = models.CharField(max_length=255)
+    context = models.CharField(max_length=20)
+    exception_type = models.CharField(max_length=1024)
+    message = models.TextField()
+    location = models.TextField()
+    crawler_version = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+
 class SearchResultVote(models.Model):
     VOTE_TYPES = {
         "upvote": "User upvoted this result",

@@ -27,6 +27,7 @@ from mwmbl.crawler.batch import (
 )
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
+from mwmbl.crawler_errors import record_crawler_error
 from mwmbl.devices import record_device
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey
@@ -334,6 +335,7 @@ def _register_routes(r: Router | NinjaAPI):
         # its own, which would file each report a second time, under production.
         logger.info("Crawler error from user %s (%s): %s", api_key.user.id, report.context, report.exception_type)
         sentry_sdk.capture_event(_crawler_error_event(report, api_key.user.id))
+        record_crawler_error(api_key.user, report)
         return {"status": "ok"}
 
     @r.post(

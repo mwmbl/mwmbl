@@ -35,6 +35,7 @@ from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
     AgreementType,
     ApiKey,
+    CrawlerError,
     Device,
     DomainEvidence,
     DomainSubmission,
@@ -70,6 +71,7 @@ from mwmbl.platform.schemas import (
     CombinedSearchUsageResponse,
     ConfirmEmail,
     ConfirmEmailChangeRequest,
+    CrawlerErrorResponse,
     CreateApiKeyRequest,
     DeviceResponse,
     DomainSubmissionSchema,
@@ -1198,6 +1200,24 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
         first_seen=device.first_seen,
         last_seen=device.last_seen,
     )
+
+
+@router.get(
+    "/crawler-errors/",
+    auth=JWTAuth(),
+    response=list[CrawlerErrorResponse],
+    summary="List recent crawler errors",
+    description=(
+        "List the errors the authenticated user's crawlers have reported, most recent first. "
+        "Results are paginated. Use `limit` and `offset` query parameters to page through results. "
+        "Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+@paginate
+def list_crawler_errors(request) -> list[CrawlerError]:
+    check_email_verified(request)
+    return CrawlerError.objects.filter(user=request.user).order_by("-created_at", "-id")
 
 
 # ---------------------------------------------------------------------------
