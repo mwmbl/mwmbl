@@ -11,10 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 from django.test import Client
 
-from mwmbl.storage_drivers import s3_driver
 from mwmbl.crawler import app
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.settings import PUBLIC_URL_PREFIX
+from mwmbl.storage_drivers import s3_driver
 
 USER_HASH = "a" * 64
 DATE = "2024-01-02"
