@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from django.test import Client
 
+from mwmbl.storage_drivers import s3_driver
 from mwmbl.crawler import app
 from mwmbl.crawler.batch import HashedBatch
 from mwmbl.settings import PUBLIC_URL_PREFIX
@@ -27,7 +28,7 @@ def client():
 @pytest.fixture
 def s3(monkeypatch):
     boto3 = MagicMock()
-    monkeypatch.setattr(app, "boto3", boto3)
+    monkeypatch.setattr(s3_driver, "boto3", boto3)
     return boto3
 
 
