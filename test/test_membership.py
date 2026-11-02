@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 from polar_sdk.models import AlreadyCanceledSubscription, SubscriptionLocked
@@ -163,6 +164,11 @@ def _history_subscription(started_at, ended_at=None):
     subscription.started_at = started_at
     subscription.ended_at = ended_at
     return subscription
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    cache.clear()
 
 
 def _get_supporter_history(api_client, user, pages):
@@ -868,3 +874,28 @@ def test_webhook_retired_product_is_not_treated_as_usage_billing(api_client, use
     assert billing.polar_subscription_id == "sub_usage"
     assert billing.max_monthly_spend_cents == 1_000
     assert not Membership.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_of_a_new_supporter_is_at_least_one_month(api_client, user):
+    just_started = _history_subscription(datetime(2026, 10, 30, tzinfo=timezone.utc))
+
+    response, _ = _get_supporter_history(api_client, user, [[just_started]])
+
+    assert response.json()["months"] == 1
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_is_cached_between_requests(api_client, user):
+    _, mock_polar = _get_supporter_history(
+        api_client, user, [[_history_subscription(datetime(2026, 5, 1, tzinfo=timezone.utc))]]
+    )
+    assert mock_polar.subscriptions.list.call_count == 1
+
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        response = api_client.get("/api/v1/platform/membership/supporter-history", **auth_headers(user))
+
+    assert response.json()["months"] == 6
+    MockPolar.assert_not_called()

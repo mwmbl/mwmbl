@@ -116,6 +116,11 @@ def merge_support_spans(spans: list[tuple[datetime, datetime]]) -> list[tuple[da
 
 def supported_months(spans: list[tuple[datetime, datetime]]) -> int:
     """Months covered by the spans, ignoring gaps between them, to the nearest month so that a
-    subscription from the 1st to the 1st counts as the months it paid for whatever their lengths."""
+    subscription from the 1st to the 1st counts as the months it paid for whatever their lengths.
+
+    At least 1 if there are any spans, so that someone who has just subscribed isn't shown as never having been
+    a supporter."""
+    if not spans:
+        return 0
     total = sum((end - start for start, end in merge_support_spans(spans)), timedelta())
-    return round(total / AVERAGE_MONTH)
+    return max(1, round(total / AVERAGE_MONTH))

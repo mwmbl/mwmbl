@@ -1598,22 +1598,33 @@ def _membership_support_spans(user) -> list[tuple[datetime, datetime]]:
     return spans
 
 
+# Polar's subscription history changes only on checkout, renewal and cancellation, so a few minutes
+# stale is fine and keeps page views from each costing a round trip to Polar.
+SUPPORTER_HISTORY_CACHE_SECONDS = 300
+
+
 @router.get(
     "/membership/supporter-history",
     auth=JWTAuth(),
     response=SupporterHistoryResponse,
     summary="Get how long the user has been a paying supporter",
-    description="Returns the months, to the nearest, the user has paid for a membership at any tier, counted across "
-    "every subscription they have had. Gaps between memberships aren't counted and neither is the overlap "
-    "when changing tier, and months is 0 if they have never been a member.",
+    description="Returns the months the user has supported Mwmbl with a membership at any tier, to the nearest "
+    "month and at least 1 once they have been a member, counted across every subscription they have had. "
+    "Gaps between memberships aren't counted and neither is the overlap when changing tier. "
+    "months is 0 if they have never been a member. The answer can be up to five minutes old.",
     tags=["Membership"],
 )
 def get_supporter_history(request):
-    spans = _membership_support_spans(request.user)
-    return SupporterHistoryResponse(
-        months=membership.supported_months(spans),
-        first_started=min((start for start, _ in spans), default=None),
-    )
+    cache_key = f"supporter-history:{request.user.id}"
+    history = cache.get(cache_key)
+    if history is None:
+        spans = _membership_support_spans(request.user)
+        history = SupporterHistoryResponse(
+            months=membership.supported_months(spans),
+            first_started=min((start for start, _ in spans), default=None),
+        )
+        cache.set(cache_key, history, timeout=SUPPORTER_HISTORY_CACHE_SECONDS)
+    return history
 
 
 @router.get(
