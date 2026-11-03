@@ -11,7 +11,8 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from ninja import Router
@@ -1255,7 +1256,16 @@ def hide_device(request, device_id: int):
 @paginate
 def list_crawler_errors(request) -> list[CrawlerError]:
     check_email_verified(request)
-    return CrawlerError.objects.filter(user=request.user).order_by("-created_at", "-id")
+    friendly_name = (
+        Device.objects.filter(user=OuterRef("user"), hostname=OuterRef("device_name"))
+        .exclude(friendly_name="")
+        .values("friendly_name")[:1]
+    )
+    return (
+        CrawlerError.objects.filter(user=request.user)
+        .annotate(device_display_name=Coalesce(Subquery(friendly_name), F("device_name")))
+        .order_by("-created_at", "-id")
+    )
 
 
 # ---------------------------------------------------------------------------

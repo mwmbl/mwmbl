@@ -270,6 +270,7 @@ class DeviceActivityResponse(Schema):
 class CrawlerErrorResponse(Schema):
     id: int
     device_name: str
+    device_display_name: str = Field(description="The device's friendly name, or its hostname if it has none.")
     context: str
     exception_type: str
     message: str
