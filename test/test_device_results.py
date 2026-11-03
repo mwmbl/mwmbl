@@ -12,7 +12,13 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.devices import SUBMISSION_HISTORY_DAYS, get_device_activity, record_device, record_device_results
+from mwmbl.devices import (
+    MAX_DEVICES_PER_USER,
+    SUBMISSION_HISTORY_DAYS,
+    get_device_activity,
+    record_device,
+    record_device_results,
+)
 from mwmbl.models import ApiKey, Device, DeviceSubmission, generate_api_key
 
 User = get_user_model()
@@ -76,6 +82,56 @@ def test_submissions_older_than_the_history_are_dropped_but_still_in_the_total(d
     assert DeviceSubmission.objects.filter(device=device).count() == 1
     device.refresh_from_db()
     assert device.total_results == 101
+
+
+def test_windows_include_their_start_and_days_split_at_utc_midnight(device):
+    midnight = datetime(2026, 11, 2, 0, 0, tzinfo=timezone.utc)
+    record_device_results(device, 1, midnight - timedelta(seconds=1))
+    record_device_results(device, 2, midnight)
+    record_device_results(device, 4, NOW - timedelta(hours=1))
+    record_device_results(device, 8, NOW - timedelta(hours=24))
+    record_device_results(device, 16, NOW - timedelta(hours=24, seconds=1))
+
+    activity = get_device_activity([device.id], NOW)[device.id]
+
+    assert activity["results_last_hour"] == 4
+    assert activity["results_last_24h"] == 1 + 2 + 4 + 8
+    by_day = {d["date"]: d["results"] for d in activity["results_daily"]}
+    assert by_day[NOW.date()] == 2 + 4
+    assert by_day[NOW.date() - timedelta(days=1)] == 1 + 8 + 16
+
+
+def test_an_empty_submission_leaves_no_row(device):
+    record_device_results(device, 0, NOW)
+
+    assert not DeviceSubmission.objects.filter(device=device).exists()
+
+
+def test_hidden_devices_are_not_dropped_when_over_the_device_cap(user, device):
+    Device.objects.filter(pk=device.pk).update(hidden=True, total_results=50)
+    for i in range(MAX_DEVICES_PER_USER + 1):
+        record_device(user, f"newer-{i}")
+
+    device.refresh_from_db()
+    assert device.total_results == 50
+    assert Device.objects.filter(user=user, hidden=False).count() == MAX_DEVICES_PER_USER
+
+
+def test_the_devices_endpoints_need_a_verified_email(user, device):
+    EmailAddress.objects.filter(user=user).update(verified=False)
+
+    activity = Client().get(f"{BASE}/devices/activity/", headers=_auth(user))
+    removal = Client().delete(f"{BASE}/devices/{device.id}", headers=_auth(user))
+
+    assert activity.status_code == 403
+    assert removal.status_code == 403
+
+
+def test_a_device_already_removed_cannot_be_removed_again(user, device):
+    first = Client().delete(f"{BASE}/devices/{device.id}", headers=_auth(user))
+    second = Client().delete(f"{BASE}/devices/{device.id}", headers=_auth(user))
+
+    assert (first.status_code, second.status_code) == (200, 404)
 
 
 def test_devices_do_not_share_counts(user, device):

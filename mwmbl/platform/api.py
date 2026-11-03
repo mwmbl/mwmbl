@@ -1228,7 +1228,7 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
     summary="Remove a device from the list",
     description=(
         "Remove a device owned by the authenticated user from their device list. The device is hidden "
-        "rather than deleted, so its results stay counted. It reappears if the crawler submits again. "
+        "rather than deleted, so its history is kept. It reappears if the crawler submits again. "
         "Requires a verified account."
     ),
     tags=["Devices"],
