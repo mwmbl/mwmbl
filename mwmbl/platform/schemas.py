@@ -246,17 +246,21 @@ class MarketingConsentListResponse(Schema):
     )
 
 
-class DeviceDayResults(Schema):
-    date: date
-    results: int
-
-
 class DeviceResponse(Schema):
     id: int
     hostname: str
     friendly_name: Optional[str] = None
     first_seen: datetime
     last_seen: datetime
+
+
+class DeviceDayResults(Schema):
+    date: date
+    results: int
+
+
+class DeviceActivityResponse(Schema):
+    device_id: int
     results_total: int = Field(description="Results submitted since the device was first counted.")
     results_last_hour: int
     results_last_24h: int

@@ -368,6 +368,8 @@ class Device(models.Model):
     last_seen = models.DateTimeField(auto_now=True)
     # Results submitted since this was first counted: devices seen earlier start from zero.
     total_results = models.BigIntegerField(default=0)
+    # Hidden, not deleted, by the user so the device's counts survive; submitting again unhides it.
+    hidden = models.BooleanField(default=False)
 
     class Meta:
         indexes = [

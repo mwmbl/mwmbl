@@ -74,6 +74,7 @@ from mwmbl.platform.schemas import (
     ConfirmEmailChangeRequest,
     CrawlerErrorResponse,
     CreateApiKeyRequest,
+    DeviceActivityResponse,
     DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
@@ -1156,20 +1157,14 @@ def delete_api_key(request, key_id: int):
 # ---------------------------------------------------------------------------
 
 
-def _device_responses(devices: list[Device]) -> list[DeviceResponse]:
-    activity = get_device_activity([d.id for d in devices], timezone.now())
-    return [
-        DeviceResponse(
-            id=d.id,
-            hostname=d.hostname,
-            friendly_name=d.friendly_name or None,
-            first_seen=d.first_seen,
-            last_seen=d.last_seen,
-            results_total=d.total_results,
-            **activity[d.id],
-        )
-        for d in devices
-    ]
+def _device_response(device: Device) -> DeviceResponse:
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
 
 
 @router.get(
@@ -1178,15 +1173,34 @@ def _device_responses(devices: list[Device]) -> list[DeviceResponse]:
     response=list[DeviceResponse],
     summary="List devices",
     description=(
-        "List all devices belonging to the authenticated user, with the results each has submitted. "
+        "List the devices belonging to the authenticated user, other than those they have removed. "
         "Requires a verified account."
     ),
     tags=["Devices"],
 )
 def list_devices(request) -> list[DeviceResponse]:
     check_email_verified(request)
-    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
-    return _device_responses(list(devices))
+    devices = Device.objects.filter(user=request.user, hidden=False).order_by("-first_seen")
+    return [_device_response(d) for d in devices]
+
+
+@router.get(
+    "/devices/activity/",
+    auth=JWTAuth(),
+    response=list[DeviceActivityResponse],
+    summary="Results submitted by each device",
+    description=(
+        "For each of the authenticated user's listed devices: results submitted over its lifetime, "
+        "in the last hour and 24 hours, and on each of the last 30 UTC days. Counting began when this "
+        "endpoint was introduced, so earlier submissions are not included. Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def list_device_activity(request) -> list[DeviceActivityResponse]:
+    check_email_verified(request)
+    devices = list(Device.objects.filter(user=request.user, hidden=False))
+    activity = get_device_activity([d.id for d in devices], timezone.now())
+    return [DeviceActivityResponse(device_id=d.id, results_total=d.total_results, **activity[d.id]) for d in devices]
 
 
 @router.patch(
@@ -1204,7 +1218,26 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
         raise InvalidRequest("Device not found.", status=404)
     device.friendly_name = body.friendly_name
     device.save(update_fields=["friendly_name"])
-    return _device_responses([device])[0]
+    return _device_response(device)
+
+
+@router.delete(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    summary="Remove a device from the list",
+    description=(
+        "Remove a device owned by the authenticated user from their device list. The device is hidden "
+        "rather than deleted, so its results stay counted. It reappears if the crawler submits again. "
+        "Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def hide_device(request, device_id: int):
+    check_email_verified(request)
+    hidden = Device.objects.filter(id=device_id, user=request.user, hidden=False).update(hidden=True)
+    if not hidden:
+        raise InvalidRequest("Device not found.", status=404)
+    return {"status": "ok"}
 
 
 @router.get(

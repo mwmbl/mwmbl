@@ -29,7 +29,9 @@ def record_device(user, hostname: str) -> Device:
     Over the cap, the least recently seen devices are dropped rather than the new one being
     refused, so the list always reflects what the user is actually crawling with now.
     """
-    device, created = Device.objects.update_or_create(user=user, hostname=hostname[:HOSTNAME_MAX_LENGTH], defaults={})
+    device, created = Device.objects.update_or_create(
+        user=user, hostname=hostname[:HOSTNAME_MAX_LENGTH], defaults={"hidden": False}
+    )
     if not created:
         return device
 

@@ -13,6 +13,11 @@ class Migration(migrations.Migration):
             name="total_results",
             field=models.BigIntegerField(default=0),
         ),
+        migrations.AddField(
+            model_name="device",
+            name="hidden",
+            field=models.BooleanField(default=False),
+        ),
         migrations.CreateModel(
             name="DeviceSubmission",
             fields=[

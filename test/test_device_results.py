@@ -1,6 +1,6 @@
 """
 What each of a user's devices has submitted: a lifetime total, the last hour and day, and each of the
-last 30 days.
+last 30 days - and removing a device from the list without losing that.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -12,12 +12,17 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
-from mwmbl.devices import SUBMISSION_HISTORY_DAYS, get_device_activity, record_device_results
+from mwmbl.devices import SUBMISSION_HISTORY_DAYS, get_device_activity, record_device, record_device_results
 from mwmbl.models import ApiKey, Device, DeviceSubmission, generate_api_key
 
 User = get_user_model()
 
+BASE = "/api/v1/platform"
 NOW = datetime(2026, 11, 2, 12, 30, tzinfo=timezone.utc)
+
+
+def _auth(user) -> dict:
+    return {"Authorization": f"Bearer {RefreshToken.for_user(user).access_token}"}
 
 
 @pytest.fixture
@@ -83,17 +88,60 @@ def test_devices_do_not_share_counts(user, device):
     assert activity[other.id]["results_last_24h"] == 0
 
 
-def test_the_devices_endpoint_reports_the_counts(user, device):
+def test_the_activity_endpoint_reports_the_counts(user, device):
     record_device_results(device, 8, datetime.now(timezone.utc))
-    headers = {"Authorization": f"Bearer {RefreshToken.for_user(user).access_token}"}
 
-    response = Client().get("/api/v1/platform/devices/", headers=headers)
+    response = Client().get(f"{BASE}/devices/activity/", headers=_auth(user))
 
     [body] = response.json()
+    assert body["device_id"] == device.id
     assert body["results_total"] == 8
     assert body["results_last_hour"] == 8
     assert body["results_last_24h"] == 8
     assert len(body["results_daily"]) == SUBMISSION_HISTORY_DAYS
+
+
+def test_the_activity_endpoint_covers_only_the_callers_listed_devices(user, device):
+    stranger = User.objects.create_user(username="other", email="other@example.com", password="correctpassword")
+    EmailAddress.objects.create(user=stranger, email=stranger.email, verified=True, primary=True)
+    Device.objects.create(user=stranger, hostname="not-mine")
+    Device.objects.create(user=user, hostname="gone", hidden=True)
+
+    response = Client().get(f"{BASE}/devices/activity/", headers=_auth(user))
+
+    assert [d["device_id"] for d in response.json()] == [device.id]
+
+
+def test_a_removed_device_is_hidden_but_keeps_its_counts(user, device):
+    record_device_results(device, 8, NOW)
+
+    response = Client().delete(f"{BASE}/devices/{device.id}", headers=_auth(user))
+
+    assert response.status_code == 200
+    assert Client().get(f"{BASE}/devices/", headers=_auth(user)).json() == []
+    device.refresh_from_db()
+    assert device.total_results == 8
+    assert DeviceSubmission.objects.filter(device=device).count() == 1
+
+
+def test_a_device_can_be_removed_by_its_owner_only(user, device):
+    stranger = User.objects.create_user(username="other", email="other@example.com", password="correctpassword")
+    EmailAddress.objects.create(user=stranger, email=stranger.email, verified=True, primary=True)
+
+    refused = Client().delete(f"{BASE}/devices/{device.id}", headers=_auth(stranger))
+
+    assert refused.status_code == 404
+    device.refresh_from_db()
+    assert not device.hidden
+
+
+def test_a_removed_device_reappears_when_its_crawler_submits_again(user, device):
+    Device.objects.filter(pk=device.pk).update(hidden=True)
+
+    record_device(user, device.hostname)
+
+    device.refresh_from_db()
+    assert not device.hidden
 
 
 @pytest.mark.django_db
