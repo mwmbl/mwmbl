@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from urllib.parse import urlencode
 
 from allauth.account.adapter import get_adapter
@@ -91,6 +92,7 @@ from mwmbl.platform.schemas import (
     ResetPasswordRequest,
     SubmissionDetailSchema,
     SubscriptionResponse,
+    SupporterHistoryResponse,
     UpdateDeviceRequest,
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
@@ -1588,6 +1590,61 @@ def get_membership(request):
     if user_membership is None:
         raise InvalidRequest("Not a member.", status=404)
     return user_membership
+
+
+def _membership_support_spans(user) -> list[tuple[datetime, datetime]]:
+    """When each of the user's membership subscriptions, past and present, was running according to Polar.
+
+    A subscription that never started, such as a checkout that wasn't paid, has no span.
+    """
+    membership_products = [product for product in membership.product_ids().values() if product]
+    now = timezone.now()
+    spans = []
+    page = 1
+    max_page = 1
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        while page <= max_page:
+            response = polar.subscriptions.list(
+                external_customer_id=str(user.id),
+                product_id=membership_products,
+                page=page,
+                limit=100,
+            )
+            max_page = response.result.pagination.max_page
+            for subscription in response.result.items:
+                if subscription.started_at is not None:
+                    spans.append((subscription.started_at, subscription.ended_at or now))
+            page += 1
+    return spans
+
+
+# Polar's subscription history changes only on checkout, renewal and cancellation, so a few minutes
+# stale is fine and keeps page views from each costing a round trip to Polar.
+SUPPORTER_HISTORY_CACHE_SECONDS = 300
+
+
+@router.get(
+    "/membership/supporter-history",
+    auth=JWTAuth(),
+    response=SupporterHistoryResponse,
+    summary="Get how long the user has been a paying supporter",
+    description="Returns the months the user has supported Mwmbl with a membership at any tier, to the nearest "
+    "month and at least 1 once they have been a member, counted across every subscription they have had. "
+    "Gaps between memberships aren't counted and neither is the overlap when changing tier. "
+    "months is 0 if they have never been a member. The answer can be up to five minutes old.",
+    tags=["Membership"],
+)
+def get_supporter_history(request):
+    cache_key = f"supporter-history:{request.user.id}"
+    history = cache.get(cache_key)
+    if history is None:
+        spans = _membership_support_spans(request.user)
+        history = SupporterHistoryResponse(
+            months=membership.supported_months(spans),
+            first_started=min((start for start, _ in spans), default=None),
+        )
+        cache.set(cache_key, history, timeout=SUPPORTER_HISTORY_CACHE_SECONDS)
+    return history
 
 
 @router.get(

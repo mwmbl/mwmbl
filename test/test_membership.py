@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 from polar_sdk.models import AlreadyCanceledSubscription, SubscriptionLocked
@@ -147,6 +148,112 @@ def test_get_membership_returns_tier(api_client, user):
 @pytest.mark.django_db
 def test_get_membership_unauthenticated(api_client):
     response = api_client.get("/api/v1/platform/membership")
+
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Supporter history
+# ---------------------------------------------------------------------------
+
+NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+
+def _history_subscription(started_at, ended_at=None):
+    subscription = Mock()
+    subscription.started_at = started_at
+    subscription.ended_at = ended_at
+    return subscription
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    cache.clear()
+
+
+def _get_supporter_history(api_client, user, pages):
+    """Fetch the history while Polar returns these pages of subscriptions."""
+    with patch("mwmbl.platform.api.Polar") as MockPolar, patch("mwmbl.platform.api.timezone.now", return_value=NOW):
+        mock_polar = MockPolar.return_value.__enter__.return_value
+        responses = []
+        for items in pages:
+            response = Mock()
+            response.result.items = items
+            response.result.pagination.max_page = len(pages)
+            responses.append(response)
+        mock_polar.subscriptions.list.side_effect = responses
+        http_response = api_client.get("/api/v1/platform/membership/supporter-history", **auth_headers(user))
+    return http_response, mock_polar
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_of_a_non_member_is_zero(api_client, user):
+    response, _ = _get_supporter_history(api_client, user, [[]])
+
+    assert response.status_code == 200
+    assert response.json() == {"months": 0, "first_started": None}
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_counts_a_running_subscription_up_to_now(api_client, user):
+    started = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+    response, mock_polar = _get_supporter_history(api_client, user, [[_history_subscription(started)]])
+
+    assert response.json()["months"] == 6
+    assert response.json()["first_started"].startswith("2026-05-01")
+    list_params = mock_polar.subscriptions.list.call_args[1]
+    assert list_params["external_customer_id"] == str(user.id)
+    assert "status" not in list_params
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_skips_gaps_and_the_overlap_of_a_tier_change(api_client, user):
+    first = _history_subscription(datetime(2025, 1, 1, tzinfo=timezone.utc), datetime(2025, 4, 1, tzinfo=timezone.utc))
+    # Overlaps the first by a month, as when someone upgrades before the old period runs out.
+    upgraded = _history_subscription(
+        datetime(2025, 3, 1, tzinfo=timezone.utc), datetime(2025, 5, 1, tzinfo=timezone.utc)
+    )
+    after_a_gap = _history_subscription(datetime(2026, 9, 1, tzinfo=timezone.utc))
+
+    response, _ = _get_supporter_history(api_client, user, [[first, upgraded, after_a_gap]])
+
+    # January to May 2025 is four months, and September to November 2026 two more.
+    assert response.json()["months"] == 6
+    assert response.json()["first_started"].startswith("2025-01-01")
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_ignores_subscriptions_that_never_started(api_client, user):
+    response, _ = _get_supporter_history(api_client, user, [[_history_subscription(None)]])
+
+    assert response.json() == {"months": 0, "first_started": None}
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_reads_every_page_of_subscriptions(api_client, user):
+    first_page = [
+        _history_subscription(datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 3, 1, tzinfo=timezone.utc))
+    ]
+    second_page = [
+        _history_subscription(datetime(2026, 6, 1, tzinfo=timezone.utc), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    ]
+
+    response, mock_polar = _get_supporter_history(api_client, user, [first_page, second_page])
+
+    assert response.json()["months"] == 4
+    pages_requested = [call[1]["page"] for call in mock_polar.subscriptions.list.call_args_list]
+    assert pages_requested == [1, 2]
+
+
+@pytest.mark.django_db
+def test_supporter_history_unauthenticated(api_client):
+    response = api_client.get("/api/v1/platform/membership/supporter-history")
 
     assert response.status_code == 401
 
@@ -767,3 +874,28 @@ def test_webhook_retired_product_is_not_treated_as_usage_billing(api_client, use
     assert billing.polar_subscription_id == "sub_usage"
     assert billing.max_monthly_spend_cents == 1_000
     assert not Membership.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_of_a_new_supporter_is_at_least_one_month(api_client, user):
+    just_started = _history_subscription(datetime(2026, 10, 30, tzinfo=timezone.utc))
+
+    response, _ = _get_supporter_history(api_client, user, [[just_started]])
+
+    assert response.json()["months"] == 1
+
+
+@pytest.mark.django_db
+@PRODUCT_SETTINGS
+def test_supporter_history_is_cached_between_requests(api_client, user):
+    _, mock_polar = _get_supporter_history(
+        api_client, user, [[_history_subscription(datetime(2026, 5, 1, tzinfo=timezone.utc))]]
+    )
+    assert mock_polar.subscriptions.list.call_count == 1
+
+    with patch("mwmbl.platform.api.Polar") as MockPolar:
+        response = api_client.get("/api/v1/platform/membership/supporter-history", **auth_headers(user))
+
+    assert response.json()["months"] == 6
+    MockPolar.assert_not_called()

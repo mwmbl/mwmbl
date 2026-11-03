@@ -61,6 +61,11 @@ class MembershipResponse(Schema):
     cancel_at_period_end: bool
 
 
+class SupporterHistoryResponse(Schema):
+    months: int
+    first_started: Optional[datetime]
+
+
 class VolunteerTierResponse(Schema):
     tier: VolunteerTier
     name: str
