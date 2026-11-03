@@ -30,6 +30,7 @@ from polar_sdk.webhooks import WebhookVerificationError
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.crawler.stats import CrawlerVersionSpread
+from mwmbl.devices import get_device_activity
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
@@ -1155,17 +1156,8 @@ def delete_api_key(request, key_id: int):
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/devices/",
-    auth=JWTAuth(),
-    response=list[DeviceResponse],
-    summary="List devices",
-    description=("List all devices belonging to the authenticated user. Requires a verified account."),
-    tags=["Devices"],
-)
-def list_devices(request) -> list[DeviceResponse]:
-    check_email_verified(request)
-    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
+def _device_responses(devices: list[Device]) -> list[DeviceResponse]:
+    activity = get_device_activity([d.id for d in devices], timezone.now())
     return [
         DeviceResponse(
             id=d.id,
@@ -1173,9 +1165,28 @@ def list_devices(request) -> list[DeviceResponse]:
             friendly_name=d.friendly_name or None,
             first_seen=d.first_seen,
             last_seen=d.last_seen,
+            results_total=d.total_results,
+            **activity[d.id],
         )
         for d in devices
     ]
+
+
+@router.get(
+    "/devices/",
+    auth=JWTAuth(),
+    response=list[DeviceResponse],
+    summary="List devices",
+    description=(
+        "List all devices belonging to the authenticated user, with the results each has submitted. "
+        "Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def list_devices(request) -> list[DeviceResponse]:
+    check_email_verified(request)
+    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
+    return _device_responses(list(devices))
 
 
 @router.patch(
@@ -1193,13 +1204,7 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
         raise InvalidRequest("Device not found.", status=404)
     device.friendly_name = body.friendly_name
     device.save(update_fields=["friendly_name"])
-    return DeviceResponse(
-        id=device.id,
-        hostname=device.hostname,
-        friendly_name=device.friendly_name or None,
-        first_seen=device.first_seen,
-        last_seen=device.last_seen,
-    )
+    return _device_responses([device])[0]
 
 
 @router.get(
