@@ -12,7 +12,8 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from ninja import Router
@@ -31,6 +32,7 @@ from polar_sdk.webhooks import WebhookVerificationError
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.crawler.stats import CrawlerVersionSpread
+from mwmbl.devices import get_device_activity
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
@@ -74,6 +76,7 @@ from mwmbl.platform.schemas import (
     ConfirmEmailChangeRequest,
     CrawlerErrorResponse,
     CreateApiKeyRequest,
+    DeviceActivityResponse,
     DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
@@ -1157,27 +1160,50 @@ def delete_api_key(request, key_id: int):
 # ---------------------------------------------------------------------------
 
 
+def _device_response(device: Device) -> DeviceResponse:
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
+
+
 @router.get(
     "/devices/",
     auth=JWTAuth(),
     response=list[DeviceResponse],
     summary="List devices",
-    description=("List all devices belonging to the authenticated user. Requires a verified account."),
+    description=(
+        "List the devices belonging to the authenticated user, other than those they have removed. "
+        "Requires a verified account."
+    ),
     tags=["Devices"],
 )
 def list_devices(request) -> list[DeviceResponse]:
     check_email_verified(request)
-    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
-    return [
-        DeviceResponse(
-            id=d.id,
-            hostname=d.hostname,
-            friendly_name=d.friendly_name or None,
-            first_seen=d.first_seen,
-            last_seen=d.last_seen,
-        )
-        for d in devices
-    ]
+    devices = Device.objects.filter(user=request.user, hidden=False).order_by("-first_seen")
+    return [_device_response(d) for d in devices]
+
+
+@router.get(
+    "/devices/activity/",
+    auth=JWTAuth(),
+    response=list[DeviceActivityResponse],
+    summary="Results submitted by each device",
+    description=(
+        "For each of the authenticated user's listed devices: results submitted over its lifetime, "
+        "in the last hour and 24 hours, and on each of the last 30 UTC days. Counting began when this "
+        "endpoint was introduced, so earlier submissions are not included. Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def list_device_activity(request) -> list[DeviceActivityResponse]:
+    check_email_verified(request)
+    devices = list(Device.objects.filter(user=request.user, hidden=False))
+    activity = get_device_activity([d.id for d in devices], timezone.now())
+    return [DeviceActivityResponse(device_id=d.id, results_total=d.total_results, **activity[d.id]) for d in devices]
 
 
 @router.patch(
@@ -1195,13 +1221,26 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
         raise InvalidRequest("Device not found.", status=404)
     device.friendly_name = body.friendly_name
     device.save(update_fields=["friendly_name"])
-    return DeviceResponse(
-        id=device.id,
-        hostname=device.hostname,
-        friendly_name=device.friendly_name or None,
-        first_seen=device.first_seen,
-        last_seen=device.last_seen,
-    )
+    return _device_response(device)
+
+
+@router.delete(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    summary="Remove a device from the list",
+    description=(
+        "Remove a device owned by the authenticated user from their device list. The device is hidden "
+        "rather than deleted, so its history is kept. It reappears if the crawler submits again. "
+        "Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def hide_device(request, device_id: int):
+    check_email_verified(request)
+    hidden = Device.objects.filter(id=device_id, user=request.user, hidden=False).update(hidden=True)
+    if not hidden:
+        raise InvalidRequest("Device not found.", status=404)
+    return {"status": "ok"}
 
 
 @router.get(
@@ -1219,7 +1258,16 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
 @paginate
 def list_crawler_errors(request) -> list[CrawlerError]:
     check_email_verified(request)
-    return CrawlerError.objects.filter(user=request.user).order_by("-created_at", "-id")
+    friendly_name = (
+        Device.objects.filter(user=OuterRef("user"), hostname=OuterRef("device_name"))
+        .exclude(friendly_name="")
+        .values("friendly_name")[:1]
+    )
+    return (
+        CrawlerError.objects.filter(user=request.user)
+        .annotate(device_display_name=Coalesce(Subquery(friendly_name), F("device_name")))
+        .order_by("-created_at", "-id")
+    )
 
 
 # ---------------------------------------------------------------------------

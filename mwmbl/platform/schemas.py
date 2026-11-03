@@ -259,9 +259,23 @@ class DeviceResponse(Schema):
     last_seen: datetime
 
 
+class DeviceDayResults(Schema):
+    date: date
+    results: int
+
+
+class DeviceActivityResponse(Schema):
+    device_id: int
+    results_total: int = Field(description="Results submitted since the device was first counted.")
+    results_last_hour: int
+    results_last_24h: int
+    results_daily: list[DeviceDayResults] = Field(description="The last 30 UTC days, oldest first.")
+
+
 class CrawlerErrorResponse(Schema):
     id: int
     device_name: str
+    device_display_name: str = Field(description="The device's friendly name, or its hostname if it has none.")
     context: str
     exception_type: str
     message: str

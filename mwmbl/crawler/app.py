@@ -27,7 +27,7 @@ from mwmbl.crawler.batch import (
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
 from mwmbl.crawler_errors import record_crawler_error
-from mwmbl.devices import record_device
+from mwmbl.devices import record_device, record_device_results
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey
 from mwmbl.settings import (
@@ -272,8 +272,9 @@ def _register_routes(r: Router | NinjaAPI):
 
         # Update or create Device records for this submission. This used to happen on the
         # now-removed /batches/ endpoint, which was the only path that saw a device name.
+        device = None
         if results.device_name:
-            record_device(api_key.user, results.device_name)
+            device = record_device(api_key.user, results.device_name)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         indexed = index_documents(documents, index_path)
@@ -284,6 +285,8 @@ def _register_routes(r: Router | NinjaAPI):
 
         # Update stats for the user
         stats_manager.record_results(results, api_key.user)
+        if device is not None:
+            record_device_results(device, len(results.results), now)
 
         # Last, since they are only analytics: a failure to store them still answers with an
         # error, but after the batch is indexed, uploaded and counted.

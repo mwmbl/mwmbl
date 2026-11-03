@@ -366,12 +366,30 @@ class Device(models.Model):
     friendly_name = models.CharField(max_length=255, blank=True, default="")  # user-defined name
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(auto_now=True)
+    # Results submitted since this was first counted: devices seen earlier start from zero.
+    total_results = models.BigIntegerField(default=0)
+    # Hidden, not deleted, by the user so the device's counts survive; submitting again unhides it.
+    hidden = models.BooleanField(default=False)
 
     class Meta:
         indexes = [
             models.Index(fields=["user", "hostname"]),
         ]
         unique_together = ("user", "hostname")
+
+
+class DeviceSubmission(models.Model):
+    """One results submission from a device, kept briefly so the devices page can show windows
+    (last hour, last day, per day) that a running total cannot."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="submissions")
+    submitted_at = models.DateTimeField()
+    num_results = models.IntegerField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["device", "submitted_at"]),
+        ]
 
 
 class CrawlerError(models.Model):
