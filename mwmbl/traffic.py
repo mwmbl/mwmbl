@@ -126,7 +126,8 @@ def status_label(response: HttpResponse) -> str:
 REQUEST_COUNT_KEY = "traffic:req:{date}:{endpoint}:{headers}:{status}"
 USER_AGENT_COUNT_KEY = "traffic:user-agents:{date}"
 
-# Thirty days. Production Redis runs allkeys-lru (see mwmbl/indexer/blacklist_snapshot.py), so a longer
+# Thirty days, matching the public daily crawler counters in mwmbl/crawler/stats.py.
+# Production Redis runs allkeys-lru (see mwmbl/indexer/blacklist_snapshot.py), so a longer
 # retention would be a promise the eviction policy does not keep.
 TRAFFIC_EXPIRE_SECONDS = 60 * 60 * 24 * 30
 

@@ -45,8 +45,9 @@ INDEX_SCAN_EXPIRE_SECONDS = 60 * 60 * 24 * 2
 # the scan state mid-scan means the next run starts again rather than waiting a week.
 INDEX_SCAN_LAST_FINISHED_KEY = "index-count-scan-last-finished"
 
-# Published counts are kept for a year: the admin page lists them, and they are only one set of
-# small keys a week.
+# Published counts are kept for a year: the stats page plots them as the index's growth, and they
+# are only one set of small keys a week. The 30 day window in get_counts also needs an earlier
+# count to carry forward into its first days.
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 365
 
 # The position of the URL in a stored document's tuple - see Document.as_tuple.
@@ -188,6 +189,20 @@ def _finish_scan(redis: Redis):
     pipeline.execute()
 
 
+def get_counts(redis: Redis | None = None) -> dict[str, dict[str, int]]:
+    """The index counts for each of the last 30 days.
+
+    A scan only finishes about once a week, so each day gets the latest count published
+    on or before it - the size of the index as last measured on that day.
+    """
+    redis = redis or get_redis()
+    return {
+        "urls_in_index_daily": _get_daily_counts(redis, INDEX_URL_COUNT_KEY),
+        "domains_in_index_daily": _get_daily_counts(redis, INDEX_DOMAIN_COUNT_KEY),
+        "results_in_index_daily": _get_daily_counts(redis, INDEX_RESULT_COUNT_KEY),
+    }
+
+
 def get_scan_status(redis: Redis, num_pages: int) -> dict:
     """How far the scan in progress has got, and when the last one finished.
 
@@ -251,3 +266,20 @@ def get_domain_result_count(domain: str) -> int:
     today = utc_today()
     count = redis.zscore(INDEX_DOMAIN_RESULT_COUNT_KEY.format(date=today), domain)
     return 0 if count is None else int(count)
+
+
+def _get_daily_counts(redis: Redis, key: str, num_days: int = 30) -> dict[str, int]:
+    today = utc_today()
+    # Look back far enough before the window to find a count to carry into its first days.
+    first_day = today - timedelta(days=num_days - 1 + 2 * settings.INDEX_COUNT_INTERVAL_DAYS)
+    days = [first_day + timedelta(days=i) for i in range((today - first_day).days + 1)]
+    counts = redis.mget([key.format(date=day) for day in days])
+
+    daily_counts = {}
+    latest = None
+    for day, count in zip(days, counts):
+        if count is not None:
+            latest = int(count)
+        if latest is not None and day > today - timedelta(days=num_days):
+            daily_counts[str(day)] = latest
+    return daily_counts

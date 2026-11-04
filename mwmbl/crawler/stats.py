@@ -1,21 +1,27 @@
 import json
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncWeek
 from pydantic import BaseModel
 from redis import Redis
 
-from mwmbl.count_urls import get_domain_result_count
+from mwmbl.count_urls import get_counts, get_domain_result_count, get_published_counts
 from mwmbl.crawler.batch import MAX_ERROR_TAG_LENGTH, Results
-from mwmbl.models import MwmblUser, UserStats
+from mwmbl.models import SEED_CRAWLER_USERNAME, MwmblUser, SeedDomain, UserStats
 from mwmbl.utils import utc_today
 from mwmbl.volunteer_membership import update_volunteer_memberships
 
 logger = getLogger(__name__)
 
+USERS_KEY = "users-{date}"
+RESULTS_COUNT_KEY = "results-count-{date}"
+USER_RESULTS_COUNT_KEY = "user-results-count-{date}"
+DATASET_QUERIES_COUNT_KEY = "dataset-queries-count-{date}"
+DATASET_RESULTS_COUNT_KEY = "dataset-results-count-{date}"
 BLACKLISTED_REMOVED_COUNT_KEY = "blacklisted-removed-count-{date}"
 CRAWLER_VERSION_RESULTS_KEY = "crawler-version-results-{date}"
 CRAWLER_VERSION_DEVICES_KEY = "crawler-version-devices-{date}:{version}"
@@ -24,18 +30,36 @@ UNKNOWN_CRAWLER_VERSION = "unknown"
 # very long digit strings.
 RELEASED_CRAWLER_VERSION = re.compile(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}")
 
+USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
+# Dated, so a payload built before UTC midnight is never served after it.
+STATS_CACHE_KEY = "stats-payload-{date}"
 LEADERBOARD_CACHE_KEY = "leaderboard-{period}-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
+# The public stats page is requested far more often than its numbers change, and building it
+# reads many counters and sums over the user table, so it is served from Redis between rebuilds.
+STATS_CACHE_SECONDS = 60 * 60
 # The all-time board sums every user's daily rows - the heaviest query on the page - and a day's
 # movement barely changes the top 100, so it is rebuilt once a day. Yesterday's board cannot change
 # once the day is over, so it is cached for as long.
 ALL_TIME_LEADERBOARD_CACHE_SECONDS = 60 * 60 * 24
+USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
+REGISTRATION_WEEKS = 52
+INDEX_HISTORY_DAYS = 365
 
 
 class DomainStats(BaseModel):
     domain_name: str
     num_index_results: int
+
+
+class IndexMeasurement(BaseModel):
+    """The size of the index as measured by one finished scan, which is about weekly."""
+
+    date: str
+    urls: int
+    domains: int
+    results: int
 
 
 class CrawlerVersionDay(BaseModel):
@@ -59,6 +83,26 @@ def _version_sort_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
+class MwmblStats(BaseModel):
+    users_crawled_daily: dict[str, int]
+    users_crawled_30d: int
+    results_indexed_daily: dict[str, int]
+    top_user_results: list[tuple[str, int]]
+    urls_in_index_daily: dict[str, int]
+    domains_in_index_daily: dict[str, int]
+    results_in_index_daily: dict[str, int]
+    dataset_queries_daily: dict[str, int]
+    dataset_results_daily: dict[str, int]
+    # Always empty: kept for one release because front-ends older than mwmbl/front-end#94 read it
+    # unguarded and would 500 without it.
+    blacklisted_results_removed_daily: dict[str, int]
+    users_registered_weekly: dict[str, int]
+    seed_searches_total: int
+    seed_pages_indexed_total: int
+    seed_sites_discovered_total: int
+    index_history: list[IndexMeasurement]
+
+
 # New stats we want per domain:
 # - Number of results in index
 # - Number of links to this domain in URL queue
@@ -80,6 +124,98 @@ class StatsManager:
     def __init__(self, redis: Redis):
         self.redis = redis
 
+    def get_stats(self) -> MwmblStats:
+        cache_key = STATS_CACHE_KEY.format(date=utc_today())
+        cached = self.redis.get(cache_key)
+        if cached is not None:
+            return MwmblStats.model_validate_json(cached)
+
+        stats = self._build_stats()
+        self.redis.set(cache_key, stats.model_dump_json(), ex=STATS_CACHE_SECONDS)
+        return stats
+
+    def _build_stats(self) -> MwmblStats:
+        date_time = datetime.now(timezone.utc)
+        date = date_time.date()
+
+        users_crawled_daily = {}
+        results_indexed_daily = {}
+        dataset_queries_daily = {}
+        dataset_results_daily = {}
+
+        # Collect all unique users over 30 days for users_crawled_30d
+        keys = [USERS_KEY.format(date=date - timedelta(days=i)) for i in range(30)]
+        all_users = self.redis.sunion(keys)
+
+        for i in range(29, -1, -1):
+            date_i = date - timedelta(days=i)
+
+            user_day_count_key = USERS_KEY.format(date=date_i)
+            user_day_count = self.redis.scard(user_day_count_key)
+            users_crawled_daily[str(date_i)] = user_day_count
+
+            result_count_key = RESULTS_COUNT_KEY.format(date=date_i)
+            result_count = self.redis.get(result_count_key)
+            if result_count is None:
+                result_count = 0
+            results_indexed_daily[str(date_i)] = result_count
+
+            dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=date_i)
+            dataset_queries_count = self.redis.get(dataset_queries_count_key)
+            if dataset_queries_count is None:
+                dataset_queries_count = 0
+            dataset_queries_daily[str(date_i)] = dataset_queries_count
+
+            dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=date_i)
+            dataset_results_count = self.redis.get(dataset_results_count_key)
+            if dataset_results_count is None:
+                dataset_results_count = 0
+            dataset_results_daily[str(date_i)] = dataset_results_count
+
+        index_stats = get_counts()
+
+        user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
+        user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
+
+        return MwmblStats(
+            users_crawled_daily=users_crawled_daily,
+            users_crawled_30d=len(all_users),
+            results_indexed_daily=results_indexed_daily,
+            top_user_results=user_results_counts,
+            dataset_queries_daily=dataset_queries_daily,
+            dataset_results_daily=dataset_results_daily,
+            blacklisted_results_removed_daily={},
+            users_registered_weekly=self.get_users_registered_weekly(),
+            **self.get_seed_search_totals(),
+            index_history=self.get_index_history(),
+            **index_stats,
+        )
+
+    def get_index_history(self) -> list[IndexMeasurement]:
+        """Each published index measurement of the last year, oldest first."""
+        published = get_published_counts(self.redis, INDEX_HISTORY_DAYS)
+        return [
+            IndexMeasurement(
+                date=str(measurement["date"]),
+                urls=measurement["urls"],
+                domains=measurement["domains"],
+                results=measurement["results"],
+            )
+            for measurement in reversed(published)
+        ]
+
+    def get_seed_search_totals(self) -> dict[str, int]:
+        """Seed Search activity across all users, all time: the sums of what each user's own
+        stats page shows. There is no per-day record, so these are aggregates only."""
+        user_totals = MwmblUser.objects.aggregate(
+            searches=Sum("seed_searches"), pages_indexed=Sum("seed_search_pages_indexed")
+        )
+        return {
+            "seed_searches_total": user_totals["searches"] or 0,
+            "seed_pages_indexed_total": user_totals["pages_indexed"] or 0,
+            "seed_sites_discovered_total": SeedDomain.objects.count(),
+        }
+
     def get_cached_leaderboard(self, period: str) -> list[tuple[str, int]]:
         """The "yesterday" or "all" leaderboard, rebuilt at most once per UTC day."""
         cache_key = LEADERBOARD_CACHE_KEY.format(period=period, date=utc_today())
@@ -95,6 +231,37 @@ class StatsManager:
             raise ValueError(f"Unknown leaderboard period: {period}")
         self.redis.set(cache_key, json.dumps(leaderboard), ex=ALL_TIME_LEADERBOARD_CACHE_SECONDS)
         return leaderboard
+
+    def get_users_registered_weekly(self) -> dict[str, int]:
+        """Registrations per week for the last year, keyed by the Monday starting each week.
+
+        Cached in Redis because it scans the user table on every stats request otherwise.
+        """
+        today = utc_today()
+        this_week_start = today - timedelta(days=today.weekday())
+        # Keyed by week so a new week never serves the previous week's window from cache.
+        cache_key = USERS_REGISTERED_WEEKLY_KEY.format(week_start=this_week_start)
+        cached = self.redis.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
+
+        first_week_start = this_week_start - timedelta(weeks=REGISTRATION_WEEKS - 1)
+        weekly_counts = (
+            MwmblUser.objects.filter(date_joined__date__gte=first_week_start)
+            .exclude(username=SEED_CRAWLER_USERNAME)
+            .annotate(week=TruncWeek("date_joined"))
+            .values("week")
+            .annotate(num_users=Count("id"))
+        )
+        counts_by_week = {row["week"].date(): row["num_users"] for row in weekly_counts}
+
+        users_registered_weekly = {}
+        for i in range(REGISTRATION_WEEKS):
+            week_start = first_week_start + timedelta(weeks=i)
+            users_registered_weekly[str(week_start)] = counts_by_week.get(week_start, 0)
+
+        self.redis.set(cache_key, json.dumps(users_registered_weekly), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS)
+        return users_registered_weekly
 
     def get_user_stats(self, username: str) -> dict:
         """Per-user stats for the last 30 days from the UserStats table."""
@@ -131,6 +298,18 @@ class StatsManager:
     def record_results(self, results: Results, user: MwmblUser) -> None:
         today = utc_today()
         num_results = len(results.results)
+
+        result_count_key = RESULTS_COUNT_KEY.format(date=today)
+        self.redis.incrby(result_count_key, num_results)
+        self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
+
+        user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
+        self.redis.zincrby(user_result_count_key, num_results, user.username)
+        self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
+
+        users_key = USERS_KEY.format(date=today)
+        self.redis.sadd(users_key, user.username)
+        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
         self._record_crawler_version(results, user, today)
 
@@ -217,3 +396,28 @@ class StatsManager:
         blacklisted_removed_count_key = BLACKLISTED_REMOVED_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(blacklisted_removed_count_key, num_results)
         self.redis.expire(blacklisted_removed_count_key, LONG_EXPIRE_SECONDS)
+
+    def record_dataset(self, hashed_dataset) -> None:
+        """Record dataset statistics from a dataset submission."""
+        # Parse the date from the dataset
+        try:
+            dataset_date = date.fromisoformat(hashed_dataset.date)
+        except ValueError:
+            # If date parsing fails, use current date
+            dataset_date = utc_today()
+
+        # Count queries
+        num_queries = len(hashed_dataset.queryDataset)
+        dataset_queries_count_key = DATASET_QUERIES_COUNT_KEY.format(date=dataset_date)
+        self.redis.incrby(dataset_queries_count_key, num_queries)
+        self.redis.expire(dataset_queries_count_key, LONG_EXPIRE_SECONDS)
+
+        # Count successful search results (exclude unsuccessful attempts)
+        num_successful_results = 0
+        for search_result_set in hashed_dataset.searchResults:
+            if search_result_set.success:
+                num_successful_results += len(search_result_set.results)
+
+        dataset_results_count_key = DATASET_RESULTS_COUNT_KEY.format(date=dataset_date)
+        self.redis.incrby(dataset_results_count_key, num_successful_results)
+        self.redis.expire(dataset_results_count_key, LONG_EXPIRE_SECONDS)

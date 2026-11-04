@@ -24,7 +24,7 @@ from mwmbl.crawler.batch import (
     Results,
     StatusResponse,
 )
-from mwmbl.crawler.stats import StatsManager
+from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
 from mwmbl.crawler_errors import record_crawler_error
 from mwmbl.devices import record_device, record_device_results
@@ -167,6 +167,18 @@ def _register_routes(r: Router | NinjaAPI):
         check_date_str(date_str)
         prefix = f"1/{VERSION}/{date_str}/1/"
         return get_subfolders(prefix)
+
+    @r.get(
+        "/stats",
+        summary="Crawler statistics",
+        description=(
+            "Return aggregate statistics about the Mwmbl crawler network, including the number "
+            "of URLs crawled, pages indexed, and active crawlers."
+        ),
+    )
+    def get_stats(request) -> MwmblStats:
+        # TODO check that the types are right here, it's not validating!
+        return stats_manager.get_stats()
 
     @r.get(
         "/",
@@ -339,6 +351,9 @@ def _register_routes(r: Router | NinjaAPI):
 
         now = datetime.now(timezone.utc)
         filename = upload_object(hashed_dataset, now, user_id_hash, "dataset")
+
+        # Record dataset statistics
+        stats_manager.record_dataset(hashed_dataset)
 
         return {
             "status": "ok",

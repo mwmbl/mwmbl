@@ -29,6 +29,8 @@ data_path = Path(settings.DATA_PATH)
 print("Data path", data_path)
 data_path.mkdir(exist_ok=True, parents=True)
 
+print("Mwmbl crawling statistics: https://mwmbl.org/stats")
+
 django.setup()
 
 from mwmbl.apps import create_index

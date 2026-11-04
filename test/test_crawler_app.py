@@ -8,13 +8,17 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import fakeredis
 import pytest
 from django.test import Client
 
 from mwmbl.crawler import app
 from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.stats import RESULTS_COUNT_KEY, USERS_KEY, StatsManager
+from mwmbl.models import MwmblUser
 from mwmbl.settings import PUBLIC_URL_PREFIX
 from mwmbl.storage_drivers import s3_driver
+from mwmbl.utils import utc_today
 
 USER_HASH = "a" * 64
 DATE = "2024-01-02"
@@ -30,6 +34,30 @@ def s3(monkeypatch):
     boto3 = MagicMock()
     monkeypatch.setattr(s3_driver, "boto3", boto3)
     return boto3
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("path", ["/crawler/stats", "/api/v1/crawler/stats"])
+def test_stats_api_still_serves_the_replacement_stats_page(client, monkeypatch, path):
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(app, "stats_manager", StatsManager(redis))
+    monkeypatch.setattr("mwmbl.count_urls.get_redis", lambda: redis)
+    today = utc_today()
+    redis.set(RESULTS_COUNT_KEY.format(date=today), 12)
+    redis.sadd(USERS_KEY.format(date=today), "alice")
+    MwmblUser.objects.create_user(username="alice", seed_searches=3, seed_search_pages_indexed=7)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["users_crawled_daily"][str(today)] == 1
+    assert stats["users_crawled_30d"] == 1
+    assert stats["results_indexed_daily"][str(today)] == 12
+    assert stats["seed_searches_total"] == 3
+    assert stats["seed_pages_indexed_total"] == 7
+    assert stats["users_registered_weekly"]
+    assert stats["index_history"] == []
 
 
 def test_upload_object_names_the_file_after_date_type_user_and_time(s3):
@@ -141,7 +169,9 @@ def test_dataset_with_a_wrong_length_user_id_is_rejected(client, s3):
     s3.resource.assert_not_called()
 
 
-def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3):
+def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3, monkeypatch):
+    stats = MagicMock()
+    monkeypatch.setattr(app, "stats_manager", stats)
     user_id = "b" * app.USER_ID_LENGTH
 
     response = client.post("/crawler/dataset", data=_dataset(user_id), content_type="application/json")
@@ -150,6 +180,7 @@ def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3):
     assert response.status_code == 200
     assert body["public_user_id"] == app._get_user_id_hash(MagicMock(user_id=user_id))
     assert user_id not in body["url"]
+    stats.record_dataset.assert_called_once()
 
 
 def test_curated_domains_endpoint_lists_domains_sorted(client, monkeypatch):
