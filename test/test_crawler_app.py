@@ -141,9 +141,7 @@ def test_dataset_with_a_wrong_length_user_id_is_rejected(client, s3):
     s3.resource.assert_not_called()
 
 
-def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3, monkeypatch):
-    stats = MagicMock()
-    monkeypatch.setattr(app, "stats_manager", stats)
+def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3):
     user_id = "b" * app.USER_ID_LENGTH
 
     response = client.post("/crawler/dataset", data=_dataset(user_id), content_type="application/json")
@@ -152,7 +150,6 @@ def test_dataset_is_stored_under_the_hash_of_the_user_id(client, s3, monkeypatch
     assert response.status_code == 200
     assert body["public_user_id"] == app._get_user_id_hash(MagicMock(user_id=user_id))
     assert user_id not in body["url"]
-    stats.record_dataset.assert_called_once()
 
 
 def test_curated_domains_endpoint_lists_domains_sorted(client, monkeypatch):

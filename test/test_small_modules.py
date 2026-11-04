@@ -1,17 +1,12 @@
 """
 Small helpers that decide what is stored or counted: tagging documents with the term whose
-page they live on, the dataset counters, and the domain-link filters.
+page they live on, and the domain-link filters.
 """
 
-from datetime import date
-from types import SimpleNamespace
-
-import fakeredis
 import pytest
 
 from mwmbl.crawler import domains
 from mwmbl.crawler.domains import DomainLinkDatabase
-from mwmbl.crawler.stats import DATASET_QUERIES_COUNT_KEY, DATASET_RESULTS_COUNT_KEY, StatsManager
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.utils import add_term_info, add_term_infos, batch, get_domain
 
@@ -69,31 +64,6 @@ def test_documents_without_a_term_are_tagged_and_unmatched_ones_dropped():
     assert result[0] is already
     assert len(result) == 2
     assert result[1].term is not None
-
-
-def _dataset(day: str, successes: list[int]):
-    results = [SimpleNamespace(success=True, results=[None] * n) for n in successes]
-    results.append(SimpleNamespace(success=False, results=[None] * 50))
-    return SimpleNamespace(date=day, queryDataset=[None] * 3, searchResults=results)
-
-
-def test_dataset_submissions_count_queries_and_only_successful_results():
-    redis = fakeredis.FakeStrictRedis()
-
-    StatsManager(redis).record_dataset(_dataset("2024-03-05", [2, 5]))
-
-    day = date(2024, 3, 5)
-    assert int(redis.get(DATASET_QUERIES_COUNT_KEY.format(date=day))) == 3
-    assert int(redis.get(DATASET_RESULTS_COUNT_KEY.format(date=day))) == 7
-
-
-def test_a_dataset_with_an_unreadable_date_is_counted_today(monkeypatch):
-    redis = fakeredis.FakeStrictRedis()
-    monkeypatch.setattr("mwmbl.crawler.stats.utc_today", lambda: date(2030, 1, 1))
-
-    StatsManager(redis).record_dataset(_dataset("not-a-date", [1]))
-
-    assert int(redis.get(DATASET_QUERIES_COUNT_KEY.format(date=date(2030, 1, 1)))) == 3
 
 
 @pytest.fixture

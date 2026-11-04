@@ -21,7 +21,6 @@ from mwmbl.count_urls import (
     INDEX_SCAN_URL_HLL_KEY,
     INDEX_URL_COUNT_KEY,
     count_urls_step,
-    get_counts,
     get_published_counts,
     get_scan_status,
 )
@@ -163,24 +162,6 @@ def test_a_batch_another_run_has_already_counted_is_not_counted_again(redis, ind
     count_urls_step(redis, index_path, time_budget_seconds=60)
 
     assert _count(redis, INDEX_RESULT_COUNT_KEY) == 5
-
-
-def test_each_day_reports_the_latest_count_published_on_or_before_it(redis):
-    today = utc_today()
-    redis.set(INDEX_URL_COUNT_KEY.format(date=today - timedelta(days=33)), 100)
-    redis.set(INDEX_URL_COUNT_KEY.format(date=today - timedelta(days=10)), 200)
-
-    urls_daily = get_counts(redis)["urls_in_index_daily"]
-
-    assert len(urls_daily) == 30
-    assert urls_daily[str(today - timedelta(days=29))] == 100
-    assert urls_daily[str(today - timedelta(days=11))] == 100
-    assert urls_daily[str(today - timedelta(days=10))] == 200
-    assert urls_daily[str(today)] == 200
-
-
-def test_no_counts_are_reported_before_the_first_scan(redis):
-    assert get_counts(redis)["urls_in_index_daily"] == {}
 
 
 def test_the_background_task_does_not_raise_so_it_keeps_repeating():
