@@ -189,3 +189,11 @@ def test_curated_domains_endpoint_lists_domains_sorted(client, monkeypatch):
     response = client.get("/crawler/curated-domains")
 
     assert response.json() == {"domains": [{"name": "a.example"}, {"name": "b.example"}]}
+
+
+@pytest.mark.parametrize("path", ["/stats", "/stats/"])
+def test_old_stats_page_redirects_to_the_front_end(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 301
+    assert response["Location"] == "https://mwmbl.org/stats"
