@@ -22,6 +22,7 @@ DOMAIN_GROUPS = [
     ("top", 5),
     ("other", 1),
 ]
+DOMAIN_GROUP_NAMES = {domain_group for domain_group, _ in DOMAIN_GROUPS}
 
 TOP_DOMAINS = set(islice(DOMAINS, 4000))
 OTHER_DOMAINS = set(islice(DOMAINS, 4000, 10000))
@@ -53,7 +54,7 @@ class DomainLinkDatabase:
             bloom_filter.close()
 
     def update_domain_links(self, source: str, target: set[str]):
-        if source in DOMAIN_GROUPS:
+        if source in DOMAIN_GROUP_NAMES:
             domain_group = source
         elif source in TOP_DOMAINS:
             domain_group = "top"

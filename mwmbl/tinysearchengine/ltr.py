@@ -49,7 +49,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
-    def transform(self, X: DataFrame, y=None):
+    def feature_frame(self, X: DataFrame) -> DataFrame:
         records = X.to_dict("records")
         all_features = []
 
@@ -59,7 +59,10 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             features = get_features(terms, item["title"], item["url"], item["extract"], item["score"], True)
             all_features.append(features)
 
-        return DataFrame(all_features).values.astype("float32")
+        return DataFrame(all_features)
+
+    def transform(self, X: DataFrame, y=None):
+        return self.feature_frame(X).values.astype("float32")
 
 
 class RankingPredictor(BaseEstimator, RegressorMixin):
@@ -73,10 +76,12 @@ class RankingPredictor(BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, X):
-        features = self.feature_extractor.transform(X)
-        predictions = self.model.predict(features)
-        too_few_match_terms = (features["match_term_proportion_whole"] <= 0.5) & (features["match_terms_whole"] <= 1.0)
-        predictions[too_few_match_terms] = 0.0
+        feature_frame = self.feature_extractor.feature_frame(X)
+        predictions = self.model.predict(feature_frame.values.astype("float32"))
+        too_few_match_terms = (feature_frame["match_term_proportion_whole"] <= 0.5) & (
+            feature_frame["match_terms_whole"] <= 1.0
+        )
+        predictions[too_few_match_terms.values] = 0.0
         return predictions
 
 

@@ -232,7 +232,7 @@ def protected(request):
     ),
 )
 def delete_user(request, username: str):
-    user = MwmblUser.objects.get(username=username)
+    user = MwmblUser.objects.filter(username=username).first()
     if user is None:
         raise InvalidRequest("User not found.", status=404)
 
@@ -308,7 +308,7 @@ def submit_domain(request, domain: str):
 )
 def delete_submission(request, submission_id: int):
     check_email_verified(request)
-    submission = DomainSubmission.objects.get(id=submission_id)
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 
@@ -331,7 +331,7 @@ def delete_submission(request, submission_id: int):
 )
 def update_submission_status(request, submission_id: int, update_submission: UpdateDomainSubmission):
     check_email_verified(request)
-    submission = DomainSubmission.objects.get(id=submission_id)
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 

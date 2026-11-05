@@ -116,6 +116,13 @@ def test_links_from_a_top_domain_count_towards_the_top_group(bloom_files, monkey
         assert database.get_domain_score("c.example") == 0
 
 
+def test_links_from_a_named_domain_group_count_towards_that_group(bloom_files):
+    with DomainLinkDatabase() as database:
+        database.update_domain_links("github.com", {"a.example"})
+
+        assert database.get_domain_score("a.example") == 10
+
+
 def test_link_filters_persist_between_openings(bloom_files, monkeypatch):
     monkeypatch.setattr(domains, "TOP_DOMAINS", {"top.example"})
     with DomainLinkDatabase() as database:
