@@ -1165,6 +1165,7 @@ def _device_response(device: Device) -> DeviceResponse:
         id=device.id,
         hostname=device.hostname,
         friendly_name=device.friendly_name or None,
+        crawler_version=device.crawler_version or None,
         first_seen=device.first_seen,
         last_seen=device.last_seen,
     )

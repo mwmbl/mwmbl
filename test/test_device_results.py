@@ -216,9 +216,28 @@ def test_post_results_counts_the_results_against_the_device(user):
         response = Client().post(
             "/api/v1/crawler/results",
             content_type="application/json",
-            data={"results": results, "device_name": "blue-heron-1"},
+            data={"results": results, "device_name": "blue-heron-1", "crawler_version": "1.0.5"},
             HTTP_X_API_KEY=raw_key,
         )
 
     assert response.status_code == 200
-    assert Device.objects.get(user=user, hostname="blue-heron-1").total_results == 3
+    device = Device.objects.get(user=user, hostname="blue-heron-1")
+    assert device.total_results == 3
+    assert device.crawler_version == "1.0.5"
+
+
+def test_a_submission_records_the_crawlers_version_and_a_later_one_updates_it(user):
+    record_device(user, "versioned", "1.0.4")
+    record_device(user, "versioned", "1.0.5")
+    record_device(user, "versioned")
+
+    device = Device.objects.get(user=user, hostname="versioned")
+    assert device.crawler_version == "1.0.5"
+    [body] = Client().get(f"{BASE}/devices/", headers=_auth(user)).json()
+    assert body["crawler_version"] == "1.0.5"
+
+
+def test_an_over_long_version_is_truncated_rather_than_losing_the_submission(user):
+    record_device(user, "long-version", "9" * 1000)
+
+    assert len(Device.objects.get(user=user, hostname="long-version").crawler_version) == 255

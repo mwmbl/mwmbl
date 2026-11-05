@@ -15,11 +15,12 @@ from mwmbl.models import Device, DeviceSubmission
 MAX_DEVICES_PER_USER = 50
 
 HOSTNAME_MAX_LENGTH = Device._meta.get_field("hostname").max_length
+VERSION_MAX_LENGTH = Device._meta.get_field("crawler_version").max_length
 
 SUBMISSION_HISTORY_DAYS = 30
 
 
-def record_device(user, hostname: str) -> Device:
+def record_device(user, hostname: str, crawler_version: str | None = None) -> Device:
     """Note that `user` is crawling from `hostname`, creating the device if it is new.
 
     The name is truncated rather than rejected. It arrives on the same request as the
@@ -27,13 +28,19 @@ def record_device(user, hostname: str) -> Device:
     would otherwise raise DataError before indexing and lose every page in the submission -
     a heavy price for a label.
 
+    The version, when reported, replaces the stored one and is truncated the same way; a
+    submission without one leaves it alone.
+
     Over the cap, the least recently seen devices are dropped rather than the new one being
     refused, so the list always reflects what the user is actually crawling with now. Devices
     the user has hidden are outside the cap, so dropping one never discards counts that hiding
     promised to keep.
     """
+    defaults = {"hidden": False}
+    if crawler_version:
+        defaults["crawler_version"] = crawler_version[:VERSION_MAX_LENGTH]
     device, created = Device.objects.update_or_create(
-        user=user, hostname=hostname[:HOSTNAME_MAX_LENGTH], defaults={"hidden": False}
+        user=user, hostname=hostname[:HOSTNAME_MAX_LENGTH], defaults=defaults
     )
     if not created:
         return device
