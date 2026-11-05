@@ -255,6 +255,7 @@ class DeviceResponse(Schema):
     id: int
     hostname: str
     friendly_name: Optional[str] = None
+    crawler_version: Optional[str] = None
     first_seen: datetime
     last_seen: datetime
 

@@ -274,7 +274,7 @@ def _register_routes(r: Router | NinjaAPI):
         # now-removed /batches/ endpoint, which was the only path that saw a device name.
         device = None
         if results.device_name:
-            device = record_device(api_key.user, results.device_name)
+            device = record_device(api_key.user, results.device_name, results.crawler_version)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         indexed = index_documents(documents, index_path)
