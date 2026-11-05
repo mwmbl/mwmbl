@@ -22,8 +22,6 @@
 # Configuration
 # ---------------------------------------------------------------------------
 
--include .env
-
 # Override these via environment or make invocation, e.g.:
 #   DATABASE_URL="postgres://user:pass@host/db" make test
 # These have no defaults — you must set them in your environment or on the command line.
