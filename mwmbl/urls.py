@@ -16,8 +16,9 @@ Including another URLconf
 """
 
 from debug_toolbar.toolbar import debug_toolbar_urls
+from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import RedirectView
 
 import mwmbl.crawler.app as crawler
@@ -71,6 +72,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", index, name="index"),
+    # The stats page moved to the front end; keep the old api.mwmbl.org/stats links working.
+    re_path(r"^stats/?$", RedirectView.as_view(url=f"{settings.FRONTEND_URL}/stats", permanent=True)),
     path("app/home/", home_fragment, name="home"),
     path("app/add/", add_url, name="add_url"),
     path("app/domain-submissions/", DomainSubmissionListView.as_view(), name="domain_submissions"),
