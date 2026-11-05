@@ -302,8 +302,6 @@ def classify_paragraphs(
             paragraph.cf_class = "bad"
         elif ("\xa9" in paragraph.text) or ("&copy" in paragraph.text):
             paragraph.cf_class = "bad"
-        elif "select" in paragraph.dom_path:
-            paragraph.cf_class = "bad"
         elif length < length_low:
             if paragraph.chars_count_in_links > 0:
                 paragraph.cf_class = "bad"
