@@ -204,7 +204,7 @@ def register_routers(ranker, combined_ranker, tiny_index):
     search_module.init_v2_router(ranker)
     super_search_module.init_router()
     combined_search_module.init_router(combined_ranker)
-    crawler_module.init_router()
+    crawler_module.init_router(ranker)
 
     api.add_router("/search/", search_module.router, tags=["Search"])
     api.add_router("/crawler/", crawler_module.router, tags=["Crawler"])
