@@ -1,9 +1,7 @@
 """Which crawled results the crawler contributes to the main index.
 
 Contributing to a term the main index already covers means displacing something: pages hold
-a fixed number of bytes and the server keeps the best-ranked documents that fit. So the gate
-asks how many of our new items would survive that, and submits the term only when enough of
-them would - see count_new_index_entries.
+a fixed number of bytes and the server keeps the best-ranked documents that fit.
 
 The comparison used to run the other way round entirely (`max_local_score < min_remote_score`),
 which promoted results precisely when they were the weaker ones and, because scores are never
@@ -18,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import fakeredis
 import pytest
 
-from mwmbl.crawl import Crawler, count_new_index_entries
+from mwmbl.crawl import Crawler
 from mwmbl.crawler.batch import HashedBatch, Item, ItemContent
 from mwmbl.tinysearchengine.indexer import Document, DocumentState
 from mwmbl.tinysearchengine.rank import score_result
@@ -63,70 +61,10 @@ def test_the_fixtures_are_ordered_as_the_tests_assume():
     assert scores[3] == 0.0
 
 
-def test_an_item_that_outranks_the_incumbent_is_a_new_entry():
-    assert count_new_index_entries(TERM, [STRONG], [MEDIUM]) == 1
-
-
-def test_an_item_the_incumbent_outranks_is_not():
-    assert count_new_index_entries(TERM, [MEDIUM], [STRONG]) == 0
-
-
-def test_ties_go_to_the_incumbent():
-    """Nothing to gain from resubmitting what the main index already has."""
-    assert count_new_index_entries(TERM, [MEDIUM], [MEDIUM]) == 0
-
-
-def test_every_matching_item_is_a_new_entry_for_a_term_the_index_has_never_seen():
-    """The perverse case under the old comparison: fresh results for an unknown term.
-
-    There is nothing to displace, so anything that matches the term at all is a new entry.
-    """
-    assert count_new_index_entries(TERM, [MEDIUM, WEAKER_MEDIUM], []) == 2
-
-
-def test_items_that_match_nothing_are_never_new_entries():
-    """A 0.0 score is not a contribution, whether or not the index has the term."""
-    assert count_new_index_entries(TERM, [WEAK], []) == 0
-    assert count_new_index_entries(TERM, [WEAK], [MEDIUM]) == 0
-
-
-def test_a_synced_mirror_document_that_matches_nothing_is_not_a_new_entry():
-    """SYNCED_WITH_MAIN_INDEX is bookkeeping, not curation.
-
-    score_result exempts curated documents from its majority-terms rule. This local index
-    is full of documents marked SYNCED_WITH_MAIN_INDEX by run_indexing, and they used to
-    ride that exemption: a mirrored document scored above 0.0 for a term it did not match,
-    which is exactly the score that clears the bar for an unseen term.
-    """
-    mirrored = Document(
-        title=WEAK.title, url=WEAK.url, extract=WEAK.extract, state=DocumentState.SYNCED_WITH_MAIN_INDEX
-    )
-    assert count_new_index_entries(TERM, [mirrored], []) == 0
-
-
 def test_a_curated_document_keeps_its_exemption():
     """The exemption is still there for the documents it was written for."""
     curated = Document(title=WEAK.title, url=WEAK.url, extract=WEAK.extract, state=DocumentState.FROM_USER)
     assert score_result(tokenize(TERM), curated, True) > 0.0
-
-
-def test_nothing_new_is_nothing_to_contribute():
-    assert count_new_index_entries(TERM, [], [MEDIUM]) == 0
-
-
-def test_one_weak_remote_result_leaves_room_for_a_middling_one():
-    """The bar is displacement, not beating the best result there is.
-
-    Comparing against the best remote result made contribution all-or-nothing: any term the
-    main index already covered well was closed to us, however much we had to add. A result
-    that outranks the weakest of two incumbents takes its slot.
-    """
-    assert count_new_index_entries(TERM, [MEDIUM], [WEAK, STRONG]) == 1
-
-
-def test_the_estimate_is_capped_by_the_slots_there_are():
-    """Three good items cannot all land in a term the index holds two documents for."""
-    assert count_new_index_entries(TERM, [STRONG, MEDIUM, WEAKER_MEDIUM], [WEAK, WEAK]) == 2
 
 
 def run_indexing_with(redis, local_items: list[Document], remote_items: list[Document]) -> MagicMock:
@@ -161,7 +99,7 @@ def run_indexing_with(redis, local_items: list[Document], remote_items: list[Doc
         local_index.retrieve.return_value = local_items
         local_index.get_key_page_index.return_value = 0
 
-        post.return_value.text = "OK"
+        post.return_value.json = lambda: {"status": "ok", "url": None, "new_items": []}
 
         crawler.run_indexing()
 
@@ -187,12 +125,6 @@ def test_run_indexing_sends_the_api_key_in_the_header(fake_redis):
     assert post.call_args.kwargs["json"]["api_key"] is None
 
 
-def test_run_indexing_keeps_quiet_about_results_the_remote_index_beats(fake_redis):
-    post = run_indexing_with(fake_redis, [MEDIUM], [STRONG])
-
-    post.assert_not_called()
-
-
 def test_run_indexing_submits_the_whole_term_once_the_gate_opens(fake_redis):
     """Deliberate: the gate is per term, the payload is every new item for it.
 
@@ -205,18 +137,3 @@ def test_run_indexing_submits_the_whole_term_once_the_gate_opens(fake_redis):
     post.assert_called_once()
     submitted_urls = {result["url"] for result in post.call_args.kwargs["json"]["results"]}
     assert submitted_urls == {STRONG.url, WEAK.url}
-
-
-def test_a_term_holding_an_ellipsis_is_still_scored():
-    """Index terms are not safe to re-tokenize.
-
-    tokenize() treats anything ending in "…" as a truncated extract and drops its last two
-    tokens, so the term "python…" - which a title like "Learn python… fast" puts in the
-    index - tokenizes to nothing. score_result asserts the term list is non-empty, so the
-    crawler's indexing loop died on every batch carrying such a term. Splitting the term is
-    what the server does on the way in (index_batches.sort_documents), and it is total.
-    """
-    ellipsis_term = "python…"
-    assert tokenize(ellipsis_term) == []
-    assert count_new_index_entries(ellipsis_term, [MEDIUM], []) == 0
-    assert count_new_index_entries("learn python…", [MEDIUM], []) == 0
