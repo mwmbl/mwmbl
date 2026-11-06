@@ -2,6 +2,8 @@ from typing import Literal, Optional
 
 from ninja import Field, Schema
 
+from mwmbl.tinysearchengine.search import RawDocument
+
 
 class Link(Schema):
     """A hyperlink found on a crawled page."""
@@ -218,6 +220,11 @@ class Results(Schema):
         ),
         example="crawler-3f7a1c9e",
     )
+    include_new_items: Optional[bool] = Field(
+        default=False,
+        description=("A boolean indicating if the server should return the updated items in the response "),
+        example=False,
+    )
 
 
 class PostResultsResponse(Schema):
@@ -233,6 +240,10 @@ class PostResultsResponse(Schema):
             "Public URL of the uploaded results file in object storage. Null for a dry run, which uploads nothing."
         ),
         example="https://storage.mwmbl.org/1/v1/2024-01-01/results/username/00001__abcd1234.json.gz",
+    )
+    new_items: Optional[list[RawDocument]] = Field(
+        default=None,
+        description=("List of updated items, if `include_new_items` is False, this field is None"),
     )
 
 

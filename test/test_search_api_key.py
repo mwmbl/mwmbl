@@ -526,6 +526,40 @@ def test_post_results_header_key_accepted(api_client, crawl_api_key):
 
 
 @pytest.mark.django_db
+def test_post_results_include_new_items(api_client, crawl_api_key):
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results",
+            content_type="application/json",
+            data={"results": [], "include_new_items": True},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+    assert response.status_code == 200
+    assert response.json()["new_items"] == []
+
+
+@pytest.mark.django_db
+def test_post_results_dry_run_include_new_items(api_client, crawl_api_key):
+    with (
+        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
+        patch("mwmbl.crawler.app.stats_manager"),
+    ):
+        response = api_client.post(
+            "/api/v1/crawler/results?dry_run=true",
+            content_type="application/json",
+            data={"results": [], "include_new_items": True},
+            **api_key_header(crawl_api_key.raw_key),
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "dry-run", "url": None, "new_items": []}
+
+
+@pytest.mark.django_db
 def test_post_results_body_key_deprecated_still_works(api_client, crawl_api_key):
     """Body api_key field is deprecated but must still work for backward compatibility."""
     with (
@@ -621,7 +655,7 @@ def test_post_results_dry_run_validates_without_indexing(api_client, crawl_api_k
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "dry-run", "url": None}
+    assert response.json() == {"status": "dry-run", "url": None, "new_items": None}
     index_documents.assert_not_called()
     upload_object.assert_not_called()
     stats_manager.record_results.assert_not_called()
