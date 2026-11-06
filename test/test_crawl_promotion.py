@@ -161,7 +161,7 @@ def run_indexing_with(redis, local_items: list[Document], remote_items: list[Doc
         local_index.retrieve.return_value = local_items
         local_index.get_key_page_index.return_value = 0
 
-        post.return_value.text = "OK"
+        post.return_value.json = lambda: {"status": "ok", "url": None, "new_items": []}
 
         crawler.run_indexing()
 
@@ -185,12 +185,6 @@ def test_run_indexing_sends_the_api_key_in_the_header(fake_redis):
     # third-party sites.
     assert headers["User-Agent"].startswith("mwmbl-crawler/")
     assert post.call_args.kwargs["json"]["api_key"] is None
-
-
-def test_run_indexing_keeps_quiet_about_results_the_remote_index_beats(fake_redis):
-    post = run_indexing_with(fake_redis, [MEDIUM], [STRONG])
-
-    post.assert_not_called()
 
 
 def test_run_indexing_submits_the_whole_term_once_the_gate_opens(fake_redis):

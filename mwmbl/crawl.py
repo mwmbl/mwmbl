@@ -40,6 +40,7 @@ from mwmbl.crawler.batch import (
     ErrorContext,
     ErrorFrame,
     HashedBatch,
+    PostResultsResponse,
     Result,
     Results,
 )
@@ -64,7 +65,7 @@ from mwmbl.indexer.index_batches import index_batches, index_pages
 from mwmbl.indexer.update_urls import record_urls_in_database
 from mwmbl.rankeval.evaluation.remote_index import RemoteIndex
 from mwmbl.redis_url_queue import RedisURLQueue
-from mwmbl.tinysearchengine.indexer import Document, TinyIndex
+from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.tinysearchengine.rank import score_result
 from mwmbl.utils import prune_request_cache
 
@@ -465,81 +466,79 @@ class Crawler:
         # Once a round is often enough to keep the cache at roughly an hour's worth of terms,
         # and the rounds are minutes apart, so the sweep costs nothing worth measuring.
         prune_request_cache()
-        remote_index = RemoteIndex(user_agent=api_user_agent(_fetch_username()), expire_after=REMOTE_INDEX_CACHE_EXPIRY)
         with TinyIndex(Document, index_path, "w") as local_index:
-            for term, count in term_new_doc_count.most_common(100):
-                logger.info(f"Syncing term {term} with {count} new local items")
-                remote_items = remote_index.retrieve(term)
-                remote_item_urls = {item.url for item in remote_items}
-                local_items = local_index.retrieve(term)
-                new_items = [item for item in local_items if item.url not in remote_item_urls]
-                logger.info(f"Found {len(new_items)} new items for term {term}")
+            local_items: list[Document] = []
+            terms = []
+            for term, _ in term_new_doc_count.most_common(100):
+                local_items += local_index.retrieve(term)
+                terms.append(term)
+            new_items = [item for item in local_items if item.state != DocumentState.SYNCED_WITH_MAIN_INDEX]
+            logger.info(f"Found {len(new_items)} new items")
 
-                estimated_new_entries = count_new_index_entries(term, new_items, remote_items)
-                logger.info(
-                    f"Estimated {estimated_new_entries} of {len(new_items)} new items would be "
-                    f'kept by the main index for term "{term}"'
+            result_items = [
+                Result(
+                    url=doc.url,
+                    title=doc.title,
+                    extract=doc.extract,
+                    score=doc.score,
+                    term=doc.term,
+                    state=doc.state,
+                    last_crawled=doc.last_crawled,
                 )
-
-                if estimated_new_entries >= MIN_NEW_INDEX_ENTRIES:
-                    result_items = [
-                        Result(
-                            url=doc.url,
-                            title=doc.title,
-                            extract=doc.extract,
-                            score=doc.score,
-                            term=doc.term,
-                            state=doc.state,
-                            last_crawled=doc.last_crawled,
-                        )
-                        for doc in new_items
-                    ]
-                    if CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
-                        logger.info(f"Submission is off, not posting {len(result_items)} results")
-                    else:
-                        results = Results(
-                            results=result_items,
-                            crawler_version=CRAWLER_VERSION,
-                            device_name=get_device_name(data_path),
-                        )
-                        results_url = f"{REMOTE_SERVER}/api/v1/crawler/results"
-                        if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
-                            results_url += "?dry_run=true"
-                        logger.info(f"Posting {len(result_items)} results to {results_url}")
-                        # A post with no timeout that never gets an answer hangs this loop for
-                        # good: no exception, so nothing logged or reported, and no more syncing.
-                        response = requests.post(
-                            results_url,
-                            json=results.dict(),
-                            headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
-                            timeout=RESULTS_POST_TIMEOUT_SECONDS,
-                        )
-                        logger.info(f"Response: {response.text}")
-                        if response.status_code == 426:
-                            logger.error(
-                                f"The server requires a newer crawler: {response.text} "
-                                f"Waiting {UPGRADE_REQUIRED_WAIT_SECONDS} seconds for an update "
-                                "instead of submitting results the server would reject."
-                            )
-                            time.sleep(UPGRADE_REQUIRED_WAIT_SECONDS)
-                            return
-                        response.raise_for_status()
-
-                new_remote_items = remote_index.retrieve(term, refresh=True)
-                # Check how many of our items were indexed
-                new_remote_item_urls = {item.url for item in new_remote_items}
-                indexed_items = sum(1 for item in new_items if item.url in new_remote_item_urls)
-                logger.info(
-                    f'Indexed items: {indexed_items}/{len(new_items)} for term "{term}" '
-                    f"(estimated {estimated_new_entries})"
+                for doc in new_items
+            ]
+            if CRAWL_SUBMIT_MODE == SUBMIT_MODE_OFF:
+                logger.info(f"Submission is off, not posting {len(result_items)} results")
+            else:
+                results = Results(
+                    results=result_items,
+                    crawler_version=CRAWLER_VERSION,
+                    device_name=get_device_name(data_path),
+                    include_new_items=True,
                 )
+                results_url = f"{REMOTE_SERVER}/api/v1/crawler/results"
+                if CRAWL_SUBMIT_MODE == SUBMIT_MODE_DRY_RUN:
+                    results_url += "?dry_run=true"
+                logger.info(f"Posting {len(result_items)} results to {results_url}")
+                # A post with no timeout that never gets an answer hangs this loop for
+                # good: no exception, so nothing logged or reported, and no more syncing.
+                response = requests.post(
+                    results_url,
+                    json=results.dict(),
+                    headers={"X-API-Key": MWMBL_API_KEY, "User-Agent": api_user_agent(_username)},
+                    timeout=RESULTS_POST_TIMEOUT_SECONDS,
+                )
+                if response.status_code == 426:
+                    logger.error(
+                        f"The server requires a newer crawler: {response.text} "
+                        f"Waiting {UPGRADE_REQUIRED_WAIT_SECONDS} seconds for an update "
+                        "instead of submitting results the server would reject."
+                    )
+                    time.sleep(UPGRADE_REQUIRED_WAIT_SECONDS)
+                    return
+                response.raise_for_status()
 
-                page_index = local_index.get_key_page_index(term)
-                index_pages(index_path, {page_index: new_remote_items}, mark_synced=True)
-                logger.info(f"Completed indexing for term {term}")
+                response_parsed = PostResultsResponse(**response.json())
 
-                new_page_content = local_index.get_page(page_index)
-                logger.info(f"Page {page_index} now holds {len(new_page_content)} documents")
+                if response_parsed.new_items is not None:
+                    new_remote_items = [Document(**result.dict()) for result in response_parsed.new_items]
+                else:
+                    logger.info("Missing new_items in response, retrieving remote index")
+                    remote_index = RemoteIndex(
+                        user_agent=api_user_agent(_fetch_username()), expire_after=REMOTE_INDEX_CACHE_EXPIRY
+                    )
+                    new_remote_items = []
+                    for term in terms:
+                        new_remote_items += remote_index.retrieve(term, refresh=True)
+
+                for term in terms:
+                    page_index = local_index.get_key_page_index(term)
+                    new_term_remote_items = [item for item in new_remote_items if item.term == term]
+                    index_pages(index_path, {page_index: new_term_remote_items}, mark_synced=True)
+                    logger.info(f"Completed indexing for term {term}")
+
+                    new_page_content = local_index.get_page(page_index)
+                    logger.info(f"Page {page_index} now holds {len(new_page_content)} documents")
 
     def process_batch_continuously(self):
         """Continuously process batches with error handling.
