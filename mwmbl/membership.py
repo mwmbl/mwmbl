@@ -1,6 +1,7 @@
 """Membership tiers: supporter subscriptions sold through Polar, separate from metered API billing."""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import models
@@ -95,3 +96,31 @@ def tier_for_product(product_id: str) -> MembershipTier | None:
 def combined_search_monthly_limit(tier: str | None) -> int:
     """Combined Search queries a month for a web (JWT) caller with this membership or volunteer tier."""
     return settings.COMBINED_SEARCH_MONTHLY_LIMITS[tier or "free"]
+
+
+AVERAGE_MONTH = timedelta(days=365.25 / 12)
+
+
+def merge_support_spans(spans: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    """Merge overlapping spans, so that time covered by two subscriptions at once, as when a member
+    changes tier, counts once."""
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            previous_start, previous_end = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def supported_months(spans: list[tuple[datetime, datetime]]) -> int:
+    """Months covered by the spans, ignoring gaps between them, to the nearest month so that a
+    subscription from the 1st to the 1st counts as the months it paid for whatever their lengths.
+
+    At least 1 if there are any spans, so that someone who has just subscribed isn't shown as never having been
+    a supporter."""
+    if not spans:
+        return 0
+    total = sum((end - start for start, end in merge_support_spans(spans)), timedelta())
+    return max(1, round(total / AVERAGE_MONTH))

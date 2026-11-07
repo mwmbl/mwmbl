@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from urllib.parse import urlencode
 
 from allauth.account.adapter import get_adapter
@@ -11,7 +12,8 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from ninja import Router
@@ -30,6 +32,7 @@ from polar_sdk.webhooks import WebhookVerificationError
 from mwmbl import membership, pricing
 from mwmbl.background import enrich_domain_submission, stats_manager
 from mwmbl.crawler.stats import CrawlerVersionSpread
+from mwmbl.devices import get_device_activity
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
@@ -73,6 +76,7 @@ from mwmbl.platform.schemas import (
     ConfirmEmailChangeRequest,
     CrawlerErrorResponse,
     CreateApiKeyRequest,
+    DeviceActivityResponse,
     DeviceResponse,
     DomainSubmissionSchema,
     ForgotPasswordRequest,
@@ -91,6 +95,7 @@ from mwmbl.platform.schemas import (
     ResetPasswordRequest,
     SubmissionDetailSchema,
     SubscriptionResponse,
+    SupporterHistoryResponse,
     UpdateDeviceRequest,
     UpdateDomainSubmission,
     UpdateSpendLimitRequest,
@@ -227,7 +232,7 @@ def protected(request):
     ),
 )
 def delete_user(request, username: str):
-    user = MwmblUser.objects.get(username=username)
+    user = MwmblUser.objects.filter(username=username).first()
     if user is None:
         raise InvalidRequest("User not found.", status=404)
 
@@ -303,7 +308,7 @@ def submit_domain(request, domain: str):
 )
 def delete_submission(request, submission_id: int):
     check_email_verified(request)
-    submission = DomainSubmission.objects.get(id=submission_id)
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 
@@ -326,7 +331,7 @@ def delete_submission(request, submission_id: int):
 )
 def update_submission_status(request, submission_id: int, update_submission: UpdateDomainSubmission):
     check_email_verified(request)
-    submission = DomainSubmission.objects.get(id=submission_id)
+    submission = DomainSubmission.objects.filter(id=submission_id).first()
     if submission is None:
         raise InvalidRequest("Submission not found.", status=404)
 
@@ -1155,27 +1160,51 @@ def delete_api_key(request, key_id: int):
 # ---------------------------------------------------------------------------
 
 
+def _device_response(device: Device) -> DeviceResponse:
+    return DeviceResponse(
+        id=device.id,
+        hostname=device.hostname,
+        friendly_name=device.friendly_name or None,
+        crawler_version=device.crawler_version or None,
+        first_seen=device.first_seen,
+        last_seen=device.last_seen,
+    )
+
+
 @router.get(
     "/devices/",
     auth=JWTAuth(),
     response=list[DeviceResponse],
     summary="List devices",
-    description=("List all devices belonging to the authenticated user. Requires a verified account."),
+    description=(
+        "List the devices belonging to the authenticated user, other than those they have removed. "
+        "Requires a verified account."
+    ),
     tags=["Devices"],
 )
 def list_devices(request) -> list[DeviceResponse]:
     check_email_verified(request)
-    devices = Device.objects.filter(user=request.user).order_by("-first_seen")
-    return [
-        DeviceResponse(
-            id=d.id,
-            hostname=d.hostname,
-            friendly_name=d.friendly_name or None,
-            first_seen=d.first_seen,
-            last_seen=d.last_seen,
-        )
-        for d in devices
-    ]
+    devices = Device.objects.filter(user=request.user, hidden=False).order_by("-first_seen")
+    return [_device_response(d) for d in devices]
+
+
+@router.get(
+    "/devices/activity/",
+    auth=JWTAuth(),
+    response=list[DeviceActivityResponse],
+    summary="Results submitted by each device",
+    description=(
+        "For each of the authenticated user's listed devices: results submitted over its lifetime, "
+        "in the last hour and 24 hours, and on each of the last 30 UTC days. Counting began when this "
+        "endpoint was introduced, so earlier submissions are not included. Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def list_device_activity(request) -> list[DeviceActivityResponse]:
+    check_email_verified(request)
+    devices = list(Device.objects.filter(user=request.user, hidden=False))
+    activity = get_device_activity([d.id for d in devices], timezone.now())
+    return [DeviceActivityResponse(device_id=d.id, results_total=d.total_results, **activity[d.id]) for d in devices]
 
 
 @router.patch(
@@ -1193,13 +1222,26 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
         raise InvalidRequest("Device not found.", status=404)
     device.friendly_name = body.friendly_name
     device.save(update_fields=["friendly_name"])
-    return DeviceResponse(
-        id=device.id,
-        hostname=device.hostname,
-        friendly_name=device.friendly_name or None,
-        first_seen=device.first_seen,
-        last_seen=device.last_seen,
-    )
+    return _device_response(device)
+
+
+@router.delete(
+    "/devices/{device_id}",
+    auth=JWTAuth(),
+    summary="Remove a device from the list",
+    description=(
+        "Remove a device owned by the authenticated user from their device list. The device is hidden "
+        "rather than deleted, so its history is kept. It reappears if the crawler submits again. "
+        "Requires a verified account."
+    ),
+    tags=["Devices"],
+)
+def hide_device(request, device_id: int):
+    check_email_verified(request)
+    hidden = Device.objects.filter(id=device_id, user=request.user, hidden=False).update(hidden=True)
+    if not hidden:
+        raise InvalidRequest("Device not found.", status=404)
+    return {"status": "ok"}
 
 
 @router.get(
@@ -1217,7 +1259,16 @@ def update_device(request, device_id: int, body: UpdateDeviceRequest):
 @paginate
 def list_crawler_errors(request) -> list[CrawlerError]:
     check_email_verified(request)
-    return CrawlerError.objects.filter(user=request.user).order_by("-created_at", "-id")
+    friendly_name = (
+        Device.objects.filter(user=OuterRef("user"), hostname=OuterRef("device_name"))
+        .exclude(friendly_name="")
+        .values("friendly_name")[:1]
+    )
+    return (
+        CrawlerError.objects.filter(user=request.user)
+        .annotate(device_display_name=Coalesce(Subquery(friendly_name), F("device_name")))
+        .order_by("-created_at", "-id")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1588,6 +1639,61 @@ def get_membership(request):
     if user_membership is None:
         raise InvalidRequest("Not a member.", status=404)
     return user_membership
+
+
+def _membership_support_spans(user) -> list[tuple[datetime, datetime]]:
+    """When each of the user's membership subscriptions, past and present, was running according to Polar.
+
+    A subscription that never started, such as a checkout that wasn't paid, has no span.
+    """
+    membership_products = [product for product in membership.product_ids().values() if product]
+    now = timezone.now()
+    spans = []
+    page = 1
+    max_page = 1
+    with Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER) as polar:
+        while page <= max_page:
+            response = polar.subscriptions.list(
+                external_customer_id=str(user.id),
+                product_id=membership_products,
+                page=page,
+                limit=100,
+            )
+            max_page = response.result.pagination.max_page
+            for subscription in response.result.items:
+                if subscription.started_at is not None:
+                    spans.append((subscription.started_at, subscription.ended_at or now))
+            page += 1
+    return spans
+
+
+# Polar's subscription history changes only on checkout, renewal and cancellation, so a few minutes
+# stale is fine and keeps page views from each costing a round trip to Polar.
+SUPPORTER_HISTORY_CACHE_SECONDS = 300
+
+
+@router.get(
+    "/membership/supporter-history",
+    auth=JWTAuth(),
+    response=SupporterHistoryResponse,
+    summary="Get how long the user has been a paying supporter",
+    description="Returns the months the user has supported Mwmbl with a membership at any tier, to the nearest "
+    "month and at least 1 once they have been a member, counted across every subscription they have had. "
+    "Gaps between memberships aren't counted and neither is the overlap when changing tier. "
+    "months is 0 if they have never been a member. The answer can be up to five minutes old.",
+    tags=["Membership"],
+)
+def get_supporter_history(request):
+    cache_key = f"supporter-history:{request.user.id}"
+    history = cache.get(cache_key)
+    if history is None:
+        spans = _membership_support_spans(request.user)
+        history = SupporterHistoryResponse(
+            months=membership.supported_months(spans),
+            first_started=min((start for start, _ in spans), default=None),
+        )
+        cache.set(cache_key, history, timeout=SUPPORTER_HISTORY_CACHE_SECONDS)
+    return history
 
 
 @router.get(

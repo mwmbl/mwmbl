@@ -1,9 +1,11 @@
+import dataclasses
 import gzip
 import hashlib
 import json
 import os
 from datetime import datetime, timezone
 from logging import getLogger
+from typing import Any
 from uuid import uuid4
 
 import requests
@@ -27,7 +29,7 @@ from mwmbl.crawler.batch import (
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
 from mwmbl.crawler_errors import record_crawler_error
-from mwmbl.devices import record_device
+from mwmbl.devices import record_device, record_device_results
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey
 from mwmbl.settings import (
@@ -42,6 +44,7 @@ from mwmbl.settings import (
 )
 from mwmbl.storage_drivers import get_batches_for_prefix, get_subfolders, upload
 from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.utils import utc_today
 
 stats_manager = StatsManager(
@@ -80,7 +83,7 @@ def upload_object(model_object: Schema, now: datetime, user_id_hash: str, object
     return filename
 
 
-def _register_routes(r: Router | NinjaAPI):
+def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register all crawler routes on the given router or API instance."""
 
     @r.post(
@@ -253,6 +256,7 @@ def _register_routes(r: Router | NinjaAPI):
         now_ts = int(now.timestamp())
 
         documents = []
+        terms: set[str] = set()
         for result in results.results:
             if result.last_crawled is not None and result.last_crawled > now_ts:
                 return 400, {"message": f"last_crawled timestamp is in the future for URL: {result.url}"}
@@ -266,14 +270,23 @@ def _register_routes(r: Router | NinjaAPI):
                     last_crawled=last_crawled,
                 )
             )
+            if result.term:
+                terms.add(result.term)
 
         if dry_run:
-            return {"status": "dry-run", "url": None}
+            response = {
+                "status": "dry-run",
+                "url": None,
+            }
+            if results.include_new_items:
+                response["new_items"] = []
+            return response
 
         # Update or create Device records for this submission. This used to happen on the
         # now-removed /batches/ endpoint, which was the only path that saw a device name.
+        device = None
         if results.device_name:
-            record_device(api_key.user, results.device_name)
+            device = record_device(api_key.user, results.device_name, results.crawler_version)
 
         index_path = f"{settings.DATA_PATH}/{settings.INDEX_NAME}"
         indexed = index_documents(documents, index_path)
@@ -284,6 +297,8 @@ def _register_routes(r: Router | NinjaAPI):
 
         # Update stats for the user
         stats_manager.record_results(results, api_key.user)
+        if device is not None:
+            record_device_results(device, len(results.results), now)
 
         # Last, since they are only analytics: a failure to store them still answers with an
         # error, but after the batch is indexed, uploaded and counted.
@@ -292,10 +307,15 @@ def _register_routes(r: Router | NinjaAPI):
             worst_agreements.get_redis(), indexed.agreements, api_key.user.id, utc_today()
         )
 
-        return {
+        response: dict[str, Any] = {
             "status": "ok",
             "url": f"{PUBLIC_URL_PREFIX}{filename}",
         }
+        if results.include_new_items:
+            response["new_items"] = []
+            for term in terms:
+                response["new_items"] += [dataclasses.asdict(item) for item in ranker.get_raw_results(term)]
+        return response
 
     @r.post(
         "/errors",
@@ -359,15 +379,15 @@ def _register_routes(r: Router | NinjaAPI):
         }
 
 
-def init_router():
+def init_router(ranker: HeuristicRanker):
     """Initialise the module-level router (called from urls.py for the unified v1 API)."""
-    _register_routes(router)
+    _register_routes(router, ranker)
 
 
-def create_router(version: str) -> NinjaAPI:
+def create_router(ranker: HeuristicRanker, version: str) -> NinjaAPI:
     """Create a standalone NinjaAPI for a specific version (used for legacy routes)."""
     api = NinjaAPI(urls_namespace=f"crawler-{version}")
-    _register_routes(api)
+    _register_routes(api, ranker)
     return api
 
 

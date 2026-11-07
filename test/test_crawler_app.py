@@ -8,13 +8,17 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import fakeredis
 import pytest
 from django.test import Client
 
 from mwmbl.crawler import app
 from mwmbl.crawler.batch import HashedBatch
+from mwmbl.crawler.stats import RESULTS_COUNT_KEY, USERS_KEY, StatsManager
+from mwmbl.models import MwmblUser
 from mwmbl.settings import PUBLIC_URL_PREFIX
 from mwmbl.storage_drivers import s3_driver
+from mwmbl.utils import utc_today
 
 USER_HASH = "a" * 64
 DATE = "2024-01-02"
@@ -30,6 +34,30 @@ def s3(monkeypatch):
     boto3 = MagicMock()
     monkeypatch.setattr(s3_driver, "boto3", boto3)
     return boto3
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("path", ["/crawler/stats", "/api/v1/crawler/stats"])
+def test_stats_api_still_serves_the_replacement_stats_page(client, monkeypatch, path):
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(app, "stats_manager", StatsManager(redis))
+    monkeypatch.setattr("mwmbl.count_urls.get_redis", lambda: redis)
+    today = utc_today()
+    redis.set(RESULTS_COUNT_KEY.format(date=today), 12)
+    redis.sadd(USERS_KEY.format(date=today), "alice")
+    MwmblUser.objects.create_user(username="alice", seed_searches=3, seed_search_pages_indexed=7)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["users_crawled_daily"][str(today)] == 1
+    assert stats["users_crawled_30d"] == 1
+    assert stats["results_indexed_daily"][str(today)] == 12
+    assert stats["seed_searches_total"] == 3
+    assert stats["seed_pages_indexed_total"] == 7
+    assert stats["users_registered_weekly"]
+    assert stats["index_history"] == []
 
 
 def test_upload_object_names_the_file_after_date_type_user_and_time(s3):
@@ -161,3 +189,11 @@ def test_curated_domains_endpoint_lists_domains_sorted(client, monkeypatch):
     response = client.get("/crawler/curated-domains")
 
     assert response.json() == {"domains": [{"name": "a.example"}, {"name": "b.example"}]}
+
+
+@pytest.mark.parametrize("path", ["/stats", "/stats/"])
+def test_old_stats_page_redirects_to_the_front_end(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 301
+    assert response["Location"] == "https://mwmbl.org/stats"

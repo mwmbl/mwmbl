@@ -21,6 +21,12 @@ def _classes(body: str) -> dict[str, str]:
     return {p.text: p.class_type for p in justext_from_dom(dom, get_stoplist("English"))}
 
 
+def test_select_options_are_not_classified_as_paragraphs():
+    classes = _classes(f"<p>{PROSE}</p><select><option>{PROSE}</option></select>")
+
+    assert list(classes) == [PROSE]
+
+
 def test_text_is_returned_unchanged():
     assert decode_html("déjà vu") == "déjà vu"
 

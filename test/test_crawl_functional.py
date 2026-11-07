@@ -208,7 +208,57 @@ class TestCrawlFunctional:
                             mock_tiny_index_instance.get_page.return_value = "test page content"
 
                             mock_post.return_value.status_code = 200
-                            mock_post.return_value.text = "OK"
+                            mock_post.return_value.json = lambda: {"status": "ok", "url": None, "new_items": []}
+
+                            # Should complete without errors
+                            crawler.run_indexing()
+
+                            # Verify batch was consumed from Redis
+                            remaining_batches = fake_redis.llen("batch-queue")
+                            assert remaining_batches == 0
+
+                            # A never-expiring cache of the index's answers fills the disk:
+                            # see test_request_cache.py
+                            mock_remote_index.assert_not_called()
+                            # assert mock_remote_index.call_args.kwargs["expire_after"] == REMOTE_INDEX_CACHE_EXPIRY
+
+    def test_indexing_workflow_fallback(self, fake_redis, mock_settings, mock_environment, temp_data_path):
+        """Test the indexing workflow with fake Redis"""
+        # Create a sample batch in Redis
+        # Create a sample item that matches the Item schema
+        sample_item = Item(
+            url="https://example.com",
+            status=200,
+            timestamp=time.time(),
+            content=ItemContent(title="Example", extract="Test content"),
+        )
+
+        sample_batch = HashedBatch(user_id_hash="test_user", timestamp=int(time.time() * 1000), items=[sample_item])
+        fake_redis.rpush("batch-queue", sample_batch.json())
+
+        crawler = Crawler()
+        crawler._redis = fake_redis  # Set the private attribute directly
+
+        # Mock Counter object for index_batches return value
+        mock_counter = Counter({"example": 1})
+        with patch("mwmbl.crawl.index_batches", return_value=mock_counter):
+            with patch("mwmbl.crawl.RemoteIndex") as mock_remote_index:
+                with patch("mwmbl.crawl.TinyIndex") as mock_tiny_index:
+                    with patch("mwmbl.crawl.index_pages"):
+                        with patch("requests.post") as mock_post:
+                            # Setup mocks
+                            mock_remote_index_instance = MagicMock()
+                            mock_remote_index.return_value = mock_remote_index_instance
+                            mock_remote_index_instance.retrieve.return_value = []
+
+                            mock_tiny_index_instance = MagicMock()
+                            mock_tiny_index.return_value.__enter__.return_value = mock_tiny_index_instance
+                            mock_tiny_index_instance.retrieve.return_value = []
+                            mock_tiny_index_instance.get_key_page_index.return_value = 0
+                            mock_tiny_index_instance.get_page.return_value = "test page content"
+
+                            mock_post.return_value.status_code = 200
+                            mock_post.return_value.json = lambda: {"status": "ok", "url": None}
 
                             # Should complete without errors
                             crawler.run_indexing()
@@ -430,7 +480,7 @@ class TestCrawlFunctional:
                                     mock_tiny_index_instance.get_page.return_value = "test content"
 
                                     mock_post.return_value.status_code = 200
-                                    mock_post.return_value.text = "OK"
+                                    mock_post.return_value.json = lambda: {"status": "ok", "url": None, "new_items": []}
 
                                     # Run complete workflow
                                     crawler.process_batch()  # Should create batch in Redis

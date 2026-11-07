@@ -61,6 +61,11 @@ class MembershipResponse(Schema):
     cancel_at_period_end: bool
 
 
+class SupporterHistoryResponse(Schema):
+    months: int
+    first_started: Optional[datetime]
+
+
 class VolunteerTierResponse(Schema):
     tier: VolunteerTier
     name: str
@@ -250,13 +255,28 @@ class DeviceResponse(Schema):
     id: int
     hostname: str
     friendly_name: Optional[str] = None
+    crawler_version: Optional[str] = None
     first_seen: datetime
     last_seen: datetime
+
+
+class DeviceDayResults(Schema):
+    date: date
+    results: int
+
+
+class DeviceActivityResponse(Schema):
+    device_id: int
+    results_total: int = Field(description="Results submitted since the device was first counted.")
+    results_last_hour: int
+    results_last_24h: int
+    results_daily: list[DeviceDayResults] = Field(description="The last 30 UTC days, oldest first.")
 
 
 class CrawlerErrorResponse(Schema):
     id: int
     device_name: str
+    device_display_name: str = Field(description="The device's friendly name, or its hostname if it has none.")
     context: str
     exception_type: str
     message: str

@@ -121,6 +121,26 @@ def test_crawler_errors_are_listed_newest_first_and_only_for_their_owner(client,
     assert [e["message"] for e in next_page.json()["items"]] == ["first"]
 
 
+def test_crawler_errors_carry_the_display_name_of_their_device(client, member):
+    Device.objects.create(user=member, hostname="named-box", friendly_name="Office")
+    Device.objects.create(user=member, hostname="plain-box")
+    for hostname in ("named-box", "plain-box", "forgotten-box"):
+        CrawlerError.objects.create(
+            user=member,
+            device_name=hostname,
+            context="indexing",
+            exception_type="ValueError",
+            message="boom",
+            location="mwmbl/crawl.py:1 in run",
+            crawler_version="1.0.0",
+        )
+
+    response = client.get(f"{BASE}/crawler-errors/", headers=_auth(member))
+
+    shown = {e["device_name"]: e["device_display_name"] for e in response.json()["items"]}
+    assert shown == {"named-box": "Office", "plain-box": "plain-box", "forgotten-box": "forgotten-box"}
+
+
 def test_profile_reports_the_account_and_plan(client, member):
     response = client.get(f"{BASE}/user", headers=_auth(member))
 
