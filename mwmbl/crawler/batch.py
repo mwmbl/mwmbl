@@ -26,6 +26,23 @@ class Link(Schema):
     )
 
 
+class Image(Schema):
+    """An image found on a crawled page, with the text to find it by."""
+
+    url: str = Field(
+        description="The absolute URL of the image file.",
+        example="https://example.com/images/gorilla.jpg",
+    )
+    alt: str = Field(default="", description="The `alt` attribute.", example="A silverback gorilla")
+    title: str = Field(default="", description="The `title` attribute.")
+    caption: str = Field(
+        default="",
+        description="The `<figcaption>` of the `<figure>` the image sits in.",
+    )
+    width: Optional[int] = Field(default=None, description="The declared width in pixels, if any.")
+    height: Optional[int] = Field(default=None, description="The declared height in pixels, if any.")
+
+
 class ItemContent(Schema):
     """Extracted text content from a successfully crawled page."""
 
@@ -40,6 +57,11 @@ class ItemContent(Schema):
     link_details: Optional[list[Link]] = Field(
         default=None,
         description="Structured list of links found on the page, with type and anchor text.",
+    )
+
+    images: Optional[list[Image]] = Field(
+        default=None,
+        description="Images found on the page that have text to search them by.",
     )
 
     # Deprecated fields kept for backward compatibility

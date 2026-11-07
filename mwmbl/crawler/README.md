@@ -46,6 +46,7 @@ The Mwmbl crawler is a **distributed, collaborative web crawler** where multiple
 The crawler fetches **web pages (HTML content)** from URLs, specifically:
 - Page titles and main text content (using the justext library for clean content extraction)
 - Internal and external links found on each page
+- Image URLs with their alt text, title and figure caption (up to 20 per page). Only the metadata is recorded: the crawler never downloads or stores the images
 - HTTP status codes and error information
 - Respects robots.txt files before crawling any URL
 
