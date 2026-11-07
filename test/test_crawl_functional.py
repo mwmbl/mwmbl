@@ -71,6 +71,7 @@ def mock_crawl_response():
             "extract": "This is an example page with some content.",
             "links": ["https://example.com/page1", "https://example.com/page2"],
             "extra_links": ["https://example.com/extra1"],
+            "images": [],
         },
         "error": None,
     }
@@ -171,6 +172,27 @@ class TestCrawlFunctional:
                 assert "timestamp" in batch
                 assert "items" in batch
                 assert len(batch["items"]) == 1
+
+    def test_process_batch_drops_images_on_blacklisted_hosts(
+        self, fake_redis, mock_settings, mock_environment, mock_crawl_response, test_blacklist_provider
+    ):
+        crawler = Crawler()
+        crawler._redis = fake_redis
+        crawler._url_queue = MagicMock()
+        crawler._url_queue.get_batch.return_value = ["https://example.com"]
+        mock_crawl_response["content"]["images"] = [
+            {"url": "https://example.com/ok.jpg", "alt": "ok"},
+            {"url": "https://spam.com/bad.jpg", "alt": "bad"},
+        ]
+
+        with patch("mwmbl.crawler.retrieve.crawl_url", return_value=mock_crawl_response):
+            with patch("mwmbl.crawl.record_urls_in_database"):
+                with patch.object(Crawler, "new_blacklist_provider", return_value=test_blacklist_provider):
+                    crawler.process_batch()
+
+        batch = json.loads(fake_redis.lpop("batch-queue"))
+        images = batch["items"][0]["content"]["images"]
+        assert [image["url"] for image in images] == ["https://example.com/ok.jpg"]
 
     def test_indexing_workflow(self, fake_redis, mock_settings, mock_environment, temp_data_path):
         """Test the indexing workflow with fake Redis"""

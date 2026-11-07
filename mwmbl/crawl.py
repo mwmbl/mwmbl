@@ -57,6 +57,7 @@ from mwmbl.crawler.env_vars import (
     SUBMIT_MODE_DRY_RUN,
     SUBMIT_MODE_OFF,
 )
+from mwmbl.crawler.images import drop_blacklisted_images
 from mwmbl.crawler.politeness import abandon_domains, release_domains
 from mwmbl.crawler.retrieve import CRAWLER_VERSION, crawl_batch
 from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider
@@ -365,6 +366,9 @@ class Crawler:
             raise
         release_domains(self.redis, results)
 
+        blacklist = self.new_blacklist_provider()
+        drop_blacklisted_images(results, blacklist)
+
         js_timestamp = int(time.time() * 1000)
         batch = HashedBatch.parse_obj(
             {
@@ -373,7 +377,7 @@ class Crawler:
                 "items": results,
             }
         )
-        record_urls_in_database([batch], self.url_queue, self.new_blacklist_provider())
+        record_urls_in_database([batch], self.url_queue, blacklist)
 
         # Push the batch into the Redis queue
         batch_json = batch.json()
