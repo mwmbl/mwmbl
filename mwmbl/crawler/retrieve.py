@@ -47,6 +47,11 @@ MAX_URL_LENGTH = 150
 BAD_URL_REGEX = re.compile(r"\/\/localhost\b|\.jpg$|\.png$|\.js$|\.gz$|\.zip$|\.pdf$|\.bz2$|\.ipynb$|\.py$")
 MAX_NEW_LINKS = 50
 MAX_EXTRA_LINKS = 50
+MAX_IMAGES = 20
+MAX_IMAGE_URL_LENGTH = 300
+MAX_IMAGE_TEXT_CHARS = 200
+# Declared sizes below this are icons, bullets and tracking pixels rather than pictures.
+MIN_IMAGE_DIMENSION = 50
 NUM_TITLE_CHARS = 65
 NUM_EXTRACT_CHARS = 155
 # Fallback extract (first-paragraph) tuning: ignore paragraphs shorter than this
@@ -307,6 +312,62 @@ def get_dom_links(dom, current_url: str) -> set[str]:
     return result
 
 
+def _image_text(text: str | None) -> str:
+    return _truncate(" ".join((text or "").split()), MAX_IMAGE_TEXT_CHARS)
+
+
+def _declared_dimension(value: str | None) -> int | None:
+    """A width or height attribute as pixels; None when absent or not plain pixels (e.g. "50%")."""
+    value = (value or "").strip()
+    return int(value) if value.isascii() and value.isdigit() and len(value) <= 6 else None
+
+
+def get_images(dom, current_url: str) -> list[dict]:
+    """Collect the page's <img> elements that carry text to search them by.
+
+    The terms for an image come from its alt text, title attribute and the <figcaption> of an
+    enclosing <figure>. An image with none of these has nothing to match a query against, and
+    one declared smaller than MIN_IMAGE_DIMENSION is decoration, so both are skipped.
+    This only records where the image is: the crawler never downloads or stores it.
+    """
+    images = []
+    seen = set()
+    for img in dom.iter("img"):
+        # Lazy-loading pages leave a placeholder (often a data: URI) in src.
+        for source in (img.get("src"), img.get("data-src")):
+            source = (source or "").strip()
+            if not source:
+                continue
+            try:
+                url = urljoin(current_url, source)
+            except ValueError:
+                continue
+            if url.startswith(("http://", "https://")) and len(url) <= MAX_IMAGE_URL_LENGTH:
+                break
+        else:
+            continue
+        if url in seen:
+            continue
+
+        width = _declared_dimension(img.get("width"))
+        height = _declared_dimension(img.get("height"))
+        if (width is not None and width < MIN_IMAGE_DIMENSION) or (height is not None and height < MIN_IMAGE_DIMENSION):
+            continue
+
+        alt = _image_text(img.get("alt"))
+        title = _image_text(img.get("title"))
+        captions = img.xpath("ancestor::figure[1]//figcaption")
+        caption = _image_text(" ".join(captions[0].itertext())) if captions else ""
+        if not (alt or title or caption):
+            continue
+
+        seen.add(url)
+        images.append({"url": url, "alt": alt, "title": title, "caption": caption, "width": width, "height": height})
+        if len(images) >= MAX_IMAGES:
+            break
+    return images
+
+
 def get_new_links(paragraphs: list[Paragraph], current_url):
     new_links = set()
     extra_links = set()
@@ -541,6 +602,7 @@ def crawl_url(url, redis: Redis):
             "extract": extract,
             "links": sorted(new_links),
             "extra_links": sorted(extra_links),
+            "images": get_images(dom, url),
         },
         "error": None,
     }
