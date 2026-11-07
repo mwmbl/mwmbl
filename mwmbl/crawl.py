@@ -68,6 +68,8 @@ from mwmbl.redis_url_queue import RedisURLQueue
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
 from mwmbl.utils import prune_request_cache
 
+INDEXING_HEALTH_FILE = Path(settings.DATA_PATH) / "indexing.health"
+
 BATCH_QUEUE_KEY = "batch-queue"
 # Reads (RemoteIndex) and writes (results, curated domains) have to agree about which
 # deployment they are talking to, or pointing a crawler at beta would send it there for half
@@ -492,6 +494,7 @@ class Crawler:
 
                     new_page_content = local_index.get_page(page_index)
                     logger.info(f"Page {page_index} now holds {len(new_page_content)} documents")
+        INDEXING_HEALTH_FILE.touch()
 
     def process_batch_continuously(self):
         """Continuously process batches with error handling.
