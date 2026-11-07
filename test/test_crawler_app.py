@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import fakeredis
 import pytest
+from django.conf import settings
 from django.test import Client
 
 from mwmbl.crawler import app
@@ -196,4 +197,4 @@ def test_old_stats_page_redirects_to_the_front_end(client, path):
     response = client.get(path)
 
     assert response.status_code == 301
-    assert response["Location"] == "https://mwmbl.org/stats"
+    assert response["Location"] == f"{settings.FRONTEND_URL}/stats"
