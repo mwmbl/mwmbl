@@ -295,9 +295,11 @@ class StatsManager:
         )
         return [(row["user__username"], row["total_results"]) for row in results]
 
-    def record_results(self, results: Results, user: MwmblUser) -> None:
+    def record_results(self, results: Results, user: MwmblUser, num_results: int) -> None:
+        """Count num_results, the URLs the submission added to the index, not len(results.results).
+        A crawler resubmits whatever the index did not keep, and repeats a URL once for each term
+        it holds it under, so counting what it sent counts the same pages round after round."""
         today = utc_today()
-        num_results = len(results.results)
 
         result_count_key = RESULTS_COUNT_KEY.format(date=today)
         self.redis.incrby(result_count_key, num_results)
@@ -311,7 +313,7 @@ class StatsManager:
         self.redis.sadd(users_key, user.username)
         self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
 
-        self._record_crawler_version(results, user, today)
+        self._record_crawler_version(results, user, today, num_results)
 
         # Persist to Postgres for all-time leaderboard.
         updated = UserStats.objects.filter(
@@ -328,14 +330,14 @@ class StatsManager:
 
         update_volunteer_memberships(user, today)
 
-    def _record_crawler_version(self, results: Results, user: MwmblUser, today: date) -> None:
+    def _record_crawler_version(self, results: Results, user: MwmblUser, today: date, num_results: int) -> None:
         # The version is client-supplied, so only release-shaped ones get a label of their own:
         # anything else would let a client mint a new row, and new Redis keys, per request.
         claimed_version = results.crawler_version or ""
         version = claimed_version if RELEASED_CRAWLER_VERSION.fullmatch(claimed_version) else UNKNOWN_CRAWLER_VERSION
 
         version_results_key = CRAWLER_VERSION_RESULTS_KEY.format(date=today)
-        self.redis.hincrby(version_results_key, version, len(results.results))
+        self.redis.hincrby(version_results_key, version, num_results)
         self.redis.expire(version_results_key, LONG_EXPIRE_SECONDS)
 
         # A crawler is its user and device name, not its API key: one key can serve several
