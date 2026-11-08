@@ -8,6 +8,10 @@ image is shown only if each of them says SAFE:
 3. the text classifier calls the image's text safe;
 4. NudeNet finds no exposed body parts in a thumbnail that is fetched, scored and discarded.
 
+Nothing here can make a response a guarantee: no layer detects CSAM, the models read English
+only, and a Commons file can be replaced after it is approved, since thumbnail URLs are not
+tied to a revision. The layers lower the odds; they do not remove them.
+
 Nothing is persisted except the approved results, which sit in the cache briefly. The browser
 loads approved thumbnails straight from Wikimedia.
 """
@@ -50,10 +54,16 @@ def normalise_query(query: str) -> str:
 
 
 def query_is_safe(query: str) -> bool:
+    """Whether to search at all. Only a confident NSFW verdict refuses the query.
+
+    The text model is noisy on a word or two ("cat" scores uncertain), and an uncertain query
+    must not blank out innocent searches. It costs nothing in safety: every image still has to pass
+    all of its own layers.
+    """
     if rules.query_verdict(query) is not Verdict.SAFE:
         return False
     (verdict,) = text_classifier().classify([query])
-    return verdict is Verdict.SAFE
+    return verdict is not Verdict.NSFW
 
 
 def pass_text_checks(images: list[SourceImage]) -> list[SourceImage]:

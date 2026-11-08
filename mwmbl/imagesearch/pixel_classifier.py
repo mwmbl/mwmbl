@@ -18,8 +18,8 @@ import onnxruntime
 from django.conf import settings
 from PIL import Image, UnidentifiedImageError
 
-from mwmbl.imagesearch.commons import ALLOWED_THUMBNAIL_HOSTS, get_with_backoff
-from mwmbl.imagesearch.types import ImageSourceUnavailable, Verdict
+from mwmbl.imagesearch.commons import ALLOWED_THUMBNAIL_HOSTS, SourceRejectedRequest, get_with_backoff
+from mwmbl.imagesearch.types import Verdict
 
 INPUT_SIZE = 320
 BOX_VALUES = 4
@@ -105,12 +105,17 @@ def verdict_for_scores(scores: np.ndarray) -> Verdict:
 
 
 def fetch_thumbnail(client: httpx.Client, url: str) -> bytes | None:
-    """The thumbnail's bytes, or None if it is not a small image served by Wikimedia."""
+    """The thumbnail's bytes, or None if this thumbnail cannot be used.
+
+    A refusal of this one thumbnail excludes just its image. Wikimedia being unreachable or asking
+    us to back off raises ImageSourceUnavailable instead: it says nothing about the image, so it must
+    not be turned into a result that looks final and gets cached.
+    """
     if urlparse(url).hostname not in ALLOWED_THUMBNAIL_HOSTS:
         return None
     try:
         response = get_with_backoff(client, url)
-    except (ImageSourceUnavailable, httpx.HTTPStatusError):
+    except SourceRejectedRequest:
         return None
     if len(response.content) > settings.IMAGE_SEARCH_THUMBNAIL_MAX_BYTES:
         return None

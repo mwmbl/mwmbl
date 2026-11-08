@@ -7,6 +7,7 @@ the models back up, not a substitute for them.
 """
 
 import re
+import unicodedata
 
 from mwmbl.imagesearch.types import SourceImage, Verdict
 
@@ -66,10 +67,19 @@ DENIED_TERMS = [
     r"lolita",
 ]
 DENIED_PATTERN = re.compile(r"\b(?:" + "|".join(DENIED_TERMS) + r")\b", re.IGNORECASE)
+# Combining marks and format characters (zero-width spaces and joiners, soft hyphens).
+IGNORED_CATEGORIES = {"Mn", "Cf"}
+
+
+def normalise(text: str) -> str:
+    """Fold the text so that accents, width variants and invisible characters cannot hide a term."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    visible = (c for c in decomposed if unicodedata.category(c) not in IGNORED_CATEGORIES)
+    return "".join(visible)
 
 
 def find_denied_term(text: str) -> str | None:
-    match = DENIED_PATTERN.search(text)
+    match = DENIED_PATTERN.search(normalise(text))
     return match.group(0) if match else None
 
 

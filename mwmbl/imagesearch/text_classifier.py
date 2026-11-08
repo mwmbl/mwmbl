@@ -1,7 +1,9 @@
 """Text safety classifier: a DistilBERT NSFW model, exported to ONNX, run in-process.
 
 Only a text the model confidently calls safe is SAFE. The split between NSFW and UNCERTAIN
-follows the two thresholds in settings; both are excluded from results.
+follows the two thresholds in settings; both are excluded from results. The model reads 128
+tokens at a time, so a longer text is split into chunks and judged by its worst chunk, and a
+text too long to check at all is UNCERTAIN. The model is English-only.
 """
 
 import json
@@ -15,7 +17,12 @@ from tokenizers import Tokenizer
 from mwmbl.imagesearch.types import Verdict
 
 MAX_TOKENS = 128
+# Words, not tokens, so a text can be split without tokenizing it twice. Sixty words fit in 128
+# tokens for ordinary text; a chunk that does not is caught as overflowing and made UNCERTAIN.
+WORDS_PER_CHUNK = 60
+MAX_CHUNKS = 8
 NSFW_LABEL = "nsfw"
+SEVERITY = [Verdict.SAFE, Verdict.UNCERTAIN, Verdict.NSFW]
 
 
 class TextSafetyClassifier:
@@ -34,19 +41,41 @@ class TextSafetyClassifier:
             str(text_dir / "model.onnx"), options, providers=["CPUExecutionProvider"]
         )
 
-    def nsfw_probabilities(self, texts: list[str]) -> np.ndarray:
-        encodings = self.tokenizer.encode_batch(texts)
+    def chunk_verdicts(self, chunks: list[str]) -> list[Verdict]:
+        encodings = self.tokenizer.encode_batch(chunks)
         input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
         attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
         (logits,) = self.session.run(["logits"], {"input_ids": input_ids, "attention_mask": attention_mask})
         shifted = logits - logits.max(axis=1, keepdims=True)
         probabilities = np.exp(shifted) / np.exp(shifted).sum(axis=1, keepdims=True)
-        return probabilities[:, self.nsfw_index]
+        nsfw_probabilities = probabilities[:, self.nsfw_index]
+        return [
+            # A chunk the model could not read in full is not one it can vouch for.
+            Verdict.UNCERTAIN if encoding.overflowing else verdict_for_probability(float(probability))
+            for encoding, probability in zip(encodings, nsfw_probabilities)
+        ]
 
     def classify(self, texts: list[str]) -> list[Verdict]:
-        if not texts:
-            return []
-        return [verdict_for_probability(float(p)) for p in self.nsfw_probabilities(texts)]
+        """One verdict per text: the worst verdict of any chunk of it, so no part escapes the model."""
+        split = [split_into_chunks(text) for text in texts]
+        all_chunks = [chunk for chunks in split if chunks is not None for chunk in chunks]
+        verdicts = iter(self.chunk_verdicts(all_chunks)) if all_chunks else iter([])
+
+        results = []
+        for chunks in split:
+            if chunks is None:
+                results.append(Verdict.UNCERTAIN)
+            else:
+                results.append(max((next(verdicts) for _ in chunks), key=SEVERITY.index))
+        return results
+
+
+def split_into_chunks(text: str) -> list[str] | None:
+    """The text in pieces the model reads whole, or None if there is too much of it to check."""
+    words = text.split()
+    if not words or len(words) > WORDS_PER_CHUNK * MAX_CHUNKS:
+        return None
+    return [" ".join(words[start : start + WORDS_PER_CHUNK]) for start in range(0, len(words), WORDS_PER_CHUNK)]
 
 
 def verdict_for_probability(nsfw_probability: float) -> Verdict:

@@ -23,7 +23,13 @@ from mwmbl.imagesearch.pixel_classifier import (
     fetch_thumbnail,
     verdict_for_scores,
 )
-from mwmbl.imagesearch.text_classifier import verdict_for_probability
+from mwmbl.imagesearch.text_classifier import (
+    MAX_CHUNKS,
+    WORDS_PER_CHUNK,
+    TextSafetyClassifier,
+    split_into_chunks,
+    verdict_for_probability,
+)
 from mwmbl.imagesearch.types import ImageSourceUnavailable, SourceImage, Verdict
 
 MODELS_BUILT = (Path(settings.IMAGE_SEARCH_MODEL_DIR) / "nudenet" / "320n.onnx").exists()
@@ -134,6 +140,53 @@ def test_rules_check_categories_as_well_as_title():
     assert rules.image_verdict(image) is Verdict.NSFW
 
 
+@pytest.mark.parametrize("text", ["n\u200bude", "nüde", "ｎｕｄｅ", "n\u00adaked", "NUDE"])
+def test_rules_see_through_accents_width_and_invisible_characters(text):
+    assert rules.find_denied_term(text) is not None
+
+
+# Text classifier chunking
+
+
+def test_short_text_is_one_chunk():
+    assert split_into_chunks("a red panda") == ["a red panda"]
+
+
+def test_long_text_is_split_into_chunks_that_cover_every_word():
+    text = " ".join(f"w{i}" for i in range(WORDS_PER_CHUNK * 2 + 5))
+    chunks = split_into_chunks(text)
+    assert len(chunks) == 3
+    assert " ".join(chunks) == text
+
+
+def test_text_too_long_to_check_or_empty_has_no_chunks():
+    assert split_into_chunks("word " * (WORDS_PER_CHUNK * MAX_CHUNKS + 1)) is None
+    assert split_into_chunks("   ") is None
+
+
+@pytest.mark.skipif(not MODELS_BUILT, reason="image safety models not built")
+class TestRealTextClassifier:
+    @pytest.fixture(scope="class")
+    def classifier(self):
+        return TextSafetyClassifier(settings.IMAGE_SEARCH_MODEL_DIR)
+
+    def test_plain_text_is_safe(self, classifier):
+        assert classifier.classify(["Red panda in Munich Zoo"]) == [Verdict.SAFE]
+
+    def test_unsafe_text_hidden_after_a_long_safe_prefix_is_still_caught(self, classifier):
+        prefix = " ".join(["a quiet photograph of a lake at dawn"] * 40)
+        (verdict,) = classifier.classify([prefix + " hardcore porn video"])
+        assert verdict is not Verdict.SAFE
+
+    def test_text_too_long_to_check_and_empty_text_are_uncertain(self, classifier):
+        too_long = "lake " * (WORDS_PER_CHUNK * MAX_CHUNKS + 1)
+        assert classifier.classify([too_long, ""]) == [Verdict.UNCERTAIN, Verdict.UNCERTAIN]
+
+    def test_each_text_gets_its_own_verdict(self, classifier):
+        verdicts = classifier.classify(["Eiffel Tower at night", "hardcore porn video", "Red panda in Munich Zoo"])
+        assert verdicts == [Verdict.SAFE, Verdict.NSFW, Verdict.SAFE]
+
+
 # Text classifier thresholds
 
 
@@ -184,6 +237,13 @@ def test_fetch_thumbnail_returns_none_on_error_status(httpx_mock):
         assert fetch_thumbnail(client, THUMB.format("a.jpg", "a.jpg")) is None
 
 
+def test_fetch_thumbnail_raises_when_wikimedia_is_unavailable(httpx_mock):
+    httpx_mock.add_response(status_code=429, headers={"Retry-After": "5"})
+    with commons.new_client() as client:
+        with pytest.raises(ImageSourceUnavailable):
+            fetch_thumbnail(client, THUMB.format("a.jpg", "a.jpg"))
+
+
 @pytest.mark.skipif(not MODELS_BUILT, reason="image safety models not built")
 def test_undecodable_thumbnail_is_uncertain():
     classifier = PixelSafetyClassifier(settings.IMAGE_SEARCH_MODEL_DIR)
@@ -230,6 +290,26 @@ def test_parse_page_drops_pages_without_imageinfo():
     assert commons.parse_page({"title": "File:a.jpg", "index": 1}) is None
 
 
+def test_parse_page_drops_a_description_page_that_is_not_on_commons():
+    page = make_page("a.jpg", 1, descriptionurl="https://evil.example.com/wiki/File:a.jpg")
+    assert commons.parse_page(page) is None
+
+
+def test_encoded_markup_in_metadata_is_not_revived():
+    page = make_page("a.jpg", 1)
+    page["imageinfo"][0]["extmetadata"]["Artist"] = {"value": "Bob &lt;img src=x onerror=alert(1)&gt; &amp; Co"}
+    image = commons.parse_page(page)
+    assert "<" not in image.attribution
+    assert image.attribution == "Bob & Co"
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "http://example.org/licence", "//example.org/licence"])
+def test_licence_url_must_be_https(url):
+    page = make_page("a.jpg", 1)
+    page["imageinfo"][0]["extmetadata"]["LicenseUrl"] = {"value": url}
+    assert commons.parse_page(page).license_url == ""
+
+
 def test_search_commons_sends_user_agent_and_orders_by_rank(httpx_mock):
     pages = [make_page("b.jpg", 2), make_page("a.jpg", 1)]
     httpx_mock.add_response(json={"query": {"pages": pages}})
@@ -248,6 +328,42 @@ def test_search_commons_falls_back_to_plain_search_when_rejected(httpx_mock):
         images = commons.search_commons(client, "red panda", 5)
     assert len(images) == 1
     assert httpx_mock.get_requests()[1].url.params["gsrsearch"] == "red panda"
+
+
+def test_search_commons_falls_back_to_plain_search_when_the_api_reports_an_error(httpx_mock):
+    httpx_mock.add_response(json={"error": {"code": "badvalue", "info": "bad profile"}})
+    httpx_mock.add_response(json={"query": {"pages": [make_page("a.jpg", 1)]}})
+    with commons.new_client() as client:
+        assert len(commons.search_commons(client, "red panda", 5)) == 1
+
+
+def test_a_failing_fallback_is_unavailable_not_an_unhandled_error(httpx_mock):
+    httpx_mock.add_response(status_code=400)
+    httpx_mock.add_response(status_code=502)
+    with commons.new_client() as client:
+        with pytest.raises(ImageSourceUnavailable):
+            commons.search_commons(client, "red panda", 5)
+
+
+def test_a_body_that_is_not_json_is_unavailable(httpx_mock):
+    httpx_mock.add_response(content=b"<html>oops</html>")
+    with commons.new_client() as client:
+        with pytest.raises(ImageSourceUnavailable):
+            commons.search_commons(client, "red panda", 5)
+
+
+def test_search_syntax_in_the_query_is_not_passed_to_commons(httpx_mock):
+    httpx_mock.add_response(json={"query": {"pages": []}})
+    with commons.new_client() as client:
+        commons.search_commons(client, 'incategory:"Cats" -dogs insource:/x/ red*', 5)
+    expression = httpx_mock.get_requests()[0].url.params["gsrsearch"]
+    assert expression == "filetype:bitmap -fileres:0 incategory Cats dogs insource /x/ red"
+
+
+def test_a_query_that_is_only_syntax_searches_nothing(httpx_mock):
+    with commons.new_client() as client:
+        assert commons.search_commons(client, ':"-', 5) == []
+    assert httpx_mock.get_requests() == []
 
 
 def test_search_commons_with_no_matches_is_empty(httpx_mock):
@@ -313,11 +429,32 @@ def test_failed_thumbnail_fetch_excludes_the_image(monkeypatch, fake_models):
     assert fake_models.seen == 0
 
 
+def test_wikimedia_unavailable_while_checking_thumbnails_is_not_a_cached_empty_result(monkeypatch, fake_models):
+    def unavailable(client, url):
+        raise ImageSourceUnavailable("rate limited")
+
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", unavailable)
+    stub_commons(monkeypatch, [make_image()])
+    with pytest.raises(ImageSourceUnavailable):
+        pipeline.search_images("red panda", 10)
+    assert cache.get(pipeline.cache_key("search", "red panda")) is None
+
+    with pytest.raises(ImageSourceUnavailable):
+        pipeline.top_image("red panda")
+    assert cache.get(pipeline.cache_key("top", "red panda")) is None
+
+
 def test_unsafe_query_never_reaches_commons(monkeypatch, fake_models):
     calls = stub_commons(monkeypatch, [make_image()])
     assert pipeline.search_images("nude photos", 10) == []
     assert pipeline.search_images("risky business", 10) == []
     assert calls == []
+
+
+def test_an_uncertain_query_still_searches_but_images_must_pass_every_layer(monkeypatch, fake_models):
+    calls = stub_commons(monkeypatch, [make_image()])
+    assert len(pipeline.search_images("maybe a cat", 10)) == 1
+    assert len(calls) == 1
 
 
 def test_source_outage_propagates_instead_of_returning_nothing(monkeypatch, fake_models):
