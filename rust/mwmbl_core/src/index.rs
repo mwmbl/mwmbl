@@ -12,6 +12,8 @@
 //! metadata and the page locks, and turns the tuples that come back into Documents.
 
 use std::cell::RefCell;
+use std::error::Error;
+use std::fmt;
 use std::fs::File;
 use std::mem::ManuallyDrop;
 use std::os::unix::fs::FileExt;
@@ -35,10 +37,22 @@ const MAX_PAGE_EXPANSION: usize = 1024;
 /// Everything that can go wrong away from the GIL, split by what Python should see: a
 /// failed syscall is an `OSError` as it has always been, and a page that will not decode is
 /// a `PageError`, which every caller of the index already handles.
+#[derive(Debug)]
 pub enum PageIoError {
     Io(std::io::Error),
     Unreadable(String),
 }
+
+impl fmt::Display for PageIoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PageIoError::Io(error) => write!(f, "PageIoError::Io: {error}"),
+            PageIoError::Unreadable(error) => write!(f, "PageIoError::Unreadable: {error}"),
+        }
+    }
+}
+
+impl Error for PageIoError {}
 
 /// The descriptor belongs to the Python file object that opened it, so wrap it without
 /// taking ownership - a plain File would close it when this returns.
