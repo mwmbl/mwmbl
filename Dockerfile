@@ -52,12 +52,30 @@ RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
     cp /app/mwmbl_rank/target/release/deps/libxgboost.so "$SODIR/" && \
     patchelf --set-rpath '$ORIGIN' "$SODIR/mwmbl_rank.cpython-311-x86_64-linux-gnu.so"
 
+FROM base as image-safety-models
+
+# Image search's safety models (see scripts/export_image_safety_models.py). This stage is the
+# only one that needs torch, and only to export the text model to ONNX; the final stage copies
+# the exported files and nothing else, so the image ships onnxruntime, not torch. It depends
+# on nothing but the script, so it stays cached until the script changes.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY scripts/export_image_safety_models.py /scripts/export_image_safety_models.py
+RUN uv venv /export-venv && \
+    uv pip install --python /export-venv --torch-backend cpu \
+    torch transformers onnx onnxscript onnxruntime huggingface_hub "ml_dtypes>=0.5" && \
+    /export-venv/bin/python /scripts/export_image_safety_models.py /models/image_safety
+
+
 FROM base as final
 
 RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
 
 # Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
 COPY --from=builder /venv /venv
+
+# Without these, image search fails loudly rather than returning unchecked images.
+COPY --from=image-safety-models /models/image_safety /models/image_safety
+ENV IMAGE_SEARCH_MODEL_DIR=/models/image_safety
 
 # Copy the front end build
 COPY --from=front-end /front-end/dist /front-end-build
