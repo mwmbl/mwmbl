@@ -3,7 +3,6 @@
 ///
 /// The scores are a sorted table that build.rs generates from wiki_stats.json; see there for
 /// the layout and why it is not a HashMap.
-
 static WIKI_TABLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin"));
 
 fn read_u32(at: usize) -> usize {
