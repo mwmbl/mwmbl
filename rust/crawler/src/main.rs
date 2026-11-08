@@ -16,10 +16,12 @@ mod redis_url_queue;
 mod constants;
 
 
-use clap::{Args, Parser, ValueEnum};
-use mwmbl_core::indexer::create_index;
+use std::path::{Path, PathBuf};
 
-use crate::{crawler::Crawler};
+use clap::{Args, Parser, ValueEnum};
+use mwmbl_core::indexer::{IndexMode, TinyIndex, create_index};
+
+use crate::{constants::{DATA_DIR, INDEX_NAME, NUM_PAGES}, crawler::Crawler};
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = "crawler")]
@@ -73,7 +75,7 @@ pub struct CrawlerParams {
     remote_server: String,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
-    home: String,
+    home: PathBuf,
     /// Redis configuration url
     #[arg(env = "REDIS_URL", long, default_value="redis://127.0.0.1:6379")]
     redis_url: String,
@@ -91,9 +93,14 @@ enum CrawlSubmitMode {
 
 fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    print!("{:?}", args.crawler_params);
+    println!("{:?}", args.crawler_params);
 
-    create_index(todo!(), todo!(), false)?;
+    let mut index_path = args.crawler_params.home.clone();
+    index_path.push(DATA_DIR);
+    index_path.push(INDEX_NAME);
+
+    create_index(&index_path, NUM_PAGES, false)?;
+    
     let crawler = Crawler::new(args.crawler_params)?;
     if args.once {
         crawler.run_once()
