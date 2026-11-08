@@ -56,13 +56,14 @@ def normalise_query(query: str) -> str:
 def query_is_safe(query: str) -> bool:
     """Whether to search at all. Only a confident NSFW verdict refuses the query.
 
-    The text model is noisy on a word or two ("cat" scores uncertain), and an uncertain query
-    must not blank out innocent searches. It costs nothing in safety: every image still has to pass
-    all of its own layers.
+    The model was trained on sentences, and on a bare word or two it is noise: it calls "gorilla",
+    "monkey" and "ape" NSFW and "cat" uncertain. Framed as a caption it does not, so the query is
+    judged as one. The deny rules, not the model, are what catch explicit search terms; the model
+    is a second opinion on queries they miss. Every image still has to pass all of its own layers.
     """
     if rules.query_verdict(query) is not Verdict.SAFE:
         return False
-    (verdict,) = text_classifier().classify([query])
+    (verdict,) = text_classifier().classify([f"a photo of {query}"])
     return verdict is not Verdict.NSFW
 
 

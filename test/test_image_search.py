@@ -125,7 +125,20 @@ def stub_commons(monkeypatch, images):
 # Deterministic rules
 
 
-@pytest.mark.parametrize("text", ["Nude woman", "sexual content", "Topless beach", "porn", "Naked mole rat"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nude woman",
+        "sexual content",
+        "Topless beach",
+        "porn",
+        "Naked mole rat",
+        "OnlyFans",
+        "cam girl",
+        "busty",
+        "milf",
+    ],
+)
 def test_rules_deny_sexual_terms(text):
     assert rules.find_denied_term(text) is not None
 
@@ -181,6 +194,12 @@ class TestRealTextClassifier:
     def test_text_too_long_to_check_and_empty_text_are_uncertain(self, classifier):
         too_long = "lake " * (WORDS_PER_CHUNK * MAX_CHUNKS + 1)
         assert classifier.classify([too_long, ""]) == [Verdict.UNCERTAIN, Verdict.UNCERTAIN]
+
+    @pytest.mark.parametrize("query", ["gorilla", "monkey", "ape", "cat", "lion", "mona lisa", "red panda"])
+    def test_ordinary_queries_are_not_refused(self, classifier, query):
+        # Bare, the model calls some of these NSFW; the gate judges them framed as a caption.
+        (verdict,) = classifier.classify([f"a photo of {query}"])
+        assert verdict is not Verdict.NSFW
 
     def test_each_text_gets_its_own_verdict(self, classifier):
         verdicts = classifier.classify(["Eiffel Tower at night", "hardcore porn video", "Red panda in Munich Zoo"])
@@ -455,6 +474,20 @@ def test_unsafe_query_never_reaches_commons(monkeypatch, fake_models):
     assert pipeline.search_images("nude photos", 10) == []
     assert pipeline.search_images("risky business", 10) == []
     assert calls == []
+
+
+def test_the_query_is_judged_as_a_caption_not_a_bare_word(monkeypatch, fake_models):
+    seen = []
+
+    class RecordingText(FakeText):
+        def classify(self, texts):
+            seen.extend(texts)
+            return super().classify(texts)
+
+    monkeypatch.setattr(pipeline, "text_classifier", lambda: RecordingText())
+    stub_commons(monkeypatch, [make_image()])
+    pipeline.search_images("gorilla", 10)
+    assert seen[0] == "a photo of gorilla"
 
 
 def test_an_uncertain_query_still_searches_but_images_must_pass_every_layer(monkeypatch, fake_models):

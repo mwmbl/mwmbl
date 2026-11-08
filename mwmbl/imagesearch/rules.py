@@ -65,6 +65,18 @@ DENIED_TERMS = [
     r"p(?:a)?edophil\w*",
     r"child\s*abuse",
     r"lolita",
+    r"onlyfans",
+    r"cam\s*girl\w*",
+    r"busty",
+    r"horny",
+    r"milf",
+    r"slut\w*",
+    r"whore\w*",
+    r"blowjob\w*",
+    r"handjob\w*",
+    r"cumshot\w*",
+    r"dildo\w*",
+    r"twerk\w*",
 ]
 DENIED_PATTERN = re.compile(r"\b(?:" + "|".join(DENIED_TERMS) + r")\b", re.IGNORECASE)
 # Combining marks and format characters (zero-width spaces and joiners, soft hyphens).
