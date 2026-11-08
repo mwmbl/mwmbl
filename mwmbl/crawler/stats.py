@@ -301,6 +301,16 @@ class StatsManager:
         it holds it under, so counting what it sent counts the same pages round after round."""
         today = utc_today()
 
+        users_key = USERS_KEY.format(date=today)
+        self.redis.sadd(users_key, user.username)
+        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
+
+        self._record_crawler_version(results, user, today, num_results)
+
+        # Still an active crawler, but one that added nothing gets no leaderboard entry or row.
+        if num_results == 0:
+            return
+
         result_count_key = RESULTS_COUNT_KEY.format(date=today)
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
@@ -308,12 +318,6 @@ class StatsManager:
         user_result_count_key = USER_RESULTS_COUNT_KEY.format(date=today)
         self.redis.zincrby(user_result_count_key, num_results, user.username)
         self.redis.expire(user_result_count_key, LONG_EXPIRE_SECONDS)
-
-        users_key = USERS_KEY.format(date=today)
-        self.redis.sadd(users_key, user.username)
-        self.redis.expire(users_key, LONG_EXPIRE_SECONDS)
-
-        self._record_crawler_version(results, user, today, num_results)
 
         # Persist to Postgres for all-time leaderboard.
         updated = UserStats.objects.filter(
