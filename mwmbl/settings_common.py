@@ -471,3 +471,30 @@ MODERATION_REJECT_THRESHOLD = 0.75
 MODERATION_APPROVE_THRESHOLD = 0.25
 MODERATION_EVIDENCE_MAX_AGE_DAYS = 30  # refetch rather than reuse evidence older than this
 MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60  # monthly; the gate guards each publish
+
+# Image search - live Wikimedia Commons results, each checked by the safety pipeline in
+# mwmbl.imagesearch before anything is shown. Nothing from Commons is stored except approved
+# results, briefly, in the cache. Models are built by scripts/export_image_safety_models.py.
+IMAGE_SEARCH_MODEL_DIR = Path(os.environ.get("IMAGE_SEARCH_MODEL_DIR", BASE_DIR / "devdata" / "image_safety"))
+# Wikimedia asks for a User-Agent that identifies the application and how to reach its operators.
+IMAGE_SEARCH_USER_AGENT = "MwmblImageSearch/1.0 (https://mwmbl.org; https://github.com/mwmbl/mwmbl)"
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+COMMONS_CANDIDATES = 30
+COMMONS_TIMEOUT_SECONDS = 5
+# Across all requests in a process, for the Action API and for thumbnail fetches alike.
+COMMONS_MAX_CONCURRENT_REQUESTS = 4
+# Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
+COMMONS_MAX_COOLDOWN_SECONDS = 300
+IMAGE_SEARCH_CACHE_SECONDS = 600
+# A text classifier probability of NSFW at or above the first is NSFW; at or above the second,
+# but below the first, the image is uncertain. Both are excluded; the split only aids tuning.
+IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.5
+IMAGE_SEARCH_TEXT_UNCERTAIN_THRESHOLD = 0.02
+# NudeNet detection scores: an exposed sexual body part at or above the first is NSFW; a
+# covered one at or above the second makes the image uncertain.
+IMAGE_SEARCH_PIXEL_EXPOSED_THRESHOLD = 0.2
+IMAGE_SEARCH_PIXEL_COVERED_THRESHOLD = 0.6
+IMAGE_SEARCH_THUMBNAIL_MAX_BYTES = 1_000_000
+IMAGE_SEARCH_MAX_RESULTS = 30
+IMAGE_SEARCH_TOP_IMAGE_CANDIDATES = 10
+IMAGE_SEARCH_TOP_IMAGE_MAX_RANK = 3
