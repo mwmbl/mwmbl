@@ -231,6 +231,12 @@ def test_fetch_thumbnail_refuses_oversized(httpx_mock, settings):
         assert fetch_thumbnail(client, THUMB.format("a.jpg", "a.jpg")) is None
 
 
+def test_fetch_thumbnail_returns_the_bytes_of_a_small_thumbnail(httpx_mock):
+    httpx_mock.add_response(content=b"thumbnail bytes")
+    with commons.new_client() as client:
+        assert fetch_thumbnail(client, THUMB.format("a.jpg", "a.jpg")) == b"thumbnail bytes"
+
+
 def test_fetch_thumbnail_returns_none_on_error_status(httpx_mock):
     httpx_mock.add_response(status_code=404)
     with commons.new_client() as client:
@@ -514,6 +520,20 @@ def test_top_image_is_none_for_a_sexual_query(monkeypatch, fake_models):
     assert calls == []
 
 
+def test_top_image_is_served_from_the_cache_without_asking_commons_again(monkeypatch, fake_models):
+    calls = stub_commons(monkeypatch, [make_image("Red Panda 1.jpg", 1)])
+    first = pipeline.top_image("red panda")
+    assert pipeline.top_image("Red  Panda") == first
+    assert len(calls) == 1
+
+
+def test_a_cached_absence_of_a_top_image_is_remembered_too(monkeypatch, fake_models):
+    calls = stub_commons(monkeypatch, [make_image("Red Fox.jpg", 1)])
+    assert pipeline.top_image("red panda") is None
+    assert pipeline.top_image("red panda") is None
+    assert len(calls) == 1
+
+
 # Endpoints
 
 
@@ -550,3 +570,17 @@ def test_top_endpoint_returns_null_without_a_match(client, monkeypatch, fake_mod
     response = client.get("/api/v2/image-search/top/", {"q": "red panda"})
     assert response.status_code == 200
     assert response.json() == {"query": "red panda", "image": None}
+
+
+def test_top_endpoint_returns_the_image(client, monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("Red Panda.jpg", 1)])
+    body = client.get("/api/v2/image-search/top/", {"q": "red panda"}).json()
+    assert body["image"]["title"] == "Red Panda.jpg"
+
+
+def test_top_endpoint_is_503_when_the_source_is_unavailable(client, monkeypatch, fake_models):
+    def search(client, query, limit):
+        raise ImageSourceUnavailable("down")
+
+    monkeypatch.setattr(pipeline, "search_commons", search)
+    assert client.get("/api/v2/image-search/top/", {"q": "red panda"}).status_code == 503
