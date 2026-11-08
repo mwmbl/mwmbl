@@ -1,7 +1,6 @@
 /// Feature extraction for learning-to-rank.
 /// Ports get_features, get_match_features, and score_match from
 /// mwmbl/tinysearchengine/rank.py.
-
 use std::collections::HashMap;
 use url::Url;
 use regex::Regex;

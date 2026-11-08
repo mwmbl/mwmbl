@@ -1,6 +1,5 @@
 /// Text processing utilities: tokenization and query regex building.
 /// Ports mwmbl/tokenizer.py and the get_query_regex function from mwmbl/format.py.
-
 use regex::RegexBuilder;
 
 /// Clean unicode by round-tripping through UTF-8 (drops invalid bytes).
