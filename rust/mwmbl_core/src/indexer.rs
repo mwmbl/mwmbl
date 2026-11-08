@@ -2,7 +2,6 @@ use std::{fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
-use zstd::zstd_safe::WriteBuf;
 
 use crate::{constants::{INDEX_VERSION, ITEM_FACTORY, METADATA_CONSTANT, METADATA_SIZE, PAGE_SIZE}, index::{PageIoError, pack_page}};
 
@@ -85,7 +84,7 @@ impl TinyIndexMetadata {
             return Err(PageIoError::Unreadable("This doesn't seem to be an index file".to_owned()));
         }
         if let Some(slice) = bytes.get(METADATA_CONSTANT.len()..){
-            let json: Vec<u8> = slice.into_iter().map(|e| *e).take_while(|e| *e != 0).collect();
+            let json: Vec<u8> = slice.iter().copied().take_while(|e| *e != 0).collect();
             serde_json::from_slice(json.as_slice()).map_err(|err| PageIoError::Io(err.into()))
         } else {
             Err(PageIoError::Unreadable("Not enought bytes for TinyIndexMetadata".to_owned()))
