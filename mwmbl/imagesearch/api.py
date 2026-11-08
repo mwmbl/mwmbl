@@ -12,6 +12,7 @@ from ninja.errors import HttpError
 from pydantic import Field
 
 from mwmbl.imagesearch import pipeline
+from mwmbl.imagesearch.rate_limit import enforce_rate_limit
 from mwmbl.imagesearch.types import ApprovedImage, ImageSourceUnavailable
 
 logger = logging.getLogger(__name__)
@@ -52,10 +53,12 @@ def to_result(image: ApprovedImage) -> ImageResult:
     summary="Image search",
     description=(
         "Search Wikimedia Commons live and return only images that pass Mwmbl's safety checks. "
-        "Anything uncertain is left out, so a query can return fewer images than Commons has."
+        "Anything uncertain is left out, so a query can return fewer images than Commons has. "
+        "Limited per client network; over the limit is a 429."
     ),
 )
 def image_search(request, q: str, limit: int = Query(20, ge=1, le=settings.IMAGE_SEARCH_MAX_RESULTS)):
+    enforce_rate_limit(request)
     try:
         approved = pipeline.search_images(q, limit)
     except ImageSourceUnavailable as e:
@@ -75,6 +78,7 @@ def image_search(request, q: str, limit: int = Query(20, ge=1, le=settings.IMAGE
     ),
 )
 def top_image(request, q: str):
+    enforce_rate_limit(request)
     try:
         image = pipeline.top_image(q)
     except ImageSourceUnavailable as e:

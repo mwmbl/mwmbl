@@ -486,6 +486,10 @@ COMMONS_MAX_CONCURRENT_REQUESTS = 4
 # Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
 COMMONS_MAX_COOLDOWN_SECONDS = 300
 IMAGE_SEARCH_CACHE_SECONDS = 600
+# Per client network (see mwmbl.search_callers.client_network), across both image endpoints. A person
+# browsing images makes a request per search, so this leaves room for a shared address (a school,
+# a mobile carrier) without letting one client run the pipeline in a loop.
+IMAGE_SEARCH_REQUESTS_PER_MINUTE = 30
 # A text classifier probability of NSFW at or above the first is NSFW; at or above the second,
 # but below the first, the image is uncertain. Both are excluded; the split only aids tuning.
 IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.5
