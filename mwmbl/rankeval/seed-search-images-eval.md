@@ -200,3 +200,115 @@ Ship option 2, the gated strip:
 Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
 than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
 check that the image's subject matches the top web result's.
+
+## Indexing
+
+#610 proposes writing the Jev-approved images into the main index, so that plain standard search
+(`/api/v2/search/`, no Jev at query time) shows them to everyone. This section measures what that does.
+The code is `mwmbl/rankeval/seed_images/indexing.py`, and the data is under `devdata/seed_images/indexing/`.
+
+### Setup
+
+- **Images:** the Jev-safe candidates (NSFW below 1.0) of the 849 train queries, each once: 11,652 images. Nothing
+  else filters them.
+- **Documents:** each image is a page of its own. The URL is its Commons file page (`…/wiki/File:X.jpg`), which
+  is enough to tell an image from a web page. The title is the file name without its extension. The extract is
+  the description, optionally followed by the categories. Both are cut to the crawler's 65 and 155 characters.
+  The image goes through `index_documents`, under its own terms like any crawled page, never under the query
+  that found it.
+- **Indexes:** all writes go to copies.
+  - The en-gb index (`index_write_order/heuristic.tinysearch`) holds the 958 lookup terms of the en-gb queries,
+    with about 44 documents per term, in production's heuristic write order. Its term pages are full like
+    production's, but it has only 65,536 pages to production's 102M. So the images' 130k other terms land on
+    the queried terms' pages far more often than they would in production.
+  - **Same-term arms** therefore write an image only to the pages of terms the index already holds, which is
+    the competition production would see. The full-write arms are an upper bound on eviction.
+  - The dev index (`index-v2.tinysearch`) is what dev search reads. It holds 1.1 documents per term on 2,560
+    pages, and 293 of the 295 en-gb queries get fewer than ten results from it. It is too thin to be a fair
+    test, so it is reported only for completeness.
+- **Search:** standard search's ranker, `MMRRanker(LTRRanker)`, run on the 295 en-gb queries. Each query's
+  Wikipedia results are fetched once and shared by every arm. With `PYTHONHASHSEED` random, tied results swap
+  places between runs and change 34 of 295 top tens, so every run uses seed 0.
+- **Relevance:** each image shown is scored with Jev image relevance. The gate's score is used where that
+  (query, image) pair has one; otherwise the harness asks the same question, and the answer is cached.
+
+### Eviction
+
+| Index, arm | Image term docs stored | Existing docs evicted | Evicted by images of the same term |
+|---|---|---|---|
+| en-gb, description, full write | 241,964 | 3,087 of 39,315 (7.9%), 579 terms | 11 |
+| en-gb, + categories, full write | 263,382 | 4,013 of 39,665 (10.1%), 599 terms | 15 |
+| en-gb, description, same term | 109, on 59 terms | 5 | 5 |
+| en-gb, + categories, same term | 74, on 28 terms | 6 | 5 |
+| dev, description, full write | 87,466 | 85,162 of 90,690 (94%) | 129 |
+
+- **Same-term competition barely evicts anything.** The heuristic write order gives `commons.wikimedia.org`
+  no domain score, so an image loses to every existing document on a full term page. Of the 36,552 image
+  documents sent to the queried terms' pages, only 109 fit.
+- **Nearly all eviction is from page sharing.** When a page receives documents for a new term, each new term's
+  best document goes ahead of the existing terms' lower-ranked ones. That costs 7.9% of this test index. In
+  production it would scale with how often an image term shares a page with a queried term, which is much
+  rarer. The dev index's 94% is the same effect on 2,560 pages.
+
+### What standard search shows
+
+| Index, arm | Top tens changed | Changed with no image shown | Queries with images | Images | Jev rel ≥ 1.5 | Jev rel < 1 | On gate-rejected queries | Web results displaced (by images) |
+|---|---|---|---|---|---|---|---|---|
+| en-gb, description, full | 106 | 92 | 14 | 31 | 12 | 19 | 30 | 219 (35) |
+| en-gb, + categories, full | 112 | 97 | 15 | 30 | 11 | 18 | 28 | 258 (36) |
+| **en-gb, description, same term** | **11** | 5 | **6** | **14** | **12** | **2** | **13** | 19 (14) |
+| en-gb, + categories, same term | 10 | 4 | 6 | 14 | 12 | 2 | 13 | 18 (14) |
+| dev, description, full | 40 | 13 | 27 | 31 | 10 | 15 | 23 | 26 (2) |
+| dev, + categories, full | 39 | 14 | 25 | 30 | 10 | 14 | 20 | 27 (2) |
+
+- **Same-term arm, the closest to production:**
+  - The images are "euro 2025" (6 images, at positions 2 and 4–7 and 10), "matalan" (4 store photos, one at
+    #1), "glasgow airport", "noel edmonds age", "italy vs bosnia" (a rugby photo, Jev relevance 0.5) and "cast of
+    wednesday" (a Sweaty Betty shop front that matched "of wednesday", Jev relevance 0.02).
+  - The 14 web results they pushed out are mostly tag and listing pages, such as dailycannon `/tag/euro-2025/`
+    and pinterest's matalan board, but they include BBC Sport's Euro 2025 live page.
+- **Full-write arms:**
+  - These changes are mostly evictions: 92 of the 106 changed top tens show no image.
+  - 17 of the 31 images came in through completion terms, such as "golden" for "price of gold" (a golden
+    retriever) and "outside" for "out". This test index has nothing on those terms' pages, so they show how
+    images fill any thin term: almost all of them are irrelevant (Jev relevance below 0.1).
+- **The gate doesn't apply:** 13 of the 14 same-term images, and 30 of 31 in the full write, are on queries Jev
+  need would reject (below 1.63), mostly navigational ones such as "matalan". Nothing caps how many images one
+  list gets.
+
+### Should categories be indexed?
+
+The probe tokenised every image with the indexer's own `tokenize_document`.
+
+- **All images share some terms.** Every image is indexed under `commons`, `wikimedia`, `wiki` and `org`, from
+  its URL, just as every Wikipedia page is under its own. 4,153 are also under `jpg`.
+- **Categories rarely reach the index.** The extract is cut to 155 characters, and only its first 10 tokens and
+  10 bigrams are indexed, so categories add terms for only 4,962 of the 11,652 images (3.7 terms each).
+- **What they add is mostly maintenance and licence text:**
+
+  | Category term | Images indexed under it |
+  |---|---|
+  | `self-published work` | 721 |
+  | `images from` (geograph) | 599 |
+  | `taken with` | 424 |
+  | `cc-zero` | 329 |
+  | `flickr images` | 225 |
+  | `canon` | 109 |
+  | `nikon` | 69 |
+  | `media needing categories` | 9 |
+
+  Long licence tags such as `CC-BY-SA-4.0` never get past the cut.
+- **On the search numbers above,** categories are no better on any of them: slightly more evictions, fewer
+  images on their own terms, and the same shown images.
+- **Decision:** drop them. Index the file name and description only.
+
+### Holistic comparison
+
+For each arm, the batches compare the image-augmented lists (X) with the original ones (Y). The images are
+shown as `[IMAGE] <file name> — <description>`.
+
+- `engb/description_same_term_vs_original/` has 11 comparisons in 2 batches.
+- `engb/description_vs_original/` has 106 comparisons in 10 batches.
+- `dev/description_vs_original/` has 40 comparisons in 4 batches.
+
+The results are pending.
