@@ -250,3 +250,29 @@ def test_strips_with_one_url_but_different_pictures_still_differ():
     y = {"same": results("https://a.com/") + [strip], "pictures": results("https://a.com/") + [strip]}
 
     assert differing_queries(x, y) == ["pictures"]
+
+
+def test_web_extracts_keep_encoded_angle_brackets():
+    web = {"url": "https://a.com/", "title": "A", "extract": "if a &lt; b use the &lt;div&gt; <strong>element</strong>"}
+
+    extract_line = results_block("A", [web]).splitlines()[2]
+
+    assert extract_line == "   if a < b use the <div> element"
+
+
+def test_commons_text_keeps_decoded_comparisons():
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:X.jpg", "title": "X.jpg", "image": True}
+    comparison = dict(picture, extract="Where a &lt; b and c &gt; d")
+
+    line = results_block("A", [comparison]).splitlines()[1]
+
+    assert line == "1. [IMAGE] X.jpg — Where a < b and c > d"
+
+
+def test_single_pictures_with_the_same_text_but_different_files_differ():
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:A.jpg", "title": "A", "extract": "A", "image": True}
+    other_file = dict(picture, url="https://commons.wikimedia.org/wiki/File:B.jpg")
+    x = {"pictures": results("https://a.com/") + [picture]}
+    y = {"pictures": results("https://a.com/") + [other_file]}
+
+    assert differing_queries(x, y) == ["pictures"]
