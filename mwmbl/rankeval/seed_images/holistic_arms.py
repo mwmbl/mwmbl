@@ -218,6 +218,16 @@ def splits() -> None:
     same_sign = sum(np.sign(text_by_query[query]) == np.sign(vision_by_query[query]) for query in vision_by_query)
     print(f"\nText-only and vision verdicts agree in direction on {same_sign} of {len(vision_by_query)} queries")
 
+    displace = [json.loads(line) for line in open(HOLISTIC_DIR / "a2d_vs_a0" / "judgments.jsonl")]
+    displace_by_query = preference_by_query(displace)
+    differences = np.array([displace_by_query[query] - text_by_query[query] for query in text_by_query])
+    same_sign = sum(np.sign(text_by_query[query]) == np.sign(displace_by_query[query]) for query in text_by_query)
+    print(
+        f"A2-displace less A2, per query: {differences.mean():+.2f}; same direction on {same_sign} of {len(text_by_query)}"
+    )
+    lost = sorted(query for query, preference in displace_by_query.items() if preference < 0)
+    print(f"A2-displace loses on {len(lost)}: {', '.join(lost)}")
+
 
 def build_vision() -> None:
     a2 = json.loads(A2_PATH.read_text())

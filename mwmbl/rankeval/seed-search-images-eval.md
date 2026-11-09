@@ -141,13 +141,17 @@ entry added and nothing displaced, so the judge can't see any cost to showing a 
 The prompt also tells it a strip "adds to the web results rather than replacing one". Of the 118 A2 verdicts' notes,
 99 say a list "adds" pictures and 94 point out that the web results are the same. Of the 104 verdicts for A2, 93
 are "slight" and none "strong". +0.84 is therefore close to the share of strips the judge found relevant, less
-those it found wrong. It doesn't measure what a strip costs in screen space or attention, and
-there was no control arm, such as a strip that replaces the tenth result. It is also conditional: only the 59 of
-295 queries (20%) that get a strip are compared, so over all en-gb queries the mean preference is about +0.17.
+those it found wrong. It doesn't measure what a strip costs in screen space or attention. The control arm,
+A2-displace, makes the strip pay for itself. It is A2 with the strip in place of the tenth web result, so the
+list stays at ten. Its batches also drop the clause saying a strip adds to the results; the prompt is otherwise
+the same. On 4 of the 59 queries there are fewer than ten web results, so there the strip displaces nothing.
+The comparisons are also conditional: only the 59 of 295 queries (20%) that get a strip are compared. Over all
+en-gb queries the mean preference is about +0.17 for A2 and +0.15 for A2-displace.
 
 | Comparison | Queries | Preference [95% CI] | Images / A0 / tie | Orders agree |
 |---|---|---|---|---|
 | **A2 vs A0** | 59 | **+0.84 [+0.64, +1.01]** | 85% / 8% / 7% | 93% |
+| **A2-displace vs A0** | 59 | **+0.75 [+0.55, +0.92]** | 80% / 12% / 8% | 80% |
 | A1 vs A0 | 118 | +0.12 [−0.03, +0.29] | 47% / 38% / 15% | 73% |
 | A2 vs A0, strip passed every local layer | 26 | +0.85 [+0.63, +1.02] | 85% / 4% / 12% | 88% |
 | A2 vs A0, strip flagged by a local layer | 33 | +0.83 [+0.52, +1.11] | 85% / 12% / 3% | 97% |
@@ -158,6 +162,15 @@ there was no control arm, such as a strip that replaces the tenth result. It is 
   and coverage (21). A0 wins on 5 queries, all where the strip shows the wrong sense of the query. Examples are
   other people with the same name ("boone helm", "tom wagner", "isak") and the palace for "versailles series".
   This is the same homonym failure the relevance labels showed.
+- **A2-displace** keeps nearly all of A2's win when the strip costs the tenth web result: +0.75 against +0.84.
+  - **Per query:** it scores 0.09 lower than A2 on average, with a 95% bootstrap interval of [−0.22, +0.03].
+    The two agree in direction on 49 of the 59 queries, and their per-query preferences correlate at 0.79.
+  - **Reasons:** relevance 72, coverage 25 and junk 7.
+  - **Flags:** A0's displaced tenth results were weak, so A0 collects more thin (17 against 7), duplicate (15
+    against 7) and poor-extract (18 against 11) flags.
+  - **Losses:** A0 wins 7 queries. Five of them are A2's wrong-sense strips. The other two are "kharg island" and
+    "minecraft movie" (a Spanish logo), where the displaced result was worth more than the pictures.
+  - **What this shows:** the strip's win is not just added content. Relevant pictures beat a tenth web result.
 - **A1** is not significantly better than A0, and judges disagree more often (73% order agreement). It has no
   gate and no minimum relevance, so its images often land in the last few places as off-topic pictures (off-topic
   flags: 105 against A0's 72). A0 wins 45 of the 118 queries, for example "chargeback" and "willis pharmacy".
@@ -169,8 +182,8 @@ there was no control arm, such as a strip that replaces the tenth result. It is 
   text-only judgment doesn't overstate A2. Seeing the pictures may also simply make them more salient to the judge.
 - **A1 against A2:** A1 differs from A2 in five ways at once: no gate, no minimum relevance, single results
   rather than a strip, low positions, and displacing web results. On the 44 queries both arms change, A1 scores
-  +0.28 and A2 +0.82. A1 is therefore a weak test of single images as such. The gap also shows how much
-  displacing a web result costs, which A2 never pays.
+  +0.28 and A2 +0.82. A1 is therefore a weak test of single images as such. A2-displace shows that losing
+  one web result costs little, so most of the gap comes from A1's other differences.
 - **Wrong-sense strips:** the judges do penalise bad pictures. All five of A0's wins are wrong-sense strips.
 
 ### Recommendation
@@ -180,10 +193,10 @@ Ship option 2, the gated strip:
 - **Gate:** show a strip only when Jev image need is at least 1.63, which is about 27% of queries.
 - **Images:** take the Jev-safe images (Jev NSFW below 1.0) with Jev image relevance of at least 1.5. Sort them
   by Jev relevance alone and show at most 4.
-- **Placement:** put the strip after the top web result, as one extra entry that displaces no web result.
+- **Placement:** put the strip after the top web result. Judged holistically, it wins whether it is an extra
+  entry (+0.84 on the gated-in queries, about +0.17 over all en-gb queries) or takes the tenth web result's place
+  (+0.75, about +0.15 over all en-gb queries). Screen space is therefore no reason to hold the strip back.
 
 Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
-than today's results, though that version had no gate or minimum relevance either. Before relying on A2's
-margin as a page-quality win, rerun it against a control that pays for the strip, for example by dropping the
-tenth web result. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
+than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
 check that the image's subject matches the top web result's.
