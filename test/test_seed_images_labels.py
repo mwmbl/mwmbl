@@ -4,13 +4,13 @@ import dataclasses
 import random
 
 import pytest
+from test_seed_images_eval import IMAGE
 
 from mwmbl.imagesearch.pipeline import file_id
 from mwmbl.rankeval.seed_images import jev_images
 from mwmbl.rankeval.seed_images.gate_data import below_threshold
 from mwmbl.rankeval.seed_images.label_batches import chunks, stratified_sample
 from mwmbl.rankeval.seed_images.labels import parse_out
-from test.test_seed_images_eval import IMAGE
 
 OTHER = dataclasses.replace(IMAGE, title="Other.jpg", sha1="def")
 
