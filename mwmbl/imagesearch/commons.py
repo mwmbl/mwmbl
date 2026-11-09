@@ -12,6 +12,7 @@ image search for every worker rather than being rediscovered by each.
 import html
 import re
 import threading
+from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -101,6 +102,11 @@ def parse_page(page: dict) -> SourceImage | None:
     if info.get("mime") not in ALLOWED_MIME_TYPES:
         return None
 
+    sha1 = info.get("sha1")
+    timestamp = info.get("timestamp")
+    if not sha1 or not timestamp:
+        return None
+
     extmetadata = info.get("extmetadata", {})
     categories = tuple(c for c in metadata_value(extmetadata, "Categories").split("|") if c)
     if not categories:
@@ -121,6 +127,8 @@ def parse_page(page: dict) -> SourceImage | None:
         # The licence page is written by the uploader, so only a plain https link is passed on.
         license_url=license_url if urlparse(license_url).scheme == "https" else "",
         attribution=metadata_value(extmetadata, "Artist"),
+        sha1=sha1,
+        uploaded_at=datetime.fromisoformat(timestamp),
         rank=page["index"],
     )
 
@@ -136,7 +144,7 @@ def request_params(search_expression: str, limit: int, mediasearch: bool) -> dic
         "gsrlimit": limit,
         "gsrsort": "relevance",
         "prop": "imageinfo",
-        "iiprop": "url|mime|extmetadata",
+        "iiprop": "url|mime|sha1|timestamp|extmetadata",
         "iiurlwidth": THUMBNAIL_WIDTH,
         "iiextmetadatafilter": "Categories|ImageDescription|LicenseShortName|LicenseUrl|Artist",
     }

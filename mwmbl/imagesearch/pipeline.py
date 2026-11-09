@@ -12,20 +12,22 @@ Nothing here can make a response a guarantee: no layer detects CSAM, the models 
 only, and a Commons file can be replaced after it is approved, since thumbnail URLs are not
 tied to a revision. The layers lower the odds; they do not remove them.
 
-Nothing is persisted except the approved results, which sit in the cache briefly. The browser
+Nothing from Commons is persisted except the approved results, which sit in the cache briefly,
+and a verdict for each text and file judged, keyed by a hash (see verdict_cache). The browser
 loads approved thumbnails straight from Wikimedia.
 """
 
 import hashlib
 import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 import httpx
 from django.conf import settings
 from django.core.cache import cache
 
-from mwmbl.imagesearch import rules
+from mwmbl.imagesearch import rules, verdict_cache
 from mwmbl.imagesearch.commons import new_client, search_commons
 from mwmbl.imagesearch.pixel_classifier import PixelSafetyClassifier, fetch_thumbnail
 from mwmbl.imagesearch.text_classifier import TextSafetyClassifier
@@ -67,23 +69,56 @@ def query_is_safe(query: str) -> bool:
     return verdict is not Verdict.NSFW
 
 
+def text_verdicts(texts: list[str]) -> list[Verdict]:
+    """A verdict per text, running the model only on texts it has not judged before."""
+    classifier = text_classifier()
+    keys = [verdict_cache.cache_key("text", classifier.fingerprint, text) for text in texts]
+    known = verdict_cache.get_verdicts(keys)
+    unknown = {key: text for key, text in zip(keys, texts) if key not in known}
+    fresh = dict(zip(unknown, classifier.classify(list(unknown.values()))))
+    verdict_cache.put_verdicts(fresh)
+    verdicts = known | fresh
+    return [verdicts[key] for key in keys]
+
+
 def pass_text_checks(images: list[SourceImage]) -> list[SourceImage]:
     ruled = [image for image in images if rules.image_verdict(image) is Verdict.SAFE]
-    verdicts = text_classifier().classify([image.text for image in ruled])
+    verdicts = text_verdicts([image.text for image in ruled])
     return [image for image, verdict in zip(ruled, verdicts) if verdict is Verdict.SAFE]
 
 
-def pass_pixel_check(client: httpx.Client, image: SourceImage) -> bool:
+def pixel_verdict(client: httpx.Client, image: SourceImage) -> Verdict:
     data = fetch_thumbnail(client, image.thumbnail_url)
     if data is None:
-        return False
-    return pixel_classifier().classify_bytes(data) is Verdict.SAFE
+        return Verdict.UNCERTAIN
+    return pixel_classifier().classify_bytes(data)
 
 
 def pass_pixel_checks(client: httpx.Client, images: list[SourceImage]) -> list[SourceImage]:
+    classifier = pixel_classifier()
+    keys = [
+        verdict_cache.cache_key("pixel", classifier.fingerprint, f"{image.sha1}:{image.thumbnail_width}")
+        for image in images
+    ]
+    known = verdict_cache.get_verdicts(keys)
+    unknown = {key: image for key, image in zip(keys, images) if key not in known}
     with ThreadPoolExecutor(max_workers=THUMBNAIL_FETCH_WORKERS) as pool:
-        passed = list(pool.map(lambda image: pass_pixel_check(client, image), images))
-    return [image for image, ok in zip(images, passed) if ok]
+        checked = dict(zip(unknown, pool.map(lambda image: pixel_verdict(client, image), unknown.values())))
+
+    # An UNCERTAIN verdict may only mean the thumbnail did not download or decode this time, so only
+    # a verdict the model reached on a whole image is kept. Nor is one for a file that was only just
+    # uploaded: Wikimedia can keep serving the previous file's thumbnail for a while after a
+    # replacement, and a verdict on that must not be filed under the new file's SHA-1.
+    settled_before = datetime.now(timezone.utc) - timedelta(seconds=settings.IMAGE_SEARCH_VERDICT_MIN_FILE_AGE_SECONDS)
+    verdict_cache.put_verdicts(
+        {
+            key: verdict
+            for key, verdict in checked.items()
+            if verdict is not Verdict.UNCERTAIN and unknown[key].uploaded_at <= settled_before
+        }
+    )
+    verdicts = known | checked
+    return [image for key, image in zip(keys, images) if verdicts[key] is Verdict.SAFE]
 
 
 def approve(image: SourceImage) -> ApprovedImage:

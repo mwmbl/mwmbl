@@ -67,6 +67,7 @@ def text_model_dir(tmp_path, monkeypatch):
     )
     tokenizer.save(str(text_dir / "tokenizer.json"))
     (text_dir / "labels.json").write_text(json.dumps({"0": "safe", "1": "nsfw"}))
+    (text_dir / "model.onnx").write_bytes(b"text model")
     FakeTextSession.options_seen = []
     FakeTextSession.batch_shapes = []
     monkeypatch.setattr(text_classifier.onnxruntime, "InferenceSession", FakeTextSession)
@@ -136,6 +137,19 @@ def test_text_model_session_uses_the_configured_threads(text_model_dir, settings
     assert options.intra_op_num_threads == 3
 
 
+def test_text_fingerprint_changes_with_the_model_files_and_the_thresholds(text_model_dir, settings):
+    before = TextSafetyClassifier(text_model_dir).fingerprint
+    assert TextSafetyClassifier(text_model_dir).fingerprint == before
+
+    settings.IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.9
+    assert TextSafetyClassifier(text_model_dir).fingerprint != before
+    settings.IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.5
+    assert TextSafetyClassifier(text_model_dir).fingerprint == before
+
+    (text_model_dir / "text" / "model.onnx").write_bytes(b"a retrained text model")
+    assert TextSafetyClassifier(text_model_dir).fingerprint != before
+
+
 # Pixel model
 
 
@@ -165,6 +179,10 @@ def fake_pixel_session(**scores_by_class):
 
 
 def pixel_model(monkeypatch, tmp_path, **scores_by_class) -> PixelSafetyClassifier:
+    (tmp_path / "nudenet").mkdir(exist_ok=True)
+    model_path = tmp_path / "nudenet" / "320n.onnx"
+    if not model_path.exists():
+        model_path.write_bytes(b"pixel model")
     monkeypatch.setattr(pixel_classifier.onnxruntime, "InferenceSession", fake_pixel_session(**scores_by_class))
     return PixelSafetyClassifier(tmp_path)
 
@@ -188,6 +206,18 @@ def test_pixel_model_session_uses_the_configured_threads(monkeypatch, tmp_path, 
     classifier = pixel_model(monkeypatch, tmp_path)
     (options,) = type(classifier.session).options_seen
     assert options.intra_op_num_threads == 1
+
+
+def test_pixel_fingerprint_changes_with_the_model_file_and_the_thresholds(monkeypatch, tmp_path, settings):
+    before = pixel_model(monkeypatch, tmp_path).fingerprint
+    assert pixel_model(monkeypatch, tmp_path).fingerprint == before
+
+    settings.IMAGE_SEARCH_PIXEL_EXPOSED_THRESHOLD = 0.9
+    assert pixel_model(monkeypatch, tmp_path).fingerprint != before
+    settings.IMAGE_SEARCH_PIXEL_EXPOSED_THRESHOLD = 0.2
+
+    (tmp_path / "nudenet" / "320n.onnx").write_bytes(b"a newer pixel model")
+    assert pixel_model(monkeypatch, tmp_path).fingerprint != before
 
 
 def test_pixel_input_is_a_padded_square_in_the_models_layout(monkeypatch, tmp_path):
@@ -224,6 +254,8 @@ def test_pixel_model_will_not_vouch_for_a_decompression_bomb(monkeypatch, tmp_pa
 
 def test_the_pipeline_loads_each_model_once_from_the_configured_directory(text_model_dir, monkeypatch, settings):
     settings.IMAGE_SEARCH_MODEL_DIR = text_model_dir
+    (text_model_dir / "nudenet").mkdir()
+    (text_model_dir / "nudenet" / "320n.onnx").write_bytes(b"pixel model")
     monkeypatch.setattr(pixel_classifier.onnxruntime, "InferenceSession", fake_pixel_session())
     pipeline.text_classifier.cache_clear()
     pipeline.pixel_classifier.cache_clear()

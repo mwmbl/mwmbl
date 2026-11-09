@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 
@@ -26,6 +27,8 @@ class SourceImage:
     license_name: str
     license_url: str
     attribution: str
+    sha1: str
+    uploaded_at: datetime
     rank: int
 
     @property

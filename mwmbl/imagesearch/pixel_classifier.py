@@ -21,6 +21,7 @@ from PIL import Image, UnidentifiedImageError
 from mwmbl.imagesearch.commons import ALLOWED_THUMBNAIL_HOSTS, SourceRejectedRequest, get_with_backoff
 from mwmbl.imagesearch.session_options import cpu_options
 from mwmbl.imagesearch.types import Verdict
+from mwmbl.imagesearch.verdict_cache import digest_files
 
 INPUT_SIZE = 320
 BOX_VALUES = 4
@@ -66,12 +67,27 @@ Image.MAX_IMAGE_PIXELS = 4_000_000
 
 class PixelSafetyClassifier:
     def __init__(self, model_dir: Path):
+        model_path = model_dir / "nudenet" / "320n.onnx"
+        self.model_digest = digest_files(model_path)
         self.session = onnxruntime.InferenceSession(
-            str(model_dir / "nudenet" / "320n.onnx"),
+            str(model_path),
             cpu_options(settings.IMAGE_SEARCH_PIXEL_THREADS),
             providers=["CPUExecutionProvider"],
         )
         self.input_name = self.session.get_inputs()[0].name
+
+    @property
+    def fingerprint(self) -> str:
+        """Everything that decides a thumbnail's verdict, so a cached verdict is used only while it still holds."""
+        return ":".join(
+            str(part)
+            for part in (
+                self.model_digest,
+                settings.IMAGE_SEARCH_PIXEL_EXPOSED_THRESHOLD,
+                settings.IMAGE_SEARCH_PIXEL_COVERED_THRESHOLD,
+                INPUT_SIZE,
+            )
+        )
 
     def preprocess(self, thumbnail: Image.Image) -> np.ndarray:
         rgb = thumbnail.convert("RGB")

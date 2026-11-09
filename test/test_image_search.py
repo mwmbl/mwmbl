@@ -6,6 +6,7 @@ is excluded. The tests that run the real models are skipped when they have not b
 """
 
 import io
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -50,6 +51,8 @@ def make_page(name: str, index: int, categories: str = "Mammals|Zoos", descripti
         "thumbheight": 213,
         "descriptionurl": f"https://commons.wikimedia.org/wiki/File:{name}",
         "mime": "image/jpeg",
+        "sha1": f"sha1-of-{name}",
+        "timestamp": "2020-01-01T00:00:00Z",
         "extmetadata": {
             "Categories": {"value": categories},
             "ImageDescription": {"value": description},
@@ -74,6 +77,8 @@ def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> Sour
         license_name="CC BY-SA 4.0",
         license_url="https://creativecommons.org/licenses/by-sa/4.0",
         attribution="A. Photographer",
+        sha1=f"sha1-of-{title}",
+        uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
         rank=rank,
     )
     fields.update(overrides)
@@ -82,6 +87,8 @@ def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> Sour
 
 class FakeText:
     """Calls a text unsafe if it contains the word 'risky', uncertain if it contains 'maybe'."""
+
+    fingerprint = "fake-text-model"
 
     def classify(self, texts):
         def verdict(text):
@@ -93,6 +100,8 @@ class FakeText:
 
 
 class FakePixels:
+    fingerprint = "fake-pixel-model"
+
     def __init__(self, verdict=Verdict.SAFE):
         self.verdict = verdict
         self.seen = 0
@@ -517,6 +526,191 @@ def test_only_approved_images_are_cached(monkeypatch, fake_models):
     pipeline.search_images("art", 10)
     cached = cache.get(pipeline.cache_key("search", "art"))
     assert [a.title for a in cached] == ["ok.jpg"]
+
+
+# Verdict cache
+
+
+class CountingText(FakeText):
+    def __init__(self):
+        self.classified: list[str] = []
+
+    def classify(self, texts):
+        self.classified.extend(texts)
+        return super().classify(texts)
+
+
+@pytest.fixture
+def counting_text(monkeypatch, fake_models):
+    text = CountingText()
+    monkeypatch.setattr(pipeline, "text_classifier", lambda: text)
+    return text
+
+
+def test_an_image_seen_in_another_query_is_not_judged_again(monkeypatch, counting_text, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1), make_image("b.jpg", 2)])
+    pipeline.search_images("first query", 10)
+    # A caption for the query is also classified, so look only at the image texts.
+    judged = [text for text in counting_text.classified if "a photo of" not in text]
+    assert len(judged) == 2
+    assert fake_models.seen == 2
+
+    stub_commons(monkeypatch, [make_image("b.jpg", 1), make_image("c.jpg", 2, description="a new description")])
+    titles = [image.title for image in pipeline.search_images("second query", 10)]
+    assert titles == ["b.jpg", "c.jpg"]
+    judged = [text for text in counting_text.classified if "a photo of" not in text]
+    assert len(judged) == 3
+    assert fake_models.seen == 3
+
+
+def test_cached_verdicts_still_exclude_what_the_models_excluded(monkeypatch, counting_text, fake_models):
+    images = [make_image("ok.jpg", 1), make_image("risky.jpg", 2, description="risky")]
+    stub_commons(monkeypatch, images)
+    first = [image.title for image in pipeline.search_images("first", 10)]
+    second = [image.title for image in pipeline.search_images("second", 10)]
+    assert first == second == ["ok.jpg"]
+
+
+def test_identical_texts_in_one_search_are_judged_once(monkeypatch, counting_text, fake_models):
+    same_text = [make_image("same.jpg", 1), make_image("same.jpg", 2, sha1="a-different-file")]
+    stub_commons(monkeypatch, same_text)
+    assert len(pipeline.search_images("red panda", 10)) == 2
+    assert counting_text.classified.count(same_text[0].text) == 1
+
+
+def test_an_edited_description_is_judged_afresh(monkeypatch, counting_text, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    assert len(pipeline.search_images("first", 10)) == 1
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, description="risky")])
+    assert pipeline.search_images("second", 10) == []
+
+
+def test_a_replaced_file_is_checked_afresh_even_at_the_same_thumbnail_url(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    assert len(pipeline.search_images("first", 10)) == 1
+    assert fake_models.seen == 1
+
+    fake_models.verdict = Verdict.NSFW
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, sha1="the-replacement")])
+    assert pipeline.search_images("second", 10) == []
+    assert fake_models.seen == 2
+
+
+def test_a_pixel_verdict_is_reused_for_the_same_file(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    fake_models.verdict = Verdict.NSFW
+    # Same file contents: the earlier verdict stands without fetching or classifying it again.
+    assert len(pipeline.search_images("second", 10)) == 1
+    assert fake_models.seen == 1
+
+
+@pytest.mark.parametrize("verdict", [Verdict.SAFE, Verdict.NSFW])
+def test_a_pixel_verdict_from_the_model_is_remembered(monkeypatch, fake_models, verdict):
+    fake_models.verdict = verdict
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    pipeline.search_images("second", 10)
+    assert fake_models.seen == 1
+
+
+def test_an_uncertain_pixel_verdict_is_not_remembered(monkeypatch, fake_models):
+    fake_models.verdict = Verdict.UNCERTAIN
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    fake_models.verdict = Verdict.SAFE
+    assert len(pipeline.search_images("second", 10)) == 1
+    assert fake_models.seen == 2
+
+
+def test_a_failed_thumbnail_fetch_is_not_remembered(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", lambda client, url: None)
+    assert pipeline.search_images("first", 10) == []
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", lambda client, url: b"bytes")
+    assert len(pipeline.search_images("second", 10)) == 1
+
+
+def test_verdicts_do_not_survive_a_change_of_model_or_threshold(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    FakePixels.fingerprint = "a-retrained-pixel-model"
+    try:
+        pipeline.search_images("second", 10)
+    finally:
+        del FakePixels.fingerprint
+        FakePixels.fingerprint = "fake-pixel-model"
+    assert fake_models.seen == 2
+
+
+def test_a_just_uploaded_file_is_checked_every_time(monkeypatch, fake_models):
+    fresh = datetime.now(timezone.utc) - timedelta(hours=1)
+    stub_commons(monkeypatch, [make_image("new.jpg", 1, uploaded_at=fresh)])
+    pipeline.search_images("first", 10)
+    pipeline.search_images("second", 10)
+    assert fake_models.seen == 2
+
+
+def test_a_batch_mixing_remembered_and_new_files_keeps_each_verdict_with_its_image(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("remembered-unsafe.jpg", 1)])
+    fake_models.verdict = Verdict.NSFW
+    pipeline.search_images("first", 10)
+    stub_commons(monkeypatch, [make_image("remembered-safe.jpg", 1)])
+    fake_models.verdict = Verdict.SAFE
+    pipeline.search_images("second", 10)
+
+    fake_models.verdict = Verdict.SAFE
+    stub_commons(
+        monkeypatch,
+        [make_image("remembered-unsafe.jpg", 1), make_image("new.jpg", 2), make_image("remembered-safe.jpg", 3)],
+    )
+    titles = [image.title for image in pipeline.search_images("third", 10)]
+    assert titles == ["new.jpg", "remembered-safe.jpg"]
+    assert fake_models.seen == 3
+
+
+def test_images_that_are_the_same_file_are_fetched_and_judged_once(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, sha1="same"), make_image("b.jpg", 2, sha1="same")])
+    assert len(pipeline.search_images("first", 10)) == 2
+    assert fake_models.seen == 1
+
+
+def test_the_same_file_at_another_thumbnail_width_is_judged_separately(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, sha1="same", thumbnail_width=320)])
+    pipeline.search_images("first", 10)
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, sha1="same", thumbnail_width=200)])
+    pipeline.search_images("second", 10)
+    assert fake_models.seen == 2
+
+
+def test_nothing_is_remembered_when_a_thumbnail_fetch_fails_part_way(monkeypatch, fake_models):
+    def fetch(client, url):
+        if "b.jpg" in url:
+            raise ImageSourceUnavailable("rate limited")
+        return b"bytes"
+
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", fetch)
+    stub_commons(monkeypatch, [make_image("a.jpg", 1), make_image("b.jpg", 2)])
+    with pytest.raises(ImageSourceUnavailable):
+        pipeline.search_images("first", 10)
+    assert not [key for key in cache._cache if "verdict:v1:pixel" in key]
+
+
+def test_a_page_without_a_hash_or_upload_time_is_dropped():
+    page = make_page("a.jpg", 1)
+    assert commons.parse_page(page) is not None
+    for field in ("sha1", "timestamp"):
+        without = make_page("a.jpg", 1)
+        del without["imageinfo"][0][field]
+        assert commons.parse_page(without) is None
+
+
+def test_only_verdicts_are_stored(monkeypatch, fake_models):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, description="distinctive description")])
+    pipeline.search_images("first", 10)
+    stored = [value for key, value in cache._cache.items() if "verdict" in key]
+    assert stored
+    assert all("distinctive" not in repr(value) for value in stored)
 
 
 # Top image

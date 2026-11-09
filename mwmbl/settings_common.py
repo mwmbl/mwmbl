@@ -474,7 +474,7 @@ MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60  # monthly; the gate gua
 
 # Image search - live Wikimedia Commons results, each checked by the safety pipeline in
 # mwmbl.imagesearch before anything is shown. Nothing from Commons is stored except approved
-# results, briefly, in the cache. Models are built by scripts/export_image_safety_models.py.
+# results, briefly, in the cache, and hashed verdicts. Models are built by scripts/export_image_safety_models.py.
 IMAGE_SEARCH_MODEL_DIR = Path(os.environ.get("IMAGE_SEARCH_MODEL_DIR", BASE_DIR / "devdata" / "image_safety"))
 # Wikimedia asks for a User-Agent that identifies the application and how to reach its operators.
 IMAGE_SEARCH_USER_AGENT = "MwmblImageSearch/1.0 (https://mwmbl.org; https://github.com/mwmbl/mwmbl)"
@@ -486,6 +486,12 @@ COMMONS_MAX_CONCURRENT_REQUESTS = 4
 # Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
 COMMONS_MAX_COOLDOWN_SECONDS = 300
 IMAGE_SEARCH_CACHE_SECONDS = 600
+# Verdicts per text and per file, keyed by content and by the models and thresholds that gave them
+# (mwmbl.imagesearch.verdict_cache), so they cannot go stale and the expiry only bounds Redis memory.
+IMAGE_SEARCH_VERDICT_CACHE_SECONDS = 30 * 24 * 60 * 60
+# A file's pixel verdict is cached only once its current version is this old, which outlasts the time
+# Wikimedia can keep serving the thumbnail of the file it replaced.
+IMAGE_SEARCH_VERDICT_MIN_FILE_AGE_SECONDS = 24 * 60 * 60
 # Per client network (see mwmbl.search_callers.client_network), across both image endpoints. A person
 # browsing images makes a request per search, so this leaves room for a shared address (a school,
 # a mobile carrier) without letting one client run the pipeline in a loop.

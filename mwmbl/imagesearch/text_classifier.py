@@ -16,6 +16,7 @@ from tokenizers import Encoding, Tokenizer
 
 from mwmbl.imagesearch.session_options import cpu_options
 from mwmbl.imagesearch.types import Verdict
+from mwmbl.imagesearch.verdict_cache import digest_files
 
 MAX_TOKENS = 128
 # Smaller batches ran faster than larger ones when measured: attention cost grows with the square
@@ -32,6 +33,7 @@ SEVERITY = [Verdict.SAFE, Verdict.UNCERTAIN, Verdict.NSFW]
 class TextSafetyClassifier:
     def __init__(self, model_dir: Path):
         text_dir = model_dir / "text"
+        self.model_digest = digest_files(text_dir / "model.onnx", text_dir / "tokenizer.json", text_dir / "labels.json")
         self.tokenizer = Tokenizer.from_file(str(text_dir / "tokenizer.json"))
         self.tokenizer.enable_truncation(MAX_TOKENS)
         self.tokenizer.enable_padding(length=None)
@@ -43,6 +45,21 @@ class TextSafetyClassifier:
             str(text_dir / "model.onnx"),
             cpu_options(settings.IMAGE_SEARCH_TEXT_THREADS),
             providers=["CPUExecutionProvider"],
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        """Everything that decides a text's verdict, so a cached verdict is used only while it still holds."""
+        return ":".join(
+            str(part)
+            for part in (
+                self.model_digest,
+                settings.IMAGE_SEARCH_TEXT_NSFW_THRESHOLD,
+                settings.IMAGE_SEARCH_TEXT_UNCERTAIN_THRESHOLD,
+                MAX_TOKENS,
+                WORDS_PER_CHUNK,
+                MAX_CHUNKS,
+            )
         )
 
     def nsfw_probabilities(self, encodings: list[Encoding]) -> np.ndarray:
