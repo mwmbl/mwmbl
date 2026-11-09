@@ -14,8 +14,9 @@ a positive preference favours X.
 A list may also hold Wikimedia Commons pictures. A single picture, {"url", "title", "extract",
 "image": true}, is a result like any other, with its file name as the title and its description
 as the extract. A strip, {"url", "images": [{"title", "description"}, ...]}, is one extra entry
-that doesn't count towards the ten; a strip's image may also give a "thumb" path for the judge
-to open. The prompt then tells the judge what these entries are.
+that doesn't count towards the ten, unless it has "displaces": true, when it takes a web
+result's place; a strip's image may also give a "thumb" path for the judge to open. The prompt
+then tells the judge what these entries are.
 
     batches X.json Y.json WORK   judge batches and a manifest -> WORK, for every query in
                                  both files whose top tens differ
@@ -143,6 +144,9 @@ pictures of what the query is about can improve a page; wrong, pointless or
 distracting pictures, or pictures that push out useful results, make it worse.
 
 """
+STRIP_ADDS = """;
+it adds to the web results rather than replacing one, so that list may have eleven
+entries."""
 
 THUMBNAILS_NOTE = """\
 Each picture in a strip gives the path of its thumbnail. Open every thumbnail with the
@@ -184,10 +188,10 @@ def results_block(label: str, results: list[dict]) -> str:
 
 
 def top_results(results: list[dict]) -> list[dict]:
-    """The top ten results, with any image strip among them, which doesn't count towards the ten."""
+    """The top ten results, with any image strip among them that adds to them rather than displacing one."""
     top: list[dict] = []
     for result in results:
-        if len(top) - sum("images" in shown for shown in top) == NUM_RESULTS:
+        if len(top) - sum("images" in shown and "displaces" not in shown for shown in top) == NUM_RESULTS:
             break
         top.append(result)
     return top
@@ -239,7 +243,10 @@ def batches(x_path: Path, y_path: Path, work: Path) -> None:
             # The image notes go only into batches that show images, so other comparisons keep the prompt as it was.
             strip_images = [image for result in shown if "images" in result for image in result["images"]]
             has_images = bool(strip_images) or any("image" in result for result in shown)
-            notes = (IMAGES_NOTE if has_images else "") + (
+            # A strip that takes a web result's place doesn't add to the results, so the judge isn't told it does.
+            adds = any("images" in result and "displaces" not in result for result in shown)
+            images_note = IMAGES_NOTE if adds else IMAGES_NOTE.replace(STRIP_ADDS, ".")
+            notes = (images_note if has_images else "") + (
                 THUMBNAILS_NOTE if any("thumb" in image for image in strip_images) else ""
             )
             prompt = PROMPT.replace("\nOUTPUT:", "\n" + notes + "OUTPUT:")

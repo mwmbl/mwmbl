@@ -10,6 +10,7 @@ from mwmbl.rankeval.evaluation.holistic_judge import (
     COMPARISONS_PER_BATCH,
     ETHOS_RUBRIC,
     IMAGES_NOTE,
+    STRIP_ADDS,
     THUMBNAILS_NOTE,
     batches,
     consolidate,
@@ -201,3 +202,18 @@ def test_only_batches_showing_images_tell_the_judge_about_them(tmp_path):
     assert all("QUERY: pictures" in texts[name] for name in with_images)
     assert all(THUMBNAILS_NOTE not in text for text in texts.values())
     assert all(str((work / name.replace("batch_", "out_")).resolve()) in text for name, text in texts.items())
+
+
+def test_a_displacing_strip_counts_towards_the_ten_and_the_judge_is_not_told_it_adds(tmp_path):
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}], "displaces": True}
+    web = results(*(f"https://{i}.com/" for i in range(10)))
+    x = {"pictures": web[:1] + [strip] + web[1:9]}
+    (tmp_path / "x.json").write_text(json.dumps(x))
+    (tmp_path / "y.json").write_text(json.dumps({"pictures": web}))
+    batches(tmp_path / "x.json", tmp_path / "y.json", tmp_path / "work")
+
+    text = (tmp_path / "work" / "batch_00.txt").read_text()
+
+    assert top_results(x["pictures"] + web[9:]) == x["pictures"]
+    assert STRIP_ADDS in IMAGES_NOTE and "eleven" not in text
+    assert IMAGES_NOTE.replace(STRIP_ADDS, ".") in text

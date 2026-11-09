@@ -55,3 +55,12 @@ def test_option_1_merges_the_two_best_images_by_composite_web_first_on_a_tie():
         "https://commons/2",
     ]
     assert len(urls) == 10
+
+
+def test_the_displacing_control_puts_the_strip_in_place_of_the_tenth_web_result():
+    with_strip = holistic_arms.with_strip(web(10), [(image(1), 2.5)], GATE)
+
+    results = holistic_arms.displacing(with_strip)
+
+    assert len(results) == 10 and results[1]["displaces"] and results[-1]["url"] == "https://8.com/"
+    assert holistic_arms.displacing(web(10)) == web(10)

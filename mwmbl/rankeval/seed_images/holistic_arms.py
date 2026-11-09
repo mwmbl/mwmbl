@@ -14,6 +14,8 @@
     vision                  judge batches for about 20 A2-vs-A0 comparisons, with the strips' thumbnails, from
                             images every local safety layer passed. The thumbnails are written to holistic/thumbs/:
                             a user-approved exception to keeping them in memory only, to delete after judging.
+    displace                a control for A2: the same strip taking the tenth web result's place, so it has a
+                            cost; holistic/a2_displace.json and judge batches against A0
     splits                  once judged and consolidated: A2 vs A0 by whether the strip passed every local
                             safety layer, and the vision check against the text-only verdicts
 """
@@ -51,6 +53,7 @@ WEB_COMPOSITE_PATH = HOLISTIC_DIR / "engb_web_composite.json"
 A1_PATH = HOLISTIC_DIR / "a1.json"
 A2_PATH = HOLISTIC_DIR / "a2.json"
 A2_VISION_PATH = HOLISTIC_DIR / "a2_vision.json"
+A2_DISPLACE_PATH = HOLISTIC_DIR / "a2_displace.json"
 THUMBS_DIR = HOLISTIC_DIR / "thumbs"
 A1_MAX_IMAGES = 2
 SUBSTANTIVE = 2
@@ -111,6 +114,20 @@ def with_strip(web: list[dict], scored: list[tuple[SourceImage, float]], gate: d
     if not shown:
         return web
     return web[:1] + [strip_entry(shown)] + web[1:]
+
+
+def displacing(results: list[dict]) -> list[dict]:
+    """A2's list with its strip taking the place of the tenth web result, so the strip costs a result."""
+    if not any("images" in entry for entry in results):
+        return results
+    shown = [entry | {"displaces": True} if "images" in entry else entry for entry in results]
+    return shown[:NUM_RESULTS]
+
+
+def build_displace() -> None:
+    a2 = json.loads(A2_PATH.read_text())
+    A2_DISPLACE_PATH.write_text(json.dumps({query: displacing(results) for query, results in a2.items()}))
+    holistic_judge.batches(A2_DISPLACE_PATH, ENGB_BASELINE_PATH, HOLISTIC_DIR / "a2d_vs_a0")
 
 
 def merged(web: list[dict], composites: list[float], scored: list[tuple[SourceImage, float]]) -> list[dict]:
@@ -235,12 +252,15 @@ def main() -> None:
     commands.add_parser("arms")
     commands.add_parser("vision")
     commands.add_parser("splits")
+    commands.add_parser("displace")
     args = parser.parse_args()
 
     if args.command == "composite":
         web_composite(args.scores, args.rows)
     elif args.command == "arms":
         build_arms()
+    elif args.command == "displace":
+        build_displace()
     elif args.command == "vision":
         build_vision()
     else:
