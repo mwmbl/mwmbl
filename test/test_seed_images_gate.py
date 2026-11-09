@@ -44,3 +44,12 @@ def test_agreement_rounds_scores_for_exact_matches():
     assert stats["exact"] == pytest.approx(2 / 3)
     assert stats["within_one"] == 1.0
     assert stats["spearman"] == pytest.approx(1.0)
+
+
+def test_bootstrap_interval_brackets_the_mean_and_collapses_for_a_constant():
+    values = np.arange(100, dtype=float)
+
+    low, high = gate_analysis.bootstrap_interval(lambda sample: values[sample].mean(), len(values))
+
+    assert low < values.mean() < high
+    assert gate_analysis.bootstrap_interval(lambda sample: 1.0, 10) == (1.0, 1.0)
