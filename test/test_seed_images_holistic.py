@@ -2,9 +2,10 @@
 
 import dataclasses
 
+from test_seed_images_eval import IMAGE
+
 from mwmbl.imagesearch.pipeline import file_id
 from mwmbl.rankeval.seed_images import holistic_arms
-from test.test_seed_images_eval import IMAGE
 
 GATE = {"num_images": 2, "min_jev_relevance": 1.5}
 
