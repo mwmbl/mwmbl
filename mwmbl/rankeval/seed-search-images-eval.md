@@ -459,8 +459,8 @@ compare the image-augmented lists (X) with the original ones (Y). Images are sho
 
 ### Recommendation
 
-With production's page count, indexed images would rarely win a full term page or evict anything, but as built
-here they make standard search slightly worse. If they are indexed:
+These runs use today's LTR, never trained on image pages; retraining it with image results should fix the ranking
+losses (store photo at #1, junk images). Indexed images rarely evict anything at production's page count. Then:
 
 - **Text:** index the file name and description only, without categories.
 - **Cap:** allow at most one or two images per standard-search list, so a query like "euro 2025" can't fill
@@ -484,12 +484,12 @@ here they make standard search slightly worse. If they are indexed:
   request, passes it below 1.0, with no pixel check behind it. This replaces DistilBERT. Keep `rules.query_verdict`
   in front of image search, and add `naturism` to the rules. Residual risk: Jev reads only text, so a nude whose
   text says nothing can't be caught, and Jev passes some nudes even with their text (the Safety section lists them).
-- **Standard search:** don't serve indexed images yet. Indexed as plain pages, they leave the index intact but
-  judge slightly worse (−0.27, n = 11) on the arm closest to production. If they are indexed, use the file name
-  and description only, cap them per list and settle the gate-rejected question first.
+- **Standard search:** with today's LTR, never trained on image pages, indexed images judge slightly worse (−0.27,
+  n = 11) on the arm closest to production; retraining the LTR with image results is expected to fix that. Index
+  the file name and description only, cap images per list and settle the gate-rejected question.
 - **Left for production:**
   - Build Seed Search's image request, run in parallel with Staan.
   - Serve the strip in the UI with attribution and licence.
   - Set the Jev latency budget for the extra questions.
   - Add a minimum relevance or a check against the top result for wrong-sense strips.
-  - If indexing goes ahead: the image flag, the per-list cap, the gate decision, and a production-sized test.
+  - Indexing: retrain the LTR with image results, re-evaluate on a production-sized index; flag, cap, gate rule.
