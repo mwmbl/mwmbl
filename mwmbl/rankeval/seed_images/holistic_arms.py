@@ -14,6 +14,8 @@
     vision                  judge batches for about 20 A2-vs-A0 comparisons, with the strips' thumbnails, from
                             images every local safety layer passed. The thumbnails are written to holistic/thumbs/:
                             a user-approved exception to keeping them in memory only, to delete after judging.
+    splits                  once judged and consolidated: A2 vs A0 by whether the strip passed every local
+                            safety layer, and the vision check against the text-only verdicts
 """
 
 import json
@@ -148,8 +150,8 @@ def build_arms() -> None:
     holistic_judge.batches(A1_PATH, ENGB_BASELINE_PATH, HOLISTIC_DIR / "a1_vs_a0")
 
 
-def build_vision() -> None:
-    a2 = json.loads(A2_PATH.read_text())
+def strips_and_passed(a2: dict) -> tuple[dict[str, dict], list[str]]:
+    """Each A2 strip by query, and the queries whose strip's every image passed every local safety layer."""
     verdicts = {row["page_url"]: row for row in read_jsonl(VERDICTS_PATH)}
     strips = {
         query: next(entry for entry in results if "images" in entry)
@@ -161,6 +163,45 @@ def build_vision() -> None:
         for query, strip in strips.items()
         if all(passed_every_layer(verdicts[image["url"]]) for image in strip["images"])
     )
+    return strips, passed
+
+
+def print_summary(name: str, records: list[dict]) -> None:
+    summary = holistic_judge.summarise(records)
+    low, high = summary["ci"]
+    print(
+        f"| {name} | {summary['comparisons']} | {summary['preference']:+.2f} [{low:+.2f}, {high:+.2f}] | "
+        f"{summary['x_preferred']:.0%} / {summary['y_preferred']:.0%} / {summary['tie']:.0%} | "
+        f"{summary['orders_agree']:.0%} |"
+    )
+
+
+def splits() -> None:
+    """A2 vs A0 split by whether the strip passed every local layer, and the vision check against text only."""
+    _, passed = strips_and_passed(json.loads(A2_PATH.read_text()))
+    text = [json.loads(line) for line in open(HOLISTIC_DIR / "a2_vs_a0" / "judgments.jsonl")]
+    vision = [json.loads(line) for line in open(HOLISTIC_DIR / "a2_vs_a0_vision" / "judgments.jsonl")]
+    vision_queries = {record["query"] for record in vision}
+    print("| Comparison | Queries | Preference for A2 [95% CI] | A2 / A0 / tie | Orders agree |\n|---|---|---|---|---|")
+    print_summary("Strip passed every local layer", [record for record in text if record["query"] in passed])
+    print_summary("Strip flagged by a local layer", [record for record in text if record["query"] not in passed])
+    print_summary("Vision subset, text only", [record for record in text if record["query"] in vision_queries])
+    print_summary("Vision subset, with thumbnails", vision)
+
+    def preference_by_query(records: list[dict]) -> dict[str, float]:
+        by_query: dict[str, list[int]] = {}
+        for record in records:
+            by_query.setdefault(record["query"], []).append(holistic_judge.preference_for_x(record))
+        return {query: sum(values) / len(values) for query, values in by_query.items()}
+
+    text_by_query, vision_by_query = preference_by_query(text), preference_by_query(vision)
+    same_sign = sum((text_by_query[query] > 0) == (vision_by_query[query] > 0) for query in vision_by_query)
+    print(f"\nText-only and vision verdicts favour A2 alike on {same_sign} of {len(vision_by_query)} queries")
+
+
+def build_vision() -> None:
+    a2 = json.loads(A2_PATH.read_text())
+    strips, passed = strips_and_passed(a2)
     print(f"{len(passed)} of {len(strips)} strips passed every local layer")
     THUMBS_DIR.mkdir(exist_ok=True)
     thumbnails = {image.page_url: image.thumbnail_url for images in jev_safe_candidates().values() for image in images}
@@ -190,14 +231,17 @@ def main() -> None:
     composite_parser.add_argument("rows", type=Path)
     commands.add_parser("arms")
     commands.add_parser("vision")
+    commands.add_parser("splits")
     args = parser.parse_args()
 
     if args.command == "composite":
         web_composite(args.scores, args.rows)
     elif args.command == "arms":
         build_arms()
-    else:
+    elif args.command == "vision":
         build_vision()
+    else:
+        splits()
 
 
 if __name__ == "__main__":

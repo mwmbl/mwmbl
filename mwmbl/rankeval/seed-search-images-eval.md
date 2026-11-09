@@ -128,4 +128,48 @@ The judge sees a strip as `[IMAGES from Wikimedia Commons] 1. <file name> — <d
 image as `[IMAGE] <file name> — <description>`, with descriptions cut to 150 characters. Batches that show images
 add a paragraph telling the judge that pictures may appear and to judge whether they help the query; the rest of
 the rubric is unchanged. A vision check repeats 20 of the A2-vs-A0 comparisons with the strips' thumbnails, using
-only strips whose every image passed the rules, NudeNet and SigLIP2 (26 of the 59 did).
+only strips whose every image passed the rules, NudeNet and SigLIP2 (26 of the 59 did). The thumbnails were
+deleted after judging.
+
+### Results
+
+Haiku 4.5 judged each comparison in both orders. Only queries whose lists differ are compared. Preference runs
+from −3 to 3, and a positive value favours the image arm.
+
+| Comparison | Queries | Preference [95% CI] | Images / A0 / tie | Orders agree |
+|---|---|---|---|---|
+| **A2 vs A0** | 59 | **+0.84 [+0.64, +1.01]** | 85% / 8% / 7% | 93% |
+| A1 vs A0 | 118 | +0.12 [−0.03, +0.29] | 47% / 38% / 15% | 73% |
+| A2 vs A0, strip passed every local layer | 26 | +0.85 [+0.63, +1.02] | 85% / 4% / 12% | 88% |
+| A2 vs A0, strip flagged by a local layer | 33 | +0.83 [+0.52, +1.11] | 85% / 12% / 3% | 97% |
+| A2 vs A0, vision subset, text only | 20 | +0.82 [+0.57, +1.02] | 85% / 5% / 10% | 90% |
+| A2 vs A0, vision subset, with thumbnails | 20 | +1.27 [+0.93, +1.57] | 90% / 5% / 5% | 85% |
+
+- **A2** wins clearly. Most verdicts are "slight", with 13 of 118 "clear", and the main reasons are relevance (83)
+  and coverage (21). A0 wins on 5 queries, all where the strip shows the wrong sense of the query. Examples are
+  other people with the same name ("boone helm", "tom wagner", "isak") and the palace for "versailles series".
+  This is the same homonym failure the relevance labels showed.
+- **A1** is not significantly better than A0, and judges disagree more often (73% order agreement). It has no
+  gate and no minimum relevance, so its images often land in the last few places as off-topic pictures (off-topic
+  flags: 105 against A0's 72). A0 wins 45 of the 118 queries, for example "chargeback" and "willis pharmacy".
+  Where A1 wins, it is mostly because the image replaced a weak tenth result.
+- **Local safety layers:** strips the local layers flagged score the same as those they passed. The local layers
+  don't pick out worse strips, so they matter for safety only.
+- **Vision:** with thumbnails, the judges favour A2 more strongly (+1.27 against +0.82 from text alone on the
+  same 20 queries). The two agree in direction on 19 of the 20 queries. The text-only judgment therefore
+  understates A2 a little, if anything.
+- **Caveat:** A2 adds an entry without removing one, so a judge may partly reward more content. The losses on
+  wrong-sense strips show the judges do penalise bad pictures.
+
+### Recommendation
+
+Ship option 2, the gated strip:
+
+- **Gate:** show a strip only when Jev image need is at least 1.63, which is about 27% of queries.
+- **Images:** take the Jev-safe images (Jev NSFW below 1.0) with Jev image relevance of at least 1.5. Sort them
+  by Jev relevance alone and show at most 4.
+- **Placement:** put the strip after the top web result, as one extra entry that displaces no web result.
+
+Don't merge single images into the web ranking (option 1): judged holistically it is no better than today's
+results. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
+check that the image's subject matches the top web result's.
