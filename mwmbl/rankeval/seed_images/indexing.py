@@ -18,6 +18,7 @@ Wikipedia fetches never write the dev cache, and PYTHONHASHSEED=0: with a random
 """
 
 import json
+import os
 import shutil
 from argparse import ArgumentParser
 from collections import Counter
@@ -174,6 +175,7 @@ def fetch_wiki(queries: list[str]) -> dict[str, list[list]]:
 
 
 def search(name: str) -> None:
+    assert os.environ.get("PYTHONHASHSEED") == "0", "set PYTHONHASHSEED=0: with a random seed, tied results swap places"
     queries = engb_queries()
     wiki = fetch_wiki(queries)
     model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))

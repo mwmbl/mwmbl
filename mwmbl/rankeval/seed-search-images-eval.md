@@ -290,7 +290,6 @@ The probe tokenised every image with the indexer's own `tokenize_document`.
   images on their own terms, and the same shown images.
 - **Decision:** drop them. Index the file name and description only.
 
-
 ### Holistic comparison
 
 Only the en-gb same-term arm was judged, because it is the closest to production. The full-write and dev arms
@@ -333,8 +332,9 @@ here they make standard search slightly worse. If they are indexed:
     most 4.
   - **Placement:** after the top web result. It beats today's page by +0.84 on gated-in queries (+0.75 when it
     displaces the tenth result), and its main failure is wrong-sense strips.
-- **Safety:** Jev's text-only NSFW check at 1.0 replaces DistilBERT. It reads only text, so a pixel layer
-  should stay behind it for images whose text says nothing.
+- **Safety:** show or index an image only if Jev's text-only NSFW check passes it (below 1.0), with no pixel check
+  behind it; this replaces DistilBERT. The residual risk: a nude whose text says nothing can't be caught from text,
+  and the safety section (#614) lists nudes Jev misses even with their text.
 - **Standard search:** don't serve indexed images yet. Indexed as plain pages, they leave the index intact but
   judge slightly worse (−0.27, n = 11) on the arm closest to production. If they are indexed, use the file name
   and description only, cap them per list and settle the gate-rejected question first.
@@ -342,7 +342,5 @@ here they make standard search slightly worse. If they are indexed:
   - Build Seed Search's image request, run in parallel with Staan.
   - Serve the strip in the UI with attribution and licence.
   - Set the Jev latency budget for the extra questions.
-  - Choose a pixel safety layer.
   - Add a minimum relevance or a check against the top result for wrong-sense strips.
-  - If indexing goes ahead: the image flag, the per-list cap, the gate decision, and a test on a
-    production-sized index.
+  - If indexing goes ahead: the image flag, the per-list cap, the gate decision, and a production-sized test.
