@@ -19,6 +19,7 @@ from django.conf import settings
 from PIL import Image, UnidentifiedImageError
 
 from mwmbl.imagesearch.commons import ALLOWED_THUMBNAIL_HOSTS, SourceRejectedRequest, get_with_backoff
+from mwmbl.imagesearch.session_options import cpu_options
 from mwmbl.imagesearch.types import Verdict
 
 INPUT_SIZE = 320
@@ -65,10 +66,10 @@ Image.MAX_IMAGE_PIXELS = 4_000_000
 
 class PixelSafetyClassifier:
     def __init__(self, model_dir: Path):
-        options = onnxruntime.SessionOptions()
-        options.log_severity_level = 3
         self.session = onnxruntime.InferenceSession(
-            str(model_dir / "nudenet" / "320n.onnx"), options, providers=["CPUExecutionProvider"]
+            str(model_dir / "nudenet" / "320n.onnx"),
+            cpu_options(settings.IMAGE_SEARCH_PIXEL_THREADS),
+            providers=["CPUExecutionProvider"],
         )
         self.input_name = self.session.get_inputs()[0].name
 

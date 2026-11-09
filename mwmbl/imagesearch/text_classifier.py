@@ -12,11 +12,15 @@ from pathlib import Path
 import numpy as np
 import onnxruntime
 from django.conf import settings
-from tokenizers import Tokenizer
+from tokenizers import Encoding, Tokenizer
 
+from mwmbl.imagesearch.session_options import cpu_options
 from mwmbl.imagesearch.types import Verdict
 
 MAX_TOKENS = 128
+# Smaller batches ran faster than larger ones when measured: attention cost grows with the square
+# of the length, and a bigger batch has more length spread to pad.
+BATCH_SIZE = 8
 # Words, not tokens, so a text can be split without tokenizing it twice. Sixty words fit in 128
 # tokens for ordinary text; a chunk that does not is caught as overflowing and made UNCERTAIN.
 WORDS_PER_CHUNK = 60
@@ -35,20 +39,38 @@ class TextSafetyClassifier:
         labels = json.loads((text_dir / "labels.json").read_text())
         self.nsfw_index = next(int(index) for index, label in labels.items() if label.lower() == NSFW_LABEL)
 
-        options = onnxruntime.SessionOptions()
-        options.log_severity_level = 3
         self.session = onnxruntime.InferenceSession(
-            str(text_dir / "model.onnx"), options, providers=["CPUExecutionProvider"]
+            str(text_dir / "model.onnx"),
+            cpu_options(settings.IMAGE_SEARCH_TEXT_THREADS),
+            providers=["CPUExecutionProvider"],
         )
+
+    def nsfw_probabilities(self, encodings: list[Encoding]) -> np.ndarray:
+        """Each chunk's NSFW probability, run in small batches of similar length.
+
+        The tokenizer pads every chunk to the longest in the call, but most chunks are far shorter than
+        that, and the model's cost grows with the padded length. Sorting by length and trimming each batch
+        to its longest chunk drops the padding without changing a chunk's logits, since padding is masked.
+        """
+        input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+        attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+        lengths = attention_mask.sum(axis=1)
+        order = np.argsort(lengths, kind="stable")
+
+        probabilities = np.empty(len(encodings))
+        for start in range(0, len(order), BATCH_SIZE):
+            rows = order[start : start + BATCH_SIZE]
+            width = lengths[rows].max()
+            inputs = {"input_ids": input_ids[rows, :width], "attention_mask": attention_mask[rows, :width]}
+            (logits,) = self.session.run(["logits"], inputs)
+            shifted = logits - logits.max(axis=1, keepdims=True)
+            batch_probabilities = np.exp(shifted) / np.exp(shifted).sum(axis=1, keepdims=True)
+            probabilities[rows] = batch_probabilities[:, self.nsfw_index]
+        return probabilities
 
     def chunk_verdicts(self, chunks: list[str]) -> list[Verdict]:
         encodings = self.tokenizer.encode_batch(chunks)
-        input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
-        attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
-        (logits,) = self.session.run(["logits"], {"input_ids": input_ids, "attention_mask": attention_mask})
-        shifted = logits - logits.max(axis=1, keepdims=True)
-        probabilities = np.exp(shifted) / np.exp(shifted).sum(axis=1, keepdims=True)
-        nsfw_probabilities = probabilities[:, self.nsfw_index]
+        nsfw_probabilities = self.nsfw_probabilities(encodings)
         return [
             # A chunk the model could not read in full is not one it can vouch for.
             Verdict.UNCERTAIN if encoding.overflowing else verdict_for_probability(float(probability))

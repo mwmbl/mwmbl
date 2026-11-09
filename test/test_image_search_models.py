@@ -16,7 +16,13 @@ from tokenizers import Tokenizer, models, pre_tokenizers, processors
 
 from mwmbl.imagesearch import pipeline, pixel_classifier, text_classifier
 from mwmbl.imagesearch.pixel_classifier import BOX_VALUES, CLASS_NAMES, INPUT_SIZE, PixelSafetyClassifier
-from mwmbl.imagesearch.text_classifier import MAX_CHUNKS, MAX_TOKENS, WORDS_PER_CHUNK, TextSafetyClassifier
+from mwmbl.imagesearch.text_classifier import (
+    BATCH_SIZE,
+    MAX_CHUNKS,
+    MAX_TOKENS,
+    WORDS_PER_CHUNK,
+    TextSafetyClassifier,
+)
 from mwmbl.imagesearch.types import Verdict
 
 SAFE_WORD, BAD_WORD, MAYBE_WORD, FILLER = 1, 2, 3, 4
@@ -31,8 +37,11 @@ NSFW_LOGITS = [-5.0, 5.0]
 class FakeTextSession:
     """Reads the words as a rule: 'bad' makes a text NSFW, 'maybe' uncertain, anything else safe."""
 
+    options_seen: list = []
+    batch_shapes: list = []
+
     def __init__(self, path, options, providers):
-        pass
+        self.options_seen.append(options)
 
     def run(self, output_names, inputs):
         def logits_for(ids):
@@ -41,6 +50,8 @@ class FakeTextSession:
             return UNCERTAIN_LOGITS if MAYBE_WORD in ids else SAFE_LOGITS
 
         assert output_names == ["logits"]
+        assert inputs["input_ids"].shape == inputs["attention_mask"].shape
+        self.batch_shapes.append(inputs["input_ids"].shape)
         return [np.array([logits_for(row) for row in inputs["input_ids"]])]
 
 
@@ -56,6 +67,8 @@ def text_model_dir(tmp_path, monkeypatch):
     )
     tokenizer.save(str(text_dir / "tokenizer.json"))
     (text_dir / "labels.json").write_text(json.dumps({"0": "safe", "1": "nsfw"}))
+    FakeTextSession.options_seen = []
+    FakeTextSession.batch_shapes = []
     monkeypatch.setattr(text_classifier.onnxruntime, "InferenceSession", FakeTextSession)
     return tmp_path
 
@@ -100,6 +113,29 @@ def test_each_text_keeps_its_own_verdict_when_batched_with_others(text_model):
     assert text_model.classify(texts) == [Verdict.NSFW, Verdict.UNCERTAIN, Verdict.SAFE, Verdict.UNCERTAIN]
 
 
+def test_text_model_trims_padding_and_keeps_each_verdict_in_the_order_given(text_model):
+    # Lengths run from 3 tokens to 25, and the NSFW texts are spread across short and long.
+    texts = [("safe " * count).strip() + (" bad" if count % 4 == 0 else "") for count in range(1, 24)]
+    expected = [Verdict.NSFW if count % 4 == 0 else Verdict.SAFE for count in range(1, 24)]
+
+    assert text_model.classify(texts) == expected
+
+    shapes = FakeTextSession.batch_shapes
+    assert sum(rows for rows, _ in shapes) == len(texts)
+    assert all(rows <= BATCH_SIZE for rows, _ in shapes)
+    longest_text_tokens = 23 + 2
+    assert max(width for _, width in shapes) == longest_text_tokens
+    # Sorted by length, so the first batch holds the shortest texts and is not padded to the longest.
+    assert shapes[0][1] < longest_text_tokens
+
+
+def test_text_model_session_uses_the_configured_threads(text_model_dir, settings):
+    settings.IMAGE_SEARCH_TEXT_THREADS = 3
+    TextSafetyClassifier(text_model_dir)
+    (options,) = FakeTextSession.options_seen
+    assert options.intra_op_num_threads == 3
+
+
 # Pixel model
 
 
@@ -111,9 +147,10 @@ def fake_pixel_session(**scores_by_class):
 
     class FakePixelSession:
         inputs_seen: list = []
+        options_seen: list = []
 
         def __init__(self, path, options, providers):
-            pass
+            self.options_seen.append(options)
 
         def get_inputs(self):
             return [SimpleNamespace(name="images")]
@@ -123,6 +160,7 @@ def fake_pixel_session(**scores_by_class):
             return [output]
 
     FakePixelSession.inputs_seen = []
+    FakePixelSession.options_seen = []
     return FakePixelSession
 
 
@@ -143,6 +181,13 @@ def test_pixel_model_reads_its_scores_as_a_verdict(monkeypatch, tmp_path):
     assert pixel_model(monkeypatch, tmp_path, FEMALE_BREAST_EXPOSED=0.9).classify_bytes(data) is Verdict.NSFW
     assert pixel_model(monkeypatch, tmp_path, BUTTOCKS_COVERED=0.8).classify_bytes(data) is Verdict.UNCERTAIN
     assert pixel_model(monkeypatch, tmp_path, FACE_FEMALE=1.0).classify_bytes(data) is Verdict.SAFE
+
+
+def test_pixel_model_session_uses_the_configured_threads(monkeypatch, tmp_path, settings):
+    settings.IMAGE_SEARCH_PIXEL_THREADS = 1
+    classifier = pixel_model(monkeypatch, tmp_path)
+    (options,) = type(classifier.session).options_seen
+    assert options.intra_op_num_threads == 1
 
 
 def test_pixel_input_is_a_padded_square_in_the_models_layout(monkeypatch, tmp_path):

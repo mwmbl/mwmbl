@@ -498,6 +498,11 @@ IMAGE_SEARCH_TEXT_UNCERTAIN_THRESHOLD = 0.02
 # covered one at or above the second makes the image uncertain.
 IMAGE_SEARCH_PIXEL_EXPOSED_THRESHOLD = 0.2
 IMAGE_SEARCH_PIXEL_COVERED_THRESHOLD = 0.6
+# ONNX Runtime threads per model session, which trade a search's latency against the CPU it uses. NudeNet
+# is small and already runs in parallel across the thumbnail workers, so it needs one thread each; the
+# text model runs once per search and is the expensive step, so it gets a couple.
+IMAGE_SEARCH_TEXT_THREADS = 2
+IMAGE_SEARCH_PIXEL_THREADS = 1
 IMAGE_SEARCH_THUMBNAIL_MAX_BYTES = 1_000_000
 IMAGE_SEARCH_MAX_RESULTS = 30
 IMAGE_SEARCH_TOP_IMAGE_CANDIDATES = 10
