@@ -60,12 +60,13 @@ fn main() {
             if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
                 let path = format!("{GITHUB_URL}/mac_arm64");
                 if !std::fs::exists(format!("{deps_path}/libxgboost.dylib")).unwrap() {
+                    // libxgboost.dylib last: its presence is what marks the download as done.
+                    web_copy(&format!("{path}/libdmlc.a"), &format!("{deps_path}/libdmlc.a")).unwrap();
                     web_copy(
                         &format!("{path}/libxgboost.dylib"),
                         &format!("{deps_path}/libxgboost.dylib"),
                     )
                     .unwrap();
-                    web_copy(&format!("{path}/libdmlc.a"), &format!("{deps_path}/libdmlc.a")).unwrap();
                 }
             } else if cfg!(target_os = "linux") {
                 let path = if cfg!(target_arch = "aarch64") {
@@ -74,8 +75,9 @@ fn main() {
                     format!("{GITHUB_URL}/linux_amd64")
                 };
                 if !std::fs::exists(format!("{deps_path}/libxgboost.so")).unwrap() {
-                    web_copy(&format!("{path}/libxgboost.so"), &format!("{deps_path}/libxgboost.so")).unwrap();
+                    // libxgboost.so last: its presence is what marks the download as done.
                     web_copy(&format!("{path}/libdmlc.a"), &format!("{deps_path}/libdmlc.a")).unwrap();
+                    web_copy(&format!("{path}/libxgboost.so"), &format!("{deps_path}/libxgboost.so")).unwrap();
                 }
             } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
                 let path = format!("{GITHUB_URL}/win_amd64");
@@ -143,9 +145,35 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[cfg(feature = "use_prebuilt_xgb")]
 fn web_copy(web_src: &str, target: &str) -> Result<()> {
+    // mwmbl patch: retry, reject non-2xx responses, and write via a temp file + rename. The
+    // upstream version wrote whatever came back (e.g. a "504 Gateway Time-out" HTML page) to
+    // libxgboost.so; the file then "existed", so later builds skipped the download and the
+    // linker failed with "unknown directive: <".
     dbg!(&web_src);
-    let resp = reqwest::blocking::get(web_src)?;
-    let body = resp.bytes()?;
-    std::fs::write(target, &body)?;
-    Ok(())
+    const ATTEMPTS: u32 = 4;
+    let mut last_err: Box<dyn std::error::Error> = "no attempts made".into();
+    for attempt in 1..=ATTEMPTS {
+        match download(web_src) {
+            Ok(body) => {
+                let tmp = format!("{target}.part");
+                std::fs::write(&tmp, &body)?;
+                std::fs::rename(&tmp, target)?;
+                return Ok(());
+            }
+            Err(e) => {
+                println!("cargo:warning=download of {web_src} failed (attempt {attempt}/{ATTEMPTS}): {e}");
+                last_err = e;
+                if attempt < ATTEMPTS {
+                    std::thread::sleep(std::time::Duration::from_secs(2u64.pow(attempt)));
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
+
+#[cfg(feature = "use_prebuilt_xgb")]
+fn download(web_src: &str) -> Result<Vec<u8>> {
+    let body = reqwest::blocking::get(web_src)?.error_for_status()?.bytes()?;
+    Ok(body.to_vec())
 }
