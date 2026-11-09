@@ -2,7 +2,7 @@
 
 One NSFW request covers a query's candidates (up to 20); one image-need request sees its web top ten. Responses
 are cached by body, as `jev_order` caches them, and each request's latency is recorded with its scores. Queries
-already in an output file are skipped, so a run resumes and latencies are those of real calls.
+already in an output file are skipped, so a run resumes; a response read from the cache has a null latency.
 """
 
 import time
@@ -14,7 +14,7 @@ from django.conf import settings
 django.setup()
 
 from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
-from mwmbl.rankeval.evaluation.jev_order import cached_response  # noqa: E402
+from mwmbl.rankeval.evaluation.jev_order import cached_response, response_cache_path  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
 from mwmbl.rankeval.seed_images.jev_images import need_request, need_score, nsfw_request, scores  # noqa: E402
@@ -25,10 +25,12 @@ NSFW_PATH = SEED_IMAGES_DIR / "jev_nsfw.jsonl"
 NEED_PATH = SEED_IMAGES_DIR / "jev_need.jsonl"
 
 
-def timed_response(body: dict) -> tuple[dict, float]:
+def timed_response(body: dict) -> tuple[dict, float | None]:
+    from_cache = response_cache_path(body, CACHE_DIR).exists()
     start = time.monotonic()
     response = cached_response(body, CACHE_DIR)
-    return response, time.monotonic() - start
+    latency = time.monotonic() - start
+    return response, None if from_cache else latency
 
 
 def score_nsfw(query: str) -> dict:

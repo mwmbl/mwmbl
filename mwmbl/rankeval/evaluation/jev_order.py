@@ -56,8 +56,12 @@ def call_jev(body: dict) -> dict:
     return response.json()
 
 
+def response_cache_path(body: dict, work: Path) -> Path:
+    return work / (sha1(json.dumps(body, sort_keys=True).encode()).hexdigest() + ".json")
+
+
 def cached_response(body: dict, work: Path) -> dict:
-    cache_path = work / (sha1(json.dumps(body, sort_keys=True).encode()).hexdigest() + ".json")
+    cache_path = response_cache_path(body, work)
     if cache_path.exists():
         return json.loads(cache_path.read_text())
     response = call_jev(body)
