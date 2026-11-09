@@ -92,6 +92,12 @@ def need_request(query: str, web_titles: list[str]) -> dict:
     return {"model": settings.JEV_MODEL, "state": state, "questions": need_question(web_titles)}
 
 
+def relevance_request(query: str, images: list[SourceImage]) -> dict:
+    state = {"query": query, "searcher": SEARCHER}
+    questions = image_questions("i", images, IMAGE_RELEVANCE_QUESTION, IMAGE_RELEVANCE_CRITERIA)
+    return {"model": settings.JEV_MODEL, "state": state, "questions": questions}
+
+
 def combined_request(query: str, documents: list[Document], web_titles: list[str], images: list[SourceImage]) -> dict:
     # The need question sees the served top ten's titles, which the pool's order is not yet.
     web = jev_request(query, documents)
