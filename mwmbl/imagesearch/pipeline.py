@@ -5,7 +5,8 @@ image is shown only if each of them says SAFE:
 
 1. the query itself is not sexual (rules, then the text classifier);
 2. the image's text (title, description, categories) passes the deterministic rules;
-3. NudeNet finds no exposed body parts in a thumbnail that is fetched, scored and discarded.
+3. NudeNet finds no exposed body parts in a thumbnail that is fetched, scored and discarded;
+4. when enabled, the zero-shot layer finds no nudity in the same thumbnail, art included.
 
 The text classifier does not read image text: measured against hand-verified nudes it caught none
 that the rules missed, excluded 4-8% of safe images, and was the largest CPU cost of a search (see
@@ -35,6 +36,7 @@ from mwmbl.imagesearch.commons import new_client, search_commons
 from mwmbl.imagesearch.pixel_classifier import PixelSafetyClassifier, fetch_thumbnail
 from mwmbl.imagesearch.text_classifier import TextSafetyClassifier
 from mwmbl.imagesearch.types import ApprovedImage, SourceImage, Verdict
+from mwmbl.imagesearch.zero_shot_classifier import ZeroShotSafetyClassifier
 
 SOURCE_NAME = "wikimedia-commons"
 CACHE_KEY_PREFIX = "imagesearch:v1:"
@@ -52,6 +54,11 @@ def text_classifier() -> TextSafetyClassifier:
 @lru_cache(maxsize=1)
 def pixel_classifier() -> PixelSafetyClassifier:
     return PixelSafetyClassifier(settings.IMAGE_SEARCH_MODEL_DIR)
+
+
+@lru_cache(maxsize=1)
+def zero_shot_classifier() -> ZeroShotSafetyClassifier:
+    return ZeroShotSafetyClassifier(settings.IMAGE_SEARCH_MODEL_DIR)
 
 
 def normalise_query(query: str) -> str:
@@ -76,38 +83,68 @@ def pass_text_checks(images: list[SourceImage]) -> list[SourceImage]:
     return [image for image in images if rules.image_verdict(image) is Verdict.SAFE]
 
 
-def pixel_verdict(client: httpx.Client, image: SourceImage) -> Verdict:
+def pixel_layers() -> dict:
+    """The classifiers that judge a thumbnail, by the name that keys each one's cached verdicts."""
+    layers = {"pixel": pixel_classifier()}
+    mode = settings.IMAGE_SEARCH_ZERO_SHOT
+    if mode == "enforce":
+        layers["zero-shot"] = zero_shot_classifier()
+    elif mode != "off":
+        raise ValueError(f"IMAGE_SEARCH_ZERO_SHOT must be 'off' or 'enforce', not {mode!r}")
+    return layers
+
+
+def file_id(image: SourceImage) -> str:
+    return f"{image.sha1}:{image.thumbnail_width}"
+
+
+def classify_thumbnail(client: httpx.Client, image: SourceImage, layers: dict, names: list[str]) -> dict[str, Verdict]:
+    """The named layers' verdicts on one image; its thumbnail is fetched once for all of them."""
     data = fetch_thumbnail(client, image.thumbnail_url)
     if data is None:
-        return Verdict.UNCERTAIN
-    return pixel_classifier().classify_bytes(data)
+        return {name: Verdict.UNCERTAIN for name in names}
+    return {name: layers[name].classify_bytes(data) for name in names}
 
 
 def pass_pixel_checks(client: httpx.Client, images: list[SourceImage]) -> list[SourceImage]:
-    classifier = pixel_classifier()
-    keys = [
-        verdict_cache.cache_key("pixel", classifier.fingerprint, f"{image.sha1}:{image.thumbnail_width}")
-        for image in images
-    ]
-    known = verdict_cache.get_verdicts(keys)
-    unknown = {key: image for key, image in zip(keys, images) if key not in known}
+    """The images every pixel layer calls SAFE. Each layer's verdicts are cached on their own, so turning one
+    on or off, or changing its model or threshold, leaves the other's cached verdicts valid."""
+    layers = pixel_layers()
+    files = {file_id(image): image for image in images}
+    keys = {
+        name: {file: verdict_cache.cache_key(name, layer.fingerprint, file) for file in files}
+        for name, layer in layers.items()
+    }
+    cached = {}
+    for name in layers:
+        remembered = verdict_cache.get_verdicts(list(keys[name].values()))
+        cached[name] = {file: remembered[key] for file, key in keys[name].items() if key in remembered}
+    missing = {file: names for file in files if (names := [n for n in layers if file not in cached[n]])}
+
     with ThreadPoolExecutor(max_workers=THUMBNAIL_FETCH_WORKERS) as pool:
-        checked = dict(zip(unknown, pool.map(lambda image: pixel_verdict(client, image), unknown.values())))
+        results = pool.map(lambda file: classify_thumbnail(client, files[file], layers, missing[file]), missing)
+        checked = dict(zip(missing, results))
 
     # An UNCERTAIN verdict may only mean the thumbnail did not download or decode this time, so only
     # a verdict the model reached on a whole image is kept. Nor is one for a file that was only just
     # uploaded: Wikimedia can keep serving the previous file's thumbnail for a while after a
     # replacement, and a verdict on that must not be filed under the new file's SHA-1.
     settled_before = datetime.now(timezone.utc) - timedelta(seconds=settings.IMAGE_SEARCH_VERDICT_MIN_FILE_AGE_SECONDS)
-    verdict_cache.put_verdicts(
-        {
-            key: verdict
-            for key, verdict in checked.items()
-            if verdict is not Verdict.UNCERTAIN and unknown[key].uploaded_at <= settled_before
-        }
-    )
-    verdicts = known | checked
-    return [image for key, image in zip(keys, images) if verdicts[key] is Verdict.SAFE]
+    for name in layers:
+        verdict_cache.put_verdicts(
+            {
+                keys[name][file]: verdicts[name]
+                for file, verdicts in checked.items()
+                if name in verdicts
+                and verdicts[name] is not Verdict.UNCERTAIN
+                and files[file].uploaded_at <= settled_before
+            }
+        )
+
+    def verdict(name: str, file: str) -> Verdict:
+        return cached[name][file] if file in cached[name] else checked[file][name]
+
+    return [image for image in images if all(verdict(name, file_id(image)) is Verdict.SAFE for name in layers)]
 
 
 def approve(image: SourceImage) -> ApprovedImage:

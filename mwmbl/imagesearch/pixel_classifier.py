@@ -63,6 +63,8 @@ COVERED_INDEXES = [i for i, name in enumerate(CLASS_NAMES) if name in COVERED_CL
 
 # Decoding a hostile image can allocate a lot; a 320px thumbnail never needs this much.
 Image.MAX_IMAGE_PIXELS = 4_000_000
+# A thumbnail that fails to decode is not one a model can vouch for.
+THUMBNAIL_DECODE_ERRORS = (UnidentifiedImageError, OSError, Image.DecompressionBombError)
 
 
 class PixelSafetyClassifier:
@@ -108,7 +110,7 @@ class PixelSafetyClassifier:
         try:
             thumbnail = Image.open(io.BytesIO(data))
             scores = self.best_scores(thumbnail)
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        except THUMBNAIL_DECODE_ERRORS:
             return Verdict.UNCERTAIN
         return verdict_for_scores(scores)
 

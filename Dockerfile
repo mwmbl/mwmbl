@@ -55,7 +55,7 @@ RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
 FROM base as image-safety-models
 
 # Image search's safety models (see scripts/export_image_safety_models.py). This stage is the
-# only one that needs torch, and only to export the text model to ONNX; the final stage copies
+# only one that needs torch, and only to export the text and zero-shot models to ONNX; the final stage copies
 # the exported files and nothing else, so the image ships onnxruntime, not torch. It depends
 # on nothing but the script, so it stays cached until the script changes.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv

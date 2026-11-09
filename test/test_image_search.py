@@ -109,6 +109,19 @@ class FakePixels:
         return self.verdict
 
 
+class FakeZeroShot(FakePixels):
+    fingerprint = "fake-zero-shot-model"
+
+
+@pytest.fixture
+def fake_zero_shot(monkeypatch, settings, fake_models):
+    """The zero-shot layer switched on, with a fake model. The NudeNet fake is `fake_models`."""
+    settings.IMAGE_SEARCH_ZERO_SHOT = "enforce"
+    zero_shot = FakeZeroShot()
+    monkeypatch.setattr(pipeline, "zero_shot_classifier", lambda: zero_shot)
+    return zero_shot
+
+
 @pytest.fixture
 def fake_models(monkeypatch):
     pixels = FakePixels()
@@ -667,6 +680,109 @@ def test_only_verdicts_are_stored(monkeypatch, fake_models):
     assert all("distinctive" not in repr(value) for value in stored)
 
 
+# Zero-shot layer
+
+
+def test_the_zero_shot_layer_is_off_unless_enabled(monkeypatch, fake_models):
+    def not_loaded():
+        raise AssertionError("the zero-shot model must not be loaded while the layer is off")
+
+    monkeypatch.setattr(pipeline, "zero_shot_classifier", not_loaded)
+    stub_commons(monkeypatch, [make_image()])
+    assert len(pipeline.search_images("red panda", 10)) == 1
+
+
+def test_an_unknown_zero_shot_mode_fails_loudly(monkeypatch, settings, fake_models):
+    settings.IMAGE_SEARCH_ZERO_SHOT = "shadow-ish"
+    stub_commons(monkeypatch, [make_image()])
+    with pytest.raises(ValueError, match="IMAGE_SEARCH_ZERO_SHOT"):
+        pipeline.search_images("red panda", 10)
+
+
+def test_the_zero_shot_layer_can_veto_what_nudenet_passed(monkeypatch, fake_models, fake_zero_shot):
+    fake_zero_shot.verdict = Verdict.NSFW
+    stub_commons(monkeypatch, [make_image()])
+    assert pipeline.search_images("art", 10) == []
+    assert fake_models.seen == 1 and fake_zero_shot.seen == 1
+
+
+@pytest.mark.parametrize("zero_shot_verdict", [Verdict.NSFW, Verdict.UNCERTAIN])
+def test_an_image_needs_every_pixel_layer_to_say_safe(monkeypatch, fake_models, fake_zero_shot, zero_shot_verdict):
+    stub_commons(monkeypatch, [make_image("both.jpg", 1)])
+    assert [a.title for a in pipeline.search_images("first", 10)] == ["both.jpg"]
+
+    fake_zero_shot.verdict = zero_shot_verdict
+    stub_commons(monkeypatch, [make_image("other.jpg", 1, sha1="a-different-file")])
+    assert pipeline.search_images("second", 10) == []
+    fake_models.verdict = Verdict.NSFW
+    fake_zero_shot.verdict = Verdict.SAFE
+    stub_commons(monkeypatch, [make_image("third.jpg", 1, sha1="a-third-file")])
+    assert pipeline.search_images("third", 10) == []
+
+
+def test_the_thumbnail_is_fetched_once_for_all_the_layers(monkeypatch, fake_models, fake_zero_shot):
+    fetched = []
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", lambda client, url: fetched.append(url) or b"bytes")
+    stub_commons(monkeypatch, [make_image("a.jpg", 1), make_image("b.jpg", 2)])
+    assert len(pipeline.search_images("red panda", 10)) == 2
+    assert len(fetched) == 2
+    assert fake_models.seen == fake_zero_shot.seen == 2
+
+
+def test_each_layers_verdicts_are_cached_on_their_own(monkeypatch, settings, fake_models, fake_zero_shot):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    assert fake_models.seen == fake_zero_shot.seen == 1
+
+    # Turning the layer off reuses NudeNet's cached verdict; turning it back on reuses the zero-shot one.
+    settings.IMAGE_SEARCH_ZERO_SHOT = "off"
+    pipeline.search_images("second", 10)
+    settings.IMAGE_SEARCH_ZERO_SHOT = "enforce"
+    pipeline.search_images("third", 10)
+    assert fake_models.seen == fake_zero_shot.seen == 1
+
+
+def test_changing_the_zero_shot_model_or_threshold_leaves_nudenets_cached_verdicts_valid(
+    monkeypatch, fake_models, fake_zero_shot
+):
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    FakeZeroShot.fingerprint = "a-retuned-zero-shot-model"
+    try:
+        pipeline.search_images("second", 10)
+    finally:
+        FakeZeroShot.fingerprint = "fake-zero-shot-model"
+    assert fake_models.seen == 1
+    assert fake_zero_shot.seen == 2
+
+
+def test_a_zero_shot_verdict_that_excludes_an_image_is_remembered(monkeypatch, fake_models, fake_zero_shot):
+    fake_zero_shot.verdict = Verdict.NSFW
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    fake_zero_shot.verdict = Verdict.SAFE
+    # The earlier verdict stands for the same file; it is not judged again.
+    assert pipeline.search_images("second", 10) == []
+    assert fake_zero_shot.seen == 1
+
+
+def test_an_uncertain_zero_shot_verdict_is_not_remembered(monkeypatch, fake_models, fake_zero_shot):
+    fake_zero_shot.verdict = Verdict.UNCERTAIN
+    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
+    pipeline.search_images("first", 10)
+    fake_zero_shot.verdict = Verdict.SAFE
+    assert len(pipeline.search_images("second", 10)) == 1
+    assert fake_zero_shot.seen == 2
+    assert fake_models.seen == 1  # NudeNet's SAFE was kept; only the zero-shot layer was asked again
+
+
+def test_a_failed_thumbnail_fetch_excludes_the_image_from_every_layer(monkeypatch, fake_models, fake_zero_shot):
+    monkeypatch.setattr(pipeline, "fetch_thumbnail", lambda client, url: None)
+    stub_commons(monkeypatch, [make_image()])
+    assert pipeline.search_images("red panda", 10) == []
+    assert fake_models.seen == fake_zero_shot.seen == 0
+
+
 # Top image
 
 
@@ -765,3 +881,21 @@ def test_top_endpoint_is_503_when_the_source_is_unavailable(client, monkeypatch,
 
     monkeypatch.setattr(pipeline, "search_commons", search)
     assert client.get("/api/v2/image-search/top/", {"q": "red panda"}).status_code == 503
+
+
+# The real zero-shot model, skipped when it has not been built.
+
+ZERO_SHOT_BUILT = (Path(settings.IMAGE_SEARCH_MODEL_DIR) / "zero_shot" / "model.onnx").exists()
+
+
+@pytest.mark.skipif(not ZERO_SHOT_BUILT, reason="the zero-shot model has not been built")
+def test_real_zero_shot_model_runs_on_a_jpeg():
+    from mwmbl.imagesearch.zero_shot_classifier import ZeroShotSafetyClassifier
+
+    classifier = ZeroShotSafetyClassifier(settings.IMAGE_SEARCH_MODEL_DIR)
+    buffer = io.BytesIO()
+    Image.new("RGB", (320, 213), (120, 160, 90)).save(buffer, format="JPEG")
+    # Blank images are not a fair test of the verdict: with no safe prompt for them, a solid black one scores
+    # high. This only checks that the exported model, embeddings and preprocessing fit together.
+    assert 0.0 <= classifier.nude_probability(Image.open(io.BytesIO(buffer.getvalue()))) <= 1.0
+    assert classifier.classify_bytes(b"not an image") is Verdict.UNCERTAIN
