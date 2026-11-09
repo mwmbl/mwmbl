@@ -3,10 +3,12 @@
 Gate: AUC of each gate signal against reference need >= 2, and a cross-validated threshold's precision and
 recall. Ranking: NDCG@k of Jev relevance, Commons rank and a cross-validated mix of the two, over each sampled
 query's labelled candidates, then how text labels agree with the vision spot-check, then what each choice of
-k and minimum Jev relevance would show. Prints markdown tables.
+k and minimum Jev relevance would show. Headline figures get 95% intervals from resampling queries with
+replacement. Prints markdown tables.
 """
 
 import json
+from collections.abc import Callable
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -30,6 +32,20 @@ INTENTS_WANTING_IMAGES = {"entity", "local"}
 RECOMMENDED_K = 4
 RECOMMENDED_MIN_RELEVANCE = 1.5
 RECOMMENDED_PATH = GATE_DIR / "recommended.json"
+BOOTSTRAP_SAMPLES = 2000
+
+
+def bootstrap_interval(statistic: Callable[[np.ndarray], float], units: int) -> tuple[float, float]:
+    """The 95% percentile interval of `statistic` over resamples, with replacement, of `units` query indices."""
+    rng = np.random.default_rng(SEED)
+    values = [statistic(rng.integers(0, units, units)) for _ in range(BOOTSTRAP_SAMPLES)]
+    low, high = np.percentile(values, [2.5, 97.5])
+    return float(low), float(high)
+
+
+def interval_text(statistic: Callable[[np.ndarray], float], units: int) -> str:
+    low, high = bootstrap_interval(statistic, units)
+    return f"[{low:.3f}, {high:.3f}]"
 
 
 def gate_stats(gated_in: np.ndarray, positives: np.ndarray) -> dict:
@@ -135,6 +151,17 @@ def analyse_gate() -> tuple[float, dict[str, set[str]]]:
         gated_in = scores.astype(bool) if scores.dtype == bool else cross_validated_gate(scores, positives)
         stats = gate_stats(gated_in, positives)
         print(f"| {name} | {auc:.3f} | {stats['share']:.1%} | {stats['precision']:.3f} | {stats['recall']:.3f} |")
+    jev_scores, intent_scores = signals["Jev need"], signals["Pass-1 intent entity/local"].astype(float)
+
+    def auc_of(scores: np.ndarray) -> Callable[[np.ndarray], float]:
+        return lambda sample: roc_auc_score(positives[sample], scores[sample])
+
+    def auc_difference(sample: np.ndarray) -> float:
+        return auc_of(jev_scores)(sample) - auc_of(intent_scores)(sample)
+
+    units = len(ordered)
+    print(f"\nAUC 95% intervals: Jev need {interval_text(auc_of(jev_scores), units)}, intent ", end="")
+    print(f"{interval_text(auc_of(intent_scores), units)}, Jev minus intent {interval_text(auc_difference, units)}")
     threshold = best_threshold(signals["Jev need"], positives)
     print(f"\nJev need threshold on all train queries: {threshold:.2f}\n")
     query_sets = {
@@ -142,6 +169,23 @@ def analyse_gate() -> tuple[float, dict[str, set[str]]]:
         f"Jev need >= {threshold:.2f}": {query for query in ordered if jev_need[query] >= threshold},
     }
     return float(threshold), query_sets
+
+
+def ndcg_intervals(pools: list[list[dict]]) -> None:
+    """Intervals for Jev relevance's and Commons rank's mean NDCG@k, and their paired difference."""
+    scorable = [pool for pool in pools if ndcg([image["relevance"] for image in pool], 1) is not None]
+    for k in NDCG_KS:
+        per_query = {
+            name: np.array([ndcg([image["relevance"] for image in mix_order(pool, weight)], k) for pool in scorable])
+            for name, weight in (("Jev", 0.0), ("Commons", MIX_WEIGHTS[-1]))
+        }
+        difference = per_query["Jev"] - per_query["Commons"]
+        texts = [
+            interval_text(lambda sample, v=values: v[sample].mean(), len(scorable)) for values in per_query.values()
+        ]
+        print(f"NDCG@{k} 95% intervals: Jev {texts[0]}, Commons {texts[1]}, ", end="")
+        print(f"difference {interval_text(lambda sample: difference[sample].mean(), len(scorable))}")
+    print()
 
 
 def analyse_ranking(query_sets: dict[str, set[str]]) -> None:
@@ -158,6 +202,7 @@ def analyse_ranking(query_sets: dict[str, set[str]]) -> None:
     print("| Order | " + " | ".join(f"NDCG@{k}" for k in NDCG_KS) + " |\n|---|" + "---|" * len(NDCG_KS))
     for name, weight in (("Jev relevance", 0.0), ("Commons rank", MIX_WEIGHTS[-1])):
         print(f"| {name} | " + " | ".join(f"{mean_ndcg(pools, weight, k):.3f}" for k in NDCG_KS) + " |")
+    ndcg_intervals(pools)
     held_out, weights = cross_validated_mix(pools)
     print("| Mix (5-fold CV) | " + " | ".join(f"{held_out[k]:.3f}" for k in NDCG_KS) + f" |\n\nWeights: {weights}\n")
 
@@ -182,6 +227,13 @@ def analyse_ranking(query_sets: dict[str, set[str]]) -> None:
                     f"| {k} | {minimum} | {stats['per_query']:.2f} | {stats['any_shown']:.1%} | "
                     f"{stats['good']:.1%} | {stats['wrong']:.1%} |"
                 )
+        for share in ("good", "wrong"):
+
+            def resampled_share(sample: np.ndarray, share: str = share) -> float:
+                return shown([gated_pools[i] for i in sample], RECOMMENDED_K, RECOMMENDED_MIN_RELEVANCE)[share]
+
+            interval = interval_text(resampled_share, len(gated_pools))
+            print(f"k = {RECOMMENDED_K}, min {RECOMMENDED_MIN_RELEVANCE}: {share} share 95% interval {interval}")
 
 
 def main() -> None:
