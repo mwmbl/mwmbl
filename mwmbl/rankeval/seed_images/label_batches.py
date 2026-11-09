@@ -7,7 +7,8 @@ Three kinds, each with its own manifest mapping item ids to what they label, for
   are written to gate/thumbs/ for the judge to read: a one-off, user-approved exception to keeping them in
   memory only, to delete once the labels are in.
 
-The rubrics are worded independently of the Jev questions, so the labels are an independent reference.
+The rubrics are worded independently of the Jev questions, so the labels are an independent reference. The #610
+labels were made with an earlier wording that called the engine a UK one.
 """
 
 import io
@@ -41,10 +42,9 @@ SEED = 610
 ITEM_MARK = "### "
 
 NEED_RUBRIC = """\
-You are helping evaluate a UK web search engine. For each query below, picture its results page: the ten web \
+You are helping evaluate a web search engine. For each query below, picture its results page: the ten web \
 results listed, plus a small strip of three to five pictures from Wikimedia Commons, the free media library \
-behind Wikipedia. Rate how much that strip would improve the page for a typical person in the UK who typed the \
-query.
+behind Wikipedia. Rate how much that strip would improve the page for a typical person who typed the query.
 
 Commons holds photos of people, places, buildings, animals, plants and objects, maps, diagrams, flags, artworks \
 and historical images. It holds little for software, websites, products for sale, services or current prices. \
@@ -68,7 +68,7 @@ Also give a short reason, a phrase of a few words such as "navigational: wants t
 landmark"."""
 
 RELEVANCE_RUBRIC = """\
-You are helping evaluate a UK web search engine that may show a few pictures from Wikimedia Commons alongside \
+You are helping evaluate a web search engine that may show a few pictures from Wikimedia Commons alongside \
 its web results. For each picture below, rate how good it would be as one of those pictures on the results page \
 for its query. You see each picture's Commons file name, the start of its description and its categories. The \
 first web results for the query are shown to tell you which meaning of an ambiguous query is meant.
@@ -132,6 +132,9 @@ def label_text(image: SourceImage) -> str:
 
 def stratified_sample(scores: dict[str, float], strata: int, total: int, rng: random.Random) -> list[str]:
     """`total` keys, an equal share from each of `strata` equal-sized bands of their score."""
+    if len(scores) < total:
+        # Every band then holds at least its share, so `rng.sample` can't run short.
+        raise ValueError(f"Can't sample {total} keys from {len(scores)}")
     ranked = sorted(scores, key=lambda key: (scores[key], key))
     bands = [ranked[band * len(ranked) // strata : (band + 1) * len(ranked) // strata] for band in range(strata)]
     return [key for band in bands for key in rng.sample(band, total // strata)]
