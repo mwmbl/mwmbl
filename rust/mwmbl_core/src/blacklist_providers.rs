@@ -1,9 +1,30 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::Arc,
+    thread::{sleep, spawn},
+    time::Duration,
+};
 
-use crate::curated_domains::SharedCuratedDomains;
+use anyhow::{self, Ok, bail};
+use reqwest::Client;
+use tokio::{sync::RwLock, task::spawn_blocking};
 
-pub trait BlacklistProvider: Clone {
-    fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool>;
+use crate::{
+    blacklist::domain_and_parents,
+    constants::{
+        BLACKLIST_REFRESH_CHECK_SECONDS, DOMAIN_BLACKLIST_REGEX, EXCLUDED_DOMAINS,
+        NUMBERS_ONLY_REGEX,
+    },
+    hn_top_domains_filtered::DOMAINS,
+};
+extern crate reqwest;
+
+pub trait BlacklistProvider: Clone + Send + Sync {
+    fn is_domain_blacklisted(
+        &self,
+        domain: &str,
+    ) -> impl Future<Output = anyhow::Result<bool>> + Send + Sync;
+    fn refresh(&mut self) -> impl Future<Output = anyhow::Result<()>> + Send + Sync;
 }
 
 #[derive(Clone)]
@@ -17,78 +38,215 @@ impl Default for BuiltInRulesBlacklistProvider {
 
 impl BuiltInRulesBlacklistProvider {
     #[must_use]
-    pub fn new() -> BuiltInRulesBlacklistProvider {
-        BuiltInRulesBlacklistProvider{}
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
 impl BlacklistProvider for BuiltInRulesBlacklistProvider {
-    fn is_domain_blacklisted(&self, _domain: &str) -> anyhow::Result<bool> {
-        todo!()
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+        if EXCLUDED_DOMAINS.contains(domain) {
+            return Ok(true);
+        }
+
+        if DOMAIN_BLACKLIST_REGEX.is_match(domain) {
+            return Ok(true);
+        }
+
+        if DOMAINS.contains_key(domain) {
+            return Ok(true);
+        }
+
+        let domain_parts: Vec<&str> = domain.splitn(3, '.').collect();
+        if let Some(first) = domain_parts.first() {
+            return Ok(domain_parts.len() > 2 && NUMBERS_ONLY_REGEX.is_match(first));
+        }
+        Ok(false)
+    }
+
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
-
-
 #[derive(Clone)]
 pub struct StaticBlacklistProvider {
-    domains: HashSet<String>
+    domains: HashSet<String>,
 }
 
 impl StaticBlacklistProvider {
     #[must_use]
-    pub fn new(domains: HashSet<String>) -> StaticBlacklistProvider {
-        StaticBlacklistProvider{
-            domains
-        }
+    pub fn new(domains: HashSet<String>) -> Self {
+        Self { domains }
     }
 }
 
 impl BlacklistProvider for StaticBlacklistProvider {
-    fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
         Ok(self.domains.contains(domain))
     }
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
-pub struct SnapshotBlacklist<T: BlacklistProvider = BuiltInRulesBlacklistProvider> {
-    redis: redis::Client,
-    built_in_rules: T
+pub struct CombinedBlacklistProvider<T: BlacklistProvider, T2: BlacklistProvider> {
+    a: T,
+    b: T2,
 }
 
-impl<T: BlacklistProvider> SnapshotBlacklist<T> {
-    pub fn new(redis: &redis::Client, built_in_rules: T) -> SnapshotBlacklist<T> {
-        SnapshotBlacklist{
-            redis: redis.clone(),
-            built_in_rules
-        }
+impl<T: BlacklistProvider, T2: BlacklistProvider> CombinedBlacklistProvider<T, T2> {
+    pub fn new(a: T, b: T2) -> Self {
+        Self { a, b }
     }
 }
 
-impl<T: BlacklistProvider> BlacklistProvider for SnapshotBlacklist<T> {
-    fn is_domain_blacklisted(&self, _domain: &str) -> anyhow::Result<bool> {
-        todo!();
+impl<T: BlacklistProvider, T2: BlacklistProvider> BlacklistProvider
+    for CombinedBlacklistProvider<T, T2>
+{
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+        Ok(self.a.is_domain_blacklisted(domain).await?
+            || self.b.is_domain_blacklisted(domain).await?)
+    }
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        self.a.refresh().await?;
+        self.b.refresh().await
     }
 }
-
 
 #[derive(Clone)]
-pub struct CuratedBlacklistProvider<T: BlacklistProvider = SnapshotBlacklist> {
-    parent: T,
-    curated_domains: SharedCuratedDomains
+pub struct RemoteBlacklistProvider {
+    url: String,
+    domains: Option<HashSet<String>>,
 }
 
-impl<T: BlacklistProvider> CuratedBlacklistProvider<T> {
-    pub fn new(parent: T, curated_domains: SharedCuratedDomains) -> CuratedBlacklistProvider<T> {
-        CuratedBlacklistProvider{
-            parent,
-            curated_domains
+impl RemoteBlacklistProvider {
+    #[must_use]
+    pub fn new(url: String) -> Self {
+        Self { url, domains: None }
+    }
+
+    async fn get_blacklisted_domains(&mut self) -> anyhow::Result<&HashSet<String>> {
+        let res = match self.domains.take() {
+            Some(res) => res,
+            None => Self::build_domains(self.url.clone()).await?,
+        };
+        Ok(self.domains.insert(res))
+    }
+
+    async fn build_domains(url: String) -> anyhow::Result<HashSet<String>> {
+        let response = Client::builder()
+            .build()?
+            .get(url)
+            .timeout(Duration::from_mins(1))
+            .send()
+            .await?;
+        let response = response.error_for_status()?;
+
+        let mut domains: HashSet<String> = HashSet::default();
+        for line in response.text().await?.split(' ') {
+            let line = line.split('#').next();
+            if let Some(line) = line {
+                let line = line.trim();
+                let mut it = line.split_whitespace();
+                if let Some(first) = it.next() {
+                    let first = first.trim();
+                    if first == "0.0.0.0" || first == "127.0.0.1" {
+                        if let Some(second) = it.next() {
+                            domains.insert(second.to_owned());
+                        }
+                    } else {
+                        domains.insert(first.to_owned());
+                    }
+                }
+            }
         }
+        Ok(domains)
     }
 }
 
-impl<T: BlacklistProvider> BlacklistProvider for CuratedBlacklistProvider<T> {
-    fn is_domain_blacklisted(&self, _domain: &str) -> anyhow::Result<bool> {
-        todo!();
+impl BlacklistProvider for RemoteBlacklistProvider {
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+        if let Some(domains) = &self.domains {
+            return Ok(domains.contains(domain));
+        }
+        bail!("blacklist was never loaded!");
+    }
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        if self.domains.is_none() {
+            self.get_blacklisted_domains().await?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedSelfRefreshingBlacklistProvider<T: BlacklistProvider> {
+    blacklist: Arc<RwLock<T>>,
+}
+
+impl<T: BlacklistProvider + 'static> SharedSelfRefreshingBlacklistProvider<T> {
+    pub async fn new(blacklist: T) -> anyhow::Result<Self> {
+        let mut shared_blacklist = Self {
+            blacklist: Arc::new(RwLock::new(blacklist)),
+        };
+        let weak = Arc::downgrade(&shared_blacklist.blacklist);
+        shared_blacklist.refresh().await?;
+
+        tokio::spawn(async move {
+            let weak = weak.clone();
+            loop {
+                sleep(Duration::from_secs(BLACKLIST_REFRESH_CHECK_SECONDS));
+                if let Some(blacklist) = weak.upgrade() {
+                    let mut blacklist = blacklist.write().await;
+                    if let Err(err) = blacklist.refresh().await {
+                        println!("Error while refreshing blacklist : {err}");
+                    }
+                } else {
+                    break;
+                }
+            }
+        });
+
+        Ok(shared_blacklist)
+    }
+}
+
+impl<T: BlacklistProvider> BlacklistProvider for SharedSelfRefreshingBlacklistProvider<T> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+        self.blacklist
+            .read()
+            .await
+            .is_domain_blacklisted(domain)
+            .await
+    }
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        self.blacklist.write().await.refresh().await
+    }
+}
+
+#[derive(Clone)]
+pub struct NormalizedBlacklistProvider<T: BlacklistProvider> {
+    blacklist: T,
+}
+
+impl<T: BlacklistProvider> NormalizedBlacklistProvider<T> {
+    pub fn new(blacklist: T) -> Self {
+        Self { blacklist }
+    }
+}
+
+impl<T: BlacklistProvider> BlacklistProvider for NormalizedBlacklistProvider<T> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+        for domain in domain_and_parents(domain) {
+            if self.blacklist.is_domain_blacklisted(&domain).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    async fn refresh(&mut self) -> anyhow::Result<()> {
+        self.blacklist.refresh().await
     }
 }
