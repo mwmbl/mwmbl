@@ -137,19 +137,6 @@ def test_text_model_session_uses_the_configured_threads(text_model_dir, settings
     assert options.intra_op_num_threads == 3
 
 
-def test_text_fingerprint_changes_with_the_model_files_and_the_thresholds(text_model_dir, settings):
-    before = TextSafetyClassifier(text_model_dir).fingerprint
-    assert TextSafetyClassifier(text_model_dir).fingerprint == before
-
-    settings.IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.9
-    assert TextSafetyClassifier(text_model_dir).fingerprint != before
-    settings.IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.5
-    assert TextSafetyClassifier(text_model_dir).fingerprint == before
-
-    (text_model_dir / "text" / "model.onnx").write_bytes(b"a retrained text model")
-    assert TextSafetyClassifier(text_model_dir).fingerprint != before
-
-
 # Pixel model
 
 

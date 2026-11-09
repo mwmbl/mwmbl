@@ -497,7 +497,8 @@ IMAGE_SEARCH_VERDICT_MIN_FILE_AGE_SECONDS = 24 * 60 * 60
 # a mobile carrier) without letting one client run the pipeline in a loop.
 IMAGE_SEARCH_REQUESTS_PER_MINUTE = 30
 # A text classifier probability of NSFW at or above the first is NSFW; at or above the second,
-# but below the first, the image is uncertain. Both are excluded; the split only aids tuning.
+# but below the first, the text is uncertain. Only the query is judged this way now (an image's
+# own text is left to the deny rules), and only an NSFW verdict refuses it.
 IMAGE_SEARCH_TEXT_NSFW_THRESHOLD = 0.5
 IMAGE_SEARCH_TEXT_UNCERTAIN_THRESHOLD = 0.02
 # NudeNet detection scores: an exposed sexual body part at or above the first is NSFW; a

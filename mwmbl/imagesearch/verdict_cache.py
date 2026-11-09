@@ -1,14 +1,13 @@
 """Verdicts remembered per image, so an image that comes up again is not judged again.
 
-The text model is the most expensive step of image search, and the thumbnail fetch and NudeNet
-the next, and the same images turn up in many queries. A cached verdict is only ever reused for
-exactly what was judged, so a hit is as good as running the model:
+The thumbnail fetch and the pixel models are the expensive steps of image search, and the same
+images turn up in many queries. A cached verdict is only ever reused for exactly what was judged,
+so a hit is as good as running the model:
 
-- a text verdict is keyed by the text itself, so an edited description or category is a new key;
 - a pixel verdict is keyed by the file's SHA-1 from Commons, so a file replaced after it was
   approved is a new key and gets a fresh check. This is stronger than keying by thumbnail URL,
   which is not tied to a revision;
-- both keys include a fingerprint of the model files and the settings that decide a verdict,
+- the key includes a fingerprint of the model files and the settings that decide a verdict,
   so retraining a model or moving a threshold makes every old entry unreachable.
 
 A pixel verdict is cached only for a file old enough that its thumbnail cannot still be the previous
@@ -16,7 +15,7 @@ file's (see pipeline.pass_pixel_checks). A SHA-1 collision between a harmless an
 would defeat the pixel key; that is accepted, since it takes an attacker who can craft a collision
 and get both files onto Commons.
 
-Only verdicts are stored, never text or images, and they expire on their own. Redis may drop any
+Only verdicts are stored, never images, and they expire on their own. Redis may drop any
 of them at any time, which costs a re-check and nothing else.
 """
 

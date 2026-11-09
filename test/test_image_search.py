@@ -88,8 +88,6 @@ def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> Sour
 class FakeText:
     """Calls a text unsafe if it contains the word 'risky', uncertain if it contains 'maybe'."""
 
-    fingerprint = "fake-text-model"
-
     def classify(self, texts):
         def verdict(text):
             if "risky" in text:
@@ -436,17 +434,27 @@ def test_safe_image_is_approved(monkeypatch, fake_models):
 
 
 def test_each_layer_can_veto(monkeypatch, fake_models):
-    images = [
-        make_image("ok.jpg", 1),
-        make_image("rules.jpg", 2, categories=("Nude art",)),
-        make_image("text-nsfw.jpg", 3, description="risky"),
-        make_image("text-uncertain.jpg", 4, description="maybe"),
-    ]
+    images = [make_image("ok.jpg", 1), make_image("rules.jpg", 2, categories=("Nude art",))]
     stub_commons(monkeypatch, images)
     titles = [a.title for a in pipeline.search_images("art", 10)]
     assert titles == ["ok.jpg"]
-    # Images failing the text layers never reach the pixel layer, so no thumbnail is fetched for them.
+    # An image failing the rules never reaches the pixel layer, so no thumbnail is fetched for it.
     assert fake_models.seen == 1
+
+
+def test_image_text_is_judged_by_the_rules_not_the_text_classifier(monkeypatch, fake_models):
+    seen = []
+
+    class RecordingText(FakeText):
+        def classify(self, texts):
+            seen.extend(texts)
+            return super().classify(texts)
+
+    monkeypatch.setattr(pipeline, "text_classifier", lambda: RecordingText())
+    # The classifier would call this text NSFW; only the deny rules and the pixel layer judge it now.
+    stub_commons(monkeypatch, [make_image("a.jpg", 1, description="risky")])
+    assert [a.title for a in pipeline.search_images("red panda", 10)] == ["a.jpg"]
+    assert seen == ["a photo of red panda"]
 
 
 @pytest.mark.parametrize("verdict", [Verdict.NSFW, Verdict.UNCERTAIN])
@@ -529,60 +537,6 @@ def test_only_approved_images_are_cached(monkeypatch, fake_models):
 
 
 # Verdict cache
-
-
-class CountingText(FakeText):
-    def __init__(self):
-        self.classified: list[str] = []
-
-    def classify(self, texts):
-        self.classified.extend(texts)
-        return super().classify(texts)
-
-
-@pytest.fixture
-def counting_text(monkeypatch, fake_models):
-    text = CountingText()
-    monkeypatch.setattr(pipeline, "text_classifier", lambda: text)
-    return text
-
-
-def test_an_image_seen_in_another_query_is_not_judged_again(monkeypatch, counting_text, fake_models):
-    stub_commons(monkeypatch, [make_image("a.jpg", 1), make_image("b.jpg", 2)])
-    pipeline.search_images("first query", 10)
-    # A caption for the query is also classified, so look only at the image texts.
-    judged = [text for text in counting_text.classified if "a photo of" not in text]
-    assert len(judged) == 2
-    assert fake_models.seen == 2
-
-    stub_commons(monkeypatch, [make_image("b.jpg", 1), make_image("c.jpg", 2, description="a new description")])
-    titles = [image.title for image in pipeline.search_images("second query", 10)]
-    assert titles == ["b.jpg", "c.jpg"]
-    judged = [text for text in counting_text.classified if "a photo of" not in text]
-    assert len(judged) == 3
-    assert fake_models.seen == 3
-
-
-def test_cached_verdicts_still_exclude_what_the_models_excluded(monkeypatch, counting_text, fake_models):
-    images = [make_image("ok.jpg", 1), make_image("risky.jpg", 2, description="risky")]
-    stub_commons(monkeypatch, images)
-    first = [image.title for image in pipeline.search_images("first", 10)]
-    second = [image.title for image in pipeline.search_images("second", 10)]
-    assert first == second == ["ok.jpg"]
-
-
-def test_identical_texts_in_one_search_are_judged_once(monkeypatch, counting_text, fake_models):
-    same_text = [make_image("same.jpg", 1), make_image("same.jpg", 2, sha1="a-different-file")]
-    stub_commons(monkeypatch, same_text)
-    assert len(pipeline.search_images("red panda", 10)) == 2
-    assert counting_text.classified.count(same_text[0].text) == 1
-
-
-def test_an_edited_description_is_judged_afresh(monkeypatch, counting_text, fake_models):
-    stub_commons(monkeypatch, [make_image("a.jpg", 1)])
-    assert len(pipeline.search_images("first", 10)) == 1
-    stub_commons(monkeypatch, [make_image("a.jpg", 1, description="risky")])
-    assert pipeline.search_images("second", 10) == []
 
 
 def test_a_replaced_file_is_checked_afresh_even_at_the_same_thumbnail_url(monkeypatch, fake_models):

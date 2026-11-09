@@ -4,16 +4,19 @@ Every layer can only remove images, and a layer that cannot decide removes them 
 image is shown only if each of them says SAFE:
 
 1. the query itself is not sexual (rules, then the text classifier);
-2. the image's text passes the deterministic rules;
-3. the text classifier calls the image's text safe;
-4. NudeNet finds no exposed body parts in a thumbnail that is fetched, scored and discarded.
+2. the image's text (title, description, categories) passes the deterministic rules;
+3. NudeNet finds no exposed body parts in a thumbnail that is fetched, scored and discarded.
+
+The text classifier does not read image text: measured against hand-verified nudes it caught none
+that the rules missed, excluded 4-8% of safe images, and was the largest CPU cost of a search (see
+docs/image-search-safety-benchmark.md). It remains only as a second opinion on the query.
 
 Nothing here can make a response a guarantee: no layer detects CSAM, the models read English
 only, and a Commons file can be replaced after it is approved, since thumbnail URLs are not
 tied to a revision. The layers lower the odds; they do not remove them.
 
 Nothing from Commons is persisted except the approved results, which sit in the cache briefly,
-and a verdict for each text and file judged, keyed by a hash (see verdict_cache). The browser
+and a verdict for each file judged, keyed by a hash (see verdict_cache). The browser
 loads approved thumbnails straight from Wikimedia.
 """
 
@@ -69,22 +72,8 @@ def query_is_safe(query: str) -> bool:
     return verdict is not Verdict.NSFW
 
 
-def text_verdicts(texts: list[str]) -> list[Verdict]:
-    """A verdict per text, running the model only on texts it has not judged before."""
-    classifier = text_classifier()
-    keys = [verdict_cache.cache_key("text", classifier.fingerprint, text) for text in texts]
-    known = verdict_cache.get_verdicts(keys)
-    unknown = {key: text for key, text in zip(keys, texts) if key not in known}
-    fresh = dict(zip(unknown, classifier.classify(list(unknown.values()))))
-    verdict_cache.put_verdicts(fresh)
-    verdicts = known | fresh
-    return [verdicts[key] for key in keys]
-
-
 def pass_text_checks(images: list[SourceImage]) -> list[SourceImage]:
-    ruled = [image for image in images if rules.image_verdict(image) is Verdict.SAFE]
-    verdicts = text_verdicts([image.text for image in ruled])
-    return [image for image, verdict in zip(ruled, verdicts) if verdict is Verdict.SAFE]
+    return [image for image in images if rules.image_verdict(image) is Verdict.SAFE]
 
 
 def pixel_verdict(client: httpx.Client, image: SourceImage) -> Verdict:
