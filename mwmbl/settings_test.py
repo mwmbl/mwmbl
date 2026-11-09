@@ -41,3 +41,6 @@ REQUEST_CACHE_PATH = "/tmp/test_request_cache"
 # against. In dev mode django-vite points at the dev server instead of reading the manifest, which
 # lets views that render the base template be tested.
 DJANGO_VITE_DEV_MODE = True
+
+# The zero-shot model is not built in CI; tests of that layer switch it on with a fake model.
+IMAGE_SEARCH_ZERO_SHOT = "off"

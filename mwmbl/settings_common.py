@@ -511,11 +511,13 @@ IMAGE_SEARCH_PIXEL_COVERED_THRESHOLD = 0.6
 IMAGE_SEARCH_TEXT_THREADS = 2
 IMAGE_SEARCH_PIXEL_THREADS = 1
 # Second pixel layer: SigLIP2 scored against nudity prompts (mwmbl.imagesearch.zero_shot_classifier), which
-# catches the art nudity NudeNet does not. "off", or "enforce" to exclude what it flags. The threshold is the
+# catches the art nudity NudeNet does not. "enforce" (the default) excludes what it flags and needs the
+# exported zero_shot model (re-run scripts/export_image_safety_models.py if the model directory predates it, or
+# image search fails loudly rather than returning unchecked images); "off" turns the layer off. The threshold is the
 # probability on the nude prompts at which 99% of 52 hand-verified art nudes were flagged (0.386, fitted down to
 # 0.38 to err on the side of excluding); 0.68 keeps 95% and excludes about half as many safe images
 # (docs/image-search-safety-benchmark.md). One thread per session for the same reason as the others.
-IMAGE_SEARCH_ZERO_SHOT = "off"
+IMAGE_SEARCH_ZERO_SHOT = "enforce"
 IMAGE_SEARCH_ZERO_SHOT_THRESHOLD = 0.38
 IMAGE_SEARCH_ZERO_SHOT_THREADS = 1
 IMAGE_SEARCH_THUMBNAIL_MAX_BYTES = 1_000_000
