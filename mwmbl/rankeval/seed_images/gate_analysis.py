@@ -110,7 +110,7 @@ def shown(pools: list[list[dict]], k: int, min_relevance: float) -> dict:
     }
 
 
-def analyse_gate() -> set[str]:
+def analyse_gate() -> tuple[float, dict[str, set[str]]]:
     reference = {row["query"]: row["need"] for row in read_jsonl(GATE_DIR / "labels_need.jsonl")}
     jev_need = {row["query"]: row["score"] for row in read_jsonl(NEED_PATH)}
     queries = load_queries()
@@ -119,8 +119,10 @@ def analyse_gate() -> set[str]:
     positives = np.array([reference[query] >= POSITIVE_LEVEL for query in ordered])
     signals = {
         "Jev need": np.array([jev_need[query] for query in ordered]),
-        "Jev-safe candidates": np.array([len(safe.get(query, [])) for query in ordered], dtype=float),
-        "Intent entity/local": np.array([queries[query]["intent"] in INTENTS_WANTING_IMAGES for query in ordered]),
+        "Jev-safe candidate count": np.array([len(safe.get(query, [])) for query in ordered], dtype=float),
+        "Pass-1 intent entity/local": np.array(
+            [queries[query]["intent"] in INTENTS_WANTING_IMAGES for query in ordered]
+        ),
     }
     print(f"Reference need >= {POSITIVE_LEVEL}: {positives.sum()}/{len(ordered)} ({positives.mean():.1%})\n")
     print("| Gate | AUC | Gated in | Precision | Recall |\n|---|---|---|---|---|")

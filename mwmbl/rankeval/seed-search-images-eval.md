@@ -52,7 +52,8 @@ recall are out of fold: each of 5 folds picks its F1-best threshold on the other
 
 ### Image ranking
 
-NDCG@k uses gain 2^label − 1, computed over each sampled query's 12 labelled candidates.
+NDCG@k uses gain 2^label − 1, computed over each sampled query's 12 labelled candidates. The 40 queries whose
+labels are all 0 have no ideal ordering and are left out, so the means are over the other 110.
 
 | Order | NDCG@1 | NDCG@3 | NDCG@5 |
 |---|---|---|---|
@@ -72,7 +73,9 @@ for the exact and ±1 columns.
 | Jev relevance | 0.842 | 57% | 98% |
 
 The text labels track what the pictures show closely. The reference therefore holds without vision, and so does
-Jev's text-only relevance.
+Jev's text-only relevance. Two caveats: the vision judge saw the same text as well as the picture, so the two
+labels are not independent, and the 100 images all passed every local safety layer, so they are not a random
+draw from the candidates.
 
 ### Number of images and minimum relevance
 
@@ -88,7 +91,10 @@ images shown.
 | 4 | 2.0 | 2.46 | 73% | 90.1% | 1.0% |
 | 4 | 2.5 | 1.88 | 61% | 94.8% | 0.0% |
 
-- **Other values of k:** at k = 3 and k = 6, precision is within a point of k = 4 at each minimum.
+- **Other values of k:** at k = 3 and k = 6, the good share is within a point of k = 4 at each minimum of 1.0
+  or more. With no minimum, k = 6 shows more wrong images (17.5% against 14.1%).
+- **In sample:** k, the minimum and the gate threshold were all chosen on these same queries, so these shares
+  are optimistic. They rest on 41 queries and about 116 images, so each is good to several points.
 - **Reference-wanted queries:** on the 34 sampled queries whose reference need is 2 or more, k = 4 with a
   minimum of 1.5 shows 3.26 images. 88% of them are good and 0.9% are wrong.
 
