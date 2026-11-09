@@ -16,7 +16,10 @@ A list may also hold Wikimedia Commons pictures. A single picture, {"url", "titl
 as the extract. A strip, {"url", "images": [{"title", "description"}, ...]}, is one extra entry
 that doesn't count towards the ten, unless it has "displaces": true, when it takes a web
 result's place; a strip's image may also give a "thumb" path for the judge to open. The prompt
-then tells the judge what these entries are.
+then tells the judge what these entries are. Commons titles and descriptions are user-entered, so
+both are reduced to plain text, and descriptions are shortened at a sentence or word boundary.
+The judge reads them as text, never as HTML, so there is no XSS risk here; plain text doesn't
+stop a description that addresses the judge, but such a description can at worst sway one verdict.
 
     batches X.json Y.json WORK   judge batches and a manifest -> WORK, for every query in
                                  both files whose top tens differ
@@ -161,14 +164,34 @@ Use the Write tool to write your JSON lines, one per comparison and nothing else
 
 
 def plain_text(text: str) -> str:
-    # Some providers mark query terms up with <strong>, which the searcher sees as bold.
-    return html.unescape(TAG.sub("", text or "")).replace("\n", " ")
+    # Some providers mark query terms up with <strong>, which the searcher sees as bold. Entities are decoded
+    # before tags are stripped, so an encoded tag such as &lt;script&gt; is stripped too.
+    return TAG.sub("", html.unescape(text or "")).replace("\n", " ")
+
+
+def shortened(text: str, limit: int) -> str:
+    """The text cut to the limit at a sentence end if one falls in its second half, else at a word boundary."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit + 1]
+    sentence_end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if sentence_end >= limit // 2:
+        return cut[: sentence_end + 1]
+    word_end = cut.rfind(" ")
+    words = cut[:word_end] if word_end > 0 else text[:limit]
+    return words.rstrip(" ,;:") + "…"
 
 
 def image_text(image: dict) -> str:
-    description = " ".join(plain_text(image["description"]).split())[:IMAGE_DESCRIPTION_CHARS]
+    # Commons titles and descriptions are user-entered, so both go through the same normalisation.
+    title = " ".join(plain_text(image["title"]).split())
+    description = shortened(" ".join(plain_text(image["description"]).split()), IMAGE_DESCRIPTION_CHARS)
     thumbnail = f" (thumbnail: {image['thumb']})" if "thumb" in image else ""
-    return f"{image['title']} — {description or '(no description)'}{thumbnail}"
+    return f"{title or '(no title)'} — {description or '(no description)'}{thumbnail}"
+
+
+def is_image_entry(result: dict) -> bool:
+    return "images" in result or "image" in result
 
 
 def result_text(result: dict) -> str:
@@ -198,11 +221,13 @@ def top_results(results: list[dict]) -> list[dict]:
 
 
 def differing_queries(x_lists: dict, y_lists: dict) -> list[str]:
-    def top_urls(results: list[dict]) -> list[str]:
-        return [result["url"] for result in top_results(results)]
+    # Web results compare by URL alone, as before images; an image entry compares by what the judge is shown, so
+    # two strips with the same URL but different pictures or text still differ.
+    def top_entries(results: list[dict]) -> list[str]:
+        return [result_text(result) if is_image_entry(result) else result["url"] for result in top_results(results)]
 
     shared = sorted(set(x_lists) & set(y_lists))
-    return [query for query in shared if top_urls(x_lists[query]) != top_urls(y_lists[query])]
+    return [query for query in shared if top_entries(x_lists[query]) != top_entries(y_lists[query])]
 
 
 def batches(x_path: Path, y_path: Path, work: Path) -> None:

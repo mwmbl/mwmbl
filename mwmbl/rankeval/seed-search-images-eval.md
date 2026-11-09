@@ -155,6 +155,14 @@ Commons images should it show? Everything is measured on the 849 train queries a
 The code is `mwmbl/rankeval/seed_images/` (`run_relevance`, `label_batches`, `labels`, `gate_analysis`), and the
 data is under `devdata/seed_images/gate/`.
 
+**What "need" measures here.** The evaluation is specific to Commons, including the need labels. The Sonnet
+rubric asks whether a strip of Commons pictures would improve the page, and says to give 0 when the subject is
+not something Commons could show. Jev's question asks the same about "a row of pictures from Wikimedia Commons".
+Both are told to judge the kind of subject, not the particular pictures returned. So the gate measures image
+need together with whether the subject is the kind Commons covers. It does not measure need independently of
+the provider. Whether Commons has suitable pictures for a particular query is left to the relevance step and its
+minimum. Another image provider would need its own evaluation.
+
 ### Setup
 
 - **Candidates:** each query's top 20 Commons results, without the images whose Jev NSFW score is 1.0 or more
@@ -168,9 +176,11 @@ data is under `devdata/seed_images/gate/`.
     judge saw the web top ten and the titles of the top five candidates. All 849 queries were labelled; 200
     (23.6%) scored 2 or more.
   - **Relevance (0–3):** the judge read each image's file name, description (first 400 characters) and
-    categories, plus the query's first three web titles. It labelled the top 12 candidates of 150 queries,
-    sampled equally from the five quintiles of Jev need. Only queries with at least 3 candidates were eligible.
-    That makes 1,689 images.
+    categories, plus the query's first three web titles. It labelled the top 12 candidates of 150 queries.
+    That makes 1,689 images. The queries are a stratified sample: 30 from each fifth of Jev need. Only the 682
+    train queries with at least 3 candidates were eligible. The fifths are equal-sized (136 or 137 eligible
+    queries each), so the sample is proportional to the eligible queries and needs no reweighting. It does not
+    cover the 167 train queries with fewer than 3 candidates.
   - **Vision spot-check:** 100 of those images, chosen only from ones every local safety layer passed (rules,
     NudeNet and SigLIP2). The judge labelled them again, this time seeing the 320px thumbnail as well as the
     text. The thumbnails were deleted afterwards.
@@ -191,6 +201,8 @@ recall are out of fold: each of 5 folds picks its F1-best threshold on the other
 | Jev-safe candidate count | 0.644 | 73.4% | 0.283 | 0.880 |
 | Pass-1 intent entity/local | 0.699 | 41.1% | 0.410 | 0.715 |
 
+- **Intervals:** 95% intervals from 2,000 resamples of the queries with replacement. Jev need's AUC is
+  [0.868, 0.913] and the intent baseline's is [0.664, 0.733]. The paired difference is [0.155, 0.229].
 - **Threshold:** fitted on all train queries, the threshold is Jev need ≥ **1.63**. It gates in 28% of train
   queries and 27% of en-gb queries, with precision 0.62 and recall 0.75 in sample.
 - **False positives** are mostly shopping queries, such as "barcelona kit 25/26", "walnut sideboard" and
@@ -201,7 +213,8 @@ recall are out of fold: each of 5 folds picks its F1-best threshold on the other
 ### Image ranking
 
 NDCG@k uses gain 2^label − 1, computed over each sampled query's 12 labelled candidates. The 40 queries whose
-labels are all 0 have no ideal ordering and are left out, so the means are over the other 110.
+labels are all 0 have no ideal ordering and are left out, so the means are over the other 110. They are means
+over the stratified sample above, so they describe eligible train queries, not all queries.
 
 | Order | NDCG@1 | NDCG@3 | NDCG@5 |
 |---|---|---|---|
@@ -209,6 +222,10 @@ labels are all 0 have no ideal ordering and are left out, so the means are over 
 | Commons rank | 0.614 | 0.648 | 0.676 |
 | Mix, Jev − w·(Commons rank − 1), 5-fold CV | 0.860 | 0.874 | 0.893 |
 
+- **Intervals:** query-resampled 95% intervals, as for the gate. For Jev relevance they are [0.816, 0.919] at
+  NDCG@1, [0.849, 0.918] at NDCG@3 and [0.869, 0.929] at NDCG@5. For Commons rank they are [0.529, 0.687],
+  [0.586, 0.707] and [0.619, 0.729]. The paired difference is [0.168, 0.349], [0.173, 0.303] and
+  [0.169, 0.283].
 - **Mix:** the folds chose w = 0, 0, 0, 0.02 and 0.05. Commons' order adds nothing on top of Jev.
 - **Caveat:** this ranks only the labelled top 12. In production Jev would rank all the candidates.
 
@@ -242,14 +259,21 @@ images shown.
 - **Other values of k:** at k = 3 and k = 6, the good share is within a point of k = 4 at each minimum of 1.0
   or more. With no minimum, k = 6 shows more wrong images (17.5% against 14.1%).
 - **In sample:** k, the minimum and the gate threshold were all chosen on these same queries, so these shares
-  are optimistic. They rest on 41 queries and about 116 images, so each is good to several points.
+  are optimistic. They are exploratory estimates, not a measure of production quality. They rest on 41 queries
+  and about 116 images. Resampling the queries puts the 87.1% good share at [75.6%, 96.3%] and the 0.9% wrong
+  share at [0%, 2.9%].
 - **Reference-wanted queries:** on the 34 sampled queries whose reference need is 2 or more, k = 4 with a
   minimum of 1.5 shows 3.26 images. 88% of them are good and 0.9% are wrong.
 
 ### Recommendation
 
+These are the settings to carry into the holistic comparison, not settled production values. Only the gate's
+precision and recall and the mix row above are out of fold. The threshold, k and minimum were all chosen in
+sample. The holistic comparison (#615) tests them on the 295 en-gb queries, which played no part in choosing
+them.
+
 - **Gate:** show images when Jev image need ≥ **1.63**. That is about 27% of queries, and AUC is 0.89 against
-  0.70 for the best non-Jev baseline.
+  0.70 for the best non-Jev baseline. The gate is specific to Commons, as explained above.
 - **Order:** sort by Jev image relevance alone, ignoring Commons' order.
 - **Number:** show up to **4** images.
 - **Minimum:** require Jev image relevance ≥ **1.5**. A fifth of gated-in queries then show no images, which
@@ -260,8 +284,12 @@ These settings are in `devdata/seed_images/gate/recommended.json` for the holist
 ## Holistic comparison
 
 The deciding step compares whole result pages with the holistic judge (`holistic_judge.py`), on the 295 en-gb
-queries, which none of the settings above were tuned on. `mwmbl/rankeval/seed_images/holistic_arms.py` builds the
-arms and their batches under `devdata/seed_images/holistic/`.
+queries, which none of the settings above were tuned on. These are the held-out queries of the earlier Combined
+Search evaluations (`combined-search-haiku-eval.md`). They come from UK autocomplete, so their stored Staan lists
+were fetched with `market=en-gb`, and the judge is told the searcher is in the UK. Locale changes the web results
+more than the pictures: Commons search doesn't depend on it, and the gate lets in 27% of these queries against
+28% of the train queries, so the conclusions should carry over to `en-us`. `mwmbl/rankeval/seed_images/holistic_arms.py` builds the arms and their
+batches under `devdata/seed_images/holistic/`.
 
 - **A0:** production's order, Jev composite + Staan rank.
 - **A2, the recommended design:** when Jev need ≥ 1.63, a strip of up to 4 Jev-safe images with Jev relevance
@@ -273,7 +301,10 @@ arms and their batches under `devdata/seed_images/holistic/`.
   to 10.
 
 The judge sees a strip as `[IMAGES from Wikimedia Commons] 1. <file name> — <description> | 2. …` and a single
-image as `[IMAGE] <file name> — <description>`, with descriptions cut to 150 characters. Batches that show images
+image as `[IMAGE] <file name> — <description>`, with descriptions cut at 150 characters. Since these runs, the
+judge cuts descriptions at a sentence end or word boundary instead of mid-word, and strips encoded tags from titles
+and descriptions. The runs weren't judged again: the same queries are compared, no title or tag changes on this
+data, and only the shortening differs, in 19 of A2's 59 strips and 37 of A1's 191 images. Batches that show images
 add a paragraph telling the judge that pictures may appear and to judge whether they help the query; the rest of
 the rubric is unchanged. A vision check repeats 20 of the A2-vs-A0 comparisons with the strips' thumbnails, using
 only strips whose every image passed the rules, NudeNet and SigLIP2 (26 of the 59 did). The thumbnails were
@@ -348,6 +379,16 @@ Ship option 2, the gated strip:
 Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
 than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
 check that the image's subject matches the top web result's.
+
+Before shipping:
+
+- **Wikipedia card:** when the top result is an English Wikipedia page, the front end shows it as a card with the
+  article's lead image (`WikipediaCard.svelte`). That is the case for 37 of the 59 queries with a strip, so the
+  strip would sit right under a card that may already show one of its pictures. The judge saw only the card's
+  title, URL and extract. Drop from the strip any image that is the card's lead image, matched by Commons file
+  name, and judge the card and strip together before deciding whether the strip still helps there.
+- **Escaping:** Commons titles and descriptions are user-entered. The judge read them as plain text, but the
+  front end must render them as escaped text, never as HTML.
 
 ## Indexing
 
