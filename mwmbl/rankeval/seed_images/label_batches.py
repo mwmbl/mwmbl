@@ -13,6 +13,7 @@ The rubrics are worded independently of the Jev questions, so the labels are an 
 import io
 import json
 import random
+from pathlib import Path
 
 from PIL import Image
 
@@ -203,12 +204,11 @@ def passed_every_layer(verdict: dict) -> bool:
     return all(verdict[layer] == "safe" for layer in ("rules", "nudenet", "zero_shot"))
 
 
-def save_thumbnail(data: bytes, image_id: str) -> str | None:
+def save_thumbnail(data: bytes, path: Path) -> str | None:
     try:
         picture = Image.open(io.BytesIO(data)).convert("RGB")
     except OSError:
         return None
-    path = THUMBS_DIR / f"{image_id}.jpg"
     picture.save(path, "JPEG")
     return str(path.resolve())
 
@@ -225,7 +225,7 @@ def vision_batches(relevance_manifest: list[dict], queries: dict[str, dict], rng
                 break
             data, _ = with_backoff(lambda: fetch_thumbnail(client, row["image"].thumbnail_url))
             vision_id = "V" + row["id"][1:]
-            thumb = data and save_thumbnail(data, vision_id)
+            thumb = data and save_thumbnail(data, THUMBS_DIR / f"{vision_id}.jpg")
             if not thumb:
                 continue
             manifest.append({"id": vision_id, "query": row["query"], "file_id": row["file_id"], "thumb": thumb})

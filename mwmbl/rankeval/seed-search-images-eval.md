@@ -108,3 +108,24 @@ images shown.
   is better than showing wrong ones.
 
 These settings are in `devdata/seed_images/gate/recommended.json` for the holistic comparison.
+
+## Holistic comparison
+
+The deciding step compares whole result pages with the holistic judge (`holistic_judge.py`), on the 295 en-gb
+queries, which none of the settings above were tuned on. `mwmbl/rankeval/seed_images/holistic_arms.py` builds the
+arms and their batches under `devdata/seed_images/holistic/`.
+
+- **A0:** production's order, Jev composite + Staan rank.
+- **A2, the recommended design:** when Jev need ≥ 1.63, a strip of up to 4 Jev-safe images with Jev relevance
+  ≥ 1.5, highest first, is one extra entry after the top web result. It displaces no web result. 80 queries are
+  gated in and 59 get a strip, of 213 images in all.
+- **A1, no gate:** the two most relevant Jev-safe images join the web results as single results, merged by Jev
+  composite, and the list is cut back to ten. An image scores as a substantive page Staan didn't return, so its
+  composite is its Jev relevance − 0.5. This puts 191 images into 118 queries' top tens, mostly at positions 7
+  to 10.
+
+The judge sees a strip as `[IMAGES from Wikimedia Commons] 1. <file name> — <description> | 2. …` and a single
+image as `[IMAGE] <file name> — <description>`, with descriptions cut to 150 characters. Batches that show images
+add a paragraph telling the judge that pictures may appear and to judge whether they help the query; the rest of
+the rubric is unchanged. A vision check repeats 20 of the A2-vs-A0 comparisons with the strips' thumbnails, using
+only strips whose every image passed the rules, NudeNet and SigLIP2 (26 of the 59 did).

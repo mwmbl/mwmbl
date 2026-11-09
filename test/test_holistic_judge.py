@@ -9,11 +9,15 @@ import pytest
 from mwmbl.rankeval.evaluation.holistic_judge import (
     COMPARISONS_PER_BATCH,
     ETHOS_RUBRIC,
+    IMAGES_NOTE,
+    THUMBNAILS_NOTE,
     batches,
     consolidate,
     differing_queries,
     preference_for_x,
+    results_block,
     summarise,
+    top_results,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -157,3 +161,43 @@ def test_preference_for_x_follows_whichever_side_x_was_shown_on():
     assert preference_for_x(record) == 1
     assert preference_for_x(dict(record, a="x", b="y")) == -1
     assert preference_for_x(dict(record, verdict={"better": "tie"})) == 0
+
+
+def test_image_entries_render_as_pictures_and_a_strip_does_not_count_towards_the_ten():
+    strip = {
+        "url": "commons-strip:a b",
+        "images": [
+            {"title": "Tower Bridge.jpg", "description": "The <b>bridge</b>\nfrom the river", "thumb": "/t/0.jpg"},
+            {"title": "Engine room.jpg", "description": ""},
+        ],
+    }
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:Kite.jpg", "title": "Kite.jpg", "extract": "A kite"}
+    web = results(*(f"https://{i}.com/" for i in range(11)))
+
+    top = top_results(web[:1] + [strip] + web[1:])
+    lines = results_block("A", [strip, dict(picture, image=True)]).splitlines()
+
+    assert len(top) == 11 and top[1] == strip and top[-1] == web[9]
+    assert lines[1] == (
+        "1. [IMAGES from Wikimedia Commons] 1. Tower Bridge.jpg — The bridge from the river (thumbnail: /t/0.jpg)"
+        " | 2. Engine room.jpg — (no description)"
+    )
+    assert lines[2] == "2. [IMAGE] Kite.jpg — A kite"
+
+
+def test_only_batches_showing_images_tell_the_judge_about_them(tmp_path):
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}]}
+    x = {f"q{i}": results("https://x.com/") for i in range(30)} | {"pictures": results("https://y.com/") + [strip]}
+    y = {f"q{i}": results("https://y.com/") for i in range(30)} | {"pictures": results("https://y.com/")}
+    (tmp_path / "x.json").write_text(json.dumps(x))
+    (tmp_path / "y.json").write_text(json.dumps(y))
+    work = tmp_path / "work"
+    batches(tmp_path / "x.json", tmp_path / "y.json", work)
+
+    texts = {path.name: path.read_text() for path in work.glob("batch_*.txt")}
+    with_images = [name for name, text in texts.items() if IMAGES_NOTE in text]
+
+    assert len(texts) == 4 and len(with_images) == 2
+    assert all("QUERY: pictures" in texts[name] for name in with_images)
+    assert all(THUMBNAILS_NOTE not in text for text in texts.values())
+    assert all(str((work / name.replace("batch_", "out_")).resolve()) in text for name, text in texts.items())
