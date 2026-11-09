@@ -112,8 +112,9 @@ images shown.
   or more. With no minimum, k = 6 shows more wrong images (17.5% against 14.1%).
 - **In sample:** k, the minimum and the gate threshold were all chosen on these same queries, so these shares
   are optimistic. They are exploratory estimates, not a measure of production quality. They rest on 41 queries
-  and about 116 images. Resampling the queries puts the 87.1% good share at [75.6%, 96.3%] and the 0.9% wrong
-  share at [0%, 2.9%].
+  and about 116 images. Resampling the queries puts the 87.1% good share at [75.6%, 96.3%]; that covers sampling
+  noise only, not the optimism of choosing the settings here. The 0.9% wrong share is one image, too few to
+  resample: its exact 95% upper bound is about 5%.
 - **Reference-wanted queries:** on the 34 sampled queries whose reference need is 2 or more, k = 4 with a
   minimum of 1.5 shows 3.26 images. 88% of them are good and 0.9% are wrong.
 
