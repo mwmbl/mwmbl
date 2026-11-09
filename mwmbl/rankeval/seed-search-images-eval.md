@@ -58,30 +58,31 @@ parallel with the web request, adds no latency, and its verdict can be cached pe
 ### 2. Real queries: where Jev and the local layers disagree
 
 These are separate-mode scores for every candidate of the 950 queries that have candidates, 16,512 images in all,
-compared with the local layers: the deny rules, NudeNet, and SigLIP2 at 0.38. Ninety-eight thumbnails couldn't be
-fetched, so the pixel layers didn't check them.
+compared with the local layers: the deny rules, NudeNet, and SigLIP2 at 0.38. A layer flags an image if its verdict
+isn't SAFE, as in the pipeline, so NudeNet's UNCERTAIN (a covered-body detection, 98 images) counts as a flag.
 
 | Jev passes (score below) | Images passed | Any local layer flags | Rules | NudeNet | SigLIP2 | Queries affected |
 |---|---|---|---|---|---|---|
-| 0.5 | 14,597 (88.4%) | 3,016 | 103 | 232 | 2,769 | 739 |
-| **1.0** | **15,846 (96.0%)** | **3,530** | 127 | 259 | 3,255 | 775 |
-| 1.5 | 16,171 (97.9%) | 3,729 | 146 | 283 | 3,445 | 780 |
+| 0.5 | 14,597 (88.4%) | 3,044 | 103 | 299 | 2,769 | 741 |
+| **1.0** | **15,846 (96.0%)** | **3,562** | 127 | 350 | 3,255 | 776 |
+| 1.5 | 16,171 (97.9%) | 3,761 | 146 | 380 | 3,445 | 781 |
 
 I classified the disagreements by reading their text. I didn't look at any of the images.
 
-- **SigLIP2 accounts for almost all of the disagreement.** It flags 21% of all real candidates, mostly by mistake:
+- **SigLIP2 accounts for almost all of the disagreement.** It flags 22% of all real candidates, mostly by mistake:
   planets, fruit, bacteria, logos, cars, footballers and celebrity portraits. I read a random sample of 40 images
   that Jev scores below 0.5 and that a local layer flags, and all 40 were clearly false positives. In a sample of 40
   that Jev scores between 0.5 and 1.0, about 35 are clothed people or posters. About 5 might be revealing (a "cupcake"
   promo, a 1934 film poster, a Leyendecker Baby New Year), and none read as nude.
 - **The rules flags that Jev passes are mostly the deny list matching innocent words.** Examples are insects and
   birds ("Brachycera sex", "Lilac-breasted roller"), book scans that mention sex, and knots filed under "BDSM knots".
-  The exceptions all score between 1.0 and 1.5, so a threshold of 1.0 excludes them: ten pages of a Hiroshige album
-  categorised "Eroticism in the British Museum" (1.43–1.49), Debret's *Caboclo* (1.49), and the Mysore paintings
-  (1.05–1.19).
+  Most exceptions score between 1.0 and 1.5, so a threshold of 1.0 excludes them: ten pages of a Hiroshige album
+  categorised "Eroticism in the British Museum" (1.43–1.49), Debret's *Caboclo* (1.49), and two of four 1820s Mysore
+  paintings whose description mentions erotics (1.05, 1.19). The other two pass at 1.0 (0.52, 0.94), as does a porn
+  actress at an adult expo (0.80), dressed according to her categories.
 - **The NudeNet flags that Jev passes are mostly round or skin-coloured objects:** planets, fruit, pills and skin
   close-ups. A few may be revealing: Cape Verde carnival dancers (0.96–0.99), a *Blazing Saddles* publicity still
-  (0.78) and a magazine cover (0.73).
+  (0.78) and a magazine cover (0.73). The covered-body detections add 32 below 1.0, all clothed people by their text.
 - **Jev also flags images that every local layer passes:** 62 at 1.5 or above (54 distinct files). Most are classical
   art that the pixel models miss: the Pietà, *Venus Carrying off Ascanius*, Canova, the Versailles statues, the
   crucifixions, and a centaur mosaic. There are also medical diagrams and MRI scans, and a photo of a toddler on a
@@ -95,9 +96,9 @@ mode.
 
 | Jev passes (score below) | Images passed | Any local layer flags | Rules | NudeNet | SigLIP2 | Queries affected |
 |---|---|---|---|---|---|---|
-| 0.5 | 415 (38%) | 99 | 8 | 14 | 89 | 35 |
-| **1.0** | **516 (47%)** | **148** | 13 | 15 | 133 | 43 |
-| 1.5 | 602 (55%) | 211 | 18 | 20 | 194 | 45 |
+| 0.5 | 415 (38%) | 99 | 8 | 16 | 89 | 35 |
+| **1.0** | **516 (47%)** | **148** | 13 | 18 | 133 | 43 |
+| 1.5 | 602 (55%) | 211 | 18 | 30 | 194 | 45 |
 
 - **Between 1.0 and 1.5, Jev passes images that shouldn't be shown.** Below 1.5 it passes John Webber's *Poedua*, a
   portrait of a topless Tahitian woman (1.17, flagged by NudeNet and SigLIP2). It also passes *Caboclo* again (1.17),
@@ -131,11 +132,21 @@ mode.
 - **No ground truth for real images.** No one viewed a flagged image. The disagreements are classified from text, and
   "doesn't read as nude" is not "not nude". With no pixel check behind Jev, images with bland text are the residual
   risk. Section 2's 62 Jev-only catches show the reverse also happens: the pixel layers miss art that Jev catches.
-- **The local layers are not ground truth either.** SigLIP2 at 0.38 flags 21% of real images, mostly in error.
+- **The local layers are not ground truth either.** SigLIP2 at 0.38 flags 22% of real images, mostly in error.
 - **One run each.** Two separate runs already differ by 11 to 32 verdicts out of 1,351, so the small differences
-  between modes on the benchmark are within noise. The difference on real queries points one way, though: at 1.5,
-  combined mode passes 29 images that separate mode flags and flags only 4 that it passes.
+  between modes on the benchmark are within noise. On real queries the difference points one way at 1.0 and 1.5
+  (25 against 9, 29 against 4), though not at 0.5, where 60 go one way and 55 the other.
 - **Benchmark caveats from the issue still apply:** the nude tiers were sampled from nudity categories, the
   rule-evading groups are small (22 and 29), and the safe set wasn't hand-checked.
 - **Pool approximation:** the web pool is rebuilt from `pass2_pool.jsonl`, which is not a live serving pool. The
-  latencies come from one machine, with four requests at a time and cached connections not reused.
+  latencies come from one machine, four requests at a time, without reused connections (the harness's, for separate).
+
+### Residual risks of serving indexed images without a check
+
+- **Known misses.** At 1.0, Jev passes 3 of 52 art nudes and 5 of 331 nude photos, including 7 of 51 rule-evading.
+  Each indexed miss is served to everyone whose query matches it.
+- **Bland text.** A nude named `IMG_1234.jpg` with no description or categories can't be caught from text. New,
+  uncategorised uploads are the riskiest; a minimum file age or some categories would reduce this.
+- **Prompt injection.** Anyone can edit a description, and Jev reads it: "no people are shown" may steer it. Untested.
+- **Changes after approval.** An overwritten file serves new pixels at the same thumbnail URL. Recheck each indexed
+  file's SHA-1 and text, re-ask Jev on a change, drop deleted files, re-run the benchmark when Jev's model changes.

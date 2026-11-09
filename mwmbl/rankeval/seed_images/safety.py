@@ -99,8 +99,9 @@ def flips(first: list[float], second: list[float], threshold: float) -> int:
 
 
 def local_flags(verdict: dict) -> list[str]:
-    """The local layers that judge an image NSFW. An unfetchable thumbnail is UNCERTAIN, which is not counted."""
-    return [layer for layer in LOCAL_LAYERS if verdict[layer] == "nsfw"]
+    """The layers that would keep an image out, as in the pipeline: any verdict but SAFE on a fetched thumbnail."""
+    checked = LOCAL_LAYERS if verdict["thumbnail_fetched"] else ("rules",)
+    return [layer for layer in checked if verdict[layer] != "safe"]
 
 
 def percentile_line(latencies: list[float]) -> str:
@@ -259,7 +260,7 @@ def disagreement_report(name: str, nsfw_rows: list[dict], verdicts: dict[str, di
         for row in nsfw_rows
         for image, score in zip(load_candidates(row["query"]), row["scores"])
     ]
-    unchecked = sum(verdict["nudenet"] == "uncertain" for _, _, _, verdict in occurrences)
+    unchecked = sum(not verdict["thumbnail_fetched"] for _, _, _, verdict in occurrences)
     print(f"\n## {name}: {len(nsfw_rows)} queries, {len(occurrences)} images, {unchecked} thumbnails unchecked\n")
     print("| Jev passes (<) | Passed | Any local flag | Rules | NudeNet | SigLIP2 | Queries affected |\n|" + "---|" * 7)
     for threshold in THRESHOLDS:
@@ -270,7 +271,7 @@ def disagreement_report(name: str, nsfw_rows: list[dict], verdicts: dict[str, di
         print(
             f"| {threshold} | {len(passed)} | {len(flagged)} | " + " | ".join(map(str, by_layer)) + f" | {affected} |"
         )
-    jev_only = [o for o in occurrences if o[2] >= 1.5 and not local_flags(o[3]) and o[3]["nudenet"] != "uncertain"]
+    jev_only = [o for o in occurrences if o[2] >= 1.5 and not local_flags(o[3]) and o[3]["thumbnail_fetched"]]
     print(f"Jev >= 1.5 but every local layer passes: {len(jev_only)}")
     for query, image, score, verdict in occurrences:
         if (score < 1.5 and local_flags(verdict)) or (score >= 1.5 and not local_flags(verdict)):

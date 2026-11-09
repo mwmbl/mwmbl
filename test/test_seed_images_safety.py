@@ -34,10 +34,12 @@ def test_flips_count_verdicts_that_differ_at_the_threshold():
     assert safety.flips([0.4, 1.0, 1.6, 0.0], [0.6, 1.1, 1.4, 0.1], 1.5) == 1
 
 
-def test_local_flags_name_the_layers_that_judged_nsfw():
-    verdict = {"rules": "safe", "nudenet": "uncertain", "zero_shot": "nsfw"}
+def test_local_flags_name_the_layers_that_would_keep_an_image_out():
+    verdict = {"rules": "safe", "nudenet": "uncertain", "zero_shot": "nsfw", "thumbnail_fetched": True}
+    unfetched = {"rules": "nsfw", "nudenet": "uncertain", "zero_shot": "uncertain", "thumbnail_fetched": False}
 
-    assert safety.local_flags(verdict) == ["zero_shot"]
+    assert safety.local_flags(verdict) == ["nudenet", "zero_shot"]
+    assert safety.local_flags(unfetched) == ["rules"]
 
 
 def test_web_pool_puts_staan_first_then_the_standard_top_results_once_each():
