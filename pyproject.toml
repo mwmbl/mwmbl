@@ -135,6 +135,8 @@ omit = [
     "mwmbl/asgi.py",
     "mwmbl/wsgi.py",
     "mwmbl/indexer/paths.py",
+    # Offline evaluation scripts for #610, not served code.
+    "mwmbl/rankeval/seed_images/*",
 ]
 
 [tool.coverage.report]
