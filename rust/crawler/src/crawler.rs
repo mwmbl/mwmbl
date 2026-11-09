@@ -1,28 +1,19 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+use std::{collections::HashMap, sync::Arc};
+
+use mwmbl_core::blacklist_providers::BlacklistProvider;
+// use redis::Commands;
+use tokio::sync::RwLock;
+
+use crate::{
+    CrawlerParams,
+    constants::{API_PRODUCT, PROJECT_URL},
+    curated_domains::{DefaultBlackList, get_default_blacklist_provider},
+    redis_url::{SharedURLQueue, URLQueue},
 };
 
-use mwmbl_core::{
-    blacklist_providers::{
-        BlacklistProvider, BuiltInRulesBlacklistProvider, CuratedBlacklistProvider,
-        SnapshotBlacklist,
-    },
-    curated_domains::SharedCuratedDomains,
-};
-
-use crate::{CrawlerParams, redis_url_queue::RedisURLQueue};
-
-pub fn fetch_curated_domains() -> HashSet<String> {
-    todo!()
-}
-
-pub struct Crawler<
-    T: BlacklistProvider = SnapshotBlacklist,
-    T2: BlacklistProvider = CuratedBlacklistProvider,
-> {
-    redis: redis::Client,
-    url_queue: RedisURLQueue<T2>,
+pub struct Crawler<T: BlacklistProvider = DefaultBlackList, T2: URLQueue = SharedURLQueue<T>> {
+    // redis: redis::Client,
+    url_queue: T2,
     blacklist: T,
     username: Arc<RwLock<Option<String>>>,
     error_last_reported_at: Arc<RwLock<HashMap<String, f32>>>,
@@ -30,37 +21,59 @@ pub struct Crawler<
 }
 
 impl Crawler {
-    pub fn new(params: CrawlerParams) -> anyhow::Result<Crawler> {
-        let redis = redis::Client::open(params.redis_url.clone())?;
-        let built_in_rules = BuiltInRulesBlacklistProvider::new();
-        let blacklist = SnapshotBlacklist::new(&redis, built_in_rules);
-        let curated_domains = SharedCuratedDomains::new();
-        let curated_blacklist = CuratedBlacklistProvider::new(blacklist.clone(), curated_domains);
-        let url_queue = RedisURLQueue::new(&redis, curated_blacklist);
+    pub async fn new(params: CrawlerParams) -> anyhow::Result<Crawler> {
+        // let redis = redis::Client::open(params.redis_url.clone())?;
+        let username = Arc::new(RwLock::new(None));
+        let blacklist = get_default_blacklist_provider(&params.remote_server).await?;
+        // let url_queue = RedisURLQueue::new(&redis, blacklist.clone());
+        let url_queue = SharedURLQueue::new(blacklist.clone());
 
         Ok(Crawler {
-            redis,
+            // redis,
             url_queue,
             blacklist,
-            username: Arc::new(RwLock::new(None)),
+            username,
             error_last_reported_at: Arc::new(RwLock::new(HashMap::default())),
             params,
         })
     }
 
-    pub fn run(&self) -> anyhow::Result<()> {
-        self.check_redis()?;
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        // self.check_redis()?;
+
+        loop {
+            println!(
+                "{:#?}",
+                self.blacklist
+                    .is_domain_blacklisted("lamathematique.ovh")
+                    .await
+            );
+        }
 
         todo!();
     }
 
-    pub fn run_once(&self) -> anyhow::Result<()> {
-        self.check_redis()?;
+    pub async fn run_once(&mut self) -> anyhow::Result<()> {
+        // self.check_redis()?;
 
         todo!();
     }
 
-    pub fn check_redis(&self) -> anyhow::Result<()> {
-        todo!();
+    // pub fn check_redis(&mut self) -> anyhow::Result<()> {
+    //     self.redis.ping::<()>()?;
+    //     Ok(())
+    // }
+
+    pub fn api_user_agent(username: Option<&String>) -> String {
+        let identity = if let Some(username) = username {
+            format!("+{}; user {}", PROJECT_URL, urlencoding::encode(username))
+        } else {
+            format!("+{PROJECT_URL}")
+        };
+        format!("{API_PRODUCT} ({identity})")
+    }
+
+    pub async fn fetch_username(username: &mut Arc<RwLock<Option<String>>>) -> Option<String> {
+        todo!()
     }
 }

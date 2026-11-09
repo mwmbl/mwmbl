@@ -101,13 +101,16 @@ thread_local! {
 fn decompress_page(page: &[u8]) -> Result<Vec<u8>, PageIoError> {
     let unreadable = |e: std::io::Error| PageIoError::Unreadable(e.to_string());
     let frame_size = zstd_safe::find_frame_compressed_size(page).map_err(zstd_error)?;
-    let Some(frame) = page.get(..frame_size) else {return Err(PageIoError::Unreadable("Invalid frame size".to_string()))};
+    let Some(frame) = page.get(..frame_size) else {
+        return Err(PageIoError::Unreadable("Invalid frame size".to_string()));
+    };
     // Every frame the index writes carries its content size, so this is the exact size of
     // the buffer to decompress into rather than a guess.
     let contents_size: usize = zstd_safe::get_frame_content_size(frame)
         .map_err(|e| PageIoError::Unreadable(e.to_string()))?
         .ok_or_else(|| PageIoError::Unreadable("The frame has no content size".to_string()))?
-        .try_into().map_err(|e: std::num::TryFromIntError| PageIoError::Unreadable(e.to_string()))?;
+        .try_into()
+        .map_err(|e: std::num::TryFromIntError| PageIoError::Unreadable(e.to_string()))?;
     // That size is data like anything else on the page, and the buffer is allocated before
     // a byte is decompressed, so a corrupt header must not be able to ask for a gigabyte.
     // Real pages expand by well under ten times; this is far past that and still bounded.
@@ -157,7 +160,9 @@ fn has_term(item: &Value, term: &str) -> bool {
 
 fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageIoError> {
     let mut json = String::from("[");
-    let Some(bounded) = serialised.get(..count) else {return Err(PageIoError::Unreadable("Out of bound read".to_string()))};
+    let Some(bounded) = serialised.get(..count) else {
+        return Err(PageIoError::Unreadable("Out of bound read".to_string()));
+    };
     for (position, item) in bounded.iter().enumerate() {
         if position > 0 {
             json.push(',');
@@ -173,7 +178,7 @@ fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageI
 }
 
 /// The padded page bytes, and how many of `items` actually fit on them.
-/// 
+///
 /// A page holds a fixed number of bytes, and how many documents that is depends on how
 /// well they compress, so the largest prefix that fits is found by binary search over the
 /// compressed size. The tail that does not fit is dropped, which is why callers pass their

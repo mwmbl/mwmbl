@@ -5,7 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+lazy_static = "1.5.1"
+phf = { version = "0.14.0", features = ["macros"] }
 redis = "1.8.1"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+tokio = { version = "1.54.1", features = ["full"] }
 zstd = "0.14.3"
