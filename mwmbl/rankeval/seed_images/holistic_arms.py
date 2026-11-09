@@ -23,6 +23,8 @@ import random
 from argparse import ArgumentParser
 from pathlib import Path
 
+import numpy as np
+
 from mwmbl.imagesearch.commons import new_client
 from mwmbl.imagesearch.pipeline import file_id
 from mwmbl.imagesearch.pixel_classifier import fetch_thumbnail
@@ -195,8 +197,9 @@ def splits() -> None:
         return {query: sum(values) / len(values) for query, values in by_query.items()}
 
     text_by_query, vision_by_query = preference_by_query(text), preference_by_query(vision)
-    same_sign = sum((text_by_query[query] > 0) == (vision_by_query[query] > 0) for query in vision_by_query)
-    print(f"\nText-only and vision verdicts favour A2 alike on {same_sign} of {len(vision_by_query)} queries")
+    # A tie only agrees with a tie, so a tie against a win for A2 counts as a disagreement.
+    same_sign = sum(np.sign(text_by_query[query]) == np.sign(vision_by_query[query]) for query in vision_by_query)
+    print(f"\nText-only and vision verdicts agree in direction on {same_sign} of {len(vision_by_query)} queries")
 
 
 def build_vision() -> None:

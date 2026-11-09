@@ -136,6 +136,15 @@ deleted after judging.
 Haiku 4.5 judged each comparison in both orders. Only queries whose lists differ are compared. Preference runs
 from −3 to 3, and a positive value favours the image arm.
 
+**Read A2's result as "the strips are mostly relevant", not as "a better page".** A2's lists are A0's with one
+entry added and nothing displaced, so the judge can't see any cost to showing a strip except a little scrolling.
+The prompt also tells it a strip "adds to the web results rather than replacing one". Of the 118 A2 verdicts' notes,
+99 say a list "adds" pictures and 94 point out that the web results are the same. Of the 104 verdicts for A2, 93
+are "slight" and none "strong". +0.84 is therefore close to the share of strips the judge found relevant, less
+those it found wrong. It doesn't measure what a strip costs in screen space or attention, and
+there was no control arm, such as a strip that replaces the tenth result. It is also conditional: only the 59 of
+295 queries (20%) that get a strip are compared, so over all en-gb queries the mean preference is about +0.17.
+
 | Comparison | Queries | Preference [95% CI] | Images / A0 / tie | Orders agree |
 |---|---|---|---|---|
 | **A2 vs A0** | 59 | **+0.84 [+0.64, +1.01]** | 85% / 8% / 7% | 93% |
@@ -156,10 +165,13 @@ from −3 to 3, and a positive value favours the image arm.
 - **Local safety layers:** strips the local layers flagged score the same as those they passed. The local layers
   don't pick out worse strips, so they matter for safety only.
 - **Vision:** with thumbnails, the judges favour A2 more strongly (+1.27 against +0.82 from text alone on the
-  same 20 queries). The two agree in direction on 19 of the 20 queries. The text-only judgment therefore
-  understates A2 a little, if anything.
-- **Caveat:** A2 adds an entry without removing one, so a judge may partly reward more content. The losses on
-  wrong-sense strips show the judges do penalise bad pictures.
+  same 20 queries, with overlapping intervals). The two agree in direction on 19 of the 20 queries, so the
+  text-only judgment doesn't overstate A2. Seeing the pictures may also simply make them more salient to the judge.
+- **A1 against A2:** A1 differs from A2 in five ways at once: no gate, no minimum relevance, single results
+  rather than a strip, low positions, and displacing web results. On the 44 queries both arms change, A1 scores
+  +0.28 and A2 +0.82. A1 is therefore a weak test of single images as such. The gap also shows how much
+  displacing a web result costs, which A2 never pays.
+- **Wrong-sense strips:** the judges do penalise bad pictures. All five of A0's wins are wrong-sense strips.
 
 ### Recommendation
 
@@ -170,6 +182,8 @@ Ship option 2, the gated strip:
   by Jev relevance alone and show at most 4.
 - **Placement:** put the strip after the top web result, as one extra entry that displaces no web result.
 
-Don't merge single images into the web ranking (option 1): judged holistically it is no better than today's
-results. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
+Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
+than today's results, though that version had no gate or minimum relevance either. Before relying on A2's
+margin as a page-quality win, rerun it against a control that pays for the strip, for example by dropping the
+tenth web result. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
 check that the image's subject matches the top web result's.
