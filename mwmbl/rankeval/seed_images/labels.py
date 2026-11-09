@@ -27,7 +27,8 @@ def parse_out(text: str, expected_ids: set[str], field: str, string_fields: tupl
         row = json.loads(line)
         assert row["id"] in expected_ids, f"unexpected id {row['id']}"
         assert row["id"] not in labels, f"id {row['id']} labelled twice"
-        assert row[field] in LEVELS and isinstance(row[field], int), f"{row['id']}: {field} {row[field]!r} not 0-3"
+        # Exactly int, as JSON true would otherwise pass for 1.
+        assert type(row[field]) is int and row[field] in LEVELS, f"{row['id']}: {field} {row[field]!r} not 0-3"
         assert all(isinstance(row[name], str) for name in string_fields), f"{row['id']}: missing {string_fields}"
         labels[row["id"]] = {field: row[field]} | {name: row[name] for name in string_fields}
     missing = expected_ids - set(labels)
