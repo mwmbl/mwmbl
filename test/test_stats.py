@@ -5,8 +5,8 @@ from unittest.mock import patch
 import fakeredis
 import pytest
 
-from mwmbl.crawler.stats import LONG_EXPIRE_SECONDS, USER_RESULTS_COUNT_KEY, StatsManager
-from mwmbl.models import MwmblUser
+from mwmbl.crawler.stats import LONG_EXPIRE_SECONDS, USER_RESULTS_COUNT_KEY, USERS_KEY, StatsManager
+from mwmbl.models import MwmblUser, UserStats
 
 TODAY = date(2026, 9, 22)
 
@@ -14,7 +14,7 @@ TODAY = date(2026, 9, 22)
 def _record(stats_manager: StatsManager, day: date, num_results: int, user: MwmblUser) -> None:
     results = SimpleNamespace(results=[object()] * num_results, crawler_version=None, device_name=None)
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
-        stats_manager.record_results(results, user)
+        stats_manager.record_results(results, user, num_results)
 
 
 @pytest.mark.django_db
@@ -56,3 +56,16 @@ def test_user_stats_include_earlier_days():
     assert daily[str(ten_days_ago)] == 3
     assert daily[str(TODAY)] == 5
     assert user_stats["results_indexed_today"] == 5
+
+
+@pytest.mark.django_db
+def test_a_submission_that_adds_nothing_counts_the_crawler_but_not_on_the_leaderboard():
+    redis = fakeredis.FakeRedis()
+    stats_manager = StatsManager(redis)
+    alice = MwmblUser.objects.create_user(username="alice", password="testpass")
+
+    _record(stats_manager, TODAY, 0, alice)
+
+    assert redis.sismember(USERS_KEY.format(date=TODAY), "alice")
+    assert redis.zcard(USER_RESULTS_COUNT_KEY.format(date=TODAY)) == 0
+    assert not UserStats.objects.filter(user=alice).exists()

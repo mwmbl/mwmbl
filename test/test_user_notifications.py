@@ -26,7 +26,7 @@ def user(db):
 def _crawl(user, day: date) -> None:
     results = SimpleNamespace(results=[object()] * 100, crawler_version=None, device_name=None)
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
-        StatsManager(fakeredis.FakeRedis()).record_results(results, user)
+        StatsManager(fakeredis.FakeRedis()).record_results(results, user, len(results.results))
 
 
 def _crawl_three_days(user, year: int, month: int) -> None:

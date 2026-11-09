@@ -1,7 +1,8 @@
 """Tests for the crawler version spread: recorded per submission, served to staff by the platform API."""
 
 import re
-from datetime import date, timedelta
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import fakeredis
@@ -17,6 +18,7 @@ from mwmbl.crawler.stats import (
     StatsManager,
 )
 from mwmbl.crawler.version import CRAWLER_VERSION
+from mwmbl.indexer.index_batches import IndexedDocuments, IndexedURLs
 from mwmbl.models import ApiKey, generate_api_key
 from mwmbl.utils import utc_today
 
@@ -33,7 +35,7 @@ def _submit(stats_manager, user, day, version, device_name, num_results=1):
         device_name=device_name,
     )
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
-        stats_manager.record_results(results, user)
+        stats_manager.record_results(results, user, num_results)
 
 
 def _spread(stats_manager, days=7):
@@ -185,8 +187,10 @@ def crawl_key(alice):
 
 
 def _post_results(client, stats_manager, crawl_key, path="/api/v1/crawler/results"):
+    urls = {"https://example.com/a"}
+    indexed = IndexedDocuments(datetime.now(timezone.utc), Counter(), [], IndexedURLs(stored=urls, new=urls))
     with (
-        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.index_documents", return_value=indexed),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager", stats_manager),
         patch("mwmbl.crawler.app.record_agreements"),
