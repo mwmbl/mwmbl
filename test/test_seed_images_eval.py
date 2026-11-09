@@ -4,9 +4,12 @@ import dataclasses
 import json
 from datetime import datetime, timezone
 
-from mwmbl.imagesearch.types import SourceImage
-from mwmbl.rankeval.seed_images import jev_images
-from mwmbl.rankeval.seed_images.collect import image_from_json, image_to_json
+import pytest
+
+from mwmbl.imagesearch.commons import SourceRejectedRequest
+from mwmbl.imagesearch.types import ImageSourceUnavailable, SourceImage
+from mwmbl.rankeval.seed_images import collect, jev_images
+from mwmbl.rankeval.seed_images.collect import image_from_json, image_to_json, with_backoff
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.jev_rank import RELEVANCE_QUESTION, SEARCHER
 
@@ -30,6 +33,33 @@ IMAGE = SourceImage(
 
 def test_image_json_round_trips():
     assert image_from_json(json.loads(json.dumps(image_to_json(IMAGE)))) == IMAGE
+
+
+def test_with_backoff_retries_an_unavailable_source(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda seconds: None)
+    outcomes = [ImageSourceUnavailable("rate limited"), "images"]
+
+    def fetch():
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    result, _ = with_backoff(fetch)
+    assert result == "images"
+
+
+def test_with_backoff_raises_a_rejected_request_at_once(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda seconds: pytest.fail("a rejected request was retried"))
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        raise SourceRejectedRequest("bad request")
+
+    with pytest.raises(SourceRejectedRequest):
+        with_backoff(fetch)
+    assert len(calls) == 1
 
 
 def test_image_text_matches_the_benchmark_format():

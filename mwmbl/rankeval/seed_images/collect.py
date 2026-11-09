@@ -15,7 +15,7 @@ from typing import Callable, TypeVar
 
 import httpx
 
-from mwmbl.imagesearch.commons import new_client, search_commons
+from mwmbl.imagesearch.commons import SourceRejectedRequest, new_client, search_commons
 from mwmbl.imagesearch.types import ImageSourceUnavailable, SourceImage
 from mwmbl.rankeval.seed_images import CANDIDATES_DIR, WORKERS
 from mwmbl.rankeval.seed_images.queries import load_queries
@@ -45,11 +45,17 @@ def load_candidates(query: str) -> list[SourceImage]:
 
 
 def with_backoff(fetch: Callable[[], T]) -> tuple[T, float]:
-    """What fetch() returns, and how long the call that returned it took, waiting out each request to back off."""
+    """What fetch() returns, and how long the call that returned it took, waiting out each request to back off.
+
+    A rejected request is a permanent failure, so it is raised at once rather than retried.
+    """
     for _ in range(MAX_ATTEMPTS):
         start = time.monotonic()
         try:
             result = fetch()
+        except SourceRejectedRequest:
+            # Wikimedia refused the request itself, so retrying it would only be refused again.
+            raise
         except ImageSourceUnavailable as e:
             print(f"Commons unavailable ({e}), waiting {BACKOFF_SECONDS}s")
             time.sleep(BACKOFF_SECONDS)
