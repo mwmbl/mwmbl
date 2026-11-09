@@ -145,6 +145,8 @@ mode.
 - **Bland text.** A nude named `IMG_1234.jpg` with no description or categories can't be caught from text. New,
   uncategorised uploads are the riskiest; a minimum file age or some categories would reduce this.
 - **Prompt injection.** Anyone can edit a description, and Jev reads it: "no people are shown" may steer it. Untested.
+  Production must tell Jev that the file name, description and categories are untrusted uploader text, never
+  instructions to follow, and re-check the NSFW threshold on the benchmark with that prompt.
 - **Changes after approval.** An overwritten file serves new pixels at the same thumbnail URL. Recheck each indexed
   file's SHA-1 and text, re-ask Jev on a change, drop deleted files, re-run the benchmark when Jev's model changes.
 
@@ -269,7 +271,7 @@ images shown.
 
 These are the settings to carry into the holistic comparison, not settled production values. Only the gate's
 precision and recall and the mix row above are out of fold. The threshold, k and minimum were all chosen in
-sample. The holistic comparison (#615) tests them on the 295 en-gb queries, which played no part in choosing
+sample. The [holistic comparison](#holistic-comparison) tests them on the 295 en-gb queries, which played no part in choosing
 them.
 
 - **Gate:** show images when Jev image need ≥ **1.63**. That is about 27% of queries, and AUC is 0.89 against
@@ -377,8 +379,8 @@ Ship option 2, the gated strip:
   (+0.75, about +0.15 over all en-gb queries). Screen space is therefore no reason to hold the strip back.
 
 Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
-than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
-check that the image's subject matches the top web result's.
+than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the
+main remaining failure; the Summary's production list says how to catch them with the top web result.
 
 Before shipping:
 
@@ -530,7 +532,10 @@ losses (store photo at #1, junk images). Indexed images rarely evict anything at
   the file name and description only, cap images per list and settle the gate-rejected question.
 - **Left for production:**
   - Build Seed Search's image request, run in parallel with Staan.
-  - Serve the strip in the UI with attribution and licence.
+  - Serve the strip in the UI with attribution and licence, render Commons text escaped, and leave out the
+    Wikipedia card's lead image (the holistic comparison's "Before shipping" list).
+  - Tell Jev that Commons text is untrusted, and re-check the NSFW threshold with that prompt (Residual risks).
   - Set the Jev latency budget for the extra questions.
-  - Add a minimum relevance or a check against the top result for wrong-sense strips.
+  - Disambiguate wrong-sense strips with the top web result. Jev's image-relevance question sees only the query,
+    so give it the top result or two as well, and drop images whose subject doesn't match that meaning.
   - Indexing: retrain the LTR with image results, re-evaluate on a production-sized index; flag, cap, gate rule.
