@@ -7,8 +7,7 @@ and the 295 en-gb queries are searched with standard search's ranker (LTR + MMR)
 each variant. Wikipedia's results, which standard search adds, are fetched once per query and shared by every arm.
 
 Run with `.env` sourced, DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and EXTERNAL_CACHE_ENABLED=false, so the
-Wikipedia fetches never write the dev results cache. Also set PYTHONHASHSEED=0: retrieval and indexing iterate
-sets of terms, so with a random seed tied results swap places between runs, changing 34 of 295 top tens.
+Wikipedia fetches never write the dev cache, and PYTHONHASHSEED=0: with a random seed, tied results swap places.
 
     build NAME INDEX    copy INDEX to indexing/NAME/original.tinysearch and once per variant, and index the
                         images into each variant's copy only, measuring the existing documents they evict
@@ -57,6 +56,7 @@ from mwmbl.tinysearchengine.rank import get_wiki_results  # noqa: E402
 
 INDEXING_DIR = SEED_IMAGES_DIR / "indexing"
 WIKI_PATH = INDEXING_DIR / "wiki.json"
+RELEVANCE_FILE = "image_relevance.json"
 ORIGINAL = "original"
 # Variant name -> (whether the extract carries the categories after the description, whether an image is written
 # only to the pages of terms the index already holds). The second leaves out the images' other terms, whose pages
@@ -197,10 +197,6 @@ def candidates_by_url() -> dict[str, SourceImage]:
     return {image.page_url: image for query in load_queries() for image in load_candidates(query)}
 
 
-def relevance_path(name: str) -> Path:
-    return INDEXING_DIR / name / "image_relevance.json"
-
-
 def relevance(name: str) -> None:
     """Jev image relevance for each image in an en-gb top ten: the gate's score if it has one, else asked now."""
     known = {
@@ -219,7 +215,7 @@ def relevance(name: str) -> None:
             asked = scores(cached_response(relevance_request(query, unscored_images), CACHE_DIR), "i", len(unscored))
             known |= {(query, file_id(image)): s for image, s in zip(unscored_images, asked)}
         scored[query] = {url: known[(query, file_id(images[url]))] for url in urls}
-    relevance_path(name).write_text(json.dumps(scored))
+    (INDEXING_DIR / name / RELEVANCE_FILE).write_text(json.dumps(scored))
 
 
 def top_ten_change(original: list[dict], augmented: list[dict]) -> dict:
@@ -235,7 +231,7 @@ def top_ten_change(original: list[dict], augmented: list[dict]) -> dict:
 def report(name: str) -> None:
     work = INDEXING_DIR / name
     original = json.loads((work / f"lists_{ORIGINAL}.json").read_text())
-    image_relevance = json.loads(relevance_path(name).read_text())
+    image_relevance = json.loads((work / RELEVANCE_FILE).read_text())
     need = {row["query"]: row["score"] for row in read_jsonl(NEED_PATH)}
     gate = json.loads(RECOMMENDED_PATH.read_text())
     summary = {}
@@ -281,27 +277,18 @@ def judge_batches(name: str, arm: str) -> None:
 
 def main() -> None:
     parser = ArgumentParser(description=__doc__.split("\n\n")[0])
-    commands = parser.add_subparsers(dest="command", required=True)
-    build_parser = commands.add_parser("build")
-    build_parser.add_argument("name")
-    build_parser.add_argument("index", type=Path)
-    for command in ("search", "relevance", "report"):
-        commands.add_parser(command).add_argument("name")
-    batches_parser = commands.add_parser("batches")
-    batches_parser.add_argument("name")
-    batches_parser.add_argument("arm", choices=list(VARIANTS))
+    parser.add_argument("command", choices=["build", "search", "relevance", "report", "batches"])
+    parser.add_argument("name")
+    parser.add_argument("extra", nargs="?", help="build: the index to copy; batches: the arm to judge")
     args = parser.parse_args()
 
     if args.command == "build":
-        build(args.name, args.index)
-    elif args.command == "search":
-        search(args.name)
-    elif args.command == "relevance":
-        relevance(args.name)
-    elif args.command == "report":
-        report(args.name)
+        build(args.name, Path(args.extra))
+    elif args.command == "batches":
+        judge_batches(args.name, args.extra)
     else:
-        judge_batches(args.name, args.arm)
+        commands = {"search": search, "relevance": relevance, "report": report}
+        commands[args.command](args.name)
 
 
 if __name__ == "__main__":

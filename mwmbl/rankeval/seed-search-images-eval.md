@@ -259,7 +259,6 @@ The code is `mwmbl/rankeval/seed_images/indexing.py`, and the data is under `dev
 | **en-gb, description, same term** | **11** | 5 | **6** | **14** | **12** | **2** | **13** | 19 (14) |
 | en-gb, + categories, same term | 10 | 4 | 6 | 14 | 12 | 2 | 13 | 18 (14) |
 | dev, description, full | 40 | 13 | 27 | 31 | 10 | 15 | 23 | 26 (2) |
-| dev, + categories, full | 39 | 14 | 25 | 30 | 10 | 14 | 20 | 27 (2) |
 
 - **Same-term arm, the closest to production:**
   - The images are "euro 2025" (6 images, at positions 2 and 4–7 and 10), "matalan" (4 store photos, one at
@@ -284,20 +283,9 @@ The probe tokenised every image with the indexer's own `tokenize_document`.
   its URL, just as every Wikipedia page is under its own. 4,153 are also under `jpg`.
 - **Categories rarely reach the index.** The extract is cut to 155 characters, and only its first 10 tokens and
   10 bigrams are indexed, so categories add terms for only 4,962 of the 11,652 images (3.7 terms each).
-- **What they add is mostly maintenance and licence text:**
-
-  | Category term | Images indexed under it |
-  |---|---|
-  | `self-published work` | 721 |
-  | `images from` (geograph) | 599 |
-  | `taken with` | 424 |
-  | `cc-zero` | 329 |
-  | `flickr images` | 225 |
-  | `canon` | 109 |
-  | `nikon` | 69 |
-  | `media needing categories` | 9 |
-
-  Long licence tags such as `CC-BY-SA-4.0` never get past the cut.
+- **What they add is mostly maintenance and licence text:** `self-published work` (721 images), `images from`
+  geograph (599), `taken with` (424), `cc-zero` (329), `flickr images` (225), `canon` (109), `nikon` (69) and
+  `media needing categories` (9). Long licence tags such as `CC-BY-SA-4.0` never get past the cut.
 - **On the search numbers above,** categories are no better on any of them: slightly more evictions, fewer
   images on their own terms, and the same shown images.
 - **Decision:** drop them. Index the file name and description only.
@@ -316,18 +304,16 @@ compare the image-augmented lists (X) with the original ones (Y). Images are sho
 | Same term vs original | 11 | −0.27 [−0.55, +0.00] | 9% / 36% / 55% | 64% |
 
 - **n = 11 is tiny.** This is a direction, not a measurement.
-- **No query wins in both orders.**
+- **No query wins in both orders,** and six of the eleven are ties.
   - "matalan" loses in both, on top result: a store photo at #1 pushed the brand's pages down.
   - "italy vs bosnia" (a rugby photo) and "cast of wednesday" (a shop front) lose on junk and relevance.
   - "euro 2025" splits, relevance for X against redundancy, with 6 of its 10 places taken by pictures.
     "glasgow airport" splits too.
-- **Ties:** six of the eleven, including the queries whose lists changed with no image shown.
 
 ### Recommendation
 
-Writing approved images into the index is safe for the index. With production's page count they would rarely
-win a full term page or evict anything. As built here, though, they make standard search slightly worse, not
-better. If they are indexed:
+With production's page count, indexed images would rarely win a full term page or evict anything, but as built
+here they make standard search slightly worse. If they are indexed:
 
 - **Text:** index the file name and description only, without categories.
 - **Cap:** allow at most one or two images per standard-search list, so a query like "euro 2025" can't fill
