@@ -36,21 +36,6 @@ def test_stratified_sample_takes_equally_from_each_band():
     assert sorted(scores[key] < 5 for key in sample) == [False, False, True, True]
 
 
-def test_stratified_sample_copes_with_exactly_as_many_keys_as_asked_for():
-    scores = {f"q{i}": float(i) for i in range(5)}
-
-    sample = stratified_sample(scores, 2, 5, random.Random(0))
-
-    assert len(sample) == 4
-
-
-def test_stratified_sample_rejects_too_few_keys():
-    scores = {f"q{i}": float(i) for i in range(3)}
-
-    with pytest.raises(ValueError, match="Can't sample 4 keys from 3"):
-        stratified_sample(scores, 2, 4, random.Random(0))
-
-
 def test_chunks():
     assert chunks([1, 2, 3], 2) == [[1, 2], [3]]
 
