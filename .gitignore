@@ -234,3 +234,4 @@ vendor/
 # Redis snapshot written by a local redis-server started in the repo
 dump.rdb
 devdata/image_safety/
+devdata/seed_images/
