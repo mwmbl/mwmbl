@@ -302,13 +302,61 @@ The probe tokenised every image with the indexer's own `tokenize_document`.
   images on their own terms, and the same shown images.
 - **Decision:** drop them. Index the file name and description only.
 
+
 ### Holistic comparison
 
-For each arm, the batches compare the image-augmented lists (X) with the original ones (Y). The images are
-shown as `[IMAGE] <file name> — <description>`.
+Only the en-gb same-term arm was judged, because it is the closest to production. The full-write and dev arms
+weren't judged: their changes are dominated by the small test indexes' eviction artefacts (92 of the 106
+full-write top tens that changed show no image), so a verdict would mostly measure page sharing. The batches
+compare the image-augmented lists (X) with the original ones (Y). Images are shown as
+`[IMAGE] <file name> — <description>`, and the work is in `engb/description_same_term_vs_original/`.
 
-- `engb/description_same_term_vs_original/` has 11 comparisons in 2 batches.
-- `engb/description_vs_original/` has 106 comparisons in 10 batches.
-- `dev/description_vs_original/` has 40 comparisons in 4 batches.
+| Comparison | Queries | Preference for X (95% CI) | X / Y / tie | Orders agree |
+|---|---|---|---|---|
+| Same term vs original | 11 | −0.27 [−0.55, +0.00] | 9% / 36% / 55% | 64% |
 
-The results are pending.
+- **n = 11 is tiny.** This is a direction, not a measurement.
+- **No query wins in both orders.**
+  - "matalan" loses in both, on top result: a store photo at #1 pushed the brand's pages down.
+  - "italy vs bosnia" (a rugby photo) and "cast of wednesday" (a shop front) lose on junk and relevance.
+  - "euro 2025" splits, relevance for X against redundancy, with 6 of its 10 places taken by pictures.
+    "glasgow airport" splits too.
+- **Ties:** six of the eleven, including the queries whose lists changed with no image shown.
+
+### Recommendation
+
+Writing approved images into the index is safe for the index. With production's page count they would rarely
+win a full term page or evict anything. As built here, though, they make standard search slightly worse, not
+better. If they are indexed:
+
+- **Text:** index the file name and description only, without categories.
+- **Cap:** allow at most one or two images per standard-search list, so a query like "euro 2025" can't fill
+  with pictures.
+- **Gate-rejected queries:** decide whether standard search should show images on queries Jev need would
+  reject. Nearly all the images it surfaced were on such queries, and the losses ("matalan" at #1) are
+  navigational ones. Standard search has no Jev, so honouring the gate means storing something like the need
+  score with the image, or not showing images in standard search at all.
+- **Thin terms:** images reach thin terms easily, as the full-write arms' completion-term junk shows, so check
+  against a production-sized index before rollout.
+
+## Summary
+
+- **Seed Search:** ship the gated strip, the holistic phase's A2.
+  - **Gate:** show images when Jev image need ≥ 1.63, about 27% of queries.
+  - **Images:** Jev-safe images (NSFW < 1.0), with Jev image relevance ≥ 1.5, sorted by Jev relevance, at
+    most 4.
+  - **Placement:** after the top web result. It beats today's page by +0.84 on gated-in queries (+0.75 when it
+    displaces the tenth result), and its main failure is wrong-sense strips.
+- **Safety:** Jev's text-only NSFW check at 1.0 replaces DistilBERT. It reads only text, so a pixel layer
+  should stay behind it for images whose text says nothing.
+- **Standard search:** don't serve indexed images yet. Indexed as plain pages, they leave the index intact but
+  judge slightly worse (−0.27, n = 11) on the arm closest to production. If they are indexed, use the file name
+  and description only, cap them per list and settle the gate-rejected question first.
+- **Left for production:**
+  - Build Seed Search's image request, run in parallel with Staan.
+  - Serve the strip in the UI with attribution and licence.
+  - Set the Jev latency budget for the extra questions.
+  - Choose a pixel safety layer.
+  - Add a minimum relevance or a check against the top result for wrong-sense strips.
+  - If indexing goes ahead: the image flag, the per-list cap, the gate decision, and a test on a
+    production-sized index.
