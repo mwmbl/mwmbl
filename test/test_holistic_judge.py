@@ -17,6 +17,7 @@ from mwmbl.rankeval.evaluation.holistic_judge import (
     differing_queries,
     preference_for_x,
     results_block,
+    shortened,
     summarise,
     top_results,
 )
@@ -217,3 +218,35 @@ def test_a_displacing_strip_counts_towards_the_ten_and_the_judge_is_not_told_it_
     assert top_results(x["pictures"] + web[9:]) == x["pictures"]
     assert STRIP_ADDS in IMAGES_NOTE and "eleven" not in text
     assert IMAGES_NOTE.replace(STRIP_ADDS, ".") in text
+
+
+def test_commons_titles_and_descriptions_lose_encoded_markup_too():
+    picture = {
+        "url": "https://commons.wikimedia.org/wiki/File:X.jpg",
+        "title": "X &lt;script&gt;alert(1)&lt;/script&gt;.jpg",
+        "extract": "A &lt;b&gt;bold&lt;/b&gt; <i>claim</i> &amp; more",
+        "image": True,
+    }
+
+    line = results_block("A", [picture]).splitlines()[1]
+
+    assert line == "1. [IMAGE] X alert(1).jpg — A bold claim & more"
+
+
+def test_descriptions_are_shortened_at_a_sentence_end_or_else_a_word_boundary():
+    sentences = "The bridge at dusk. " + "Seen from the north bank of the river " * 5
+    words = "word " * 40
+
+    assert shortened("Short enough.", 150) == "Short enough."
+    assert shortened(sentences, 30) == "The bridge at dusk."
+    assert shortened(words, 22) == "word word word word…"
+    assert shortened("x" * 200, 10) == "x" * 10 + "…"
+
+
+def test_strips_with_one_url_but_different_pictures_still_differ():
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}]}
+    other_text = dict(strip, images=[{"title": "A.jpg", "description": "Another description"}])
+    x = {"same": results("https://a.com/") + [strip], "pictures": results("https://a.com/") + [other_text]}
+    y = {"same": results("https://a.com/") + [strip], "pictures": results("https://a.com/") + [strip]}
+
+    assert differing_queries(x, y) == ["pictures"]
