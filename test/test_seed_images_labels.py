@@ -56,6 +56,7 @@ def test_parse_out_reads_valid_lines():
         '{"id": "N1", "need": 1, "reason": "x"}\n{"id": "N3", "need": 1, "reason": "x"}',
         '{"id": "N1", "need": 1, "reason": "x"}',
         '{"id": "N1", "need": 1}\n{"id": "N2", "need": 0, "reason": "x"}',
+        '{"id": "N1", "need": true, "reason": "x"}\n{"id": "N2", "need": 0, "reason": "x"}',
     ],
 )
 def test_parse_out_rejects_bad_output(text):
