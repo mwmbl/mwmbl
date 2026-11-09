@@ -10,12 +10,15 @@ import time
 import django
 from django.conf import settings
 
-from mwmbl.imagesearch.pipeline import file_id
-from mwmbl.rankeval.evaluation.jev_order import cached_response
-from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably
-from mwmbl.rankeval.seed_images.collect import load_candidates
-from mwmbl.rankeval.seed_images.jev_images import need_request, need_score, nsfw_request, scores
-from mwmbl.rankeval.seed_images.queries import load_queries
+# jev_rank reaches Django models through rank -> blacklist_snapshot, so the registry must be up first.
+django.setup()
+
+from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
+from mwmbl.rankeval.evaluation.jev_order import cached_response  # noqa: E402
+from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E402
+from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
+from mwmbl.rankeval.seed_images.jev_images import need_request, need_score, nsfw_request, scores  # noqa: E402
+from mwmbl.rankeval.seed_images.queries import load_queries  # noqa: E402
 
 CACHE_DIR = SEED_IMAGES_DIR / "jev_cache"
 NSFW_PATH = SEED_IMAGES_DIR / "jev_nsfw.jsonl"
@@ -43,7 +46,6 @@ def score_need(query: str, web: list[dict]) -> dict:
 
 
 def main() -> None:
-    django.setup()
     assert settings.JEV_API_KEY, "JEV_API_KEY is not set: source .env"
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     queries = load_queries()

@@ -1,14 +1,12 @@
 """Evaluation harness for Wikimedia Commons images in Seed Search (mwmbl/mwmbl#610).
 
-Run in order, from the repo root, with `.env` sourced (`set -a && source .env && set +a`) and
-DJANGO_SETTINGS_MODULE=mwmbl.settings_dev:
+Each step resumes and caches under devdata/seed_images/. Run them in order from the repo root, with `.env`
+sourced (`set -a && source .env && set +a`) and DJANGO_SETTINGS_MODULE=mwmbl.settings_dev:
 
     uv run python -m mwmbl.rankeval.seed_images.queries ARMS    # queries.json + the en-gb baseline lists
     uv run python -m mwmbl.rankeval.seed_images.collect         # top Commons candidates per query
     uv run python -m mwmbl.rankeval.seed_images.local_verdicts  # rules, NudeNet and SigLIP2 on each candidate
     uv run python -m mwmbl.rankeval.seed_images.run_jev         # Jev's NSFW and image-need scores
-
-Each step is resumable and caches what it fetched under devdata/seed_images/.
 """
 
 import json
