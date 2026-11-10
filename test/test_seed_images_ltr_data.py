@@ -5,7 +5,7 @@ from hashlib import sha256
 
 import pytest
 
-from mwmbl.rankeval.seed_images import ltr_data
+from mwmbl.rankeval.seed_images import indexing, ltr_data
 from mwmbl.tinysearchengine.indexer import Document
 
 COMMONS = "https://commons.wikimedia.org/wiki/File:"
@@ -32,8 +32,8 @@ def test_an_image_fits_on_a_thin_page_but_loses_to_a_full_one():
     thin = ltr_data.stored_page(web_documents("clock", 2), [image("clock", "A")])
     full = ltr_data.stored_page(web_documents("clock", 200), [image("clock", "A")])
 
-    assert any(ltr_data.is_image(d.url) for d in thin)
-    assert not any(ltr_data.is_image(d.url) for d in full)
+    assert any(indexing.is_image(d.url) for d in thin)
+    assert not any(indexing.is_image(d.url) for d in full)
 
 
 def test_a_query_reads_its_terms_and_bigrams():
@@ -45,13 +45,16 @@ def test_a_query_gets_the_images_stored_under_its_terms_that_pass_the_majority_r
     both.title = "big ben"
     one_term = image("ben", "Ben_nevis")
     pooled = image("big", "Pooled")
+    already_indexed = image("big ben", "Production_holds_it")
+    wrong_term = image("other", "Wrong_term")
     pages = {
         ltr_data.page_index("ben"): [both, one_term],
         ltr_data.page_index("big"): [pooled],
-        ltr_data.page_index("big ben"): [image("other", "Wrong_term")],
+        ltr_data.page_index("big ben"): [wrong_term, already_indexed],
     }
+    overlaid = {document.url for document in (both, one_term, pooled, wrong_term)}
 
-    row = ltr_data.query_images("big ben", pages, pool_urls={pooled.url})
+    row = ltr_data.query_images("big ben", pages, overlaid, pool_urls={pooled.url})
 
     assert [entry["url"] for entry in row["images"]] == [both.url]
     assert (row["retrieved"], row["already_pooled"]) == (3, 1)
@@ -117,9 +120,22 @@ def test_merge_splits_image_grades_from_anchor_grades_and_skips_repeats(ltr_dir)
     output.write_text("".join(f"{number} || 1 || 3 || 3\n" for number in manifest) + "junk\n")
 
     ltr_data.merge("t1", [output, output])
+    ltr_data.merge("t1", [output])
 
     assert [row["overall"] for row in ltr_data.read_jsonl(ltr_dir / "pass3_judgments.jsonl")] == [3]
     assert len(ltr_data.read_jsonl(ltr_dir / "pass3_anchors.jsonl")) == 2
-    assert ltr_data.anchor_agreement() == {"anchors": 2, "mean_difference": -5.0, "within_one": 0.0}
+    agreement = ltr_data.anchor_agreement()
+    assert agreement["anchors"] == 2
+    assert agreement["overall"] == {"mean_difference": -5.0, "within_one": 0.0}
+    assert agreement["ethos"] == {"mean_difference": 1.0, "within_one": 1.0}
     rows = ltr_data.image_rows()
     assert rows[["url", "overall", "pools"]].values.tolist() == [[f"{COMMONS}Big_ben.jpg", 3, ltr_data.IMAGE_POOL]]
+
+
+def test_a_second_different_grade_for_one_id_fails_the_merge(ltr_dir):
+    ltr_data.batches("t1", 1)
+    output = ltr_dir / "out.txt"
+    output.write_text("1 || 1 || 3 || 3\n1 || 3 || 3 || 10\n")
+
+    with pytest.raises(ValueError, match="graded twice"):
+        ltr_data.merge("t1", [output])

@@ -1,9 +1,14 @@
 """LTR training rows for Commons image pages: the Jev-safe images in the LLM-labelled queries' pools (#610).
 
-Standard search's LTR has never seen an image page. This puts the eval's Jev-safe images (NSFW below 1.0, every
-query's) where indexing them would put them, grades the ones that reach an LLM-labelled query's candidates with
-the pass-3 prompt, and writes the LLM dataset with those rows added, tagged with their own pool so a model can be
-trained with and without them (`llm_experiment --exclude-pool commons_image`).
+Standard search's LTR has never seen an image page. This puts the Jev-safe images (NSFW below 1.0) of the 849
+train queries, the set indexing.py indexes, where indexing them would put them, grades the ones that reach an
+LLM-labelled query's candidates with the pass-3 prompt, and writes the LLM dataset with those rows added, tagged
+with their own pool so a model can be trained with and without them (`llm_experiment --exclude-pool commons_image`).
+The en-gb queries' images stay out, so an en-gb evaluation never ranks images its own queries found.
+
+A query's images are not cut to the top 30 by stored score as its pass-2 standard rows were: an image's stored
+score is None, so its place among the other None-scored pages would be arbitrary, and the LTR scores every
+retrieved candidate at serving time anyway.
 
 Each image is the document indexing.py made of it (file page URL, file name as title, description as extract, no
 categories) under each of its own terms, never the query that found it. Its documents are merged into production's
@@ -40,8 +45,7 @@ from mwmbl.indexer.index_batches import combine_documents  # noqa: E402
 from mwmbl.rankeval.evaluation.remote_index import USER_AGENT  # noqa: E402
 from mwmbl.rankeval.paths import LEARNING_TO_RANK_LLM_DATASET_PATH  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR  # noqa: E402
-from mwmbl.rankeval.seed_images.gate_data import jev_safe_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.indexing import image_document, is_image  # noqa: E402
+from mwmbl.rankeval.seed_images.indexing import approved_train_images, image_document  # noqa: E402
 from mwmbl.rankeval.seed_images.queries import LLM_RELABEL_DIR, read_jsonl  # noqa: E402
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, cleaned_document  # noqa: E402
 from mwmbl.tinysearchengine.rank import HeuristicRanker, get_features  # noqa: E402
@@ -59,6 +63,7 @@ DATASET_PATH = LTR_DIR / "learning-to-rank-llm-images.csv.gz"
 PASS2_POOL_PATH = LLM_RELABEL_DIR / "pass2_pool.jsonl"
 PASS3_PATH = LLM_RELABEL_DIR / "pass3_judgments.jsonl"
 IMAGE_POOL = "commons_image"
+AXES = ("relevance", "ethos", "overall")
 # settings_prod.NUM_PAGES. The page a term is stored on is its hash modulo this, so it must be production's.
 PRODUCTION_NUM_PAGES = 102_400_000
 # Web pages from the query's graded pool, judged again alongside its images: a check that grades given beside
@@ -68,15 +73,6 @@ NUM_ANCHORS = 2
 
 def page_index(term: str) -> int:
     return mmh3.hash(term, signed=False) % PRODUCTION_NUM_PAGES
-
-
-def jev_safe_images() -> list[SourceImage]:
-    """Every query's Jev-safe candidates, each once: Seed Search would approve them whichever query found them."""
-    by_url = {}
-    for images in jev_safe_candidates().values():
-        for image in images:
-            by_url.setdefault(image.page_url, image)
-    return list(by_url.values())
 
 
 def image_term_documents(images: list[SourceImage]) -> dict[int, list[Document]]:
@@ -117,12 +113,16 @@ def passes_majority_terms(terms: list[str], document: Document) -> bool:
     return features["match_terms"] > len(terms) / 2
 
 
-def query_images(query: str, stored_pages: dict[int, list[Document]], pool_urls: set[str]) -> dict:
+def query_images(
+    query: str, stored_pages: dict[int, list[Document]], image_urls: set[str], pool_urls: set[str]
+) -> dict:
+    """The overlaid images the query retrieves. Commons file pages production already holds are web rows: they
+    went through pass 2 like any other page."""
     terms = tokenize(query)
     retrieved = {}
     for term in lookup_terms(terms):
         for document in stored_pages.get(page_index(term), []):
-            if document.term == term and is_image(document.url):
+            if document.term == term and document.url in image_urls:
                 retrieved.setdefault(document.url, document)
     kept = [d for d in retrieved.values() if passes_majority_terms(terms, d) and d.url not in pool_urls]
     return {
@@ -135,7 +135,9 @@ def query_images(query: str, stored_pages: dict[int, list[Document]], pool_urls:
 
 def overlay() -> None:
     pools = read_jsonl(PASS2_POOL_PATH)
-    image_pages = image_term_documents(jev_safe_images())
+    images = approved_train_images()
+    image_urls = {image.page_url for image in images}
+    image_pages = image_term_documents(images)
     wanted = sorted({page_index(term) for pool in pools for term in lookup_terms(tokenize(pool["query"]))})
     written = [number for number in wanted if number in image_pages]
     print(f"{len(written)} of the {len(wanted)} lookup pages receive images")
@@ -152,7 +154,7 @@ def overlay() -> None:
     with POOLS_PATH.open("w") as out:
         for pool in pools:
             pool_urls = {candidate["url"] for candidate in pool["candidates"]}
-            out.write(json.dumps(query_images(pool["query"], stored_pages, pool_urls)) + "\n")
+            out.write(json.dumps(query_images(pool["query"], stored_pages, image_urls, pool_urls)) + "\n")
     print(f"{evicted} existing documents evicted from those pages")
 
 
@@ -210,27 +212,35 @@ def parse_line(line: str) -> tuple[int, int, int, int] | None:
     return number, relevance, ethos, overall
 
 
+def judged_lines(paths: list[Path], manifest: dict) -> dict[int, tuple[int, int, int]]:
+    """Each manifest id's grades. Two different grades for one id fail: a candidate's text addressing the judge
+    could print a line for another id, and keeping either line would hide that."""
+    grades = {}
+    for path in paths:
+        for line in path.read_text().splitlines():
+            parsed = parse_line(line)
+            if parsed is None or str(parsed[0]) not in manifest:
+                continue
+            number, *axes = parsed
+            if grades.setdefault(number, tuple(axes)) != tuple(axes):
+                raise ValueError(f"id {number} is graded twice, differently, in {path}")
+    return grades
+
+
 def merge(tag: str, paths: list[Path]) -> None:
     manifest = json.loads((WORK_DIR / tag / "manifest.json").read_text())
     done = graded_pairs(JUDGMENTS_PATH) | graded_pairs(ANCHORS_PATH)
     added = Counter()
     with JUDGMENTS_PATH.open("a") as judgments, ANCHORS_PATH.open("a") as anchor_judgments:
-        for path in paths:
-            for line in path.read_text().splitlines():
-                parsed = parse_line(line)
-                if parsed is None or str(parsed[0]) not in manifest:
-                    added["malformed"] += line.strip() != ""
-                    continue
-                number, relevance, ethos, overall = parsed
-                entry = manifest[str(number)]
-                if (entry["query"], entry["url"]) in done:
-                    added["duplicate"] += 1
-                    continue
-                record = {"query": entry["query"], "url": entry["url"]}
-                record |= {"relevance": relevance, "ethos": ethos, "overall": overall}
-                (anchor_judgments if entry["anchor"] else judgments).write(json.dumps(record) + "\n")
-                done.add((entry["query"], entry["url"]))
-                added["anchor" if entry["anchor"] else "image"] += 1
+        for number, grades in judged_lines(paths, manifest).items():
+            entry = manifest[str(number)]
+            if (entry["query"], entry["url"]) in done:
+                added["duplicate"] += 1
+                continue
+            record = {"query": entry["query"], "url": entry["url"]} | dict(zip(AXES, grades))
+            (anchor_judgments if entry["anchor"] else judgments).write(json.dumps(record) + "\n")
+            done.add((entry["query"], entry["url"]))
+            added["anchor" if entry["anchor"] else "image"] += 1
     print(f"merged {tag}: {dict(added)}; {len(manifest)} in the manifest")
 
 
@@ -242,20 +252,24 @@ def image_rows() -> pd.DataFrame:
             grade = grades[(row["query"], image["url"])]
             rows.append(
                 {"query": row["query"], "url": image["url"], "title": image["title"], "extract": image["extract"]}
-                | {axis: grade[axis] for axis in ("relevance", "ethos", "overall")}
+                | {axis: grade[axis] for axis in AXES}
                 | {"pools": IMAGE_POOL, "ss_source": ""}
             )
     return pd.DataFrame(rows)
 
 
 def anchor_agreement() -> dict:
-    grades = {(row["query"], row["url"]): row["overall"] for row in read_jsonl(PASS3_PATH)}
-    differences = [row["overall"] - grades[(row["query"], row["url"])] for row in read_jsonl(ANCHORS_PATH)]
-    return {
-        "anchors": len(differences),
-        "mean_difference": sum(differences) / len(differences),
-        "within_one": sum(abs(difference) <= 1 for difference in differences) / len(differences),
-    }
+    """Per axis, how the anchors' grades beside images differ from their pass-3 grades."""
+    grades = {(row["query"], row["url"]): row for row in read_jsonl(PASS3_PATH)}
+    anchor_rows = read_jsonl(ANCHORS_PATH)
+    agreement = {"anchors": len(anchor_rows)}
+    for axis in AXES:
+        differences = [row[axis] - grades[(row["query"], row["url"])][axis] for row in anchor_rows]
+        agreement[axis] = {
+            "mean_difference": round(sum(differences) / len(differences), 3),
+            "within_one": round(sum(abs(difference) <= 1 for difference in differences) / len(differences), 3),
+        }
+    return agreement
 
 
 def build() -> None:
@@ -264,8 +278,9 @@ def build() -> None:
     dataset = pd.concat([llm, images], ignore_index=True)
     dataset.to_csv(DATASET_PATH, errors="replace")
     print(f"{len(images)} image rows on {images['query'].nunique()} queries, {len(dataset)} rows -> {DATASET_PATH}")
-    for axis in ("relevance", "ethos", "overall"):
-        print(f"  {axis}: {dict(sorted(Counter(images[axis]).items()))}")
+    for axis in AXES:
+        distribution = dict(sorted(Counter(images[axis]).items()))
+        print(f"  {axis}: {distribution}, mean {images[axis].mean():.2f} for images, {llm[axis].mean():.2f} for web")
     print(f"  overall >= 4: {(images['overall'] >= 4).mean():.1%} of images, {(llm['overall'] >= 4).mean():.1%} of web")
     print(f"  anchors: {anchor_agreement()}")
 
