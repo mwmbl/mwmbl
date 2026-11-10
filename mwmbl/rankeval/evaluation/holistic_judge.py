@@ -49,6 +49,8 @@ IMAGE_DESCRIPTION_CHARS = 150
 COMPARISONS_PER_BATCH = 25
 BOOTSTRAP_SAMPLES = 2000
 TAG = re.compile(r"<[^>]+>")
+# Only tag shapes, so a decoded "a < b and c > d" survives, and linear because it can't span a "<".
+DECODED_TAG = re.compile(r"</?[A-Za-z][^<>]*>")
 STRENGTHS = {"slight": 1, "clear": 2, "strong": 3}
 REASONS = ("top_result", "relevance", "junk", "redundancy", "coverage", "extracts", "ethos", "none")
 FLAGS = ("off-topic", "spam", "thin", "duplicate", "poor-extract", "wrong-locale", "ethos")
@@ -164,9 +166,16 @@ Use the Write tool to write your JSON lines, one per comparison and nothing else
 
 
 def plain_text(text: str) -> str:
-    # Some providers mark query terms up with <strong>, which the searcher sees as bold. Entities are decoded
-    # before tags are stripped, so an encoded tag such as &lt;script&gt; is stripped too.
-    return TAG.sub("", html.unescape(text or "")).replace("\n", " ")
+    # Some providers mark query terms up with <strong>, which the searcher sees as bold.
+    return html.unescape(TAG.sub("", text or "")).replace("\n", " ")
+
+
+def commons_text(text: str) -> str:
+    """Commons text as plain text on one line. Commons text is user-entered, so tags that only appear once
+    entities are decoded, such as &lt;script&gt;, are stripped too. Web extracts keep encoded tags, since there
+    they are usually code being written about."""
+    decoded = plain_text(text)
+    return " ".join(DECODED_TAG.sub("", decoded).split())
 
 
 def shortened(text: str, limit: int) -> str:
@@ -183,9 +192,8 @@ def shortened(text: str, limit: int) -> str:
 
 
 def image_text(image: dict) -> str:
-    # Commons titles and descriptions are user-entered, so both go through the same normalisation.
-    title = " ".join(plain_text(image["title"]).split())
-    description = shortened(" ".join(plain_text(image["description"]).split()), IMAGE_DESCRIPTION_CHARS)
+    title = commons_text(image["title"])
+    description = shortened(commons_text(image["description"]), IMAGE_DESCRIPTION_CHARS)
     thumbnail = f" (thumbnail: {image['thumb']})" if "thumb" in image else ""
     return f"{title or '(no title)'} — {description or '(no description)'}{thumbnail}"
 
@@ -221,10 +229,13 @@ def top_results(results: list[dict]) -> list[dict]:
 
 
 def differing_queries(x_lists: dict, y_lists: dict) -> list[str]:
-    # Web results compare by URL alone, as before images; an image entry compares by what the judge is shown, so
-    # two strips with the same URL but different pictures or text still differ.
+    # Web results compare by URL alone, as before images; an image entry also compares by what the judge is shown,
+    # so two strips with the same URL but different pictures or text still differ.
     def top_entries(results: list[dict]) -> list[str]:
-        return [result_text(result) if is_image_entry(result) else result["url"] for result in top_results(results)]
+        return [
+            result["url"] + result_text(result) if is_image_entry(result) else result["url"]
+            for result in top_results(results)
+        ]
 
     shared = sorted(set(x_lists) & set(y_lists))
     return [query for query in shared if top_entries(x_lists[query]) != top_entries(y_lists[query])]
