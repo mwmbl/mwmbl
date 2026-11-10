@@ -72,11 +72,19 @@ def index_batches(batch_data: Collection[HashedBatch], index_path: str) -> Count
     return indexed.new_page_doc_counts
 
 
+class IndexedURLs(NamedTuple):
+    stored: set[str]
+    """URLs of the documents written, now on at least one of their pages."""
+    new: set[str]
+    """Of those, the URLs none of their pages held beforehand."""
+
+
 class IndexedDocuments(NamedTuple):
     end_time: datetime
     new_page_doc_counts: Counter
     agreements: list[Agreement]
     """One for each submitted URL another crawler's stored copy of was met."""
+    urls: IndexedURLs
 
 
 def index_documents(documents, index_path) -> IndexedDocuments:
@@ -96,8 +104,12 @@ def index_documents(documents, index_path) -> IndexedDocuments:
     new_page_doc_counts = Counter()
     copy_pages = Counter()
     copy_last_crawled = {}
+    stored_urls = set()
+    held_urls = set()
     for page in _store_pages(index_path, page_documents):
         new_page_doc_counts.update(_new_terms(page.stored))
+        stored_urls |= {document.url for document in page.stored}
+        held_urls |= {document.url for document in page.existing}
         for stored_copy, last_crawled in page.stored_copies:
             copy_pages[stored_copy] += 1
             copy_last_crawled[stored_copy] = _latest(copy_last_crawled.get(stored_copy), last_crawled)
@@ -107,8 +119,11 @@ def index_documents(documents, index_path) -> IndexedDocuments:
         compare(submitted_by_url[stored_copy.url], stored_copy, copy_last_crawled[stored_copy])
         for stored_copy in _most_held_copies(copy_pages)
     ]
+    incoming_urls = {document.url for documents in page_documents.values() for document in documents}
+    written_urls = stored_urls & incoming_urls
+    urls = IndexedURLs(stored=written_urls, new=written_urls - held_urls)
     end_time = datetime.now(timezone.utc)
-    return IndexedDocuments(end_time, new_page_doc_counts, agreements)
+    return IndexedDocuments(end_time, new_page_doc_counts, agreements, urls)
 
 
 def _most_held_copies(copy_pages: Counter) -> list[StoredCopy]:
@@ -127,13 +142,6 @@ def _latest(first: Optional[int], second: Optional[int]) -> Optional[int]:
     return max((time for time in (first, second) if time is not None), default=None)
 
 
-class IndexedURLs(NamedTuple):
-    stored: set[str]
-    """URLs of the documents written, now on at least one of their pages."""
-    new: set[str]
-    """Of those, the URLs none of their pages held beforehand."""
-
-
 def index_new_documents(documents, index_path) -> IndexedURLs:
     """index_documents, returning which URLs it stored and which of those the index lacked.
 
@@ -142,15 +150,7 @@ def index_new_documents(documents, index_path) -> IndexedURLs:
     Both are read under the page locks the write takes, so a document the store trimmed, or
     one the blacklist dropped, is in neither.
     """
-    page_documents = _page_documents(documents, index_path)
-    stored_urls = set()
-    held_urls = set()
-    for page in _store_pages(index_path, page_documents):
-        stored_urls |= {document.url for document in page.stored}
-        held_urls |= {document.url for document in page.existing}
-    incoming_urls = {document.url for documents in page_documents.values() for document in documents}
-    written_urls = stored_urls & incoming_urls
-    return IndexedURLs(stored=written_urls, new=written_urls - held_urls)
+    return index_documents(documents, index_path).urls
 
 
 def _page_documents(documents, index_path) -> dict[int, list[Document]]:

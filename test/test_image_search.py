@@ -157,6 +157,12 @@ def stub_commons(monkeypatch, images):
         "cam girl",
         "busty",
         "milf",
+        "Naturism in France",
+        "nudism",
+        "FKK-Strand",
+        "Freikörperkultur",
+        "skinny dipping",
+        "Clothing-optional beach",
     ],
 )
 def test_rules_deny_sexual_terms(text):
@@ -175,6 +181,11 @@ def test_rules_check_categories_as_well_as_title():
 
 @pytest.mark.parametrize("text", ["n\u200bude", "nüde", "ｎｕｄｅ", "n\u00adaked", "NUDE"])
 def test_rules_see_through_accents_width_and_invisible_characters(text):
+    assert rules.find_denied_term(text) is not None
+
+
+@pytest.mark.parametrize("text", ["topless_beach", "Woman_nude.jpg", "Naked_mole_rat", "2naked", "nude2024.jpg"])
+def test_rules_see_through_underscores_and_digits_in_file_names(text):
     assert rules.find_denied_term(text) is not None
 
 
