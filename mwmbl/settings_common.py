@@ -485,6 +485,9 @@ COMMONS_MAX_COOLDOWN_SECONDS = 300
 # (mwmbl.imagesearch.verdict_cache), so they cannot go stale and the expiry only bounds Redis memory.
 IMAGE_SEARCH_VERDICT_CACHE_SECONDS = 30 * 24 * 60 * 60
 # Seed Search's images (mwmbl.imagesearch.seed_images); the thresholds live with the questions, in prompt.py.
+# The kill switch: off, images=true answers `unavailable` without asking Commons or the judge. Off until the safety
+# benchmark and injection probes have been re-run with captions.
+IMAGE_SEARCH_ENABLED = os.environ.get("IMAGE_SEARCH_ENABLED", "false").lower() == "true"
 IMAGE_SEARCH_CANDIDATES = 20
 # How many of the images returned the page shows before its "More" button.
 IMAGES_DISPLAY_COUNT = 4

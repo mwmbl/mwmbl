@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
-from logging import getLogger
+from logging import WARNING, getLogger
 
 from django.conf import settings
 
@@ -32,6 +32,8 @@ from mwmbl.imagesearch.types import SourceImage, Verdict
 from mwmbl.tinysearchengine.indexer import Document
 
 logger = getLogger(__name__)
+# httpx logs every request's URL at INFO, and the Commons search URL holds the query.
+getLogger("httpx").setLevel(WARNING)
 
 # One client for the process, so its pooled connections to Commons are reused across searches.
 client = commons.new_client()
