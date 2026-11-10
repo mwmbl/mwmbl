@@ -484,3 +484,17 @@ COMMONS_MAX_COOLDOWN_SECONDS = 300
 # Judgments per file, keyed by content and by the model and question that gave them
 # (mwmbl.imagesearch.verdict_cache), so they cannot go stale and the expiry only bounds Redis memory.
 IMAGE_SEARCH_VERDICT_CACHE_SECONDS = 30 * 24 * 60 * 60
+# Seed Search's images (mwmbl.imagesearch.seed_images). The thresholds were measured with the judge's questions
+# and live beside them, in mwmbl.imagesearch.prompt.
+IMAGE_SEARCH_CANDIDATES = 20
+# How many of the images returned the page shows before its "More" button.
+IMAGES_DISPLAY_COUNT = 4
+# For each request to the judge: they take 0.27s at p50 and 0.37s at p95.
+IMAGE_JUDGE_TIMEOUT_SECONDS = 1.5
+# How long the images may still take once web ranking has finished, before they are given up as unavailable.
+IMAGE_SEARCH_GRACE_SECONDS = 0.25
+# A file whose page was edited, or whose file was replaced, more recently than this is left out, so that Commons'
+# own patrollers have had a chance to catch an explicit file given bland text.
+IMAGE_SEARCH_MIN_REVISION_AGE = timedelta(days=7)
+# SHA-1s or Commons file page URLs (as the API gives them) never to show, until approvals can be revoked.
+IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").split())
