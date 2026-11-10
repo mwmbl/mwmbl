@@ -524,3 +524,17 @@ IMAGE_SEARCH_THUMBNAIL_MAX_BYTES = 1_000_000
 IMAGE_SEARCH_MAX_RESULTS = 30
 IMAGE_SEARCH_TOP_IMAGE_CANDIDATES = 10
 IMAGE_SEARCH_TOP_IMAGE_MAX_RANK = 3
+# Seed Search's images (mwmbl.imagesearch.seed_images); the thresholds live with the questions, in prompt.py.
+IMAGE_SEARCH_CANDIDATES = 20
+# How many of the images returned the page shows before its "More" button.
+IMAGES_DISPLAY_COUNT = 4
+# For each request to the judge: they take 0.27s at p50 and 0.37s at p95.
+IMAGE_JUDGE_TIMEOUT_SECONDS = 1.5
+# How long the images may still take once web ranking has finished, before they are given up as unavailable.
+IMAGE_SEARCH_GRACE_SECONDS = 0.25
+# A file edited or replaced more recently is left out, so patrollers can catch an explicit file with bland text.
+IMAGE_SEARCH_MIN_REVISION_AGE = timedelta(days=7)
+IMAGE_SEARCH_THREADS = 8
+# Space-separated SHA-1s, or Commons file page URLs percent-encoded as the API gives them
+# (https://commons.wikimedia.org/wiki/File:Caf%C3%A9.jpg), never to show until approvals can be revoked.
+IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").lower().split())

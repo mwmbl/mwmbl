@@ -62,12 +62,14 @@ def make_page(name: str, index: int, categories: str = "Mammals|Zoos", descripti
         },
     }
     info.update(overrides)
-    return {"title": f"File:{name}", "index": index, "imageinfo": [info]}
+    revisions = [{"timestamp": "2021-01-01T00:00:00Z"}]
+    return {"title": f"File:{name}", "index": index, "imageinfo": [info], "revisions": revisions}
 
 
 def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> SourceImage:
     fields = dict(
         title=title,
+        caption="",
         page_url="https://commons.wikimedia.org/wiki/File:x",
         thumbnail_url=THUMB.format(title, title),
         thumbnail_width=320,
@@ -79,6 +81,7 @@ def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> Sour
         attribution="A. Photographer",
         sha1=f"sha1-of-{title}",
         uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        revised_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
         rank=rank,
     )
     fields.update(overrides)
@@ -323,6 +326,21 @@ def test_parse_page_extracts_everything_the_checks_read():
     assert image.categories == ("Mammals", "Zoos")
     assert image.attribution == "A. Photographer"
     assert image.rank == 3
+    assert image.caption == ""
+    assert image.revised_at == datetime(2021, 1, 1, tzinfo=timezone.utc)
+
+
+def test_parse_page_reads_the_english_caption_as_plain_text():
+    page = make_page("a.jpg", 1) | {"entityterms": {"label": ["A red panda &lt;b&gt;asleep&lt;/b&gt;"]}}
+    image = commons.parse_page(page)
+    assert image.caption == "A red panda asleep"
+    assert "A red panda asleep" in image.text
+
+
+def test_parse_page_drops_pages_without_a_revision_time():
+    page = make_page("a.jpg", 1)
+    del page["revisions"]
+    assert commons.parse_page(page) is None
 
 
 @pytest.mark.parametrize(
@@ -375,6 +393,8 @@ def test_search_commons_sends_user_agent_and_orders_by_rank(httpx_mock):
     request = httpx_mock.get_requests()[0]
     assert request.headers["User-Agent"] == settings.IMAGE_SEARCH_USER_AGENT
     assert "filetype:bitmap" in request.url.params["gsrsearch"]
+    assert request.url.params["prop"] == "imageinfo|entityterms|revisions"
+    assert request.url.params["iiextmetadatalanguage"] == "en"
 
 
 def test_search_commons_falls_back_to_plain_search_when_rejected(httpx_mock):
