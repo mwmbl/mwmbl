@@ -138,11 +138,13 @@ These settings are in `devdata/seed_images/gate/recommended.json` for the holist
 
 The deciding step compares whole result pages with the holistic judge (`holistic_judge.py`), on the 295 en-gb
 queries, which none of the settings above were tuned on. These are the held-out queries of the earlier Combined
-Search evaluations (`combined-search-haiku-eval.md`). They come from UK autocomplete, so their stored Staan lists
-were fetched with `market=en-gb`, and the judge is told the searcher is in the UK. Locale changes the web results
-more than the pictures: Commons search doesn't depend on it, and the gate lets in 27% of these queries against
-28% of the train queries, so the conclusions should carry over to `en-us`. `mwmbl/rankeval/seed_images/holistic_arms.py` builds the arms and their
-batches under `devdata/seed_images/holistic/`.
+Search evaluations (`combined-search-haiku-eval.md`), which come from UK autocomplete. That evaluation has en-us
+lists for the same queries too; this comparison uses its en-gb run, whose Staan lists were fetched with
+`market=en-gb`, and the judge is told the searcher is in the UK. Locale changes the web results more than the
+pictures: Commons search doesn't depend on it, and the gate lets in 27% of these queries against 28% of the train
+queries, so the conclusions probably carry over to `en-us`. The en-us lists would let that be checked.
+`mwmbl/rankeval/seed_images/holistic_arms.py` builds the arms and their batches under
+`devdata/seed_images/holistic/`.
 
 - **A0:** production's order, Jev composite + Staan rank.
 - **A2, the recommended design:** when Jev need ≥ 1.63, a strip of up to 4 Jev-safe images with Jev relevance
@@ -155,9 +157,10 @@ batches under `devdata/seed_images/holistic/`.
 
 The judge sees a strip as `[IMAGES from Wikimedia Commons] 1. <file name> — <description> | 2. …` and a single
 image as `[IMAGE] <file name> — <description>`, with descriptions cut at 150 characters. Since these runs, the
-judge cuts descriptions at a sentence end or word boundary instead of mid-word, and strips encoded tags from titles
-and descriptions. The runs weren't judged again: the same queries are compared, no title or tag changes on this
-data, and only the shortening differs, in 19 of A2's 59 strips and 37 of A1's 191 images. Batches that show images
+judge's `commons_text` decodes entities and strips tags, encoded ones too, from titles as well as descriptions, and
+descriptions are cut at a sentence end or word boundary instead of mid-word. The runs weren't judged again: the
+same queries are compared, no title or description in this data contains a tag or entity, and only the shortening
+differs, in 19 of A2's 59 strips and 37 of A1's 191 images. Batches that show images
 add a paragraph telling the judge that pictures may appear and to judge whether they help the query; the rest of
 the rubric is unchanged. A vision check repeats 20 of the A2-vs-A0 comparisons with the strips' thumbnails, using
 only strips whose every image passed the rules, NudeNet and SigLIP2 (26 of the 59 did). The thumbnails were
@@ -230,15 +233,19 @@ Ship option 2, the gated strip:
   (+0.75, about +0.15 over all en-gb queries). Screen space is therefore no reason to hold the strip back.
 
 Don't merge single images into the web ranking (option 1) as built here: judged holistically it is no better
-than today's results, though that version had no gate or minimum relevance either. Wrong-sense images are the main remaining failure, so the next lever is the minimum relevance or a
-check that the image's subject matches the top web result's.
+than today's results, though that version had no gate or minimum relevance either.
+
+Wrong-sense images are the main remaining failure. Jev's image-relevance question sees only the query; giving it
+the top web results should catch most of them (see the Summary's production list).
 
 Before shipping:
 
 - **Wikipedia card:** when the top result is an English Wikipedia page, the front end shows it as a card with the
   article's lead image (`WikipediaCard.svelte`). That is the case for 37 of the 59 queries with a strip, so the
   strip would sit right under a card that may already show one of its pictures. The judge saw only the card's
-  title, URL and extract. Drop from the strip any image that is the card's lead image, matched by Commons file
-  name, and judge the card and strip together before deciding whether the strip still helps there.
+  title, URL and extract. Drop from the strip any image that is the card's lead image, matched by file name: the
+  last segment of the summary's `originalimage` URL, URL-decoded, with underscores read as spaces. That may be a
+  non-free file local to en.wikipedia, which no Commons image matches. Then judge the card and strip together
+  before deciding whether the strip still helps there.
 - **Escaping:** Commons titles and descriptions are user-entered. The judge read them as plain text, but the
   front end must render them as escaped text, never as HTML.
