@@ -53,3 +53,18 @@ def test_bootstrap_interval_brackets_the_mean_and_collapses_for_a_constant():
 
     assert low < values.mean() < high
     assert gate_analysis.bootstrap_interval(lambda sample: 1.0, 10) == (1.0, 1.0)
+
+
+def test_bootstrap_interval_is_reproducible_and_pairs_arms_on_one_resample():
+    jev = np.arange(50, dtype=float)
+    commons = jev - 2.0
+
+    def paired_difference(sample: np.ndarray) -> float:
+        return jev[sample].mean() - commons[sample].mean()
+
+    first = gate_analysis.bootstrap_interval(lambda sample: jev[sample].mean(), len(jev))
+    second = gate_analysis.bootstrap_interval(lambda sample: jev[sample].mean(), len(jev))
+    difference = gate_analysis.bootstrap_interval(paired_difference, len(jev))
+
+    assert first == second
+    assert difference == pytest.approx((2.0, 2.0))
