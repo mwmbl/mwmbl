@@ -121,8 +121,8 @@ mode.
 - **Query gate:** keep `rules.query_verdict` in front of image search. Jev already filters nearly every candidate
   for explicit queries, so the gate is defence in depth, and it saves a request whose images would be mostly
   off-topic leftovers. A Jev question about the query isn't needed. The gate does refuse "breastfeeding" and "breast
-  cancer", which is a cost we can accept. It misses "naturism": the rules have `naturist\w*` but not `naturism`.
-  For "naturism", Jev passed only a road sign.
+  cancer", which is a cost we can accept. It missed "naturism": the rules had `naturist\w*` but not `naturism`
+  (now added, with `nudism`). For "naturism", Jev passed only a road sign.
 
 ### Caveats
 

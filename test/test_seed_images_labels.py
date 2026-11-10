@@ -6,8 +6,8 @@ import random
 import pytest
 from test_seed_images_eval import IMAGE
 
+from mwmbl.imagesearch import judge
 from mwmbl.imagesearch.pipeline import file_id
-from mwmbl.rankeval.seed_images import jev_images
 from mwmbl.rankeval.seed_images.gate_data import below_threshold
 from mwmbl.rankeval.seed_images.label_batches import chunks, stratified_sample
 from mwmbl.rankeval.seed_images.labels import parse_out
@@ -22,7 +22,7 @@ def test_below_threshold_drops_images_at_or_above_it():
 
 
 def test_relevance_request_asks_about_each_image_for_the_query():
-    request = jev_images.relevance_request("red panda", [IMAGE, OTHER])
+    request = judge.relevance_request("red panda", [IMAGE, OTHER])
 
     assert request["state"]["query"] == "red panda"
     assert list(request["questions"]) == ["i0", "i1"]

@@ -27,9 +27,10 @@ from pathlib import Path
 import django
 from django.conf import settings
 
-# jev_images reaches Django models through jev_rank, so the registry must be up first.
+# judge reaches Django models through jev_rank, so the registry must be up first.
 django.setup()
 
+from mwmbl.imagesearch.judge import relevance_request, scores  # noqa: E402
 from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
 from mwmbl.imagesearch.types import SourceImage  # noqa: E402
 from mwmbl.indexer.index_batches import index_documents, index_pages, preprocess_documents  # noqa: E402
@@ -39,7 +40,6 @@ from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
 from mwmbl.rankeval.seed_images.gate_analysis import RECOMMENDED_PATH  # noqa: E402
 from mwmbl.rankeval.seed_images.gate_data import RELEVANCE_PATH, jev_safe_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.jev_images import relevance_request, scores  # noqa: E402
 from mwmbl.rankeval.seed_images.queries import NUM_RESULTS, load_queries, read_jsonl  # noqa: E402
 from mwmbl.rankeval.seed_images.run_jev import CACHE_DIR, NEED_PATH  # noqa: E402
 from mwmbl.tinysearchengine.completer import Completer  # noqa: E402

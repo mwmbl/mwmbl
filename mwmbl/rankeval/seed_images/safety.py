@@ -26,6 +26,7 @@ from sklearn.metrics import roc_auc_score
 django.setup()
 
 from mwmbl.imagesearch.commons import new_client  # noqa: E402
+from mwmbl.imagesearch.judge import nsfw_request, scores  # noqa: E402
 from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
 from mwmbl.imagesearch.pixel_classifier import PixelSafetyClassifier  # noqa: E402
 from mwmbl.imagesearch.types import SourceImage  # noqa: E402
@@ -33,7 +34,7 @@ from mwmbl.imagesearch.zero_shot_classifier import ZeroShotSafetyClassifier  # n
 from mwmbl.rankeval.evaluation.jev_order import cached_response  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import candidates_path, collect_query, load_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.jev_images import combined_request, nsfw_request, scores  # noqa: E402
+from mwmbl.rankeval.seed_images.jev_images import combined_request  # noqa: E402
 from mwmbl.rankeval.seed_images.local_verdicts import VERDICTS_PATH, judge  # noqa: E402
 from mwmbl.rankeval.seed_images.queries import LLM_RELABEL_DIR, load_queries, read_jsonl  # noqa: E402
 from mwmbl.rankeval.seed_images.run_jev import NSFW_PATH, score_nsfw  # noqa: E402
