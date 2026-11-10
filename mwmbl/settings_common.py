@@ -481,3 +481,6 @@ COMMONS_TIMEOUT_SECONDS = 5
 COMMONS_MAX_CONCURRENT_REQUESTS = 4
 # Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
 COMMONS_MAX_COOLDOWN_SECONDS = 300
+# Judgments per file, keyed by content and by the model and question that gave them
+# (mwmbl.imagesearch.verdict_cache), so they cannot go stale and the expiry only bounds Redis memory.
+IMAGE_SEARCH_VERDICT_CACHE_SECONDS = 30 * 24 * 60 * 60
