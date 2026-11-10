@@ -1,12 +1,14 @@
-"""Tests for the Wikimedia Commons client (no network)."""
+"""Tests for the Wikimedia Commons client and the deterministic rules in front of image search (no network)."""
+
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 from django.conf import settings
 from django.core.cache import cache
 
-from mwmbl.imagesearch import commons
-from mwmbl.imagesearch.types import ImageSourceUnavailable
+from mwmbl.imagesearch import commons, rules, verdict_cache
+from mwmbl.imagesearch.types import ImageSourceUnavailable, SourceImage, Verdict
 
 THUMB = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/{}/320px-{}"
 
@@ -37,6 +39,72 @@ def make_page(name: str, index: int, categories: str = "Mammals|Zoos", descripti
     }
     info.update(overrides)
     return {"title": f"File:{name}", "index": index, "imageinfo": [info]}
+
+
+def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> SourceImage:
+    fields = dict(
+        title=title,
+        page_url="https://commons.wikimedia.org/wiki/File:x",
+        thumbnail_url=THUMB.format(title, title),
+        thumbnail_width=320,
+        thumbnail_height=213,
+        description="A red panda in a zoo",
+        categories=("Mammals", "Zoos"),
+        license_name="CC BY-SA 4.0",
+        license_url="https://creativecommons.org/licenses/by-sa/4.0",
+        attribution="A. Photographer",
+        sha1=f"sha1-of-{title}",
+        uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        rank=rank,
+    )
+    fields.update(overrides)
+    return SourceImage(**fields)
+
+
+# Deterministic rules
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nude woman",
+        "sexual content",
+        "Topless beach",
+        "porn",
+        "Naked mole rat",
+        "OnlyFans",
+        "cam girl",
+        "busty",
+        "milf",
+    ],
+)
+def test_rules_deny_sexual_terms(text):
+    assert rules.find_denied_term(text) is not None
+
+
+@pytest.mark.parametrize("text", ["Essex county", "Sextant", "Red panda", "Middlesex", "Analysis of data"])
+def test_rules_allow_innocent_lookalikes(text):
+    assert rules.find_denied_term(text) is None
+
+
+def test_rules_check_categories_as_well_as_title():
+    image = make_image(categories=("Mammals", "Nude paintings"))
+    assert rules.image_verdict(image) is Verdict.NSFW
+
+
+def test_rules_refuse_a_sexual_query_and_pass_an_innocent_one():
+    assert rules.query_verdict("nude beach") is Verdict.NSFW
+    assert rules.query_verdict("red panda") is Verdict.SAFE
+
+
+@pytest.mark.parametrize("text", ["n\u200bude", "nüde", "ｎｕｄｅ", "n\u00adaked", "NUDE"])
+def test_rules_see_through_accents_width_and_invisible_characters(text):
+    assert rules.find_denied_term(text) is not None
+
+
+@pytest.mark.parametrize("text", ["topless_beach", "Woman_nude.jpg", "Naked_mole_rat", "2naked", "nude2024.jpg"])
+def test_rules_see_through_underscores_and_digits_in_file_names(text):
+    assert rules.find_denied_term(text) is not None
 
 
 # Commons client
@@ -169,3 +237,17 @@ def test_network_failure_is_unavailable_not_empty(httpx_mock):
     with commons.new_client() as client:
         with pytest.raises(ImageSourceUnavailable):
             commons.search_commons(client, "red panda", 5)
+
+
+# Cache keys
+
+
+def test_cache_keys_differ_by_kind_fingerprint_and_content():
+    key = verdict_cache.cache_key("kind", "fingerprint", "content")
+    others = [
+        verdict_cache.cache_key("other", "fingerprint", "content"),
+        verdict_cache.cache_key("kind", "other", "content"),
+        verdict_cache.cache_key("kind", "fingerprint", "other"),
+    ]
+    assert key.startswith(verdict_cache.KEY_PREFIX)
+    assert key not in others

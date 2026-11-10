@@ -1,5 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
+
+
+class Verdict(Enum):
+    SAFE = "safe"
+    UNCERTAIN = "uncertain"
+    NSFW = "nsfw"
 
 
 class ImageSourceUnavailable(Exception):
