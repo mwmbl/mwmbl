@@ -13,11 +13,11 @@ from django.conf import settings
 # jev_rank reaches Django models through rank -> blacklist_snapshot, so the registry must be up first.
 django.setup()
 
+from mwmbl.imagesearch.judge import need_request, need_score, nsfw_request, scores  # noqa: E402
 from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
 from mwmbl.rankeval.evaluation.jev_order import cached_response, response_cache_path  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.jev_images import need_request, need_score, nsfw_request, scores  # noqa: E402
 from mwmbl.rankeval.seed_images.queries import load_queries  # noqa: E402
 
 CACHE_DIR = SEED_IMAGES_DIR / "jev_cache"

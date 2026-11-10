@@ -3,6 +3,7 @@ What each of a user's devices has submitted: a lifetime total, the last hour and
 last 30 days - and removing a device from the list without losing that.
 """
 
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from mwmbl.devices import (
     record_device,
     record_device_results,
 )
+from mwmbl.indexer.index_batches import IndexedDocuments, IndexedURLs
 from mwmbl.models import ApiKey, Device, DeviceSubmission, generate_api_key
 
 User = get_user_model()
@@ -206,8 +208,11 @@ def test_post_results_counts_the_results_against_the_device(user):
     ApiKey.objects.create(user=user, key=key_hash, name="Crawl", scopes=[ApiKey.Scope.CRAWL])
     results = [{"url": f"https://example.com/{i}", "title": "t", "extract": "e", "links": []} for i in range(3)]
 
+    urls = {result["url"] for result in results}
+    indexed = IndexedDocuments(NOW, Counter(), [], IndexedURLs(stored=urls, new=urls))
+
     with (
-        patch("mwmbl.crawler.app.index_documents"),
+        patch("mwmbl.crawler.app.index_documents", return_value=indexed),
         patch("mwmbl.crawler.app.upload_object", return_value="fake/path.json.gz"),
         patch("mwmbl.crawler.app.stats_manager"),
         patch("mwmbl.crawler.app.record_agreements"),

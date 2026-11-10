@@ -45,7 +45,7 @@ def two_tiers(monkeypatch):
 def _crawl(user, day: date, num_results: int = ENOUGH_RESULTS) -> None:
     results = SimpleNamespace(results=[object()] * num_results, crawler_version=None, device_name=None)
     with patch("mwmbl.crawler.stats.utc_today", return_value=day):
-        StatsManager(fakeredis.FakeRedis()).record_results(results, user)
+        StatsManager(fakeredis.FakeRedis()).record_results(results, user, len(results.results))
 
 
 def _valid_until(user, tier=POLLINATOR) -> date | None:

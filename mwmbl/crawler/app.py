@@ -295,10 +295,10 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
         # publish the plaintext key of any client still using the deprecated body field.
         filename = upload_object(results.model_copy(update={"api_key": None}), now, api_key.user.username, "results")
 
-        # Update stats for the user
-        stats_manager.record_results(results, api_key.user)
+        num_indexed = len(indexed.urls.new)
+        stats_manager.record_results(results, api_key.user, num_indexed)
         if device is not None:
-            record_device_results(device, len(results.results), now)
+            record_device_results(device, num_indexed, now)
 
         # Last, since they are only analytics: a failure to store them still answers with an
         # error, but after the batch is indexed, uploaded and counted.

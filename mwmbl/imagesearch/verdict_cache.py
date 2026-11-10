@@ -1,4 +1,4 @@
-"""Verdicts remembered per image, so an image that comes up again is not judged again.
+"""Verdicts and scores remembered per image, so an image that comes up again is not judged again.
 
 The thumbnail fetch and the pixel models are the expensive steps of image search, and the same
 images turn up in many queries. A cached verdict is only ever reused for exactly what was judged,
@@ -15,7 +15,10 @@ file's (see pipeline.pass_pixel_checks). A SHA-1 collision between a harmless an
 would defeat the pixel key; that is accepted, since it takes an attacker who can craft a collision
 and get both files onto Commons.
 
-Only verdicts are stored, never images, and they expire on their own. Redis may drop any
+The judge's NSFW scores (see judge.nsfw_scores) are kept the same way, keyed by the file's SHA-1, the
+exact text the judge was shown and a fingerprint of the prompt and model.
+
+Only verdicts and scores are stored, never images, and they expire on their own. Redis may drop any
 of them at any time, which costs a re-check and nothing else.
 """
 
@@ -27,7 +30,8 @@ from django.core.cache import cache
 
 from mwmbl.imagesearch.types import Verdict
 
-# Raise this when a change to the code, rather than a model or a setting, changes verdicts.
+# Raise this when a change to the code, rather than a model or a setting, changes verdicts. It drops the
+# cached judge scores too.
 KEY_PREFIX = "imagesearch:verdict:v1:"
 KEY_DIGEST_CHARS = 32
 
@@ -54,3 +58,12 @@ def put_verdicts(verdicts: dict[str, Verdict]) -> None:
     cache.set_many(
         {key: verdict.value for key, verdict in verdicts.items()}, settings.IMAGE_SEARCH_VERDICT_CACHE_SECONDS
     )
+
+
+def get_scores(keys: list[str]) -> dict[str, float]:
+    """The scores held for these keys; a key with none is left out."""
+    return cache.get_many(keys)
+
+
+def put_scores(scores: dict[str, float]) -> None:
+    cache.set_many(scores, settings.IMAGE_SEARCH_VERDICT_CACHE_SECONDS)

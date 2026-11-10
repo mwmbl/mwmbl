@@ -14,8 +14,12 @@ from mwmbl.imagesearch.types import SourceImage, Verdict
 DENIED_TERMS = [
     r"nude\w*",
     r"nudity",
-    r"nudist\w*",
-    r"naturist\w*",
+    r"nudis[mt]\w*",
+    r"naturis[mt]\w*",
+    r"fkk",
+    r"freikorperkultur",
+    r"skinny\s*dip\w*",
+    r"clothing.optional",
     r"naked",
     r"topless",
     r"bottomless",
@@ -81,13 +85,15 @@ DENIED_TERMS = [
 DENIED_PATTERN = re.compile(r"\b(?:" + "|".join(DENIED_TERMS) + r")\b", re.IGNORECASE)
 # Combining marks and format characters (zero-width spaces and joiners, soft hyphens).
 IGNORED_CATEGORIES = {"Mn", "Cf"}
+WORD_JOINER_PATTERN = re.compile(r"[_\d]+")
 
 
 def normalise(text: str) -> str:
-    """Fold the text so that accents, width variants and invisible characters cannot hide a term."""
+    """Fold the text so that accents, width variants, invisible characters and the underscores and digits in
+    Commons file names (which \\b treats as part of a word) cannot hide a term."""
     decomposed = unicodedata.normalize("NFKD", text)
-    visible = (c for c in decomposed if unicodedata.category(c) not in IGNORED_CATEGORIES)
-    return "".join(visible)
+    visible = "".join(c for c in decomposed if unicodedata.category(c) not in IGNORED_CATEGORIES)
+    return WORD_JOINER_PATTERN.sub(" ", visible)
 
 
 def find_denied_term(text: str) -> str | None:

@@ -8,11 +8,11 @@ import django
 
 django.setup()
 
+from mwmbl.imagesearch.judge import relevance_request, scores  # noqa: E402
 from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
 from mwmbl.imagesearch.types import SourceImage  # noqa: E402
 from mwmbl.rankeval.seed_images import run_resumably  # noqa: E402
 from mwmbl.rankeval.seed_images.gate_data import GATE_DIR, RELEVANCE_PATH, jev_safe_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.jev_images import relevance_request, scores  # noqa: E402
 from mwmbl.rankeval.seed_images.run_jev import CACHE_DIR, timed_response  # noqa: E402
 
 

@@ -24,7 +24,7 @@ from ninja_jwt.tokens import RefreshToken
 
 from mwmbl import pricing
 from mwmbl.background import sync_search_counts
-from mwmbl.indexer.index_batches import IndexedDocuments
+from mwmbl.indexer.index_batches import IndexedDocuments, IndexedURLs
 from mwmbl.models import AgreementType, ApiKey, UsageBucket, UserAgreement, UserBilling, generate_api_key
 from mwmbl.quota import (
     RATE_LIMIT,
@@ -494,7 +494,7 @@ def test_search_keyed_cap_shrinks_with_combined_search_spend(api_client, search_
 def _capturing_index(captured):
     def index_documents(documents, index_path):
         captured.extend(documents)
-        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), [])
+        return IndexedDocuments(datetime.now(stdlib_timezone.utc), Counter(), [], IndexedURLs(set(), set()))
 
     return index_documents
 
