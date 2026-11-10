@@ -9,11 +9,17 @@ import pytest
 from mwmbl.rankeval.evaluation.holistic_judge import (
     COMPARISONS_PER_BATCH,
     ETHOS_RUBRIC,
+    IMAGES_NOTE,
+    STRIP_ADDS,
+    THUMBNAILS_NOTE,
     batches,
     consolidate,
     differing_queries,
     preference_for_x,
+    results_block,
+    shortened,
     summarise,
+    top_results,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -157,3 +163,116 @@ def test_preference_for_x_follows_whichever_side_x_was_shown_on():
     assert preference_for_x(record) == 1
     assert preference_for_x(dict(record, a="x", b="y")) == -1
     assert preference_for_x(dict(record, verdict={"better": "tie"})) == 0
+
+
+def test_image_entries_render_as_pictures_and_a_strip_does_not_count_towards_the_ten():
+    strip = {
+        "url": "commons-strip:a b",
+        "images": [
+            {"title": "Tower Bridge.jpg", "description": "The <b>bridge</b>\nfrom the river", "thumb": "/t/0.jpg"},
+            {"title": "Engine room.jpg", "description": ""},
+        ],
+    }
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:Kite.jpg", "title": "Kite.jpg", "extract": "A kite"}
+    web = results(*(f"https://{i}.com/" for i in range(11)))
+
+    top = top_results(web[:1] + [strip] + web[1:])
+    lines = results_block("A", [strip, dict(picture, image=True)]).splitlines()
+
+    assert len(top) == 11 and top[1] == strip and top[-1] == web[9]
+    assert lines[1] == (
+        "1. [IMAGES from Wikimedia Commons] 1. Tower Bridge.jpg — The bridge from the river (thumbnail: /t/0.jpg)"
+        " | 2. Engine room.jpg — (no description)"
+    )
+    assert lines[2] == "2. [IMAGE] Kite.jpg — A kite"
+
+
+def test_only_batches_showing_images_tell_the_judge_about_them(tmp_path):
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}]}
+    x = {f"q{i}": results("https://x.com/") for i in range(30)} | {"pictures": results("https://y.com/") + [strip]}
+    y = {f"q{i}": results("https://y.com/") for i in range(30)} | {"pictures": results("https://y.com/")}
+    (tmp_path / "x.json").write_text(json.dumps(x))
+    (tmp_path / "y.json").write_text(json.dumps(y))
+    work = tmp_path / "work"
+    batches(tmp_path / "x.json", tmp_path / "y.json", work)
+
+    texts = {path.name: path.read_text() for path in work.glob("batch_*.txt")}
+    with_images = [name for name, text in texts.items() if IMAGES_NOTE in text]
+
+    assert len(texts) == 4 and len(with_images) == 2
+    assert all("QUERY: pictures" in texts[name] for name in with_images)
+    assert all(THUMBNAILS_NOTE not in text for text in texts.values())
+    assert all(str((work / name.replace("batch_", "out_")).resolve()) in text for name, text in texts.items())
+
+
+def test_a_displacing_strip_counts_towards_the_ten_and_the_judge_is_not_told_it_adds(tmp_path):
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}], "displaces": True}
+    web = results(*(f"https://{i}.com/" for i in range(10)))
+    x = {"pictures": web[:1] + [strip] + web[1:9]}
+    (tmp_path / "x.json").write_text(json.dumps(x))
+    (tmp_path / "y.json").write_text(json.dumps({"pictures": web}))
+    batches(tmp_path / "x.json", tmp_path / "y.json", tmp_path / "work")
+
+    text = (tmp_path / "work" / "batch_00.txt").read_text()
+
+    assert top_results(x["pictures"] + web[9:]) == x["pictures"]
+    assert STRIP_ADDS in IMAGES_NOTE and "eleven" not in text
+    assert IMAGES_NOTE.replace(STRIP_ADDS, ".") in text
+
+
+def test_commons_titles_and_descriptions_lose_encoded_markup_too():
+    picture = {
+        "url": "https://commons.wikimedia.org/wiki/File:X.jpg",
+        "title": "X &lt;script&gt;alert(1)&lt;/script&gt;.jpg",
+        "extract": "A &lt;b&gt;bold&lt;/b&gt; <i>claim</i> &amp; more",
+        "image": True,
+    }
+
+    line = results_block("A", [picture]).splitlines()[1]
+
+    assert line == "1. [IMAGE] X alert(1).jpg — A bold claim & more"
+
+
+def test_descriptions_are_shortened_at_a_sentence_end_or_else_a_word_boundary():
+    sentences = "The bridge at dusk. " + "Seen from the north bank of the river " * 5
+    words = "word " * 40
+
+    assert shortened("Short enough.", 150) == "Short enough."
+    assert shortened(sentences, 30) == "The bridge at dusk."
+    assert shortened(words, 22) == "word word word word…"
+    assert shortened("x" * 200, 10) == "x" * 10 + "…"
+
+
+def test_strips_with_one_url_but_different_pictures_still_differ():
+    strip = {"url": "commons-strip:a", "images": [{"title": "A.jpg", "description": "A"}]}
+    other_text = dict(strip, images=[{"title": "A.jpg", "description": "Another description"}])
+    x = {"same": results("https://a.com/") + [strip], "pictures": results("https://a.com/") + [other_text]}
+    y = {"same": results("https://a.com/") + [strip], "pictures": results("https://a.com/") + [strip]}
+
+    assert differing_queries(x, y) == ["pictures"]
+
+
+def test_web_extracts_keep_encoded_angle_brackets():
+    web = {"url": "https://a.com/", "title": "A", "extract": "if a &lt; b use the &lt;div&gt; <strong>element</strong>"}
+
+    extract_line = results_block("A", [web]).splitlines()[2]
+
+    assert extract_line == "   if a < b use the <div> element"
+
+
+def test_commons_text_keeps_decoded_comparisons():
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:X.jpg", "title": "X.jpg", "image": True}
+    comparison = dict(picture, extract="Where a &lt; b and c &gt; d")
+
+    line = results_block("A", [comparison]).splitlines()[1]
+
+    assert line == "1. [IMAGE] X.jpg — Where a < b and c > d"
+
+
+def test_single_pictures_with_the_same_text_but_different_files_differ():
+    picture = {"url": "https://commons.wikimedia.org/wiki/File:A.jpg", "title": "A", "extract": "A", "image": True}
+    other_file = dict(picture, url="https://commons.wikimedia.org/wiki/File:B.jpg")
+    x = {"pictures": results("https://a.com/") + [picture]}
+    y = {"pictures": results("https://a.com/") + [other_file]}
+
+    assert differing_queries(x, y) == ["pictures"]

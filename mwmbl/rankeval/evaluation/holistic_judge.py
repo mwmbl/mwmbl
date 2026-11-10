@@ -11,6 +11,16 @@ A lists file is JSON mapping each query to its ranked results, each a {"url", "t
 "extract"} object. Only the top ten count. X is the arm under test and Y the baseline, so
 a positive preference favours X.
 
+A list may also hold Wikimedia Commons pictures. A single picture, {"url", "title", "extract",
+"image": true}, is a result like any other, with its file name as the title and its description
+as the extract. A strip, {"url", "images": [{"title", "description"}, ...]}, is one extra entry
+that doesn't count towards the ten, unless it has "displaces": true, when it takes a web
+result's place; a strip's image may also give a "thumb" path for the judge to open. The prompt
+then tells the judge what these entries are. Commons titles and descriptions are user-entered, so
+both are reduced to plain text, and descriptions are shortened at a sentence or word boundary.
+The judge reads them as text, never as HTML, so there is no XSS risk here; plain text doesn't
+stop a description that addresses the judge, but such a description can at worst sway one verdict.
+
     batches X.json Y.json WORK   judge batches and a manifest -> WORK, for every query in
                                  both files whose top tens differ
     consolidate WORK             the judges' WORK/out_*.txt -> WORK/judgments.jsonl
@@ -35,9 +45,12 @@ import numpy as np
 
 NUM_RESULTS = 10
 EXTRACT_CHARS = 400
+IMAGE_DESCRIPTION_CHARS = 150
 COMPARISONS_PER_BATCH = 25
 BOOTSTRAP_SAMPLES = 2000
 TAG = re.compile(r"<[^>]+>")
+# Only tag shapes, so a decoded "a < b and c > d" survives, and linear because it can't span a "<".
+DECODED_TAG = re.compile(r"</?[A-Za-z][^<>]*>")
 STRENGTHS = {"slight": 1, "clear": 2, "strong": 3}
 REASONS = ("top_result", "relevance", "junk", "redundancy", "coverage", "extracts", "ethos", "none")
 FLAGS = ("off-topic", "spam", "thin", "duplicate", "poor-extract", "wrong-locale", "ethos")
@@ -125,22 +138,107 @@ this order:
 COMPARISONS:
 """
 
+IMAGES_NOTE = """\
+Some lists include pictures from Wikimedia Commons, the free media library behind
+Wikipedia, shown by their file name and the start of their description. A strip of
+several pictures shown together is one entry, marked [IMAGES from Wikimedia Commons];
+it adds to the web results rather than replacing one, so that list may have eleven
+entries. A single picture shown as a result is marked [IMAGE]. An image entry takes a
+position like any result, in "a_best", "a_bad" and the rest. Judge whether the pictures help this searcher: relevant
+pictures of what the query is about can improve a page; wrong, pointless or
+distracting pictures, or pictures that push out useful results, make it worse.
+
+"""
+STRIP_ADDS = """;
+it adds to the web results rather than replacing one, so that list may have eleven
+entries."""
+
+THUMBNAILS_NOTE = """\
+Each picture in a strip gives the path of its thumbnail. Open every thumbnail with the
+Read tool and judge the pictures themselves as well as their text.
+
+"""
+
+OUTPUT_NOTE = """
+Use the Write tool to write your JSON lines, one per comparison and nothing else, to
+{out_path}
+"""
+
+
+def plain_text(text: str) -> str:
+    # Some providers mark query terms up with <strong>, which the searcher sees as bold.
+    return html.unescape(TAG.sub("", text or "")).replace("\n", " ")
+
+
+def commons_text(text: str) -> str:
+    """Commons text as plain text on one line. Commons text is user-entered, so tags that only appear once
+    entities are decoded, such as &lt;script&gt;, are stripped too. Web extracts keep encoded tags, since there
+    they are usually code being written about."""
+    decoded = plain_text(text)
+    return " ".join(DECODED_TAG.sub("", decoded).split())
+
+
+def shortened(text: str, limit: int) -> str:
+    """The text cut to the limit at a sentence end if one falls in its second half, else at a word boundary."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit + 1]
+    sentence_end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if sentence_end >= limit // 2:
+        return cut[: sentence_end + 1]
+    word_end = cut.rfind(" ")
+    words = cut[:word_end] if word_end > 0 else text[:limit]
+    return words.rstrip(" ,;:") + "…"
+
+
+def image_text(image: dict) -> str:
+    title = commons_text(image["title"])
+    description = shortened(commons_text(image["description"]), IMAGE_DESCRIPTION_CHARS)
+    thumbnail = f" (thumbnail: {image['thumb']})" if "thumb" in image else ""
+    return f"{title or '(no title)'} — {description or '(no description)'}{thumbnail}"
+
+
+def is_image_entry(result: dict) -> bool:
+    return "images" in result or "image" in result
+
+
+def result_text(result: dict) -> str:
+    if "images" in result:
+        strip = " | ".join(f"{number}. {image_text(image)}" for number, image in enumerate(result["images"], 1))
+        return f"[IMAGES from Wikimedia Commons] {strip}"
+    if "image" in result:
+        return "[IMAGE] " + image_text({"title": result["title"], "description": result["extract"]})
+    extract = plain_text(result["extract"])[:EXTRACT_CHARS]
+    return f"{result['title'] or '(no title)'} — {result['url']}\n   {extract or '(no extract)'}"
+
 
 def results_block(label: str, results: list[dict]) -> str:
     lines = [f"--- RESULTS {label}"]
-    for position, result in enumerate(results, 1):
-        # Some providers mark query terms up with <strong>, which the searcher sees as bold.
-        extract = html.unescape(TAG.sub("", result["extract"] or "")).replace("\n", " ")[:EXTRACT_CHARS]
-        lines.append(f"{position}. {result['title'] or '(no title)'} — {result['url']}\n   {extract or '(no extract)'}")
+    lines += [f"{position}. {result_text(result)}" for position, result in enumerate(results, 1)]
     return "\n".join(lines)
 
 
+def top_results(results: list[dict]) -> list[dict]:
+    """The top ten results, with any image strip among them that adds to them rather than displacing one."""
+    top: list[dict] = []
+    for result in results:
+        if len(top) - sum("images" in shown and "displaces" not in shown for shown in top) == NUM_RESULTS:
+            break
+        top.append(result)
+    return top
+
+
 def differing_queries(x_lists: dict, y_lists: dict) -> list[str]:
-    def top_urls(results: list[dict]) -> list[str]:
-        return [result["url"] for result in results[:NUM_RESULTS]]
+    # Web results compare by URL alone, as before images; an image entry also compares by what the judge is shown,
+    # so two strips with the same URL but different pictures or text still differ.
+    def top_entries(results: list[dict]) -> list[str]:
+        return [
+            result["url"] + result_text(result) if is_image_entry(result) else result["url"]
+            for result in top_results(results)
+        ]
 
     shared = sorted(set(x_lists) & set(y_lists))
-    return [query for query in shared if top_urls(x_lists[query]) != top_urls(y_lists[query])]
+    return [query for query in shared if top_entries(x_lists[query]) != top_entries(y_lists[query])]
 
 
 def batches(x_path: Path, y_path: Path, work: Path) -> None:
@@ -168,16 +266,30 @@ def batches(x_path: Path, y_path: Path, work: Path) -> None:
     next_id = 1
     for half in halves:
         for start in range(0, len(half), COMPARISONS_PER_BATCH):
-            blocks = []
+            blocks, shown = [], []
             for judgment in half[start : start + COMPARISONS_PER_BATCH]:
                 query = judgment["query"]
-                a_results = lists[judgment["a"]][query][:NUM_RESULTS]
-                b_results = lists[judgment["b"]][query][:NUM_RESULTS]
+                a_results = top_results(lists[judgment["a"]][query])
+                b_results = top_results(lists[judgment["b"]][query])
+                shown += a_results + b_results
                 header = f"\n=== COMPARISON {next_id} — QUERY: {query}"
                 blocks.append("\n".join([header, results_block("A", a_results), results_block("B", b_results)]))
                 manifest["judgments"][str(next_id)] = judgment
                 next_id += 1
-            (work / f"batch_{num_batches:02d}.txt").write_text(PROMPT + "\n".join(blocks) + "\n")
+            # The image notes go only into batches that show images, so other comparisons keep the prompt as it was.
+            strip_images = [image for result in shown if "images" in result for image in result["images"]]
+            has_images = bool(strip_images) or any("image" in result for result in shown)
+            # A strip that takes a web result's place doesn't add to the results, so the judge isn't told it does.
+            adds = any("images" in result and "displaces" not in result for result in shown)
+            images_note = IMAGES_NOTE if adds else IMAGES_NOTE.replace(STRIP_ADDS, ".")
+            notes = (images_note if has_images else "") + (
+                THUMBNAILS_NOTE if any("thumb" in image for image in strip_images) else ""
+            )
+            prompt = PROMPT.replace("\nOUTPUT:", "\n" + notes + "OUTPUT:")
+            # Resolved, so a judge is pointed at the real checkout's data, not a worktree's link to it.
+            out_path = (work / f"out_{num_batches:02d}.txt").resolve()
+            batch_text = prompt + "\n".join(blocks) + "\n" + OUTPUT_NOTE.format(out_path=out_path)
+            (work / f"batch_{num_batches:02d}.txt").write_text(batch_text)
             num_batches += 1
     (work / "manifest.json").write_text(json.dumps(manifest))
     print(f"{len(queries)} comparisons, {len(judgments)} judgments in {num_batches} batches -> {work}")
