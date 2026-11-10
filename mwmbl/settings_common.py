@@ -471,3 +471,13 @@ MODERATION_REJECT_THRESHOLD = 0.75
 MODERATION_APPROVE_THRESHOLD = 0.25
 MODERATION_EVIDENCE_MAX_AGE_DAYS = 30  # refetch rather than reuse evidence older than this
 MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60  # monthly; the gate guards each publish
+
+# Image search - Wikimedia Commons results for Seed Search (mwmbl.imagesearch, #610).
+# Wikimedia asks for a User-Agent that identifies the application and how to reach its operators.
+IMAGE_SEARCH_USER_AGENT = "MwmblImageSearch/1.0 (https://mwmbl.org; https://github.com/mwmbl/mwmbl)"
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+COMMONS_TIMEOUT_SECONDS = 5
+# Across all requests to Wikimedia in a process.
+COMMONS_MAX_CONCURRENT_REQUESTS = 4
+# Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
+COMMONS_MAX_COOLDOWN_SECONDS = 300
