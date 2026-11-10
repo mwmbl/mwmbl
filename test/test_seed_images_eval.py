@@ -16,6 +16,7 @@ from mwmbl.tinysearchengine.jev_rank import RELEVANCE_QUESTION
 CATEGORIES = "Ailurus fulgens | Zoos"
 IMAGE = SourceImage(
     title="Red panda.jpg",
+    caption="A red panda",
     page_url="https://commons.wikimedia.org/wiki/File:Red_panda.jpg",
     thumbnail_url="https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Red_panda.jpg/320px-Red_panda.jpg",
     thumbnail_width=320,
@@ -27,6 +28,7 @@ IMAGE = SourceImage(
     attribution="Someone",
     sha1="abc",
     uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    revised_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
     rank=1,
 )
 
@@ -82,3 +84,11 @@ def test_combined_request_holds_the_web_image_and_need_questions():
     assert sorted(request["questions"]) == ["i0", "i1", "n0", "n1", "need", "q0", "r0"]
     assert request["questions"]["r0"]["instructions"]["question"] == RELEVANCE_QUESTION
     assert request["state"] == judge.query_state("red panda", documents) | {"policy": prompt.NSFW_POLICY}
+
+
+def test_image_collected_before_captions_has_none():
+    fields = image_to_json(IMAGE)
+    del fields["caption"], fields["revised_at"]
+    image = image_from_json(fields)
+    assert image.caption == ""
+    assert image.revised_at == IMAGE.uploaded_at
