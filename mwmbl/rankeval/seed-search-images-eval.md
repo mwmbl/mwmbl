@@ -523,6 +523,27 @@ losses (store photo at #1, junk images). Indexed images rarely evict anything at
 - **Thin terms:** images reach thin terms easily, as the full-write arms' completion-term junk shows, so check
   against a production-sized index before rollout.
 
+## LTR training rows for image pages
+
+`mwmbl/rankeval/seed_images/ltr_data.py` writes the train queries' 11,652 Jev-safe images into production's own
+pages, read whole from api.mwmbl.org, with the indexer's write order and page size, and grades the images the 849
+LLM-labelled queries then retrieve (terms and bigrams, majority-terms rule applied) with the pass-3 prompt. Data is
+in `devdata/seed_images/ltr/`; train with `llm_experiment --llm-dataset …/learning-to-rank-llm-images.csv.gz`, and
+without the images by adding `--exclude-pool commons_image`. The query split is unchanged.
+
+- **Reach:** 1,444 of the queries' 2,333 lookup pages receive image documents, evicting 55 existing ones. 161 of
+  849 queries retrieve an image: 448 in all, 353 after the majority-terms rule. Most get one or two; gunnersbury
+  park (19), seaton tramway (18) and kempsey church (17) get many, so the per-list cap matters.
+- **Grades (Haiku 4.5, pass-3 prompt):** relevance 0/1/2/3 = 8/113/231/1, ethos 3 for 351 of 353, overall mean 4.73
+  against 3.29 for the web rows; 72.8% of images reach overall ≥ 4, against 41.4% of web rows.
+- **The ethos axis lifts every image.** The rubric rewards Creative Commons, so ethos says nothing about which image
+  is good, and the model may learn "Commons file page" as a class. PR 8 should check a relevance-only label too.
+- **Anchors** (two graded web pages per query, 324 in all, judged again beside the images) come out +0.44 overall,
+  +0.30 relevance, against their pass-3 grades, within one point 55% of the time on overall. Grading among pictures
+  runs a little high, so the images' advantage is partly scale.
+- **Score feature:** an indexed image's stored score is None, which the LTR reads as 0, so image rows carry 0, as
+  about half the web rows do.
+
 ## Summary
 
 - **Seed Search:** ship the gated strip, the holistic phase's A2.
