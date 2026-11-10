@@ -18,7 +18,7 @@ from mwmbl.imagesearch.pipeline import file_id  # noqa: E402
 from mwmbl.rankeval.evaluation.jev_order import cached_response, response_cache_path  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.queries import load_queries  # noqa: E402
+from mwmbl.rankeval.seed_images.queries import load_queries, web_documents  # noqa: E402
 
 CACHE_DIR = SEED_IMAGES_DIR / "jev_cache"
 NSFW_PATH = SEED_IMAGES_DIR / "jev_nsfw.jsonl"
@@ -41,9 +41,8 @@ def score_nsfw(query: str) -> dict:
     return {"query": query, "size": len(images), "file_ids": file_ids, "scores": nsfw_scores, "latency_s": latency}
 
 
-def score_need(query: str, web: list[dict]) -> dict:
-    web_titles = [result["title"] for result in web]
-    response, latency = timed_response(need_request(query, web_titles))
+def score_need(query: str, entry: dict) -> dict:
+    response, latency = timed_response(need_request(query, web_documents(entry)))
     return {"query": query, "score": need_score(response), "latency_s": latency}
 
 
@@ -53,7 +52,7 @@ def main() -> None:
     queries = load_queries()
     with_candidates = [query for query in queries if load_candidates(query)]
     run_resumably(NSFW_PATH, "query", with_candidates, score_nsfw)
-    run_resumably(NEED_PATH, "query", list(queries), lambda query: score_need(query, queries[query]["web"]))
+    run_resumably(NEED_PATH, "query", list(queries), lambda query: score_need(query, queries[query]))
 
 
 if __name__ == "__main__":

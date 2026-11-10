@@ -36,7 +36,7 @@ from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR, run_resumably  # noqa: E
 from mwmbl.rankeval.seed_images.collect import candidates_path, collect_query, load_candidates  # noqa: E402
 from mwmbl.rankeval.seed_images.jev_images import combined_request  # noqa: E402
 from mwmbl.rankeval.seed_images.local_verdicts import VERDICTS_PATH, judge  # noqa: E402
-from mwmbl.rankeval.seed_images.queries import LLM_RELABEL_DIR, load_queries, read_jsonl  # noqa: E402
+from mwmbl.rankeval.seed_images.queries import LLM_RELABEL_DIR, load_queries, read_jsonl, web_documents  # noqa: E402
 from mwmbl.rankeval.seed_images.run_jev import NSFW_PATH, score_nsfw  # noqa: E402
 from mwmbl.tinysearchengine.indexer import Document  # noqa: E402
 from mwmbl.tinysearchengine.jev_rank import NUM_LTR_CANDIDATES, jev_request  # noqa: E402
@@ -126,8 +126,8 @@ def web_pool(query: str, staan: list[dict], pools: dict[str, list[dict]]) -> lis
 
 
 def combined_scores(query: str, staan: list[dict], pools: dict, images: list[SourceImage]) -> dict:
-    titles = [result["title"] for result in staan]
-    call = timed(combined_request(query, web_pool(query, staan, pools), titles, images))
+    staan_documents = web_documents({"web": staan})
+    call = timed(combined_request(query, web_pool(query, staan, pools), staan_documents, images))
     nsfw_scores = scores(call["response"], "n", len(images))
     return {"scores": nsfw_scores, "latency_s": call["latency_s"], "questions": call["questions"]} | call["response"][
         "usage"
@@ -156,12 +156,16 @@ def benchmark_image(row: dict, metadata: dict) -> SourceImage:
     return SourceImage(**text, **filler, **licence, uploaded_at=datetime(2000, 1, 1, tzinfo=timezone.utc))
 
 
+def benchmark_batches(rng: random.Random) -> list[list[tuple[dict, SourceImage]]]:
+    images = benchmark_images()
+    rng.shuffle(images)
+    return [images[start : start + BATCH_SIZE] for start in range(0, len(images), BATCH_SIZE)]
+
+
 def run_benchmark() -> None:
     queries, pools = train_context()
-    images = benchmark_images()
     rng = random.Random(SEED)
-    rng.shuffle(images)
-    batches = [images[start : start + BATCH_SIZE] for start in range(0, len(images), BATCH_SIZE)]
+    batches = benchmark_batches(rng)
     batch_queries = rng.choices(sorted(queries), k=len(batches))
 
     def score_batch(index: str) -> dict:

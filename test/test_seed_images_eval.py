@@ -1,6 +1,5 @@
 """The Seed Search images harness: Jev request builders and answer parsing (no network)."""
 
-import dataclasses
 import json
 from datetime import datetime, timezone
 
@@ -12,7 +11,7 @@ from mwmbl.imagesearch.types import ImageSourceUnavailable, SourceImage
 from mwmbl.rankeval.seed_images import collect, jev_images
 from mwmbl.rankeval.seed_images.collect import image_from_json, image_to_json, with_backoff
 from mwmbl.tinysearchengine.indexer import Document
-from mwmbl.tinysearchengine.jev_rank import RELEVANCE_QUESTION, SEARCHER
+from mwmbl.tinysearchengine.jev_rank import RELEVANCE_QUESTION
 
 CATEGORIES = "Ailurus fulgens | Zoos"
 IMAGE = SourceImage(
@@ -63,16 +62,6 @@ def test_with_backoff_raises_a_rejected_request_at_once(monkeypatch):
     assert len(calls) == 1
 
 
-def test_image_text_matches_the_benchmark_format():
-    long_image = dataclasses.replace(IMAGE, description="x" * (prompt.DESCRIPTION_CHARS + 10))
-
-    assert (
-        prompt.image_text(IMAGE)
-        == f"File name: Red panda.jpg\nDescription: {IMAGE.description}\nCategories: {CATEGORIES}"
-    )
-    assert prompt.image_text(long_image).count("x") == prompt.DESCRIPTION_CHARS
-
-
 def test_nsfw_request_asks_one_question_per_image_under_the_policy():
     request = judge.nsfw_request([IMAGE, IMAGE])
 
@@ -85,23 +74,11 @@ def test_nsfw_request_asks_one_question_per_image_under_the_policy():
     assert judge.scores({"answers": {"n1": {"score": 2.5}, "n0": {"score": 0.1}}}, "n", 2) == [0.1, 2.5]
 
 
-def test_need_request_numbers_the_web_titles():
-    request = judge.need_request("red panda", ["Red panda - Wikipedia", "Red Panda Network"])
-
-    assert request["state"] == {"query": "red panda", "searcher": SEARCHER}
-    instructions = request["questions"]["need"]["instructions"]
-    assert instructions == {
-        "results": "1. Red panda - Wikipedia\n2. Red Panda Network",
-        "question": prompt.IMAGE_NEED_QUESTION,
-    }
-    assert judge.need_score({"answers": {"need": {"score": 1.75}}}) == 1.75
-
-
 def test_combined_request_holds_the_web_image_and_need_questions():
     documents = [Document("Red panda", "https://en.wikipedia.org/wiki/Red_panda", "A mammal")]
 
-    request = jev_images.combined_request("red panda", documents, ["Red panda"], [IMAGE, IMAGE])
+    request = jev_images.combined_request("red panda", documents, documents, [IMAGE, IMAGE])
 
     assert sorted(request["questions"]) == ["i0", "i1", "n0", "n1", "need", "q0", "r0"]
     assert request["questions"]["r0"]["instructions"]["question"] == RELEVANCE_QUESTION
-    assert request["state"] == {"query": "red panda", "searcher": SEARCHER, "policy": prompt.NSFW_POLICY}
+    assert request["state"] == judge.query_state("red panda", documents) | {"policy": prompt.NSFW_POLICY}

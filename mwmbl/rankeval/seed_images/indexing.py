@@ -38,9 +38,9 @@ from mwmbl.rankeval.evaluation import holistic_judge  # noqa: E402
 from mwmbl.rankeval.evaluation.jev_order import cached_response  # noqa: E402
 from mwmbl.rankeval.seed_images import SEED_IMAGES_DIR  # noqa: E402
 from mwmbl.rankeval.seed_images.collect import load_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.gate_analysis import RECOMMENDED_PATH  # noqa: E402
-from mwmbl.rankeval.seed_images.gate_data import RELEVANCE_PATH, jev_safe_candidates  # noqa: E402
-from mwmbl.rankeval.seed_images.queries import NUM_RESULTS, load_queries, read_jsonl  # noqa: E402
+from mwmbl.rankeval.seed_images.gate_analysis import HARDENED_PATH, RECOMMENDED_PATH  # noqa: E402
+from mwmbl.rankeval.seed_images.gate_data import jev_safe_candidates  # noqa: E402
+from mwmbl.rankeval.seed_images.queries import NUM_RESULTS, load_queries, read_jsonl, web_documents  # noqa: E402
 from mwmbl.rankeval.seed_images.run_jev import CACHE_DIR, NEED_PATH  # noqa: E402
 from mwmbl.tinysearchengine.completer import Completer  # noqa: E402
 from mwmbl.tinysearchengine.indexer import (  # noqa: E402
@@ -202,9 +202,10 @@ def candidates_by_url() -> dict[str, SourceImage]:
 def relevance(name: str) -> None:
     """Jev image relevance for each image in an en-gb top ten: the gate's score if it has one, else asked now."""
     known = {
-        (row["query"], fid): s for row in read_jsonl(RELEVANCE_PATH) for fid, s in zip(row["file_ids"], row["scores"])
+        (row["query"], fid): s for row in read_jsonl(HARDENED_PATH) for fid, s in zip(row["file_ids"], row["scores"])
     }
     images = candidates_by_url()
+    queries = load_queries()
     shown: dict[str, set[str]] = {}
     for arm in VARIANTS:
         for query, results in json.loads((INDEXING_DIR / name / f"lists_{arm}.json").read_text()).items():
@@ -214,7 +215,8 @@ def relevance(name: str) -> None:
         unscored = sorted(url for url in urls if (query, file_id(images[url])) not in known)
         if unscored:
             unscored_images = [images[url] for url in unscored]
-            asked = scores(cached_response(relevance_request(query, unscored_images), CACHE_DIR), "i", len(unscored))
+            request = relevance_request(query, web_documents(queries[query]), unscored_images)
+            asked = scores(cached_response(request, CACHE_DIR), "i", len(unscored))
             known |= {(query, file_id(image)): s for image, s in zip(unscored_images, asked)}
         scored[query] = {url: known[(query, file_id(images[url]))] for url in urls}
     (INDEXING_DIR / name / RELEVANCE_FILE).write_text(json.dumps(scored))

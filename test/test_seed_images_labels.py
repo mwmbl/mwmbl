@@ -22,7 +22,7 @@ def test_below_threshold_drops_images_at_or_above_it():
 
 
 def test_relevance_request_asks_about_each_image_for_the_query():
-    request = judge.relevance_request("red panda", [IMAGE, OTHER])
+    request = judge.relevance_request("red panda", [], [IMAGE, OTHER])
 
     assert request["state"]["query"] == "red panda"
     assert list(request["questions"]) == ["i0", "i1"]

@@ -5,16 +5,25 @@ recall. Ranking: NDCG@k of Jev relevance, Commons rank and a cross-validated mix
 query's labelled candidates, then how text labels agree with the vision spot-check, then what each choice of
 k and minimum Jev relevance would show. Headline figures get 95% intervals from resampling queries with
 replacement. Prints markdown tables.
+
+    uv run python -m mwmbl.rankeval.seed_images.gate_analysis --arm hardened
+
+`--arm` picks whose answers are scored: `first`, the questions as first asked (the default); `hardened`, the
+hardened questions in production's one request (run_hardened); `top1`, hardened relevance given one web result.
+The first answers can only be re-scored, not re-asked: the questions that gave them are now the hardened ones.
 """
 
 import json
+from argparse import ArgumentParser
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 from scipy.stats import spearmanr
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import KFold
 
+from mwmbl.imagesearch import prompt
 from mwmbl.rankeval.seed_images.gate_data import GATE_DIR, NSFW_THRESHOLD, RELEVANCE_PATH, jev_safe_candidates
 from mwmbl.rankeval.seed_images.queries import load_queries, read_jsonl
 from mwmbl.rankeval.seed_images.run_jev import NEED_PATH
@@ -30,8 +39,16 @@ MIN_RELEVANCES = (0.0, 1.0, 1.5, 2.0, 2.5)
 INTENTS_WANTING_IMAGES = {"entity", "local"}
 # Chosen from the tables this prints; see mwmbl/rankeval/seed-search-images-eval.md.
 RECOMMENDED_K = 4
-RECOMMENDED_MIN_RELEVANCE = 1.5
 RECOMMENDED_PATH = GATE_DIR / "recommended.json"
+# The hardened questions' answers (run_hardened).
+HARDENED_PATH = GATE_DIR / "hardened_image.jsonl"
+TOP1_PATH = GATE_DIR / "hardened_top1.jsonl"
+# arm: (need answers, their need field, relevance answers, recommended minimum relevance, where to record it)
+ARMS = {
+    "first": (NEED_PATH, "score", RELEVANCE_PATH, 1.5, RECOMMENDED_PATH),
+    "hardened": (HARDENED_PATH, "need", HARDENED_PATH, prompt.MIN_RELEVANCE, GATE_DIR / "recommended_hardened.json"),
+    "top1": (HARDENED_PATH, "need", TOP1_PATH, prompt.MIN_RELEVANCE, GATE_DIR / "recommended_top1.json"),
+}
 BOOTSTRAP_SAMPLES = 2000
 
 
@@ -126,9 +143,9 @@ def shown(pools: list[list[dict]], k: int, min_relevance: float) -> dict:
     }
 
 
-def analyse_gate() -> tuple[float, dict[str, set[str]]]:
+def analyse_gate(need_path: Path, need_field: str) -> tuple[float, dict[str, set[str]]]:
     reference = {row["query"]: row["need"] for row in read_jsonl(GATE_DIR / "labels_need.jsonl")}
-    jev_need = {row["query"]: row["score"] for row in read_jsonl(NEED_PATH)}
+    jev_need = {row["query"]: row[need_field] for row in read_jsonl(need_path)}
     queries = load_queries()
     safe = jev_safe_candidates()
     ordered = sorted(reference)
@@ -188,10 +205,10 @@ def ndcg_intervals(pools: list[list[dict]]) -> None:
     print()
 
 
-def analyse_ranking(query_sets: dict[str, set[str]]) -> None:
+def analyse_ranking(query_sets: dict[str, set[str]], relevance_path: Path, min_relevance: float) -> None:
     jev = {
         (row["query"], file): score
-        for row in read_jsonl(RELEVANCE_PATH)
+        for row in read_jsonl(relevance_path)
         for file, score in zip(row["file_ids"], row["scores"])
     }
     by_query: dict[str, list[dict]] = {}
@@ -230,24 +247,27 @@ def analyse_ranking(query_sets: dict[str, set[str]]) -> None:
         for share in ("good", "wrong"):
 
             def resampled_share(sample: np.ndarray, share: str = share) -> float:
-                return shown([gated_pools[i] for i in sample], RECOMMENDED_K, RECOMMENDED_MIN_RELEVANCE)[share]
+                return shown([gated_pools[i] for i in sample], RECOMMENDED_K, min_relevance)[share]
 
             interval = interval_text(resampled_share, len(gated_pools))
-            print(f"k = {RECOMMENDED_K}, min {RECOMMENDED_MIN_RELEVANCE}: {share} share 95% interval {interval}")
+            print(f"k = {RECOMMENDED_K}, min {min_relevance}: {share} share 95% interval {interval}")
 
 
 def main() -> None:
-    threshold, query_sets = analyse_gate()
-    analyse_ranking(query_sets)
+    parser = ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--arm", choices=ARMS, default="first")
+    need_path, need_field, relevance_path, min_relevance, recommended_path = ARMS[parser.parse_args().arm]
+    threshold, query_sets = analyse_gate(need_path, need_field)
+    analyse_ranking(query_sets, relevance_path, min_relevance)
     recommended = {
         "jev_need_threshold": round(threshold, 2),
         "num_images": RECOMMENDED_K,
-        "min_jev_relevance": RECOMMENDED_MIN_RELEVANCE,
+        "min_jev_relevance": min_relevance,
         "nsfw_threshold": NSFW_THRESHOLD,
         "order": "Jev image relevance, highest first; ties by Commons rank",
     }
-    RECOMMENDED_PATH.write_text(json.dumps(recommended, indent=2) + "\n")
-    print(f"\n{recommended} -> {RECOMMENDED_PATH}")
+    recommended_path.write_text(json.dumps(recommended, indent=2) + "\n")
+    print(f"\n{recommended} -> {recommended_path}")
 
 
 if __name__ == "__main__":
