@@ -22,13 +22,16 @@ from mwmbl.imagesearch.prompt import (
     IMAGE_NEED_QUESTION,
     IMAGE_RELEVANCE_CRITERIA,
     IMAGE_RELEVANCE_QUESTION,
+    NEED_WEB_RESULTS,
     NSFW_CRITERIA,
     NSFW_POLICY,
     NSFW_QUESTION,
+    RELEVANCE_WEB_RESULTS,
     image_text,
     numbered_titles,
 )
 from mwmbl.imagesearch.types import SourceImage
+from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.jev_rank import SEARCHER, post
 
 NSFW_PREFIX = "n"
@@ -60,18 +63,36 @@ def need_question(web_titles: list[str]) -> dict:
     return {NEED_KEY: score_question("results", results, IMAGE_NEED_QUESTION, IMAGE_NEED_CRITERIA)}
 
 
+def staan_need_question(staan: list[Document]) -> dict:
+    return need_question([document.title for document in staan[:NEED_WEB_RESULTS]])
+
+
+def query_state(query: str, staan: list[Document]) -> dict:
+    """What the query-dependent questions share: the query, and Staan's top results, to say which sense is meant."""
+    top_results = [
+        {"title": document.title, "url": document.url, "snippet": document.extract or ""}
+        for document in staan[:RELEVANCE_WEB_RESULTS]
+    ]
+    return {"query": query, "searcher": SEARCHER, "top_results": top_results}
+
+
 def nsfw_request(images: list[SourceImage]) -> dict:
     return {"model": settings.JEV_MODEL, "state": {"policy": NSFW_POLICY}, "questions": nsfw_questions(images)}
 
 
-def need_request(query: str, web_titles: list[str]) -> dict:
-    state = {"query": query, "searcher": SEARCHER}
-    return {"model": settings.JEV_MODEL, "state": state, "questions": need_question(web_titles)}
+def need_request(query: str, staan: list[Document]) -> dict:
+    return {"model": settings.JEV_MODEL, "state": query_state(query, staan), "questions": staan_need_question(staan)}
 
 
-def relevance_request(query: str, images: list[SourceImage]) -> dict:
-    state = {"query": query, "searcher": SEARCHER}
-    return {"model": settings.JEV_MODEL, "state": state, "questions": relevance_questions(images)}
+def relevance_request(query: str, staan: list[Document], images: list[SourceImage]) -> dict:
+    return {"model": settings.JEV_MODEL, "state": query_state(query, staan), "questions": relevance_questions(images)}
+
+
+def image_request(query: str, staan: list[Document], images: list[SourceImage]) -> dict:
+    """The one request Seed Search sends once Staan has answered: the query's image need and every candidate's
+    relevance. It doesn't wait for the NSFW scores, so it asks about every candidate."""
+    questions = staan_need_question(staan) | relevance_questions(images)
+    return {"model": settings.JEV_MODEL, "state": query_state(query, staan), "questions": questions}
 
 
 def scores(response: dict, prefix: str, count: int) -> list[float]:
