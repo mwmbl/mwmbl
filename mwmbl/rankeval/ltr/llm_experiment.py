@@ -79,9 +79,9 @@ def _normalise(dataset: pd.DataFrame) -> pd.DataFrame:
     return dataset
 
 
-def load_datasets() -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_datasets(llm_path: Path = LEARNING_TO_RANK_LLM_DATASET_PATH) -> tuple[pd.DataFrame, pd.DataFrame]:
     ext = _normalise(pd.read_csv(LEARNING_TO_RANK_DATASET_PATH, lineterminator="\n"))
-    llm = _normalise(pd.read_csv(LEARNING_TO_RANK_LLM_DATASET_PATH, lineterminator="\n"))
+    llm = _normalise(pd.read_csv(llm_path, lineterminator="\n"))
     return ext, llm
 
 
@@ -347,6 +347,13 @@ def run():
         "--split-seed", type=int, default=42, help="train/test query split seed; keep fixed across compared runs"
     )
     parser.add_argument("--test-size", type=float, default=0.3)
+    parser.add_argument(
+        "--llm-dataset",
+        type=Path,
+        default=LEARNING_TO_RANK_LLM_DATASET_PATH,
+        help="the LLM-labelled dataset, e.g. seed_images/ltr_data.py's with image pages "
+        "(train without them with --exclude-pool commons_image)",
+    )
     parser.add_argument("--save-model", default=None, help="optional path to save the trained model")
     parser.add_argument(
         "--exclude-pool",
@@ -356,7 +363,7 @@ def run():
     )
     args = parser.parse_args()
 
-    ext, llm = load_datasets()
+    ext, llm = load_datasets(args.llm_dataset)
     train_queries, test_queries = split_llm_queries(llm, args.test_size, args.split_seed)
     test_df = llm[llm["qnorm"].isin(test_queries)]
     human_test_pairs, human_test_queries = split_human_pairs(load_human_pairs(), args.test_size, args.split_seed)
