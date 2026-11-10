@@ -11,6 +11,7 @@ from pathlib import Path
 from django.conf import settings
 
 from mwmbl.rankeval.seed_images import QUERIES_PATH, SEED_IMAGES_DIR
+from mwmbl.tinysearchengine.indexer import Document
 
 LLM_RELABEL_DIR = Path(settings.BASE_DIR) / "devdata" / "llm_relabel"
 PRODUCTION_ARM = "Jev composite + Staan rank"
@@ -47,6 +48,11 @@ def engb_queries(arms_path: Path) -> dict[str, dict]:
 
 def load_queries() -> dict[str, dict]:
     return json.loads(QUERIES_PATH.read_text())
+
+
+def web_documents(entry: dict) -> list[Document]:
+    """A query's web top ten, in its set's order: Staan's for train queries."""
+    return [Document(result["title"], result["url"], result["extract"]) for result in entry["web"]]
 
 
 def main() -> None:
