@@ -12,14 +12,13 @@ A search runs in two phases, each alongside the part of web search it doesn't de
 It fails closed: anything that goes wrong, or doesn't finish within IMAGE_SEARCH_GRACE_SECONDS of web ranking,
 is `unavailable`, with no images, and never delays or costs the web results.
 
-With no Staan results there is nothing to give the need question, which was measured with them, so the
-outcome is `unavailable`. One result is enough: the relevance question was also measured with only Staan's top
-result.
-
-Images are never stored or logged together with the query.
+With no Staan results the need question, measured with them, can't be asked, so the outcome is `unavailable`;
+one is enough, as the relevance question was also measured with Staan's top result alone. Images are never
+stored or logged together with the query.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -36,6 +35,17 @@ logger = getLogger(__name__)
 
 # One client for the process, so its pooled connections to Commons are reused across searches.
 client = commons.new_client()
+# Image work has threads of its own, so that threads left blocked on Commons or Redis after a missed deadline
+# can never hold up web search's.
+executor = ThreadPoolExecutor(settings.IMAGE_SEARCH_THREADS, thread_name_prefix="seed-images")
+# Files nominated for deletion are still on Commons while the community decides.
+DELETION_CATEGORY_PREFIXES = (
+    "Deletion requests",
+    "Candidates for speedy deletion",
+    "Copyright violations",
+    "Media without a license",
+    "Media missing permission",
+)
 
 
 class ImageOutcome(StrEnum):
@@ -80,22 +90,24 @@ class ImageSearch:
 
 def start(query: str) -> ImageSearch:
     """Begin phase 1 in the background. Call it from the request's event loop, then pass the result to finish."""
-    candidates = asyncio.ensure_future(asyncio.to_thread(find_candidates, query))
-    nsfw_scores = asyncio.ensure_future(score_nsfw(candidates))
+    candidates = asyncio.get_running_loop().run_in_executor(executor, find_candidates, query)
+    nsfw_scores = asyncio.create_task(score_nsfw(candidates))
     for future in (candidates, nsfw_scores):
         future.add_done_callback(retrieve_outcome)
     return ImageSearch(query, candidates, nsfw_scores)
 
 
 async def finish(search: ImageSearch, staan_results: list[Document], web_ranking: asyncio.Future) -> ImageSelection:
-    """Phase 2 and the selection. Call it once Staan has answered, with web ranking already running. Never raises."""
-    selection = asyncio.ensure_future(select_images(search, staan_results))
+    """Phase 2 and the selection. Call it once Staan has answered, with web ranking already running as a task or
+    future, which this waits for. Never raises."""
+    selection = asyncio.create_task(select_images(search, staan_results))
+    selection.add_done_callback(retrieve_outcome)
     await asyncio.wait([web_ranking])
     try:
-        return await asyncio.wait_for(selection, settings.IMAGE_SEARCH_GRACE_SECONDS)
+        return await asyncio.wait_for(asyncio.shield(selection), settings.IMAGE_SEARCH_GRACE_SECONDS)
     except TimeoutError:
-        # The threads underneath can't be stopped, and may be blocked on Redis for its socket timeout, but
-        # nothing waits for them now.
+        # The threads underneath can't be stopped, and may be blocked on Redis for its socket timeout; they
+        # finish on their own, NSFW scores still reach the cache, and nothing waits for them.
         logger.warning("Images missed their deadline")
         return UNAVAILABLE
 
@@ -120,14 +132,18 @@ def find_candidates(query: str) -> list[SourceImage]:
 
 def is_eligible(image: SourceImage, settled_before: datetime) -> bool:
     denied_files = settings.IMAGE_SEARCH_DENIED_FILES
-    denied = image.sha1 in denied_files or image.page_url in denied_files
-    settled = image.revised_at <= settled_before
-    return settled and not denied and rules.image_verdict(image) == Verdict.SAFE
+    # Lower case on both sides, so a SHA-1 matches however it was pasted; a URL then over-matches, never under.
+    denied = image.sha1.lower() in denied_files or image.page_url.lower() in denied_files
+    settled = max(image.revised_at, image.uploaded_at) <= settled_before
+    nominated = any(category.startswith(DELETION_CATEGORY_PREFIXES) for category in image.categories)
+    return settled and not denied and not nominated and rules.image_verdict(image) == Verdict.SAFE
 
 
 async def score_nsfw(candidates: asyncio.Future) -> list[float]:
     images = await candidates
-    return await asyncio.to_thread(judge.nsfw_scores, images) if images else []
+    if not images:
+        return []
+    return await asyncio.get_running_loop().run_in_executor(executor, judge.nsfw_scores, images)
 
 
 async def select_images(search: ImageSearch, staan_results: list[Document]) -> ImageSelection:
@@ -137,15 +153,16 @@ async def select_images(search: ImageSearch, staan_results: list[Document]) -> I
             return ImageSelection(ImageOutcome.NONE_RELEVANT, [])
         if not staan_results:
             return UNAVAILABLE
-        judged = asyncio.to_thread(judge.image_scores, search.query, staan_results, candidates)
+        loop = asyncio.get_running_loop()
+        judged = loop.run_in_executor(executor, judge.image_scores, search.query, staan_results, candidates)
         (need, relevance), nsfw_scores = await asyncio.gather(judged, search.nsfw_scores)
+        return select(candidates, need, relevance, nsfw_scores)
     except NoImages as e:
         return ImageSelection(e.outcome, [])
     except Exception as e:
         # Only the type: a message can embed the query.
         logger.warning("Images unavailable: %s", type(e).__name__)
         return UNAVAILABLE
-    return select(candidates, need, relevance, nsfw_scores)
 
 
 def select(candidates: list[SourceImage], need: float, relevance: list[float], nsfw: list[float]) -> ImageSelection:

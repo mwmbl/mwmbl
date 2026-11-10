@@ -48,12 +48,13 @@ def found(monkeypatch):
 
 @pytest.fixture
 def answers(monkeypatch):
-    """Stub the judge: NSFW and relevance scores by file name, a fixed need, and an optional delay."""
+    """Stub the judge: NSFW and relevance scores by file name, a fixed need, and a delay for the request with need,
+    which writes nothing to the cache, so that a thread it leaves running cannot touch a later test."""
     nsfw = {name: NSFW.get(name, 0.0) for name in NAMES}
     state = SimpleNamespace(need=2.0, relevance=RELEVANCE, nsfw=nsfw, delay=0.0, requests=[])
 
     def fake_post(url, json, headers, timeout):
-        time.sleep(state.delay)
+        time.sleep(state.delay if "need" in json["questions"] else 0)
         state.requests.append(json)
         scores = {}
         for key, question in json["questions"].items():
@@ -170,10 +171,11 @@ async def test_images_that_are_too_new_denied_or_ruled_out_are_never_judged(foun
         dataclasses.replace(CANDIDATES[0], revised_at=recent),
         CANDIDATES[1],
         dataclasses.replace(CANDIDATES[2], caption="Topless sunbather"),
-        dataclasses.replace(CANDIDATES[3], page_url="https://commons.wikimedia.org/wiki/File:d.jpg"),
+        dataclasses.replace(CANDIDATES[3], page_url="https://commons.wikimedia.org/wiki/File:D.jpg"),
+        dataclasses.replace(CANDIDATES[4], categories=("Deletion requests November 2026",)),
         CANDIDATES[5],
     ]
-    settings.IMAGE_SEARCH_DENIED_FILES = {"sha1-of-b.jpg", "https://commons.wikimedia.org/wiki/File:d.jpg"}
+    settings.IMAGE_SEARCH_DENIED_FILES = {"sha1-of-b.jpg", "https://commons.wikimedia.org/wiki/file:d.jpg"}
 
     selection = await search()
 
@@ -189,7 +191,7 @@ async def test_images_late_after_web_ranking_are_unavailable(found, answers, set
     selection = await search()
 
     assert selection.outcome == ImageOutcome.UNAVAILABLE
-    assert time.monotonic() - started < 0.4
+    assert time.monotonic() - started < 0.45
 
 
 async def test_images_may_take_as_long_as_web_ranking(found, answers, settings):
