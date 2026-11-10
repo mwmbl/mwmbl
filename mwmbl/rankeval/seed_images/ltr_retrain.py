@@ -5,9 +5,8 @@ queries (five folds by query, pass-3 NDCG@10), on the whole test fold and on the
 deployed model was trained on all of these queries, so `today`, its recipe retrained per fold, is the fair baseline.
 Labels are `overall`, which the image rows' ethos (3 for almost all) and grading beside pictures both lift, and
 `relevance`, which neither lifts much. `search` runs standard search's ranker (LTR + MMR) on the en-gb queries over
-production's own pages with images overlaid as ltr_data.py overlays them. Run from the repo root with
-DJANGO_SETTINGS_MODULE=mwmbl.settings_dev and DATABASE_URL; `search` also needs EXTERNAL_CACHE_ENABLED=false and
-PYTHONHASHSEED=0.
+production's pages, images overlaid as ltr_data.py does. Needs DJANGO_SETTINGS_MODULE=mwmbl.settings_dev, DATABASE_URL
+and, for `search`, EXTERNAL_CACHE_ENABLED=false and PYTHONHASHSEED=0.
 
     cv                           -> ltr/cv.json
     train ARM                    -> ltr/model-ARM.xgb, trained on every query
@@ -197,7 +196,6 @@ def cross_validate() -> None:
                 per_query[name].setdefault(metric, {}).update(scores)
             placement[name].append(image_placement(predicted))
             pair_accuracies[name].append(pair_accuracy(model, human_test_pairs)[0])
-            print(f"fold {fold} {name}: done")
     results = {}
     for name in names:
         results[name] = summary(per_query[name], per_query["today"]) | {
@@ -205,7 +203,6 @@ def cross_validate() -> None:
             "images in top ten": float(np.mean([p["images_in_top_ten"] for p in placement[name]])),
             "image first": float(np.mean([p["image_first"] for p in placement[name]])),
         }
-        print(name, json.dumps(results[name]))
     CV_PATH.write_text(json.dumps(results, indent=1))
 
 
@@ -229,7 +226,8 @@ class OverlaidIndex:
             existing = remote_page(number)
             incoming = self.image_pages.get(number, [])
             self.pages[number] = stored_page(existing, incoming) if incoming else existing
-        return [document for document in self.pages[number] if document.term == term]
+        # As TinyIndex.retrieve: a document with no term belongs to every term on its page.
+        return [document for document in self.pages[number] if document.term in (term, None)]
 
 
 def capped(results: list[Document], cap: int | None) -> list[Document]:
@@ -246,7 +244,10 @@ def approved_images(image_set: str) -> list[SourceImage]:
     if image_set == "train":
         return approved_train_images()
     safe = jev_safe_candidates()
-    by_url = {image.page_url: image for query in load_queries() for image in safe.get(query, [])}
+    by_url = {}
+    for query in load_queries():
+        for image in safe.get(query, []):
+            by_url.setdefault(image.page_url, image)
     return list(by_url.values())
 
 

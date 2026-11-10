@@ -56,11 +56,8 @@ def test_the_relevance_label_grades_the_rows_by_relevance_alone():
 
     frame = ltr_retrain.training_frame(llm_frame(), curation_frame().iloc[:0], {"held out"}, arm)
 
-    assert dict(zip(frame["url"], frame["label"])) == {
-        "https://a.org": 1.0,
-        f"{COMMONS}Ben.jpg": 1.0,
-        "https://b.org": 1.0,
-    }
+    assert frame["url"].tolist() == ["https://a.org", f"{COMMONS}Ben.jpg", "https://b.org"]
+    assert frame["label"].tolist() == [1.0, 1.0, 1.0]
 
 
 def test_ndcg_skips_queries_with_one_row_or_no_gain_and_placement_counts_images():

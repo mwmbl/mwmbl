@@ -570,9 +570,9 @@ are on the test queries that have image rows: how many of them reach the top ten
 - **The image rows don't cost web ranking anything.** Scored on the test folds with their image rows removed, both
   image arms are level with or ahead of their no-image twins. Their gains on the whole fold are therefore not just
   the image rows' inflated grades.
-- **Training on images demotes them.** A model that has never seen an image page puts 1.2 images in the top ten of
-  a query that has any, and an image first 1.2% of the time (the "matalan" store photo). Trained with them, it puts
-  0.4 to 0.6 in, and never first. An image page matches the query's terms closely (its file name is often the
+- **Training on images demotes them.** A model that has never seen an image page puts 1.24 images in the top ten
+  of a query that has any, and an image first 1.2% of the time (the "matalan" store photo). Image rows take that to
+  0.44 with the overall label, and its relevance twin from 0.66 to 0.55; neither image arm ever puts one first. An image page matches the query's terms closely (its file name is often the
   query), which an image-blind model rewards, while 61% of images miss overall ≥ 6 and 34% miss relevance ≥ 2. The
   ethos lift (ethos 3 on 351 of 353 images) didn't make the model learn "Commons page = good".
 - **The relevance label is slightly better on every metric** and recovers some human pair accuracy (0.812 against
@@ -591,12 +591,13 @@ those pages the way `ltr_data.py` writes them, with production's write order, pa
   the retrained one 1. At production's page count, an image reaches a query only through its own terms, and the
   train queries' images rarely share terms with the en-gb queries.
 - **So the comparison overlays every Jev-safe image, the en-gb queries' own as well.** This is the case indexing is
-  for: a query searched before in Seed Search, whose images were approved and indexed then. No model was trained
-  on these queries or their images. Today's model shows 65 images on 45 queries (9 at #1), the retrained one 61 on
+  for, a query searched before in Seed Search, and an upper bound on how often and how relevantly images appear: each
+  image was found by searching that query. No model was trained on these queries, and the retrained one shows
+  no image it was trained on. Today's model shows 65 images on 45 queries (9 at #1), the retrained one 61 on
   43 (5 at #1). "callerton parkway metro" gets 9 photos of the station in both.
-- **Cap:** after ranking, every image after the first `cap` is dropped and the web results below it move up.
 
-The retrained model is `images_relevance`, trained on all 849 queries. X is the arm under test.
+The retrained model is `images_relevance`, trained on all 849 queries. A cap of n drops every image after the
+first n, after ranking. X is the arm under test.
 
 | X | Y | Queries | Preference for X (95% CI) | X / Y / tie | Orders agree |
 |---|---|---|---|---|---|
@@ -606,33 +607,34 @@ The retrained model is `images_relevance`, trained on all 849 queries. X is the 
 | retrained, images, cap 2 | retrained, no images | 43 | +0.64 [+0.42, +0.87] | 77% / 16% / 7% | 74% |
 | retrained, images, cap 1 | today's model, images, no cap | 245 | −0.01 [−0.14, +0.12] | 39% / 38% / 22% | 69% |
 
-- **Indexed images help, with either model.** A relevant photo of the subject ("audrey hepburn", "trustpilot logo",
-  "falls of falloch") wins most comparisons on relevance. The losses are wrong-sense pictures (a Bitcoin Gold coin
-  for "bitcoin price", a Chemnitz train for "citylink") and a picture pushing a destination down a navigational
-  list.
+- **Indexed images help, with either model.** A photo of the subject ("audrey hepburn", "falls of falloch") wins on
+  relevance. The losses are wrong-sense pictures (a Bitcoin Gold coin for "bitcoin price", a Chemnitz train for
+  "citylink") and a picture pushing a destination down a navigational list.
 - **Capping matters for the few queries with many images.** The three capped arms show the same lists except where
   a query has more images than the cap: 7 queries for cap 1, 4 for cap 2. On those, paired by query:
   - Cap 2 against no cap: +1.0. Uncapped, "callerton parkway metro" is the Wikipedia page and nine near-identical
     station photos, which loses clearly in both orders (−2.5). Capped at 2 it wins (+1.5).
   - Cap 2 against cap 1: +0.36 on 7 queries. A second picture helps "prestatyn train station" and "lansdown grove
     hotel". It hurts "horseshoe fish", where the second is the same fish bar again.
-  - The arms' overall figures differ by more than these few queries can explain, because the 36 identical lists
-    were judged again by other judges. That puts the judge-to-judge noise at about ±0.15 on 43 queries.
+  - The 36 identical lists, judged again by other judges, put the judge noise at about ±0.15 on 43 queries.
 - **Retrained against today's model, both with images, it's a tie.** The two models differ on 245 of the 295 top
   tens, mostly in their web ordering. On the 44 queries where either list shows an image the retrained model with
-  cap 1 is ahead, +0.18 [−0.14, +0.48]; on the 201 with no image in either it is level, −0.05 [−0.20, +0.10]. So
-  the retrain doesn't make web results worse, and its gain is where the images are: fewer at #1 and a cap. This
-  comparison used cap 1, before the cap runs above chose 2; the two differ on 7 queries.
+  cap 1 leans ahead, +0.18 [−0.14, +0.48]; on the 201 with no image in either it is level, −0.05 [−0.20, +0.10].
+  The model and the cap aren't separated here (today's model with a cap wasn't judged), and this used cap 1, before
+  the runs above chose 2. So the holistic step shows only that the retrain is no worse; the case for it is the CV.
 
 ### Recommendation
 
-- **Model:** the `images_relevance` arm: the image rows added, labelled relevance ≥ 2, the deployed recipe otherwise.
-  It is the best arm on cross-validation, costs web ranking nothing, and never puts an image first.
-- **Cap:** at most 2 images per standard-search list, counted after ranking, with the web results below a dropped
-  image moving up.
+- **Model:** `images_relevance`: the image rows added, labelled relevance ≥ 2, the deployed recipe otherwise. Best on
+  CV, no measurable cost to web ranking, and fewer images first (none in CV; 5 en-gb queries against today's 9).
+- **Cap:** at most 2 images per standard-search list, after ranking, the web results below moving up. Chosen on the
+  7 queries where the caps differ.
 - **Before shipping:** a crawled Commons file page that Jev never checked has the same URL pattern as an approved
-  image (`https://commons.wikimedia.org/wiki/File:…`), so the model ranks it as one. It must be paired with PR 9's
-  serving-time store lookup, which drops any image URL not approved in the store.
+  image (`https://commons.wikimedia.org/wiki/File:…`), and the model and cap treat it as one. Ship them only with
+  the serving-time lookup in the store of Jev-approved images (#610's standard-display step), which drops every
+  Commons file-page URL not approved there, after canonicalising it (http, mobile, `index.php?title=File:` and
+  encoded variants). That also drops the crawled Commons file pages served today. The model adds no safety of its
+  own: it was trained on Jev-safe images only, so everything rests on the checks before the index.
 
 ## Summary
 
@@ -647,10 +649,10 @@ The retrained model is `images_relevance`, trained on all 849 queries. X is the 
   in front of image search, and add `naturism` to the rules. Residual risk: Jev reads only text, so a nude whose
   text says nothing can't be caught, and Jev passes some nudes even with their text (the Safety section lists them).
 - **Standard search:** on production-sized pages, indexed images help with either model (+0.42 today's, +0.64
-  retrained with a cap of 2, on the 43–45 en-gb queries that show one). Ship the LTR retrained with the image rows
-  and a relevance ≥ 2 label, and cap images at 2 per list: it costs web ranking nothing, never puts an image first
-  and stops a query filling with photos. Only with PR 9's store lookup, so unapproved Commons file pages aren't
-  boosted. Index the file name and description only, and settle the gate-rejected question.
+  retrained with a cap of 2, each against its own image-free lists; the gap is within judge noise). Ship the LTR
+  retrained with the image rows and a relevance ≥ 2 label, and cap images at 2 per list: no measurable cost to web
+  ranking, fewer images first, and no query fills with photos. Only with the serving-time store lookup, so only
+  Jev-approved images count as images. Index the file name and description only; settle the gate-rejected question.
 - **Left for production:**
   - Build Seed Search's image request. The Commons fetch and the NSFW check run in parallel with Staan; Jev's
     relevance question waits for Staan's top results (below).
@@ -662,4 +664,4 @@ The retrained model is `images_relevance`, trained on all 849 queries. X is the 
   - Set the Jev latency budget for the extra questions.
   - Disambiguate wrong-sense strips: give Jev's image-relevance question the top web result or two as well as the
     query, and drop images whose subject doesn't match that meaning. Re-tune the 1.5 minimum with the new prompt.
-  - Indexing: ship the retrained LTR and the cap of 2 (Retraining the LTR with image pages); the gate rule.
+  - Indexing: ship the retrained LTR and the cap of 2 with the store lookup (Retraining the LTR with image pages).
