@@ -28,10 +28,16 @@ With crawl=true the search also starts a seed crawl: the Staan results the index
 crawled in the background, following links within Staan's domains, and what that adds is
 read back from /new-pages - see mwmbl.indexer.seed_crawl. JWT only for now: it is free, and
 API customers are billed per request.
+
+With images=true the search also looks for Wikimedia Commons images (mwmbl.imagesearch.seed_images): the first
+phase starts before Staan is fetched and the second runs alongside ranking, which it waits for, so images add
+at most IMAGE_SEARCH_GRACE_SECONDS to a search and never cost it its web results.
 """
 
 import asyncio
+import time
 from logging import getLogger
+from urllib.parse import unquote, urlparse
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -42,6 +48,8 @@ from pydantic import Field
 
 from mwmbl import pricing
 from mwmbl.format import format_result_v2
+from mwmbl.imagesearch import seed_images
+from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSearch, ImageSelection, RankedImage
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
     CrawlOutcome,
@@ -72,6 +80,28 @@ from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 logger = getLogger(__name__)
 
 router = Router(tags=["Combined Search"])
+
+COMMONS_HOSTS = {"commons.wikimedia.org", "commons.m.wikimedia.org"}
+IMAGES_SWITCHED_OFF = ImageSelection(ImageOutcome.UNAVAILABLE, [])
+
+
+class ImageResult(Schema):
+    title: str = Field(description="The file name on Commons. Plain text, but not HTML-safe: escape it.")
+    page_url: str = Field(description="The image's page on Commons, which has the full-size file and licence.")
+    thumbnail_url: str = Field(
+        description='Load this directly from Commons, with `referrerpolicy="no-referrer"`: Mwmbl does not proxy '
+        "or store images."
+    )
+    thumbnail_width: int
+    thumbnail_height: int
+    source: str = Field(examples=["commons"])
+    license_name: str
+    license_url: str
+    attribution: str = Field(description="The author, as Commons gives it. Plain text, but not HTML-safe: escape it.")
+    relevance: float = Field(
+        description="How relevant the image is to the query, as judged. Images are sorted by it, best first.",
+        examples=[2.4],
+    )
 
 
 class CombinedSearchResponse(SearchResponse):
@@ -105,6 +135,22 @@ class CombinedSearchResponse(SearchResponse):
         default=None,
         description="With `too_many_crawls`, the queries of your crawls that are queued or running, oldest first.",
         examples=[["rust async runtimes"]],
+    )
+    image_outcome: ImageOutcome | None = Field(
+        default=None,
+        description="What `images=true` did: `shown` images, or none because images are never shown for the "
+        "query (`query_refused`), the query doesn't call for images (`not_needed`), no image was both relevant "
+        "and safe (`none_relevant`), or image search is switched off, failed or ran out of time "
+        "(`unavailable`). Null without `images=true`.",
+        examples=["shown"],
+    )
+    images_display_count: int = Field(
+        description='How many of `images` to show at first. Show the rest behind a "More" button.',
+        examples=[settings.IMAGES_DISPLAY_COUNT],
+    )
+    images: list[ImageResult] = Field(
+        default=[],
+        description="With `shown`, every image that passed, most relevant first. Empty otherwise.",
     )
 
 
@@ -206,6 +252,16 @@ DESCRIPTION = (
     "`GET /api/v2/combined-search/new-pages/count?q=...` counts it.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
+    "With `images=true`, the search also returns images from Wikimedia Commons in `images`, most "
+    "relevant first, when the query calls for them; `image_outcome` says why there are none. To find "
+    "them, Mwmbl's server sends the query to Wikimedia Commons. An LLM-based model judges each image's "
+    "relevance from its text, and whether that text suggests nudity or sexual content. That is the only "
+    "safety check: nobody looks at the pixels, and violent or otherwise disturbing images are not "
+    'screened. Show the first `images_display_count` images and put the rest behind a "More" button, '
+    "without a new request. Image pages shown in `images` are left out of `results`. Titles and "
+    "attribution are plain text from Commons that is not HTML-safe, so escape them, and load thumbnails "
+    'with `referrerpolicy="no-referrer"`. Image search fails closed: if it fails or is slow, '
+    "`image_outcome` is `unavailable` and the web results are unaffected. Images cost nothing extra.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
 )
 
@@ -223,8 +279,67 @@ OPENAPI_EXTRA = {
             "required": False,
             "schema": {"type": "boolean", "default": False},
         },
+        {
+            "name": "images",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "boolean", "default": False},
+        },
     ]
 }
+
+
+def commons_file_key(url: str) -> str | None:
+    """The file a Commons page URL is for, however it is encoded and on either site; None for any other URL."""
+    parsed = urlparse(url)
+    if parsed.hostname not in COMMONS_HOSTS or not parsed.path.startswith("/wiki/"):
+        return None
+    return unquote(parsed.path).replace(" ", "_")
+
+
+def to_image_result(ranked: RankedImage) -> ImageResult:
+    image = ranked.image
+    return ImageResult(
+        title=image.title,
+        page_url=image.page_url,
+        thumbnail_url=image.thumbnail_url,
+        thumbnail_width=image.thumbnail_width,
+        thumbnail_height=image.thumbnail_height,
+        source="commons",
+        license_name=image.license_name,
+        license_url=image.license_url,
+        attribution=image.attribution,
+        relevance=ranked.relevance,
+    )
+
+
+async def find_images(
+    search: ImageSearch | None, started_at: float, staan_results: list[Document], web_ranking: asyncio.Task
+) -> ImageSelection:
+    """seed_images.finish, logging the outcome and how long images took, overall and beyond web ranking.
+
+    The log line carries neither the query nor the images, so it can't tie what was searched for to what was
+    found.
+    """
+    if search is None:
+        logger.info("Images %s: switched off", IMAGES_SWITCHED_OFF.outcome)
+        return IMAGES_SWITCHED_OFF
+    ranking_finished_at = []
+    web_ranking.add_done_callback(lambda task: ranking_finished_at.append(time.monotonic()))
+    selection = await seed_images.finish(search, staan_results, web_ranking)
+    finished_at = time.monotonic()
+    logger.info(
+        "Images %s: %d in %.3fs, %.3fs after web ranking",
+        selection.outcome,
+        len(selection.images),
+        finished_at - started_at,
+        finished_at - ranking_finished_at[0],
+    )
+    return selection
+
+
+async def no_images() -> None:
+    return None
 
 
 def index_staan_results(query: str, staan_results: list[Document]) -> set[str]:
@@ -275,7 +390,7 @@ def init_router(ranker) -> None:
         description=DESCRIPTION,
         openapi_extra=OPENAPI_EXTRA,
     )
-    async def combined_search(request, q: str, crawl: bool = False):
+    async def combined_search(request, q: str, crawl: bool = False, images: bool = False):
         user = await authenticate_user(request)
 
         # Checked before the quota, so a refused request is not counted.
@@ -310,17 +425,30 @@ def init_router(ranker) -> None:
                 await sync_to_async(decrement_monthly_combined_search)(user.id)
                 raise HttpError(429, f"Combined Search monthly quota exceeded: {monthly_limit} requests per month.")
 
+        # The first phase of images needs only the query, so it starts before anything else.
+        image_started_at = time.monotonic()
+        image_search = seed_images.start(q) if images and settings.IMAGE_SEARCH_ENABLED else None
         # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
         # rather than after it. get_staan_results returns [] on failure by itself.
         retrieval, staan_results = await asyncio.gather(
             asyncio.to_thread(ranker.retrieve, q),
             asyncio.to_thread(get_staan_results, q),
         )
-        # Ranking only reads what was already retrieved, so the index write can overlap it.
-        results, new_staan_urls = await asyncio.gather(
-            asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results),
-            asyncio.to_thread(index_staan_results, q, staan_results),
+        # Ranking only reads what was already retrieved, so the index write and the second phase of
+        # images can overlap it.
+        web_ranking = asyncio.create_task(asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results))
+        image_finding = (
+            find_images(image_search, image_started_at, staan_results, web_ranking) if images else no_images()
         )
+        results, new_staan_urls, image_selection = await asyncio.gather(
+            web_ranking,
+            asyncio.to_thread(index_staan_results, q, staan_results),
+            image_finding,
+        )
+        shown_images = image_selection.images if image_selection else []
+        # An image in the strip isn't shown again as a web result.
+        shown_files = {commons_file_key(ranked.image.page_url) for ranked in shown_images}
+        web_results = [result for result in results if commons_file_key(result.url) not in shown_files]
 
         crawl_outcome = None
         crawls_ahead = None
@@ -335,7 +463,7 @@ def init_router(ranker) -> None:
             if crawl_outcome == CrawlOutcome.TOO_MANY_CRAWLS:
                 active_crawl_queries = await sync_to_async(get_active_seed_crawl_queries)(user.id)
 
-        formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(results)]
+        formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(web_results)]
         return CombinedSearchResponse(
             query=q,
             number_of_results=len(formatted),
@@ -347,6 +475,9 @@ def init_router(ranker) -> None:
             crawl_outcome=crawl_outcome,
             crawls_ahead=crawls_ahead,
             active_crawl_queries=active_crawl_queries,
+            image_outcome=image_selection.outcome if image_selection else None,
+            images_display_count=settings.IMAGES_DISPLAY_COUNT,
+            images=[to_image_result(ranked) for ranked in shown_images],
         )
 
     @router.get(
