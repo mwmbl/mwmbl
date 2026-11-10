@@ -145,8 +145,8 @@ mode.
 - **Bland text.** A nude named `IMG_1234.jpg` with no description or categories can't be caught from text. New,
   uncategorised uploads are the riskiest; a minimum file age or some categories would reduce this.
 - **Prompt injection.** Anyone can edit a description, and Jev reads it: "no people are shown" may steer it. Untested.
-  Production must tell Jev that the file name, description and categories are untrusted uploader text, never
-  instructions to follow, and re-check the NSFW threshold on the benchmark with that prompt.
+  Production must tell Jev, in both the NSFW and the image-relevance question, that the file name, description and
+  categories are untrusted uploader text, never instructions to follow.
 - **Changes after approval.** An overwritten file serves new pixels at the same thumbnail URL. Recheck each indexed
   file's SHA-1 and text, re-ask Jev on a change, drop deleted files, re-run the benchmark when Jev's model changes.
 
@@ -272,8 +272,8 @@ images shown.
 
 These are the settings to carry into the holistic comparison, not settled production values. Only the gate's
 precision and recall and the mix row above are out of fold. The threshold, k and minimum were all chosen in
-sample. The [holistic comparison](#holistic-comparison) tests them on the 295 en-gb queries, which played no part in choosing
-them.
+sample. The [holistic comparison](#holistic-comparison) tests them on the 295 en-gb queries, which played no
+part in choosing them.
 
 - **Gate:** show images when Jev image need ≥ **1.63**. That is about 27% of queries, and AUC is 0.89 against
   0.70 for the best non-Jev baseline. The gate is specific to Commons, as explained above.
@@ -539,11 +539,14 @@ losses (store photo at #1, junk images). Indexed images rarely evict anything at
   n = 11) on the arm closest to production; retraining the LTR with image results is expected to fix that. Index
   the file name and description only, cap images per list and settle the gate-rejected question.
 - **Left for production:**
-  - Build Seed Search's image request, run in parallel with Staan.
+  - Build Seed Search's image request. The Commons fetch and the NSFW check run in parallel with Staan; Jev's
+    relevance question waits for Staan's top results (below).
   - Serve the strip in the UI with attribution and licence, render Commons text escaped, and leave out the
-    Wikipedia card's lead image (the holistic comparison's "Before shipping" list).
-  - Tell Jev that Commons text is untrusted, and re-check the NSFW threshold with that prompt (Residual risks).
+    Wikipedia card's lead image, then re-judge the card and strip together (the holistic comparison's "Before
+    shipping" list).
+  - Mark Commons text as untrusted in Jev's questions (Residual risks). Re-check the NSFW threshold on the
+    benchmark with that prompt, and test it with descriptions that address Jev: the benchmark doesn't test injection.
   - Set the Jev latency budget for the extra questions.
-  - Disambiguate wrong-sense strips with the top web result. Jev's image-relevance question sees only the query,
-    so give it the top result or two as well, and drop images whose subject doesn't match that meaning.
+  - Disambiguate wrong-sense strips: give Jev's image-relevance question the top web result or two as well as the
+    query, and drop images whose subject doesn't match that meaning. Re-tune the 1.5 minimum with the new prompt.
   - Indexing: retrain the LTR with image results, re-evaluate on a production-sized index; flag, cap, gate rule.
