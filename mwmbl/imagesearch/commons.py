@@ -114,7 +114,7 @@ def parse_page(page: dict) -> SourceImage | None:
         return None
 
     title = page["title"].removeprefix("File:")
-    # The caption is the file's English label in its structured data (MediaInfo), absent on many files.
+    # The caption is the file's label in its structured data (MediaInfo): English, else Commons' fallback.
     captions = page.get("entityterms", {}).get("label", [])
     description = metadata_value(extmetadata, "ImageDescription")
     license_url = metadata_value(extmetadata, "LicenseUrl")

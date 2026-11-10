@@ -26,6 +26,8 @@ RELEVANCE_WEB_RESULTS = 2
 NEED_WEB_RESULTS = 10
 
 DESCRIPTION_CHARS = 1500
+# Commons limits captions to 250 characters.
+CAPTION_CHARS = 250
 # Anyone can add categories, so they are capped too; real candidates' longest are about 2,700 characters.
 CATEGORY_CHARS = 3000
 TEXT_START = "<commons-file-text>"
@@ -98,7 +100,7 @@ def image_text(image: SourceImage) -> str:
     description = image.description[:DESCRIPTION_CHARS]
     categories = " | ".join(image.categories)[:CATEGORY_CHARS]
     # A file without a caption is shown exactly as when the thresholds were measured.
-    caption = f"\nCaption: {image.caption}" if image.caption else ""
+    caption = f"\nCaption: {image.caption[:CAPTION_CHARS]}" if image.caption else ""
     text = f"File name: {image.title}{caption}\nDescription: {description}\nCategories: {categories}"
     contained = DELIMITER_PATTERN.sub("commons file text", HIDDEN_PATTERN.sub("", text))
     return f"{TEXT_START}\n{contained}\n{TEXT_END}"
