@@ -9,8 +9,11 @@ atomically.
 """
 
 import json
+import logging
 import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
@@ -19,9 +22,12 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
+from test_image_search import make_image
 
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
+from mwmbl.imagesearch import commons, seed_images
+from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSelection, RankedImage
 from mwmbl.indexer import seed_crawl
 from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.models import ApiKey, Membership, UserBilling, VolunteerMembership, generate_api_key
@@ -735,3 +741,178 @@ def test_new_pages_count_is_404_without_a_crawl(client, access_token, redis_cach
 @pytest.mark.django_db
 def test_new_pages_count_requires_a_jwt(client, api_key):
     assert client.get(f"{NEW_PAGES_URL}/count?q=tokio", HTTP_X_API_KEY=api_key.raw_key).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Images (images=true)
+# ---------------------------------------------------------------------------
+
+PANDA = make_image("Red panda.jpg", page_url="https://commons.wikimedia.org/wiki/File:Red_panda_%C3%A9.jpg")
+PANDA_ZOO = make_image("Red panda zoo.jpg", page_url="https://commons.wikimedia.org/wiki/File:Red_panda_zoo.jpg")
+# The strip's first image as a web result, written as a crawled link might be.
+PANDA_WEB_RESULT = Document("Red panda", "https://commons.m.wikimedia.org/wiki/File:Red panda é.jpg", "A file.")
+
+
+@pytest.fixture
+def stub_images(monkeypatch, settings):
+    """Stub both phases of seed_images. finish records what it was given and returns `state.selection`."""
+    settings.IMAGE_SEARCH_ENABLED = True
+    state = SimpleNamespace(
+        selection=ImageSelection(ImageOutcome.SHOWN, [RankedImage(PANDA, 2.9), RankedImage(PANDA_ZOO, 1.7)]),
+        started=[],
+        finish_args=None,
+        ranking_done_when_finish_began=None,
+    )
+
+    def fake_start(query):
+        state.started.append(query)
+        return "search"
+
+    async def fake_finish(search, staan_results, web_ranking):
+        state.ranking_done_when_finish_began = web_ranking.done()
+        state.finish_args = (search, staan_results)
+        await web_ranking
+        return state.selection
+
+    monkeypatch.setattr(seed_images, "start", fake_start)
+    monkeypatch.setattr(seed_images, "finish", fake_finish)
+    return state
+
+
+def _images(client, access_token, query="red panda"):
+    return client.get(f"{URL}?q={query}&images=true", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+
+@pytest.mark.django_db
+def test_without_the_flag_there_is_no_image_search(client, access_token, fresh_quota, stub_sources, stub_images):
+    stub_sources()
+
+    body = _get(client, access_token).json()
+
+    assert body["image_outcome"] is None
+    assert body["images"] == []
+    assert body["images_display_count"] == 4
+    assert stub_images.started == []
+
+
+@pytest.mark.django_db
+def test_images_are_returned_best_first_with_their_relevance(
+    client, access_token, fresh_quota, stub_sources, stub_images
+):
+    stub_sources()
+
+    body = _images(client, access_token).json()
+
+    assert body["image_outcome"] == "shown"
+    assert body["images"][0] == {
+        "title": "Red panda.jpg",
+        "page_url": PANDA.page_url,
+        "thumbnail_url": PANDA.thumbnail_url,
+        "thumbnail_width": 320,
+        "thumbnail_height": 213,
+        "source": "commons",
+        "license_name": "CC BY-SA 4.0",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+        "attribution": "A. Photographer",
+        "relevance": 2.9,
+    }
+    assert [image["relevance"] for image in body["images"]] == [2.9, 1.7]
+    assert stub_images.started == ["red panda"]
+    assert stub_images.finish_args == ("search", [STAAN_RESULT])
+
+
+@pytest.mark.django_db
+def test_images_are_finished_alongside_web_ranking(
+    client, access_token, fresh_quota, stub_sources, stub_images, monkeypatch
+):
+    """finish is handed web ranking while it is still running, so that the image requests overlap it."""
+    stub_sources()
+    from mwmbl.search_setup import combined_ranker
+
+    fake_search_retrieved = combined_ranker.search_retrieved
+
+    def slow_search_retrieved(retrieval, additional_results):
+        time.sleep(0.2)
+        return fake_search_retrieved(retrieval, additional_results)
+
+    monkeypatch.setattr(combined_ranker, "search_retrieved", slow_search_retrieved)
+
+    assert _images(client, access_token).status_code == 200
+    assert stub_images.ranking_done_when_finish_began is False
+
+
+@pytest.mark.django_db
+def test_images_in_the_strip_are_left_out_of_the_web_results(
+    client, access_token, fresh_quota, stub_sources, stub_images
+):
+    stub_sources(index=(INDEX_RESULT, PANDA_WEB_RESULT))
+
+    body = _images(client, access_token).json()
+
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url, STAAN_RESULT.url]
+    assert body["number_of_results"] == 2
+
+
+@pytest.mark.django_db
+def test_web_results_are_kept_when_no_images_are_shown(client, access_token, fresh_quota, stub_sources, stub_images):
+    stub_images.selection = ImageSelection(ImageOutcome.NOT_NEEDED, [])
+    stub_sources(index=(INDEX_RESULT, PANDA_WEB_RESULT))
+
+    body = _images(client, access_token).json()
+
+    assert body["image_outcome"] == "not_needed"
+    assert body["images"] == []
+    assert len(body["results"]) == 3
+
+
+@pytest.mark.django_db
+def test_switched_off_images_are_unavailable_without_asking_commons(
+    client, access_token, fresh_quota, stub_sources, stub_images, settings, monkeypatch
+):
+    settings.IMAGE_SEARCH_ENABLED = False
+    commons_searches = []
+    monkeypatch.setattr(commons, "search_commons", lambda *args: commons_searches.append(args))
+    stub_sources()
+
+    body = _images(client, access_token).json()
+
+    assert body["image_outcome"] == "unavailable"
+    assert body["images"] == []
+    assert stub_images.started == []
+    assert commons_searches == []
+
+
+@pytest.mark.django_db
+def test_images_work_with_an_api_key(client, user, api_key, fresh_quota, redis_cache, stub_sources, stub_images):
+    stub_sources()
+    UserBilling.objects.create(user=user, max_monthly_spend_cents=1_000)
+
+    response = client.get(f"{URL}?q=tokio&images=true", HTTP_X_API_KEY=api_key.raw_key)
+
+    assert response.status_code == 200
+    assert response.json()["image_outcome"] == "shown"
+
+
+@pytest.mark.django_db
+def test_the_image_log_has_the_outcome_but_not_the_query_or_the_images(
+    client, access_token, fresh_quota, stub_sources, stub_images, caplog
+):
+    stub_sources()
+
+    # At the root, so that a line from any logger that held the query would be caught.
+    with caplog.at_level(logging.INFO):
+        _images(client, access_token, query="unusual-query")
+
+    image_lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Images")]
+    assert len(image_lines) == 1
+    assert image_lines[0].startswith("Images shown: 2 in ")
+    assert "unusual-query" not in caplog.text
+    assert "Red panda" not in caplog.text
+    assert PANDA.sha1 not in caplog.text
+
+
+def test_a_commons_file_has_one_key_however_its_url_is_written():
+    key = combined_search.commons_file_key(PANDA.page_url)
+
+    assert key == combined_search.commons_file_key(PANDA_WEB_RESULT.url)
+    assert combined_search.commons_file_key("https://example.com/wiki/File:Red_panda_%C3%A9.jpg") is None

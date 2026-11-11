@@ -95,14 +95,19 @@ def jev_request(query: str, documents: list[Document]) -> dict:
 
 def get_jev_scores(query: str, documents: list[Document]) -> np.ndarray:
     """Jev's (relevance, quality) for each document, one row each. Raises on any failure."""
+    return scores_from(post(jev_request(query, documents), settings.JEV_TIMEOUT_SECONDS), len(documents))
+
+
+def post(body: dict, timeout_seconds: float) -> dict:
+    """Jev's answers to one request. Raises on any failure."""
     response = session.post(
         settings.JEV_URL,
-        json=jev_request(query, documents),
+        json=body,
         headers={"Authorization": f"Bearer {settings.JEV_API_KEY}"},
-        timeout=settings.JEV_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     response.raise_for_status()
-    return scores_from(response.json(), len(documents))
+    return response.json()
 
 
 def scores_from(response: dict, num_documents: int) -> np.ndarray:

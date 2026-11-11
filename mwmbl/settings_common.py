@@ -471,3 +471,36 @@ MODERATION_REJECT_THRESHOLD = 0.75
 MODERATION_APPROVE_THRESHOLD = 0.25
 MODERATION_EVIDENCE_MAX_AGE_DAYS = 30  # refetch rather than reuse evidence older than this
 MODERATION_RETRAIN_INTERVAL_SECONDS = 30 * 24 * 60 * 60  # monthly; the gate guards each publish
+
+# Image search - Wikimedia Commons results for Seed Search (mwmbl.imagesearch, #610).
+# Wikimedia asks for a User-Agent that identifies the application and how to reach its operators.
+IMAGE_SEARCH_USER_AGENT = "MwmblImageSearch/1.0 (https://mwmbl.org; https://github.com/mwmbl/mwmbl)"
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+COMMONS_TIMEOUT_SECONDS = 5
+# Across all requests to Wikimedia in a process.
+COMMONS_MAX_CONCURRENT_REQUESTS = 4
+# Upper bound on how long a 429 or 503 from Wikimedia can keep image search paused.
+COMMONS_MAX_COOLDOWN_SECONDS = 300
+# Judgments per file, keyed by content and by the model and question that gave them
+# (mwmbl.imagesearch.verdict_cache), so they cannot go stale and the expiry only bounds Redis memory.
+IMAGE_SEARCH_VERDICT_CACHE_SECONDS = 30 * 24 * 60 * 60
+# Seed Search's images (mwmbl.imagesearch.seed_images); the thresholds live with the questions, in prompt.py.
+# The kill switch: off, images=true answers `unavailable` without asking Commons or the judge. On by default: a
+# request only searches images when it asks with images=true, and the safety benchmark and injection probes held
+# with captions (#630). Set IMAGE_SEARCH_ENABLED=false to stop image search without a deploy.
+IMAGE_SEARCH_ENABLED = os.environ.get("IMAGE_SEARCH_ENABLED", "true").lower() == "true"
+IMAGE_SEARCH_CANDIDATES = 20
+# How many of the images returned the page shows before its "More" button.
+IMAGES_DISPLAY_COUNT = 4
+# For each request to the judge: they take 0.27s at p50 and 0.37s at p95.
+IMAGE_JUDGE_TIMEOUT_SECONDS = 1.5
+# How long the images may still take once web ranking has finished, before they are given up as unavailable.
+# Phase 1 runs the Commons search (about 1s) and then the NSFW request in turn, which usually outlasts web ranking.
+# A search that misses still logs when it finished ("Late images"), to tune this from.
+IMAGE_SEARCH_GRACE_SECONDS = float(os.environ.get("IMAGE_SEARCH_GRACE_SECONDS", "1.0"))
+# A file edited or replaced more recently is left out, so patrollers can catch an explicit file with bland text.
+IMAGE_SEARCH_MIN_REVISION_AGE = timedelta(days=7)
+IMAGE_SEARCH_THREADS = 8
+# Space-separated SHA-1s, or Commons file page URLs percent-encoded as the API gives them
+# (https://commons.wikimedia.org/wiki/File:Caf%C3%A9.jpg), never to show until approvals can be revoked.
+IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").lower().split())
