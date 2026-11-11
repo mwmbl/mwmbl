@@ -285,7 +285,12 @@ INTERNAL_IPS = [
     "127.0.0.1",
 ]
 
+# Trained with the Commons image pages' rows on the relevance label (#626: `ltr_retrain train images_relevance`,
+# on the wikicommons_image_search branch).
 RUST_MODEL_PATH = Path(__file__).parent / "resources" / "model.xgb"
+# The most Wikimedia Commons images one result list keeps, after ranking (mwmbl.tinysearchengine.image_cap). 2 won
+# the holistic evaluation against 1 and no cap (#626).
+MAX_IMAGES_PER_RESULT_LIST = 2
 
 POLAR_ACCESS_TOKEN = os.environ.get("POLAR_ACCESS_TOKEN", "")
 POLAR_WEBHOOK_SECRET = os.environ.get("POLAR_WEBHOOK_SECRET", "")

@@ -6,6 +6,7 @@ from mwmbl.apps import index_shape_mismatch
 from mwmbl.imagesearch.serving import ServedImagesRanker
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
+from mwmbl.tinysearchengine.image_cap import ImageCapRanker
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.jev_rank import JevRanker
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
@@ -36,12 +37,20 @@ ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # num_wiki_results is left at its default on purpose - see NUM_WIKI_RESULTS. Serving
 # passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
 # pool a size it had never been fitted to.
-# Commons files the image store doesn't vouch for are left out last, after MMR.
-ranker = ServedImagesRanker(MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True)))
+# Commons files the image store doesn't vouch for are left out after MMR, and the image cap goes outside that, so
+# it counts only the files that will be shown, in the order MMR settled on.
+ranker = ImageCapRanker(
+    ServedImagesRanker(MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))),
+    settings.MAX_IMAGES_PER_RESULT_LIST,
+)
 
 # Combined Search gets its own model and its own ranker, so retraining on the pooled
 # Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
 # Staan's ranking as features, which only CombinedLTRRanker supplies. Jev orders the final
 # list from the model's output, without MMR.
 combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
-combined_ranker = ServedImagesRanker(JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model)))
+# The same image cap as standard search, so the two lists can't disagree about how many pictures one query gets.
+combined_ranker = ImageCapRanker(
+    ServedImagesRanker(JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))),
+    settings.MAX_IMAGES_PER_RESULT_LIST,
+)
