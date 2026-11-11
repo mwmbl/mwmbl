@@ -14,7 +14,7 @@
 mod constants;
 mod crawler;
 mod curated_domains;
-mod redis_url;
+mod url_queue;
 
 use std::path::PathBuf;
 
@@ -86,9 +86,6 @@ pub struct CrawlerParams {
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
     home: PathBuf,
-    /// Redis configuration url
-    #[arg(env = "REDIS_URL", long, default_value = "redis://127.0.0.1:6379")]
-    redis_url: String,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
