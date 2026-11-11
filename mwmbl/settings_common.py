@@ -499,5 +499,8 @@ IMAGE_SEARCH_GRACE_SECONDS = 0.25
 IMAGE_SEARCH_MIN_REVISION_AGE = timedelta(days=7)
 IMAGE_SEARCH_THREADS = 8
 # Space-separated SHA-1s, or Commons file page URLs percent-encoded as the API gives them
-# (https://commons.wikimedia.org/wiki/File:Caf%C3%A9.jpg), never to show until approvals can be revoked.
+# (https://commons.wikimedia.org/wiki/File:Caf%C3%A9.jpg), never to show; recheck_images revokes them in the store.
 IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").lower().split())
+# Files the recheck_images command rechecks per run: one Commons request per 10, and a judge request for those
+# whose content or NSFW question changed.
+IMAGE_STORE_RECHECK_LIMIT = 2000

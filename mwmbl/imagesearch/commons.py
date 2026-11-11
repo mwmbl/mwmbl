@@ -37,6 +37,8 @@ FILE_PAGE_PREFIX = "https://commons.wikimedia.org/wiki/File:"
 FILE_NAMESPACES = {"file", "image"}
 # What MediaWiki leaves unescaped in a page URL (wfUrlencode), so a canonical URL is the one Commons gives.
 URL_SAFE_CHARACTERS = ";@$!*(),/~:"
+# Commons answers at most 50 titles a request; 10 keeps a GET of the longest non-Latin names under 8 KB.
+FILES_PER_REQUEST = 10
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 THUMBNAIL_WIDTH = 320
 TAG_PATTERN = re.compile(r"<[^>]+>")
@@ -141,29 +143,34 @@ def parse_page(page: dict) -> SourceImage | None:
         sha1=sha1,
         uploaded_at=datetime.fromisoformat(timestamp),
         revised_at=datetime.fromisoformat(revisions[0]["timestamp"]),
-        rank=page["index"],
+        # A page fetched by title rather than found by a search has no rank.
+        rank=page.get("index", 0),
     )
 
 
+FILE_PARAMS = {
+    "action": "query",
+    "format": "json",
+    "formatversion": 2,
+    # The captions and the latest revision's time come in the same request at no measurable extra latency.
+    "prop": "imageinfo|entityterms|revisions",
+    "iiprop": "url|mime|sha1|timestamp|extmetadata",
+    "iiurlwidth": THUMBNAIL_WIDTH,
+    "iiextmetadatafilter": "Categories|ImageDescription|LicenseShortName|LicenseUrl|Artist",
+    # Commons falls back to another language for a description that has no English version.
+    "iiextmetadatalanguage": "en",
+    "wbetlanguage": "en",
+    "rvprop": "timestamp",
+}
+
+
 def request_params(search_expression: str, limit: int, mediasearch: bool) -> dict:
-    params = {
-        "action": "query",
-        "format": "json",
-        "formatversion": 2,
+    params = FILE_PARAMS | {
         "generator": "search",
         "gsrnamespace": 6,
         "gsrsearch": search_expression,
         "gsrlimit": limit,
         "gsrsort": "relevance",
-        # The captions and the latest revision's time come in the same request at no measurable extra latency.
-        "prop": "imageinfo|entityterms|revisions",
-        "iiprop": "url|mime|sha1|timestamp|extmetadata",
-        "iiurlwidth": THUMBNAIL_WIDTH,
-        "iiextmetadatafilter": "Categories|ImageDescription|LicenseShortName|LicenseUrl|Artist",
-        # Commons falls back to another language for a description that has no English version.
-        "iiextmetadatalanguage": "en",
-        "wbetlanguage": "en",
-        "rvprop": "timestamp",
     }
     if mediasearch:
         params["gsrqiprofile"] = "classic_noboostlinks"
@@ -198,6 +205,17 @@ def fetch_json(client: httpx.Client, params: dict) -> dict:
     return body
 
 
+def fetch_files(client: httpx.Client, page_urls: list[str]) -> dict[str, SourceImage | None]:
+    """The files at these canonical page URLs, at most FILES_PER_REQUEST of them, as Commons has them now, by page
+    URL. A deleted file is left out, and one that no longer has the metadata a safety check needs is None.
+    Raises ImageSourceUnavailable on any failure."""
+    titles = [file_title(page_url) for page_url in page_urls]
+    body = fetch_json(client, FILE_PARAMS | {"titles": "|".join(titles)})
+    pages = body.get("query", {}).get("pages", [])
+    # Commons answers under its own form of each title, whose canonical URL is the one asked about.
+    return {file_page_url(page["title"]): parse_page(page) for page in pages if not page.get("missing")}
+
+
 def file_page_url(title: str) -> str | None:
     """The canonical page URL of a file title, such as `File:Café.jpg` or `image:café jpg`; None for a title that is
     not in the File namespace."""
@@ -210,6 +228,11 @@ def file_page_url(title: str) -> str | None:
     # Commons capitalises the first letter of every title, so `File:café.jpg` is `File:Café.jpg`.
     capitalised = joined[0].upper() + joined[1:]
     return FILE_PAGE_PREFIX + quote(capitalised, safe=URL_SAFE_CHARACTERS)
+
+
+def file_title(page_url: str) -> str:
+    """The title of the file at a canonical page URL."""
+    return "File:" + unquote(page_url.removeprefix(FILE_PAGE_PREFIX))
 
 
 def commons_file_key(url: str) -> str | None:

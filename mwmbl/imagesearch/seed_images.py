@@ -133,12 +133,22 @@ def find_candidates(query: str) -> list[SourceImage]:
 
 
 def is_eligible(image: SourceImage, settled_before: datetime) -> bool:
+    settled = is_settled(image, settled_before)
+    return settled and not is_denied(image) and not is_nominated(image) and rules.image_verdict(image) == Verdict.SAFE
+
+
+def is_settled(image: SourceImage, settled_before: datetime) -> bool:
+    return max(image.revised_at, image.uploaded_at) <= settled_before
+
+
+def is_denied(image: SourceImage) -> bool:
     denied_files = settings.IMAGE_SEARCH_DENIED_FILES
     # Lower case on both sides, so a SHA-1 matches however it was pasted; a URL then over-matches, never under.
-    denied = image.sha1.lower() in denied_files or image.page_url.lower() in denied_files
-    settled = max(image.revised_at, image.uploaded_at) <= settled_before
-    nominated = any(category.startswith(DELETION_CATEGORY_PREFIXES) for category in image.categories)
-    return settled and not denied and not nominated and rules.image_verdict(image) == Verdict.SAFE
+    return image.sha1.lower() in denied_files or image.page_url.lower() in denied_files
+
+
+def is_nominated(image: SourceImage) -> bool:
+    return any(category.startswith(DELETION_CATEGORY_PREFIXES) for category in image.categories)
 
 
 async def score_nsfw(candidates: asyncio.Future) -> list[float]:

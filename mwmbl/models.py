@@ -667,7 +667,7 @@ class CrawlerAgreement(models.Model):
 class CommonsImage(models.Model):
     """A Wikimedia Commons file that passed Seed Search's safety checks - see mwmbl.imagesearch.store.
 
-    One row per file, to be kept current by a recheck against Commons that revokes it when the file is deleted,
+    One row per file, kept current by the recheck_images command, which revokes it when the file is deleted,
     nominated for deletion, denied or no longer passes. Holds no query, user or relevance score: nothing that
     could tie a file to the searches that found it.
     """
