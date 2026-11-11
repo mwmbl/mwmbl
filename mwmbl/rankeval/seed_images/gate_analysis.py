@@ -9,7 +9,7 @@ replacement. Prints markdown tables.
     uv run python -m mwmbl.rankeval.seed_images.gate_analysis --arm hardened
 
 `--arm` picks whose answers are scored: `first`, the questions as first asked (the default); `hardened`, the
-hardened questions in production's one request (run_hardened); `top1`, hardened relevance given one web result.
+hardened questions in production's one request (run_hardened); `top1`, hardened relevance given one web result; `captions`, hardened relevance with Commons captions.
 The first answers can only be re-scored, not re-asked: the questions that gave them are now the hardened ones.
 """
 
@@ -43,11 +43,15 @@ RECOMMENDED_PATH = GATE_DIR / "recommended.json"
 # The hardened questions' answers (run_hardened).
 HARDENED_PATH = GATE_DIR / "hardened_image.jsonl"
 TOP1_PATH = GATE_DIR / "hardened_top1.jsonl"
+# The same request with Commons captions, on the queries with relevance labels (captions.py).
+CAPTIONS_PATH = GATE_DIR / "captions_image.jsonl"
 # arm: (need answers, their need field, relevance answers, recommended minimum relevance, where to record it)
 ARMS = {
     "first": (NEED_PATH, "score", RELEVANCE_PATH, 1.5, RECOMMENDED_PATH),
     "hardened": (HARDENED_PATH, "need", HARDENED_PATH, prompt.MIN_RELEVANCE, GATE_DIR / "recommended_hardened.json"),
     "top1": (HARDENED_PATH, "need", TOP1_PATH, prompt.MIN_RELEVANCE, GATE_DIR / "recommended_top1.json"),
+    # Need doesn't read the images, so captions leave the hardened gate as it was.
+    "captions": (HARDENED_PATH, "need", CAPTIONS_PATH, prompt.MIN_RELEVANCE, GATE_DIR / "recommended_captions.json"),
 }
 BOOTSTRAP_SAMPLES = 2000
 
