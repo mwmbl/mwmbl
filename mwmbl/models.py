@@ -709,6 +709,10 @@ class CommonsImage(models.Model):
     last_checked_at = models.DateTimeField()
     revoked_at = models.DateTimeField(null=True, blank=True)
     revocation_reason = models.CharField(max_length=16, choices=RevocationReason.choices, blank=True)
+    # The text_hash of the text index_images last took to the search index, whether it wrote the file or skipped it
+    # for having no real text; empty until then. A change to the text makes the two differ, and the file is taken
+    # again (mwmbl.imagesearch.indexing).
+    indexed_text_hash = models.CharField(max_length=64, blank=True)
 
     class Meta:
         indexes = [

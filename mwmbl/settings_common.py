@@ -504,3 +504,10 @@ IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").
 # Files the recheck_images command rechecks per run: one Commons request per 10, and a judge request for those
 # whose content or NSFW question changed.
 IMAGE_STORE_RECHECK_LIMIT = 2000
+# Whether the index_images command writes the stored files to the search index, separate from IMAGE_SEARCH_ENABLED:
+# Seed Search can show and store images while the index is left alone. Don't switch it on before standard search
+# drops revoked files at serving time (#610 PR 9): the index can't delete a document, so until then a file revoked
+# after it was written stays searchable.
+IMAGE_INDEXING_ENABLED = os.environ.get("IMAGE_INDEXING_ENABLED", "false").lower() == "true"
+# Files index_images takes per run.
+IMAGE_INDEX_LIMIT = 1000
