@@ -29,9 +29,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent.parent
 VERSION_PATH = "mwmbl/crawler/version.py"
 IMAGE_BUILD_INPUTS = ("Dockerfile.crawler", "pyproject.toml", "uv.lock")
-# The Rust extension, and data read by loaded modules: rank.py and completer.py load
-# mwmbl/resources/, justext/utils.py loads the stoplists.
-CRAWLER_DIRECTORIES = ("mwmbl_rank/", "mwmbl/resources/", "mwmbl/justext/stoplists/")
+# The Rust extension and the core crate it links, which holds the index page format, and
+# data read by loaded modules: rank.py and completer.py load mwmbl/resources/,
+# justext/utils.py loads the stoplists.
+CRAWLER_DIRECTORIES = ("mwmbl_rank/", "rust/mwmbl_core/", "mwmbl/resources/", "mwmbl/justext/stoplists/")
 VERSION_PATTERN = re.compile(r'^CRAWLER_VERSION: str = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
 NO_CRAWLER_CHANGES = "No functional changes to the crawler."
 # What the commit-msg hook compares the version with: where the branch will be merged.

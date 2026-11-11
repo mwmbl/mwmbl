@@ -3,14 +3,9 @@ name = "mwmbl_core"
 version = "0.1.0"
 edition = "2024"
 
+# Only what index.rs needs: mwmbl_rank links this crate into the server's extension, so
+# every dependency here is compiled into the server. Keep the versions in step with
+# mwmbl_rank's, or two copies of each get linked.
 [dependencies]
-anyhow = "1.0.104"
-lazy_static = "1.5.1"
-phf = { version = "0.14.0", features = ["macros"] }
-redis = "1.8.1"
-regex = "1.13.1"
-reqwest = { version = "0.13.5", features = ["json"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
-tokio = { version = "1.54.1", features = ["full"] }
-zstd = "0.14.3"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+zstd = "0.13"
