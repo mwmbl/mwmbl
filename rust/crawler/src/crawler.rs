@@ -35,7 +35,6 @@ impl Crawler {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-
         loop {
             println!(
                 "{:#?}",
@@ -49,7 +48,6 @@ impl Crawler {
     }
 
     pub async fn run_once(&mut self) -> anyhow::Result<()> {
-
         todo!();
     }
 

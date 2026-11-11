@@ -43,7 +43,7 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file coverage coverage-python coverage-rust \
+.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core coverage coverage-python coverage-rust \
         coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
@@ -54,6 +54,7 @@ help:
 	@echo "  create-index   Create the search index for DJANGO_SETTINGS_MODULE (run by install)"
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
+	@echo "  rust-core      Format-check, lint and test the crates under rust/"
 	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
 	@echo "  coverage-python Run Python tests with terminal, XML, and HTML coverage reports"
 	@echo "  coverage-rust  Run Rust unit tests and write an LCOV report (needs cargo-llvm-cov)"
@@ -104,6 +105,18 @@ test:
 test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
+
+# The Rust crates under rust/. Their tests are Rust ones, so they run here rather than
+# through pytest. mwmbl_core with default features is what mwmbl_rank links into the server,
+# so it must be clippy-clean. The `crawler` feature and rust/crawler are work in progress
+# that nothing runs yet, so they only have to build and pass their tests.
+rust-core:
+	cargo fmt --manifest-path rust/mwmbl_core/Cargo.toml --check
+	cargo fmt --manifest-path rust/crawler/Cargo.toml --check
+	cargo clippy --manifest-path rust/mwmbl_core/Cargo.toml --all-targets --locked -- -D warnings
+	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
+	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked --features crawler
+	cargo test --manifest-path rust/crawler/Cargo.toml --locked
 
 coverage: coverage-python coverage-rust
 	uv run python scripts/combine_coverage.py coverage/python.xml coverage/rust.lcov

@@ -11,9 +11,14 @@
     clippy::pedantic
 )]
 #![allow(clippy::missing_errors_doc)]
+#[cfg(feature = "crawler")]
 pub mod blacklist;
+#[cfg(feature = "crawler")]
 pub mod blacklist_providers;
+#[cfg(feature = "crawler")]
 pub mod constants;
+#[cfg(feature = "crawler")]
 pub mod hn_top_domains_filtered;
 pub mod index;
+#[cfg(feature = "crawler")]
 pub mod indexer;
