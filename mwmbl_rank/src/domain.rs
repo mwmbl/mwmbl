@@ -1,10 +1,8 @@
 /// Domain scoring using the HN top domains list.
 /// The DOMAINS data is loaded from a JSON file embedded at compile time.
 /// Replicates get_domain_score from mwmbl/tinysearchengine/rank.py.
-
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
-use serde_json;
 use url::Url;
 
 static DOMAINS_JSON: &str = include_str!("../data/hn_top_domains_filtered.json");

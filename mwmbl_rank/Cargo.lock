@@ -818,9 +818,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mwmbl_core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "zstd",
+]
+
+[[package]]
 name = "mwmbl_rank"
 version = "0.1.0"
 dependencies = [
+ "mwmbl_core",
  "once_cell",
  "pyo3",
  "regex",

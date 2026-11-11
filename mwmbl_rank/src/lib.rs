@@ -2,7 +2,6 @@
 ///
 /// Exposes RustXGBPipeline to Python via PyO3.
 /// Build with: maturin develop  (or maturin build --release)
-
 mod domain;
 mod features;
 mod index;
@@ -94,7 +93,7 @@ impl PyXGBPipeline {
     ///     provider_features: append Staan's ranking to the features (default False)
     #[new]
     #[pyo3(signature = (threshold=0.0, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100, max_depth=None, min_child_weight=None, gamma=None, subsample=None, provider_features=false))]
-    fn new(
+    #[allow(clippy::too_many_arguments)] fn new(
         threshold: f32,
         scale_pos_weight: f32,
         reg_lambda: f32,
@@ -131,7 +130,7 @@ impl PyXGBPipeline {
     ) -> PyResult<PyObject> {
         let doc_records = self.extract_records(records)?;
         self.inner.fit(&doc_records, &labels, sample_weight.as_deref())
-            .map_err(|e| PyValueError::new_err(e))?;
+            .map_err(PyValueError::new_err)?;
         // Return self as a Python object for sklearn-style chaining
         Ok(py.None())
     }
@@ -145,19 +144,19 @@ impl PyXGBPipeline {
     fn predict(&self, records: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
         let doc_records = self.extract_records(records)?;
         self.inner.predict(&doc_records)
-            .map_err(|e| PyValueError::new_err(e))
+            .map_err(PyValueError::new_err)
     }
 
     /// Save the trained model to disk (XGBoost binary format).
     fn save_model(&self, path: &str) -> PyResult<()> {
         self.inner.save_model(path)
-            .map_err(|e| PyValueError::new_err(e))
+            .map_err(PyValueError::new_err)
     }
 
     /// Load a model from disk (XGBoost binary format). Sets provider_features from the model.
     fn load_model(&mut self, path: &str) -> PyResult<()> {
         self.inner.load_model(path)
-            .map_err(|e| PyValueError::new_err(e))
+            .map_err(PyValueError::new_err)
     }
 
     /// Whether this pipeline appends Staan's ranking to the features.

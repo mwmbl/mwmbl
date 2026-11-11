@@ -3,7 +3,6 @@
 /// from mwmbl/rankeval/ltr/evaluate.py.
 ///
 /// Uses the xgb 3.0.5 crate (prebuilt XGBoost binaries, same API as xgboost 0.1.4).
-
 use xgb::{parameters, Booster, DMatrix};
 
 use crate::features::{
@@ -155,6 +154,7 @@ impl XGBPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_params(
         threshold: f32,
         scale_pos_weight: f32,
@@ -370,6 +370,7 @@ impl XGBPipeline {
     }
 
     /// Create a new pipeline with a pre-loaded model from disk.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_model_path(
         path: &str,
         threshold: f32,

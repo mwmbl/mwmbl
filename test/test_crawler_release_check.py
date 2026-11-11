@@ -32,6 +32,7 @@ def test_changed_crawler_files_ignore_server_only_changes_and_the_version_itself
         "mwmbl/crawler/version.py",
         "uv.lock",
         "mwmbl_rank/src/lib.rs",
+        "rust/mwmbl_core/src/index.rs",
         "mwmbl/resources/document_counts.json",
         "mwmbl/templates/index.html",
         "README.md",
@@ -43,6 +44,7 @@ def test_changed_crawler_files_ignore_server_only_changes_and_the_version_itself
         "mwmbl/crawler/retrieve.py",
         "uv.lock",
         "mwmbl_rank/src/lib.rs",
+        "rust/mwmbl_core/src/index.rs",
         "mwmbl/resources/document_counts.json",
     ]
 

@@ -21,6 +21,7 @@ import pytest
 from mwmbl.indexer.index_batches import index_pages, index_results_against_query
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.tinysearchengine.indexer import METADATA_SIZE, Document, DocumentState, PageError, TinyIndex
+from mwmbl_rank import read_index_page, write_index_page
 
 NUM_PAGES = 64
 
@@ -364,3 +365,16 @@ def test_a_failed_read_degrades_to_no_results(index_path, monkeypatch):
     with TinyIndex(Document, index_path, "r") as indexer:
         monkeypatch.setattr("mwmbl.tinysearchengine.indexer.read_index_page", fail)
         assert indexer.retrieve("zebra") == []
+
+
+def test_a_syscall_error_is_an_os_error_not_a_page_error(index_path):
+    """A read or write that the OS refuses is OSError, like the pread it replaced, so it
+    isn't mistaken for a corrupt page that a writer may reset."""
+    descriptor = os.open(index_path, os.O_RDONLY)
+    os.close(descriptor)
+
+    with pytest.raises(OSError) as raised:
+        read_index_page(descriptor, METADATA_SIZE, 4096)
+    assert not isinstance(raised.value, PageError)
+    with pytest.raises(OSError):
+        write_index_page(descriptor, METADATA_SIZE, 4096, [])
