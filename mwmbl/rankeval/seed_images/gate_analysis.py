@@ -9,7 +9,8 @@ replacement. Prints markdown tables.
     uv run python -m mwmbl.rankeval.seed_images.gate_analysis --arm hardened
 
 `--arm` picks whose answers are scored: `first`, the questions as first asked (the default); `hardened`, the
-hardened questions in production's one request (run_hardened); `top1`, hardened relevance given one web result; `captions`, hardened relevance with Commons captions.
+hardened questions in production's one request (run_hardened); `top1`, hardened relevance given one web result;
+`captions`, hardened relevance with Commons captions.
 The first answers can only be re-scored, not re-asked: the questions that gave them are now the hardened ones.
 """
 

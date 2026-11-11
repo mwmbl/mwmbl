@@ -54,6 +54,7 @@ from mwmbl.rankeval.seed_images.safety import (  # noqa: E402
     SEED,
     benchmark_batches,
     benchmark_groups,
+    benchmark_images,
     flagged_rates,
     flips,
     timed,
@@ -175,9 +176,11 @@ def run_probes() -> None:
     """injection.py's probes, the payload replacing the caption rather than heading the description; every other
     image keeps its real caption, so a cross control is the captioned benchmark's batch."""
     captions = load_captions()
+    # probe_batches() heads the descriptions with the payload, so each image is taken as the benchmark has it.
+    unedited = {image.title: captioned(image, captions) for _, image in benchmark_images()}
     probes = {}
-    for probe, (rows, images) in probe_batches().items():
-        images = [captioned(image, captions) for image in images]
+    for probe, (rows, injected_images) in probe_batches().items():
+        images = [unedited[image.title] for image in injected_images]
         if probe.startswith("self-"):
             payload = SELF_PAYLOADS[probe.split("-")[1]]
             probes[probe] = (rows, [with_caption(image, payload) for image in images])
