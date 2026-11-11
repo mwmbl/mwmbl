@@ -228,12 +228,22 @@ def test_combined_search_is_documented():
     assert [(p["name"], p["in"], p["required"]) for p in operation["parameters"]] == [
         ("q", "query", True),
         ("crawl", "query", False),
+        ("images", "query", False),
     ]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/CombinedSearchResponse"
     }
     assert "pages_indexed" in spec["components"]["schemas"]["CombinedSearchResponse"]["required"]
-    for expected in ("X-API-Key", "monthly_limit", "pages_indexed", "eusp", "wikipedia"):
+    # Front ends need the image contract: where queries go, what the safety check covers, how to render.
+    image_contract = (
+        "Wikimedia Commons",
+        "third-party LLM",
+        "nudity",
+        "images_display_count",
+        'referrerpolicy="no-referrer"',
+        "escape",
+    )
+    for expected in ("X-API-Key", "monthly_limit", "pages_indexed", "eusp", "wikipedia", *image_contract):
         assert expected in operation["description"]
     # The provider agreement labels its results EUSP; its own name stays out of the public docs.
     assert "staan" not in operation["description"].lower()
