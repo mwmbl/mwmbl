@@ -194,6 +194,30 @@ async def test_images_late_after_web_ranking_are_unavailable(found, answers, set
     assert time.monotonic() - started < 0.45
 
 
+async def test_images_that_miss_their_deadline_log_when_they_finished(found, answers, settings, caplog):
+    settings.IMAGE_SEARCH_GRACE_SECONDS = 0.05
+    answers.delay = 0.2
+
+    with caplog.at_level("INFO", logger="mwmbl.imagesearch.seed_images"):
+        selection = await search()
+        late_lines = await wait_for_late_lines(caplog)
+
+    assert selection.outcome == ImageOutcome.UNAVAILABLE
+    assert len(late_lines) == 1
+    finished_after = float(late_lines[0].removeprefix("Late images shown: finished ").split("s")[0])
+    assert settings.IMAGE_SEARCH_GRACE_SECONDS < finished_after < 1.0
+
+
+async def wait_for_late_lines(caplog, timeout_seconds: float = 2.0) -> list[str]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        late_lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Late images")]
+        if late_lines:
+            return late_lines
+        await asyncio.sleep(0.02)
+    return []
+
+
 async def test_images_may_take_as_long_as_web_ranking(found, answers, settings):
     settings.IMAGE_SEARCH_GRACE_SECONDS = 0.05
     answers.delay = 0.1

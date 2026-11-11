@@ -495,7 +495,9 @@ IMAGES_DISPLAY_COUNT = 4
 # For each request to the judge: they take 0.27s at p50 and 0.37s at p95.
 IMAGE_JUDGE_TIMEOUT_SECONDS = 1.5
 # How long the images may still take once web ranking has finished, before they are given up as unavailable.
-IMAGE_SEARCH_GRACE_SECONDS = 0.25
+# Phase 1 runs the Commons search (about 1s) and then the NSFW request in turn, which usually outlasts web ranking.
+# A search that misses still logs when it finished ("Late images"), to tune this from.
+IMAGE_SEARCH_GRACE_SECONDS = float(os.environ.get("IMAGE_SEARCH_GRACE_SECONDS", "1.0"))
 # A file edited or replaced more recently is left out, so patrollers can catch an explicit file with bland text.
 IMAGE_SEARCH_MIN_REVISION_AGE = timedelta(days=7)
 IMAGE_SEARCH_THREADS = 8
