@@ -121,19 +121,37 @@ def staff(db):
     return User.objects.create_user(username="staff_member_1", password="correctpassword", is_staff=True)
 
 
-def test_anonymous_users_are_refused(client, db):
-    response = client.get(VERSIONS_URL)
+def test_anonymous_users_get_the_spread(client, alice, stats_manager):
+    _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
 
-    assert response.status_code == 401
+    with patch("mwmbl.platform.api.stats_manager", stats_manager):
+        response = client.get(VERSIONS_URL)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["dates"]) == 7
+    assert body["dates"][-1] == str(utc_today())
+    assert body["rows"] == [
+        {"version": "0.2.0", "days": [{"crawlers": 0, "results": 0}] * 6 + [{"crawlers": 1, "results": 4}]}
+    ]
 
 
-def test_non_staff_are_refused(client, alice):
-    response = client.get(VERSIONS_URL, headers=_auth(alice))
+def test_non_staff_get_the_spread(client, alice, bob, stats_manager):
+    _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
 
-    assert response.status_code == 403
+    with patch("mwmbl.platform.api.stats_manager", stats_manager):
+        response = client.get(VERSIONS_URL, headers=_auth(bob))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["dates"]) == 7
+    assert body["dates"][-1] == str(utc_today())
+    assert body["rows"] == [
+        {"version": "0.2.0", "days": [{"crawlers": 0, "results": 0}] * 6 + [{"crawlers": 1, "results": 4}]}
+    ]
 
 
-def test_staff_get_the_spread(client, staff, alice, stats_manager):
+def test_staff_get_the_spread(client, alice, staff, stats_manager):
     _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
 
     with patch("mwmbl.platform.api.stats_manager", stats_manager):

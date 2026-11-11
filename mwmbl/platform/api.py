@@ -1495,7 +1495,7 @@ CRAWLER_VERSION_DAYS = 7
 
 @router.get(
     "/crawler-versions",
-    auth=JWTAuth(),
+    auth=None,
     response=CrawlerVersionSpread,
     summary="Crawler version spread",
     description=(
@@ -1507,8 +1507,6 @@ CRAWLER_VERSION_DAYS = 7
     ),
 )
 def get_crawler_versions(request):
-    if not request.user.is_staff:
-        raise InvalidRequest("Only staff can see the crawler versions.", status=403)
     return stats_manager.get_crawler_version_spread(CRAWLER_VERSION_DAYS)
 
 
