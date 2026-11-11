@@ -20,18 +20,6 @@ use serde_json::{Map, Number, Value};
 
 struct PyPageIoError(PageIoError);
 
-impl From<PageIoError> for PyPageIoError {
-    fn from(error: PageIoError) -> PyPageIoError {
-        PyPageIoError(error)
-    }
-}
-
-impl From<PyPageIoError> for PageIoError {
-    fn from(error: PyPageIoError) -> PageIoError {
-        error.0
-    }
-}
-
 impl From<PyPageIoError> for PyErr {
     fn from(error: PyPageIoError) -> PyErr {
         match error.0 {
