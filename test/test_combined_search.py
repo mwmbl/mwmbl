@@ -899,7 +899,8 @@ def test_the_image_log_has_the_outcome_but_not_the_query_or_the_images(
 ):
     stub_sources()
 
-    with caplog.at_level(logging.INFO, logger=combined_search.__name__):
+    # At the root, so that a line from any logger that held the query would be caught.
+    with caplog.at_level(logging.INFO):
         _images(client, access_token, query="unusual-query")
 
     image_lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Images")]

@@ -235,7 +235,14 @@ def test_combined_search_is_documented():
     }
     assert "pages_indexed" in spec["components"]["schemas"]["CombinedSearchResponse"]["required"]
     # Front ends need the image contract: where queries go, what the safety check covers, how to render.
-    image_contract = ("Wikimedia Commons", "nudity", "images_display_count", 'referrerpolicy="no-referrer"', "escape")
+    image_contract = (
+        "Wikimedia Commons",
+        "third-party LLM",
+        "nudity",
+        "images_display_count",
+        'referrerpolicy="no-referrer"',
+        "escape",
+    )
     for expected in ("X-API-Key", "monthly_limit", "pages_indexed", "eusp", "wikipedia", *image_contract):
         assert expected in operation["description"]
     # The provider agreement labels its results EUSP; its own name stays out of the public docs.

@@ -48,7 +48,7 @@ from pydantic import Field
 
 from mwmbl import pricing
 from mwmbl.format import format_result_v2
-from mwmbl.imagesearch import seed_images
+from mwmbl.imagesearch import commons, seed_images
 from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSearch, ImageSelection, RankedImage
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
@@ -81,7 +81,8 @@ logger = getLogger(__name__)
 
 router = Router(tags=["Combined Search"])
 
-COMMONS_HOSTS = {"commons.wikimedia.org", "commons.m.wikimedia.org"}
+# Image page URLs are always on one of commons.COMMONS_PAGE_HOSTS, so their keys are never None.
+COMMONS_HOSTS = commons.COMMONS_PAGE_HOSTS | {"commons.m.wikimedia.org"}
 IMAGES_SWITCHED_OFF = ImageSelection(ImageOutcome.UNAVAILABLE, [])
 
 
@@ -254,13 +255,17 @@ DESCRIPTION = (
     "results: the index's results are ranked and returned as usual.\n\n"
     "With `images=true`, the search also returns images from Wikimedia Commons in `images`, most "
     "relevant first, when the query calls for them; `image_outcome` says why there are none. To find "
-    "them, Mwmbl's server sends the query to Wikimedia Commons. An LLM-based model judges each image's "
+    "them, Mwmbl's server sends the query to Wikimedia Commons, and the query, the top web results and "
+    "the images' text to a third-party LLM service, on every `images=true` request except "
+    "`query_refused` ones, including those whose outcome is `not_needed`. The LLM judges each image's "
     "relevance from its text, and whether that text suggests nudity or sexual content. That is the only "
     "safety check: nobody looks at the pixels, and violent or otherwise disturbing images are not "
     'screened. Show the first `images_display_count` images and put the rest behind a "More" button, '
     "without a new request. Image pages shown in `images` are left out of `results`. Titles and "
-    "attribution are plain text from Commons that is not HTML-safe, so escape them, and load thumbnails "
-    'with `referrerpolicy="no-referrer"`. Image search fails closed: if it fails or is slow, '
+    "attribution are plain text from Commons that is not HTML-safe, so escape them. Load thumbnails "
+    'with `referrerpolicy="no-referrer"`; they come from Wikimedia, which sees the viewer\'s IP address. '
+    "`license_url` may be empty and is set by the uploader: link it, and `page_url`, with "
+    '`rel="noopener noreferrer nofollow"`. Image search fails closed: if it fails or is slow, '
     "`image_outcome` is `unavailable` and the web results are unaffected. Images cost nothing extra.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
 )
@@ -324,16 +329,17 @@ async def find_images(
     if search is None:
         logger.info("Images %s: switched off", IMAGES_SWITCHED_OFF.outcome)
         return IMAGES_SWITCHED_OFF
-    ranking_finished_at = []
-    web_ranking.add_done_callback(lambda task: ranking_finished_at.append(time.monotonic()))
-    selection = await seed_images.finish(search, staan_results, web_ranking)
+    selecting = asyncio.create_task(seed_images.finish(search, staan_results, web_ranking))
+    await asyncio.wait([web_ranking])
+    ranking_finished_at = time.monotonic()
+    selection = await selecting
     finished_at = time.monotonic()
     logger.info(
         "Images %s: %d in %.3fs, %.3fs after web ranking",
         selection.outcome,
         len(selection.images),
         finished_at - started_at,
-        finished_at - ranking_finished_at[0],
+        finished_at - ranking_finished_at,
     )
     return selection
 
