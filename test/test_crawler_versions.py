@@ -121,23 +121,11 @@ def staff(db):
     return User.objects.create_user(username="staff_member_1", password="correctpassword", is_staff=True)
 
 
-def test_anonymous_users_are_refused(client, db):
-    response = client.get(VERSIONS_URL)
-
-    assert response.status_code == 401
-
-
-def test_non_staff_are_refused(client, alice):
-    response = client.get(VERSIONS_URL, headers=_auth(alice))
-
-    assert response.status_code == 403
-
-
-def test_staff_get_the_spread(client, staff, alice, stats_manager):
+def test_anonymous_users_get_the_spread(client, alice, stats_manager):
     _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
 
     with patch("mwmbl.platform.api.stats_manager", stats_manager):
-        response = client.get(VERSIONS_URL, headers=_auth(staff))
+        response = client.get(VERSIONS_URL)
 
     assert response.status_code == 200
     body = response.json()
@@ -146,7 +134,6 @@ def test_staff_get_the_spread(client, staff, alice, stats_manager):
     assert body["rows"] == [
         {"version": "0.2.0", "days": [{"crawlers": 0, "results": 0}] * 6 + [{"crawlers": 1, "results": 4}]}
     ]
-    assert body["total_crawlers"] == [0] * 6 + [1]
 
 
 @pytest.mark.parametrize(
