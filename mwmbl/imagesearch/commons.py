@@ -104,7 +104,8 @@ def parse_page(page: dict) -> SourceImage | None:
 
     sha1 = info.get("sha1")
     timestamp = info.get("timestamp")
-    if not sha1 or not timestamp:
+    revisions = page.get("revisions")
+    if not sha1 or not timestamp or not revisions:
         return None
 
     extmetadata = info.get("extmetadata", {})
@@ -113,10 +114,13 @@ def parse_page(page: dict) -> SourceImage | None:
         return None
 
     title = page["title"].removeprefix("File:")
+    # The caption is the file's label in its structured data (MediaInfo): English, else Commons' fallback.
+    captions = page.get("entityterms", {}).get("label", [])
     description = metadata_value(extmetadata, "ImageDescription")
     license_url = metadata_value(extmetadata, "LicenseUrl")
     return SourceImage(
         title=title,
+        caption=plain_text(captions[0]) if captions else "",
         page_url=page_url,
         thumbnail_url=thumbnail_url,
         thumbnail_width=info["thumbwidth"],
@@ -129,6 +133,7 @@ def parse_page(page: dict) -> SourceImage | None:
         attribution=metadata_value(extmetadata, "Artist"),
         sha1=sha1,
         uploaded_at=datetime.fromisoformat(timestamp),
+        revised_at=datetime.fromisoformat(revisions[0]["timestamp"]),
         rank=page["index"],
     )
 
@@ -143,10 +148,15 @@ def request_params(search_expression: str, limit: int, mediasearch: bool) -> dic
         "gsrsearch": search_expression,
         "gsrlimit": limit,
         "gsrsort": "relevance",
-        "prop": "imageinfo",
+        # The captions and the latest revision's time come in the same request at no measurable extra latency.
+        "prop": "imageinfo|entityterms|revisions",
         "iiprop": "url|mime|sha1|timestamp|extmetadata",
         "iiurlwidth": THUMBNAIL_WIDTH,
         "iiextmetadatafilter": "Categories|ImageDescription|LicenseShortName|LicenseUrl|Artist",
+        # Commons falls back to another language for a description that has no English version.
+        "iiextmetadatalanguage": "en",
+        "wbetlanguage": "en",
+        "rvprop": "timestamp",
     }
     if mediasearch:
         params["gsrqiprofile"] = "classic_noboostlinks"

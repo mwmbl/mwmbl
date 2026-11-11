@@ -27,8 +27,12 @@ from mwmbl.imagesearch.prompt import (
     NSFW_POLICY,
     NSFW_QUESTION,
     RELEVANCE_WEB_RESULTS,
+    WEB_SNIPPET_CHARS,
+    WEB_TITLE_CHARS,
+    WEB_URL_CHARS,
     image_text,
     numbered_titles,
+    web_text,
 )
 from mwmbl.imagesearch.types import SourceImage
 from mwmbl.tinysearchengine.indexer import Document
@@ -70,7 +74,11 @@ def staan_need_question(staan: list[Document]) -> dict:
 def query_state(query: str, staan: list[Document]) -> dict:
     """What the query-dependent questions share: the query, and Staan's top results, to say which sense is meant."""
     top_results = [
-        {"title": document.title, "url": document.url, "snippet": document.extract or ""}
+        {
+            "title": web_text(document.title, WEB_TITLE_CHARS),
+            "url": web_text(document.url, WEB_URL_CHARS),
+            "snippet": web_text(document.extract or "", WEB_SNIPPET_CHARS),
+        }
         for document in staan[:RELEVANCE_WEB_RESULTS]
     ]
     return {"query": query, "searcher": SEARCHER, "top_results": top_results}
@@ -102,6 +110,17 @@ def scores(response: dict, prefix: str, count: int) -> list[float]:
 
 def need_score(response: dict) -> float:
     return response["answers"][NEED_KEY]["score"]
+
+
+def image_scores(query: str, staan: list[Document], images: list[SourceImage]) -> tuple[float, list[float]]:
+    """The query's image need and each image's relevance, in order, from one request. Raises on any failure,
+    including an answer off its question's scale."""
+    response = post(image_request(query, staan, images), settings.IMAGE_JUDGE_TIMEOUT_SECONDS)
+    need = checked_score(need_score(response), IMAGE_NEED_CRITERIA)
+    relevance = [
+        checked_score(score, IMAGE_RELEVANCE_CRITERIA) for score in scores(response, RELEVANCE_PREFIX, len(images))
+    ]
+    return need, relevance
 
 
 def nsfw_fingerprint() -> str:
@@ -140,7 +159,7 @@ def nsfw_scores(images: list[SourceImage]) -> list[float]:
     unscored = {key: image for key, image in zip(keys, images) if key not in cached}
     if unscored:
         unscored_images = list(unscored.values())
-        response = post(nsfw_request(unscored_images))
+        response = post(nsfw_request(unscored_images), settings.IMAGE_JUDGE_TIMEOUT_SECONDS)
         answered = scores(response, NSFW_PREFIX, len(unscored_images))
         asked = {key: checked_score(score, NSFW_CRITERIA) for key, score in zip(unscored, answered)}
         verdict_cache.put_scores(asked)

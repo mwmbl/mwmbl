@@ -153,7 +153,11 @@ def benchmark_image(row: dict, metadata: dict) -> SourceImage:
     text = {"title": row["title"], "description": metadata["description"], "categories": tuple(metadata["categories"])}
     filler = {"page_url": "", "thumbnail_url": "", "thumbnail_width": 0, "thumbnail_height": 0, "rank": 0}
     licence = {"license_name": "", "license_url": "", "attribution": "", "sha1": row["sha1"]}
-    return SourceImage(**text, **filler, **licence, uploaded_at=datetime(2000, 1, 1, tzinfo=timezone.utc))
+    dates = {
+        "uploaded_at": datetime(2000, 1, 1, tzinfo=timezone.utc),
+        "revised_at": datetime(2000, 1, 1, tzinfo=timezone.utc),
+    }
+    return SourceImage(**text, caption="", **filler, **licence, **dates)
 
 
 def benchmark_batches(rng: random.Random) -> list[list[tuple[dict, SourceImage]]]:

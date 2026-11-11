@@ -32,12 +32,23 @@ def candidates_path(query: str) -> Path:
 
 def image_to_json(image: SourceImage) -> dict:
     fields = dataclasses.asdict(image)
-    return fields | {"categories": list(image.categories), "uploaded_at": image.uploaded_at.isoformat()}
+    times = {"uploaded_at": image.uploaded_at.isoformat(), "revised_at": image.revised_at.isoformat()}
+    return fields | {"categories": list(image.categories)} | times
 
 
 def image_from_json(fields: dict) -> SourceImage:
-    parsed = {"categories": tuple(fields["categories"]), "uploaded_at": datetime.fromisoformat(fields["uploaded_at"])}
-    return SourceImage(**fields | parsed)
+    """An image as collected. The eval's files were collected before Commons captions and revision times were
+    fetched, so such a file's images have no caption, as when they were judged, and its latest revision is taken
+    to be its upload (the upload of the file's current version)."""
+    collected_before_captions = "revised_at" not in fields
+    added = {"caption": "", "revised_at": fields["uploaded_at"]} if collected_before_captions else {}
+    stored = fields | added
+    parsed = {
+        "categories": tuple(stored["categories"]),
+        "uploaded_at": datetime.fromisoformat(stored["uploaded_at"]),
+        "revised_at": datetime.fromisoformat(stored["revised_at"]),
+    }
+    return SourceImage(**stored | parsed)
 
 
 def load_candidates(query: str) -> list[SourceImage]:
