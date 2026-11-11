@@ -12,7 +12,7 @@ import requests
 from django.core.cache import cache
 from test_image_search import make_image
 
-from mwmbl.imagesearch import commons, seed_images, verdict_cache
+from mwmbl.imagesearch import commons, seed_images, store, verdict_cache
 from mwmbl.imagesearch.seed_images import ImageOutcome
 from mwmbl.imagesearch.types import ImageSourceUnavailable
 from mwmbl.tinysearchengine import jev_rank
@@ -207,3 +207,22 @@ async def test_a_second_search_reuses_the_nsfw_scores(found, answers):
     nsfw_requests = [request for request in answers.requests if "need" not in request["questions"]]
     assert len(nsfw_requests) == 1
     assert len(answers.requests) == 3
+
+
+async def test_every_judged_candidate_is_passed_to_the_store_without_the_query(found, answers, settings, monkeypatch):
+    settings.IMAGE_SEARCH_ENABLED = True
+    recorded = []
+    monkeypatch.setattr(store, "record_later", lambda *args: recorded.append(args))
+
+    await search()
+
+    assert recorded == [(CANDIDATES, [NSFW.get(name, 0.0) for name in NAMES])]
+
+
+async def test_nothing_is_stored_while_images_are_switched_off(found, answers, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(store, "record_later", lambda *args: recorded.append(args))
+
+    await search()
+
+    assert recorded == []

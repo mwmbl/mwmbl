@@ -26,7 +26,7 @@ from logging import WARNING, getLogger
 
 from django.conf import settings
 
-from mwmbl.imagesearch import commons, judge, rules
+from mwmbl.imagesearch import commons, judge, rules, store
 from mwmbl.imagesearch.prompt import MIN_RELEVANCE, NEED_THRESHOLD, NSFW_THRESHOLD
 from mwmbl.imagesearch.types import SourceImage, Verdict
 from mwmbl.tinysearchengine.indexer import Document
@@ -145,7 +145,11 @@ async def score_nsfw(candidates: asyncio.Future) -> list[float]:
     images = await candidates
     if not images:
         return []
-    return await asyncio.get_running_loop().run_in_executor(executor, judge.nsfw_scores, images)
+    nsfw_scores = await asyncio.get_running_loop().run_in_executor(executor, judge.nsfw_scores, images)
+    # Every judged candidate goes to the store, shown or not, without anything about the search that found it.
+    if settings.IMAGE_SEARCH_ENABLED:
+        store.record_later(images, nsfw_scores)
+    return nsfw_scores
 
 
 async def select_images(search: ImageSearch, staan_results: list[Document]) -> ImageSelection:

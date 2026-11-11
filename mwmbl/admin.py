@@ -2,9 +2,13 @@ from django import forms
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
 from django.contrib.auth.admin import UserAdmin
+from django.db.models import Value
+from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from mwmbl.models import (
     ApiKey,
+    CommonsImage,
     Curation,
     DomainSubmission,
     FlagCuration,
@@ -126,6 +130,28 @@ class UserNotificationAdmin(ModelAdmin):
 
 
 admin.site.register(UserNotification, UserNotificationAdmin)
+
+
+class CommonsImageAdmin(ModelAdmin):
+    list_display = ("page_url", "nsfw_score", "approved_at", "last_checked_at", "revoked_at", "revocation_reason")
+    list_filter = ("revocation_reason",)
+    search_fields = ("page_url", "sha1")
+    # Rows are what Commons and the judge said; the one thing done by hand is the action below.
+    readonly_fields = tuple(field.name for field in CommonsImage._meta.fields)
+    actions = ("revoke",)
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.action(description="Revoke for good (never lifted by a recheck)")
+    def revoke(self, request, queryset):
+        queryset.update(
+            revoked_at=Coalesce("revoked_at", Value(timezone.now())),
+            revocation_reason=CommonsImage.RevocationReason.OPERATOR,
+        )
+
+
+admin.site.register(CommonsImage, CommonsImageAdmin)
 
 # Adds the "Status" panel linking to the blacklist status page (mwmbl.admin_views) to the
 # admin front page.

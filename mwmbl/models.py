@@ -662,3 +662,58 @@ class CrawlerAgreement(models.Model):
         indexes = [
             models.Index(fields=["created_at"]),
         ]
+
+
+class CommonsImage(models.Model):
+    """A Wikimedia Commons file that passed Seed Search's safety checks - see mwmbl.imagesearch.store.
+
+    One row per file, to be kept current by a recheck against Commons that revokes it when the file is deleted,
+    nominated for deletion, denied or no longer passes. Holds no query, user or relevance score: nothing that
+    could tie a file to the searches that found it.
+    """
+
+    class RevocationReason(models.TextChoices):
+        GONE = "gone", "Deleted or moved on Commons"
+        DENIED = "denied", "In IMAGE_SEARCH_DENIED_FILES"
+        NOMINATED = "nominated", "Nominated for deletion"
+        RULES = "rules", "Flagged by the deny rules"
+        NSFW = "nsfw", "Fails the NSFW judge"
+        # These three say nothing about the content, so a fresh pass lifts them even if it is unchanged.
+        UNSETTLED = "unsettled", "Changed too recently"
+        UNUSABLE = "unusable", "Commons lacks what the checks need"
+        UNJUDGED = "unjudged", "The judge failed"
+        # Set by hand, and never lifted by the store or the recheck.
+        OPERATOR = "operator", "Revoked by an operator"
+
+    # The canonical page URL (mwmbl.imagesearch.commons.commons_file_key).
+    page_url = models.CharField(max_length=1000, unique=True)
+    sha1 = models.CharField(max_length=40)
+    # Of the text the NSFW judge was shown (mwmbl.imagesearch.prompt.image_text).
+    text_hash = models.CharField(max_length=64)
+    title = models.TextField()
+    caption = models.TextField()
+    description = models.TextField()
+    nsfw_score = models.FloatField()
+    # Of the model and question that gave nsfw_score (mwmbl.imagesearch.judge.nsfw_fingerprint).
+    nsfw_fingerprint = models.CharField(max_length=64)
+    license_name = models.TextField()
+    license_url = models.TextField()
+    attribution = models.TextField()
+    thumbnail_url = models.TextField()
+    thumbnail_width = models.IntegerField()
+    thumbnail_height = models.IntegerField()
+    uploaded_at = models.DateTimeField()
+    revised_at = models.DateTimeField()
+    # When the content now held was approved.
+    approved_at = models.DateTimeField()
+    last_checked_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revocation_reason = models.CharField(max_length=16, choices=RevocationReason.choices, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["last_checked_at"]),
+        ]
+
+    def __str__(self):
+        return self.page_url
