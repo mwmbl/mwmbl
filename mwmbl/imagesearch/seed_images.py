@@ -18,6 +18,7 @@ stored or logged together with the query.
 """
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -105,13 +106,24 @@ async def finish(search: ImageSearch, staan_results: list[Document], web_ranking
     selection = asyncio.create_task(select_images(search, staan_results))
     selection.add_done_callback(retrieve_outcome)
     await asyncio.wait([web_ranking])
+    ranking_finished_at = time.monotonic()
     try:
         return await asyncio.wait_for(asyncio.shield(selection), settings.IMAGE_SEARCH_GRACE_SECONDS)
     except TimeoutError:
         # The threads underneath can't be stopped, and may be blocked on Redis for its socket timeout; they
         # finish on their own, NSFW scores still reach the cache, and nothing waits for them.
         logger.warning("Images missed their deadline")
+        selection.add_done_callback(lambda done: log_late_selection(done, ranking_finished_at))
         return UNAVAILABLE
+
+
+def log_late_selection(selection: asyncio.Future, ranking_finished_at: float) -> None:
+    """How long after web ranking a selection that missed its deadline finished, to tune the deadline from. Like
+    combined_search's line, it carries neither the query nor the images."""
+    finished_after = time.monotonic() - ranking_finished_at
+    failed = selection.cancelled() or selection.exception() is not None
+    outcome = "failed" if failed else selection.result().outcome
+    logger.info("Late images %s: finished %.3fs after web ranking", outcome, finished_after)
 
 
 def retrieve_outcome(future: asyncio.Future) -> None:
