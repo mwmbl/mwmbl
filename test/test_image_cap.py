@@ -71,6 +71,14 @@ def test_every_commons_file_url_counts_but_other_commons_pages_do_not():
     assert _urls(capped) == _urls([_image("a"), category])
 
 
+def test_a_second_url_for_a_kept_file_is_dropped_without_using_a_slot():
+    mobile_a = Document(title="a", url="https://commons.m.wikimedia.org/wiki/File:a.jpg", extract="")
+
+    capped = cap_images([_image("a"), mobile_a, _web("one"), _image("b"), _image("c")], 2)
+
+    assert _urls(capped) == _urls([_image("a"), _web("one"), _image("b")])
+
+
 def test_the_ranker_caps_search_and_search_retrieved_and_delegates_the_rest():
     results = [_image("a"), _image("b"), _image("c"), _web("one")]
     ranker = ImageCapRanker(_FakeRanker(results), 2)

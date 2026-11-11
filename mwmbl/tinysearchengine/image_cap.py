@@ -33,16 +33,20 @@ class SearchRanker(Protocol):
 
 
 def cap_images(results: list[Document], cap: int) -> list[Document]:
-    """The results without every Commons file page after the first `cap`, in their order."""
+    """The results without every Commons file page after the first `cap` files, in their order.
+
+    A second URL for a file already kept (the mobile site, say) is dropped too, so one picture can't take two slots.
+    """
     kept = []
-    images_kept = 0
+    kept_files = set()
     for result in results:
         # Any URL for a Commons file page counts, approved or not: a crawled one looks the same to the ranker.
-        is_image = commons_file_key(result.url) is not None
-        if is_image and images_kept == cap:
+        file_key = commons_file_key(result.url)
+        if file_key is not None and (file_key in kept_files or len(kept_files) == cap):
             continue
         kept.append(result)
-        images_kept += is_image
+        if file_key is not None:
+            kept_files.add(file_key)
     return kept
 
 
