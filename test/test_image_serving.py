@@ -117,8 +117,8 @@ def test_results_with_no_commons_file_are_not_looked_up(django_assert_num_querie
 @pytest.fixture
 def ranked(monkeypatch):
     def configure(results):
-        # What the ranker inside ServedImagesRanker returns: the router closed over the outer instance.
-        monkeypatch.setattr(ranker.ranker, "search", lambda *args, **kwargs: list(results))
+        # What the ranker inside ImageCapRanker and ServedImagesRanker returns: the router closed over the outer instance.
+        monkeypatch.setattr(ranker.ranker.ranker, "search", lambda *args, **kwargs: list(results))
 
     return configure
 
@@ -136,6 +136,25 @@ def test_standard_search_gives_a_served_file_its_image_and_every_other_result_no
     ]
     assert [hit["image"] for hit in body["results"]] == [None, PANDA_IMAGE]
     assert body["number_of_results"] == 2
+
+
+@pytest.mark.django_db
+def test_a_file_the_store_lacks_is_dropped_before_the_image_cap_counts_it(ranked):
+    otter = make_image("Otter.jpg", caption="An otter", page_url="https://commons.wikimedia.org/wiki/File:Otter.jpg")
+    fox = make_image("Fox.jpg", caption="A fox", page_url="https://commons.wikimedia.org/wiki/File:Fox.jpg")
+    otter_result = Document("Crawled otter", otter.page_url, "Crawled.")
+    fox_result = Document("Crawled fox", fox.page_url, "Crawled.")
+    stored()
+    stored(otter)
+    stored(fox)
+    # The unstored zoo file ranks first, so a cap counted before the store's check would leave only one image. The
+    # fox is stored, and past the cap of 2.
+    ranked([ZOO_RESULT, PANDA_RESULT, WEB_RESULT, otter_result, fox_result])
+
+    body = Client().get("/api/v2/search/?q=red+panda").json()
+
+    assert [hit["url"] for hit in body["results"]] == [PANDA_RESULT.url, WEB_RESULT.url, otter_result.url]
+    assert all(isinstance(hit["image"], dict) for hit in (body["results"][0], body["results"][2]))
 
 
 @pytest.mark.django_db
@@ -165,3 +184,26 @@ def test_super_search_drops_a_file_the_store_lacks(monkeypatch):
     async_to_sync(super_search._run_pipeline)("red panda", emit, all_docs, [None], asyncio.Lock())
 
     assert [document.url for document in all_docs] == [PANDA_RESULT.url, WEB_RESULT.url]
+
+
+@pytest.mark.django_db
+def test_super_search_caps_the_files_the_store_vouches_for_in_its_final_list(monkeypatch):
+    images = [
+        make_image(f"{name}.jpg", page_url=f"https://commons.wikimedia.org/wiki/File:{name}.jpg") for name in "ABC"
+    ]
+    for image in images:
+        stored(image)
+    results = [ZOO_RESULT] + [Document(image.title, image.page_url, "Crawled.") for image in images] + [WEB_RESULT]
+    _stub_scoring(monkeypatch, [0.0] * 20)
+    emitted = []
+
+    async def emit(event_type, data):
+        emitted.append((event_type, data))
+
+    async_to_sync(super_search._emit_final_results)("", results, emit, [None], asyncio.Lock())
+
+    [(_, final)] = emitted
+    shown_files = [item.url for item in final.results if commons_file_key(item.url)]
+    assert len(shown_files) == 2
+    assert ZOO_RESULT.url not in shown_files
+    assert WEB_RESULT.url in [item.url for item in final.results]

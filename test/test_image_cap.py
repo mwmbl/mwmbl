@@ -2,6 +2,7 @@ import math
 
 from django.conf import settings
 
+from mwmbl.imagesearch.serving import ServedImagesRanker
 from mwmbl.tinysearchengine.image_cap import ImageCapRanker, cap_images
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr import RustXGBPipeline
@@ -107,12 +108,15 @@ def test_the_cap_keeps_the_first_images_in_the_order_mmr_settled_on():
     assert _urls(capped)[:2] == _urls([_image("a"), _web("one")])
 
 
-def test_both_served_rankers_are_capped_at_the_setting():
+def test_both_served_rankers_are_capped_at_the_setting_outside_the_store_check():
     from mwmbl.search_setup import combined_ranker, ranker
 
+    # Outside ServedImagesRanker, so a file the store doesn't vouch for is dropped before it can use a slot.
     assert isinstance(ranker, ImageCapRanker)
-    assert isinstance(ranker.ranker, MMRRanker)
+    assert isinstance(ranker.ranker, ServedImagesRanker)
+    assert isinstance(ranker.ranker.ranker, MMRRanker)
     assert isinstance(combined_ranker, ImageCapRanker)
+    assert isinstance(combined_ranker.ranker, ServedImagesRanker)
     assert ranker.cap == combined_ranker.cap == settings.MAX_IMAGES_PER_RESULT_LIST == 2
 
 

@@ -42,6 +42,7 @@ from mwmbl.quota import (
 )
 from mwmbl.search_auth import authenticate_user
 from mwmbl.search_setup import index_path, ltr_model
+from mwmbl.tinysearchengine.image_cap import cap_images
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.ltr_rank import score_documents
 from mwmbl.tinysearchengine.mmr_rank import mmr_rerank
@@ -480,6 +481,8 @@ async def _emit_final_results(
         # results) to match standard search — see MMRRanker in search_setup.py.
         score_by_url = {doc.url: score for doc, score in ranked}
         diversified = mmr_rerank([doc for doc, _ in ranked])
+        # The same image cap as standard search's ranker (ImageCapRanker), after MMR and the store's check.
+        diversified = cap_images(diversified, settings.MAX_IMAGES_PER_RESULT_LIST)
         ranked = [(doc, score_by_url[doc.url]) for doc in diversified]
         key = tuple(doc.url for doc, _ in ranked)
         if key == last_results_key[0]:

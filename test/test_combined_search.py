@@ -141,12 +141,12 @@ def stub_sources(monkeypatch):
         monkeypatch.setattr(combined_search, "index_new_results_against_query", fake_index)
         monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
         # The router closed over the ranker at registration time, so the ranker instance
-        # itself is what has to be patched, not the name in search_setup. Ranking is patched inside
+        # itself is what has to be patched, not the name in search_setup. Ranking is patched inside the image cap and
         # ServedImagesRanker, so the image store's check still runs.
         from mwmbl.search_setup import combined_ranker
 
         monkeypatch.setattr(combined_ranker, "retrieve", fake_retrieve)
-        monkeypatch.setattr(combined_ranker.ranker, "search_retrieved", fake_search_retrieved)
+        monkeypatch.setattr(combined_ranker.ranker.ranker, "search_retrieved", fake_search_retrieved)
         return calls
 
     return configure
@@ -832,13 +832,13 @@ def test_images_are_finished_alongside_web_ranking(
     stub_sources()
     from mwmbl.search_setup import combined_ranker
 
-    fake_search_retrieved = combined_ranker.ranker.search_retrieved
+    fake_search_retrieved = combined_ranker.ranker.ranker.search_retrieved
 
     def slow_search_retrieved(retrieval, additional_results):
         time.sleep(0.2)
         return fake_search_retrieved(retrieval, additional_results)
 
-    monkeypatch.setattr(combined_ranker.ranker, "search_retrieved", slow_search_retrieved)
+    monkeypatch.setattr(combined_ranker.ranker.ranker, "search_retrieved", slow_search_retrieved)
 
     assert _images(client, access_token).status_code == 200
     assert stub_images.ranking_done_when_finish_began is False
