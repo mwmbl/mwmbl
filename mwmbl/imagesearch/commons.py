@@ -32,6 +32,7 @@ ALLOWED_THUMBNAIL_HOSTS = {"upload.wikimedia.org", "thumb.wikimedia.org"}
 COMMONS_PAGE_HOSTS = {"commons.wikimedia.org"}
 # Where a link to a file page may point: the mobile site's pages are the same files.
 COMMONS_FILE_HOSTS = COMMONS_PAGE_HOSTS | {"commons.m.wikimedia.org"}
+COMMONS_DOMAIN = "wikimedia.org"
 FILE_PAGE_PREFIX = "https://commons.wikimedia.org/wiki/File:"
 # `Image:` is MediaWiki's old name for the File namespace, and still links to the same pages.
 FILE_NAMESPACES = {"file", "image"}
@@ -238,6 +239,10 @@ def file_title(page_url: str) -> str:
 def commons_file_key(url: str) -> str | None:
     """The canonical page URL of the Commons file a URL is for, however it is encoded, on either site, as a /wiki/
     or a /w/index.php?title= URL; None for any other URL."""
+    # Search results ask this of every result, nearly all of them elsewhere, and this is far cheaper than parsing:
+    # every Commons hostname ends in it, and a URL holds its hostname, in whatever case.
+    if COMMONS_DOMAIN not in url.lower():
+        return None
     parsed = urlparse(url)
     if parsed.hostname not in COMMONS_FILE_HOSTS:
         return None

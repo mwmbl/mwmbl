@@ -1,6 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+
+from mwmbl.tinysearchengine.indexer import Document
 
 
 class Verdict(Enum):
@@ -38,3 +40,11 @@ class SourceImage:
     def text(self) -> str:
         """Everything the text checks read, in one string."""
         return "\n".join([self.title, self.caption, self.description, *self.categories])
+
+
+@dataclass
+class ImageDocument(Document):
+    """A search result that is a Commons file page the store vouches for (mwmbl.imagesearch.serving), with the
+    thumbnail and licence to show: the fields of the API's `image`."""
+
+    image: dict = field(default_factory=dict)

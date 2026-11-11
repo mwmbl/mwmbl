@@ -12,6 +12,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -23,6 +24,7 @@ from django.core.cache import cache
 from django.test import Client, override_settings
 from ninja_jwt.tokens import RefreshToken
 from test_image_search import make_image
+from test_image_serving import stored
 
 import mwmbl.tinysearchengine.combined_search as combined_search
 from mwmbl import pricing
@@ -139,11 +141,12 @@ def stub_sources(monkeypatch):
         monkeypatch.setattr(combined_search, "index_new_results_against_query", fake_index)
         monkeypatch.setattr(combined_search, "find_blacklisted_urls", lambda documents: set())
         # The router closed over the ranker at registration time, so the ranker instance
-        # itself is what has to be patched, not the name in search_setup.
+        # itself is what has to be patched, not the name in search_setup. Ranking is patched inside
+        # ServedImagesRanker, so the image store's check still runs.
         from mwmbl.search_setup import combined_ranker
 
         monkeypatch.setattr(combined_ranker, "retrieve", fake_retrieve)
-        monkeypatch.setattr(combined_ranker, "search_retrieved", fake_search_retrieved)
+        monkeypatch.setattr(combined_ranker.ranker, "search_retrieved", fake_search_retrieved)
         return calls
 
     return configure
@@ -829,13 +832,13 @@ def test_images_are_finished_alongside_web_ranking(
     stub_sources()
     from mwmbl.search_setup import combined_ranker
 
-    fake_search_retrieved = combined_ranker.search_retrieved
+    fake_search_retrieved = combined_ranker.ranker.search_retrieved
 
     def slow_search_retrieved(retrieval, additional_results):
         time.sleep(0.2)
         return fake_search_retrieved(retrieval, additional_results)
 
-    monkeypatch.setattr(combined_ranker, "search_retrieved", slow_search_retrieved)
+    monkeypatch.setattr(combined_ranker.ranker, "search_retrieved", slow_search_retrieved)
 
     assert _images(client, access_token).status_code == 200
     assert stub_images.ranking_done_when_finish_began is False
@@ -855,6 +858,7 @@ def test_images_in_the_strip_are_left_out_of_the_web_results(
 
 @pytest.mark.django_db
 def test_web_results_are_kept_when_no_images_are_shown(client, access_token, fresh_quota, stub_sources, stub_images):
+    stored(PANDA)
     stub_images.selection = ImageSelection(ImageOutcome.NOT_NEEDED, [])
     stub_sources(index=(INDEX_RESULT, PANDA_WEB_RESULT))
 
@@ -863,6 +867,32 @@ def test_web_results_are_kept_when_no_images_are_shown(client, access_token, fre
     assert body["image_outcome"] == "not_needed"
     assert body["images"] == []
     assert len(body["results"]) == 3
+
+
+@pytest.mark.django_db
+def test_a_stored_file_among_the_web_results_has_its_image(client, access_token, fresh_quota, stub_sources):
+    stored(PANDA)
+    stub_sources(index=(PANDA_WEB_RESULT, INDEX_RESULT))
+
+    body = _get(client, access_token).json()
+
+    panda_hit, index_hit, staan_hit = body["results"]
+    assert (panda_hit["engine"], panda_hit["image"]["thumbnail_url"]) == ("commons", PANDA.thumbnail_url)
+    assert panda_hit["image"]["attribution"] == "A. Photographer"
+    assert (index_hit["image"], staan_hit["image"]) == (None, None)
+
+
+@pytest.mark.django_db
+def test_a_web_result_the_store_cannot_vouch_for_is_dropped(client, access_token, fresh_quota, stub_sources):
+    """Staan can return Commons file pages too; one the store lacks, or has revoked, is never shown."""
+    stored(PANDA, revoked_at=datetime.now(timezone.utc), revocation_reason="operator")
+    zoo_result = Document("Zoo", PANDA_ZOO.page_url, "A zoo.", source=DocumentSource.STAAN)
+    stub_sources(staan=(zoo_result, STAAN_RESULT), index=(PANDA_WEB_RESULT, INDEX_RESULT))
+
+    body = _get(client, access_token).json()
+
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url, STAAN_RESULT.url]
+    assert body["number_of_results"] == 2
 
 
 @pytest.mark.django_db

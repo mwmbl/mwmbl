@@ -515,3 +515,9 @@ IMAGE_INDEX_LIMIT = 1000
 # uploaded to be found, within days by speedy deletion; a deletion request takes longer, but the recheck revokes a
 # nominated file meanwhile.
 IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=30)
+# Search results show a stored Commons file only if it was checked this recently (mwmbl.imagesearch.serving), so a
+# file swapped on Commons under unchanged text is shown for at most this long before a recheck sees the new SHA-1 and
+# revokes it as unsettled. Two days allows for a daily recheck_images run plus the day's rounding of times written by
+# searches; a file the recheck falls behind on is hidden until it catches up, so the schedule must recheck the whole
+# store within this time.
+IMAGE_SERVE_MAX_CHECK_AGE = timedelta(hours=48)

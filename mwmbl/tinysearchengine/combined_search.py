@@ -72,7 +72,7 @@ from mwmbl.search_auth import CrawlApiKeyAuth, authenticate_user
 from mwmbl.search_setup import index_path
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
-from mwmbl.tinysearchengine.search import SearchResponse
+from mwmbl.tinysearchengine.search import IMAGE_HITS_DESCRIPTION, SearchResponse
 from mwmbl.tinysearchengine.staan import get_staan_results
 from mwmbl.volunteer_membership import user_combined_search_monthly_limit
 
@@ -231,8 +231,10 @@ DESCRIPTION = (
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
-    "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
-    "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
+    "- `google`, `user` - originally suggested via Google, or submitted by a user\n"
+    "- `commons` - a Wikimedia Commons file page, with the file's thumbnail and licence in `image`\n\n"
+    + IMAGE_HITS_DESCRIPTION
+    + "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. With an API key every request is billed - there is no free allowance - at the "
     "same price as `/api/v2/search/` overage, within your monthly spend limit, which "
     "standard search and Combined Search share. Obtain a key via "
@@ -430,8 +432,10 @@ def init_router(ranker) -> None:
             asyncio.to_thread(get_staan_results, q),
         )
         # Ranking only reads what was already retrieved, so the index write and the second phase of
-        # images can overlap it.
-        web_ranking = asyncio.create_task(asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results))
+        # images can overlap it. It runs on the request's own thread, not asyncio.to_thread, because it ends by
+        # looking Commons files up in the store (mwmbl.imagesearch.serving), and only that thread's database
+        # connection is closed when the request ends.
+        web_ranking = asyncio.create_task(sync_to_async(ranker.search_retrieved)(retrieval, staan_results))
         image_finding = (
             find_images(image_search, image_started_at, staan_results, web_ranking) if images else no_images()
         )

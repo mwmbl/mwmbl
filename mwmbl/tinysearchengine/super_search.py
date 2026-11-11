@@ -33,6 +33,7 @@ from ninja.errors import HttpError
 from pydantic import BaseModel, Field
 
 from mwmbl.crawler.retrieve import crawl_url
+from mwmbl.imagesearch import serving
 from mwmbl.indexer.index_batches import index_results_against_query
 from mwmbl.quota import (
     check_rate_limit,
@@ -467,6 +468,8 @@ async def _emit_final_results(
 
         if terms:
             unique = [doc for doc in unique if _doc_passes_term_filter(doc, terms)]
+        # The sources' results were checked as they came in, but a page crawled for its links can be a Commons file.
+        unique = await sync_to_async(serving.served)(unique)
 
         if not unique:
             return
@@ -563,6 +566,8 @@ async def _run_pipeline(
                 await emit("source_failed", SourceFailedEvent(source=name, error=error))
                 continue
             docs = _drop_blacklisted(docs)
+            # Any source can return a Commons file page, and only those the image store vouches for are shown.
+            docs = await sync_to_async(serving.served)(docs)
             await emit("source_returned", SourceReturnedEvent(source=name, count=len(docs)))
             if ctx is not None:
                 ctx.record_results(name, [doc.url for doc in docs])

@@ -1,5 +1,6 @@
 import re
 
+from mwmbl.imagesearch.types import ImageDocument
 from mwmbl.tinysearchengine.indexer import DocumentSource, DocumentState
 from mwmbl.tokenizer import clean_unicode, tokenize
 
@@ -212,6 +213,7 @@ def format_result_v2(result, position: int, query: str) -> dict:
         "title_highlights": _extract_highlights(v1["title"]),
         "content": content,
         "content_highlights": _extract_highlights(v1["extract"]),
-        "engine": get_result_source(result),
+        "engine": "commons" if isinstance(result, ImageDocument) else get_result_source(result),
         "score": 1.0 / position,
+        "image": result.image if isinstance(result, ImageDocument) else None,
     }

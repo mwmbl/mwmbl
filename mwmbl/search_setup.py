@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 
 from mwmbl.apps import index_shape_mismatch
+from mwmbl.imagesearch.serving import ServedImagesRanker
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.completer import Completer
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
@@ -35,11 +36,12 @@ ltr_model = RustXGBPipeline.from_model_path(str(settings.RUST_MODEL_PATH))
 # num_wiki_results is left at its default on purpose - see NUM_WIKI_RESULTS. Serving
 # passed 3 here while mwmbl.rankeval.ltr.dataset trained on 5, so the model was ranking a
 # pool a size it had never been fitted to.
-ranker = MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True))
+# Commons files the image store doesn't vouch for are left out last, after MMR.
+ranker = ServedImagesRanker(MMRRanker(LTRRanker(tiny_index, completer, ltr_model, include_wiki=True)))
 
 # Combined Search gets its own model and its own ranker, so retraining on the pooled
 # Mwmbl + Staan candidate set never moves standard search's ranking. The model uses
 # Staan's ranking as features, which only CombinedLTRRanker supplies. Jev orders the final
 # list from the model's output, without MMR.
 combined_ltr_model = RustXGBPipeline.from_model_path(str(settings.COMBINED_MODEL_PATH))
-combined_ranker = JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model))
+combined_ranker = ServedImagesRanker(JevRanker(CombinedLTRRanker(tiny_index, completer, combined_ltr_model)))

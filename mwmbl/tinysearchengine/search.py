@@ -25,6 +25,15 @@ logger = getLogger(__name__)
 
 SCORE_THRESHOLD = 0.25
 
+IMAGE_HITS_DESCRIPTION = (
+    "A result with `engine` `commons` is the page of an image on Wikimedia Commons whose text a third-party LLM "
+    "service judged not to suggest nudity or sexual content. That is the only safety check: nobody looks at the "
+    "pixels, and violent or otherwise disturbing images are not screened. Its `image` has the thumbnail, which "
+    'you load directly from Wikimedia with `referrerpolicy="no-referrer"`, and the licence and attribution, '
+    "which you must show with it. Titles, content and attribution are plain text from Commons that is not "
+    "HTML-safe, so escape them. Every other result has `image` null.\n\n"
+)
+
 # Module-level routers
 router = Router(tags=["Search"])  # v1
 v2_router = Router(tags=["Search"])  # v2
@@ -79,6 +88,25 @@ class SearchResult(Schema):
         }
 
 
+class HitImage(Schema):
+    """The image of a result that is a Wikimedia Commons file page."""
+
+    thumbnail_url: str = Field(
+        description='Load this directly from Wikimedia, with `referrerpolicy="no-referrer"`: Mwmbl does not proxy '
+        "or store images, and Wikimedia sees the viewer's IP address."
+    )
+    thumbnail_width: int
+    thumbnail_height: int
+    license_name: str = Field(description="Show it with the image, as the licence requires.")
+    license_url: str = Field(
+        description='May be empty, and is set by the uploader: link it with `rel="noopener noreferrer nofollow"`.'
+    )
+    attribution: str = Field(
+        description="The author, as Commons gives it. Show it with the image, as the licence requires. Plain text, "
+        "but not HTML-safe: escape it."
+    )
+
+
 class SearchHit(Schema):
     url: str
     title: str
@@ -87,6 +115,9 @@ class SearchHit(Schema):
     content_highlights: list[str]
     engine: str
     score: float
+    image: HitImage | None = Field(
+        default=None, description="With `engine` `commons`, the image the result is the page of. Null otherwise."
+    )
 
 
 class SearchResponse(Schema):
@@ -302,8 +333,10 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `mwmbl` — organically crawled by the Mwmbl crawler\n"
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
-            "- `user` — submitted directly by a user\n\n"
-            "The response includes `monthly_usage` (requests used this month) and "
+            "- `user` — submitted directly by a user\n"
+            "- `commons` — a Wikimedia Commons file page, with the file's thumbnail and licence in `image`\n\n"
+            + IMAGE_HITS_DESCRIPTION
+            + "The response includes `monthly_usage` (requests used this month) and "
             "`monthly_limit` (your plan's monthly cap); both are `null` for "
             "unauthenticated requests.\n\n"
             "**Query parameter:** `q` — the search query string (required)."

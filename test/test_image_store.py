@@ -23,6 +23,7 @@ LONG_AGO = datetime(2023, 1, 1, tzinfo=timezone.utc)
         URL,
         "https://commons.wikimedia.org/wiki/File:Red panda é.jpg",
         "https://commons.m.wikimedia.org/wiki/File:Red_panda_é.jpg",
+        "https://Commons.Wikimedia.ORG/wiki/File:Red_panda_é.jpg",
         "https://commons.wikimedia.org/wiki/File:red__panda_%C3%A9.jpg",
         "https://commons.wikimedia.org/wiki/Image:Red_panda_%C3%A9.jpg",
         "https://commons.wikimedia.org/wiki/file:_Red_panda_é.jpg",
