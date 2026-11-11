@@ -1,13 +1,12 @@
 use std::{
     collections::HashSet,
     sync::Arc,
-    thread::{sleep, spawn},
     time::Duration,
 };
 
 use anyhow::{self, Ok, bail};
 use reqwest::Client;
-use tokio::{sync::RwLock, task::spawn_blocking};
+use tokio::{sync::RwLock, task::spawn_blocking, time::sleep};
 
 use crate::{
     blacklist::domain_and_parents,
@@ -197,7 +196,7 @@ impl<T: BlacklistProvider + 'static> SharedSelfRefreshingBlacklistProvider<T> {
         tokio::spawn(async move {
             let weak = weak.clone();
             loop {
-                sleep(Duration::from_secs(BLACKLIST_REFRESH_CHECK_SECONDS));
+                sleep(Duration::from_secs(BLACKLIST_REFRESH_CHECK_SECONDS)).await;
                 if let Some(blacklist) = weak.upgrade() {
                     let mut blacklist = blacklist.write().await;
                     if let Err(err) = blacklist.refresh().await {
