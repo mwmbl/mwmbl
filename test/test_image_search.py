@@ -76,6 +76,12 @@ def make_image(title: str = "Red panda.jpg", rank: int = 1, **overrides) -> Sour
         "cam girl",
         "busty",
         "milf",
+        "Naturism in France",
+        "nudism",
+        "FKK-Strand",
+        "Freikörperkultur",
+        "skinny dipping",
+        "Clothing-optional beach",
     ],
 )
 def test_rules_deny_sexual_terms(text):
