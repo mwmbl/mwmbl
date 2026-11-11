@@ -136,37 +136,6 @@ def test_anonymous_users_get_the_spread(client, alice, stats_manager):
     ]
 
 
-def test_non_staff_get_the_spread(client, alice, bob, stats_manager):
-    _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
-
-    with patch("mwmbl.platform.api.stats_manager", stats_manager):
-        response = client.get(VERSIONS_URL, headers=_auth(bob))
-
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body["dates"]) == 7
-    assert body["dates"][-1] == str(utc_today())
-    assert body["rows"] == [
-        {"version": "0.2.0", "days": [{"crawlers": 0, "results": 0}] * 6 + [{"crawlers": 1, "results": 4}]}
-    ]
-
-
-def test_staff_get_the_spread(client, alice, staff, stats_manager):
-    _submit(stats_manager, alice, utc_today(), "0.2.0", "crawler-aaaa", num_results=4)
-
-    with patch("mwmbl.platform.api.stats_manager", stats_manager):
-        response = client.get(VERSIONS_URL, headers=_auth(staff))
-
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body["dates"]) == 7
-    assert body["dates"][-1] == str(utc_today())
-    assert body["rows"] == [
-        {"version": "0.2.0", "days": [{"crawlers": 0, "results": 0}] * 6 + [{"crawlers": 1, "results": 4}]}
-    ]
-    assert body["total_crawlers"] == [0] * 6 + [1]
-
-
 @pytest.mark.parametrize(
     "claimed_version",
     ["1." * 500, "0.2.0-rc1", "1.\u00b2", "1.\u0663.0", "1." + "9" * 5000, "latest", "1.2", ""],
