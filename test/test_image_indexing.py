@@ -1,7 +1,7 @@
 """Writing stored Commons files to the search index (mwmbl.imagesearch.indexing)."""
 
 import dataclasses
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -89,8 +89,8 @@ def test_title_and_extract_are_cut_to_the_crawlers_lengths():
         "WhatsApp Image 2023-01-01 at 12.34.56.jpeg",
     ],
 )
-def test_a_camera_or_date_file_name_is_not_real_text(name):
-    assert not indexing.has_real_text(row(title=name))
+def test_a_camera_or_date_file_name_alone_is_not_real_text(name):
+    assert not indexing.has_real_text(row(title=name, description=""))
 
 
 @pytest.mark.parametrize(
@@ -109,21 +109,27 @@ def test_a_camera_or_date_file_name_is_not_real_text(name):
     ],
 )
 def test_a_file_name_with_words_is_real_text(name):
-    assert indexing.has_real_text(row(title=name))
+    assert indexing.has_real_text(row(title=name, description=""))
 
 
 def test_a_caption_makes_a_camera_file_name_real_text():
     assert indexing.has_real_text(row(title="IMG_1234.jpg", caption="Big Ben at night", description=""))
 
 
-def test_a_file_with_neither_caption_nor_description_has_no_real_text():
-    assert not indexing.has_real_text(row(caption="", description=""))
+def test_a_camera_file_with_a_description_is_titled_by_the_descriptions_opening_words():
+    description = "The Eiffel Tower lit up at night, seen from the Trocadéro gardens across the Seine in Paris"
+    camera_file = row(title="IMG_1234.jpg", description=description)
+
+    assert indexing.has_real_text(camera_file)
+    assert indexing.image_document(camera_file).title == "The Eiffel Tower lit up at night, seen from the Trocadéro…"
+    assert indexing.image_document(row(title="IMG_1234.jpg", description="Big Ben")).title == "Big Ben"
 
 
 @pytest.mark.django_db
 def test_approved_files_with_real_text_are_written_once(index_path):
     stored()
-    camera = stored(make_image("IMG_1234.jpg", page_url="https://commons.wikimedia.org/wiki/File:IMG_1234.jpg"))
+    camera_url = "https://commons.wikimedia.org/wiki/File:IMG_1234.jpg"
+    camera = stored(make_image("IMG_1234.jpg", page_url=camera_url, description=""))
 
     first = indexing.index_images(index_path, 100)
     after_first = written(index_path)
@@ -158,6 +164,18 @@ def test_revoked_files_are_not_written(index_path):
 
     assert indexing.index_images(index_path, 100) == NOTHING
     assert written(index_path) == []
+
+
+@pytest.mark.django_db
+def test_a_file_uploaded_too_recently_is_left_for_a_later_run(index_path, settings):
+    row = stored(uploaded_at=datetime.now(timezone.utc) - timedelta(days=29))
+    settings.IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=30)
+
+    assert indexing.index_images(index_path, 100) == NOTHING
+    assert CommonsImage.objects.get(pk=row.pk).indexed_text_hash == ""
+
+    settings.IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=28)
+    assert indexing.index_images(index_path, 100) == {"stored": 1, "dropped": 0, "skipped": 0}
 
 
 @pytest.mark.django_db

@@ -511,3 +511,7 @@ IMAGE_STORE_RECHECK_LIMIT = 2000
 IMAGE_INDEXING_ENABLED = os.environ.get("IMAGE_INDEXING_ENABLED", "false").lower() == "true"
 # Files index_images takes per run.
 IMAGE_INDEX_LIMIT = 1000
+# A file uploaded more recently is left out of the index. Commons deletes most copyright violations, and the spam
+# uploaded to be found, within days by speedy deletion; a deletion request takes longer, but the recheck revokes a
+# nominated file meanwhile.
+IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=30)
