@@ -56,9 +56,9 @@ def test_record_results_counts_each_crawler_once_per_day():
     bob = MwmblUser.objects.create_user(username="bob", password="testpass")
 
     # A crawler submits twice in the same day with the same API-key user.
-    stats_manager.record_results(make_results("https://example.com/"), alice)
-    stats_manager.record_results(make_results("https://example.com/b", "https://example.com/c"), alice)
-    stats_manager.record_results(make_results("https://other.org/"), bob)
+    stats_manager.record_results(make_results("https://example.com/"), alice, 1)
+    stats_manager.record_results(make_results("https://example.com/b", "https://example.com/c"), alice, 2)
+    stats_manager.record_results(make_results("https://other.org/"), bob, 1)
 
     with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
         stats = stats_manager.get_stats()

@@ -65,3 +65,5 @@ USER mwmbl
 WORKDIR /home/mwmbl
 
 CMD ["/venv/bin/mwmbl-crawl"]
+
+HEALTHCHECK CMD find .mwmbl/indexing.health -mmin -10 -type f -print | grep . && exit 0 || exit 1
