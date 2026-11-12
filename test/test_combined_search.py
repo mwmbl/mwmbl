@@ -909,10 +909,3 @@ def test_the_image_log_has_the_outcome_but_not_the_query_or_the_images(
     assert "unusual-query" not in caplog.text
     assert "Red panda" not in caplog.text
     assert PANDA.sha1 not in caplog.text
-
-
-def test_a_commons_file_has_one_key_however_its_url_is_written():
-    key = combined_search.commons_file_key(PANDA.page_url)
-
-    assert key == combined_search.commons_file_key(PANDA_WEB_RESULT.url)
-    assert combined_search.commons_file_key("https://example.com/wiki/File:Red_panda_%C3%A9.jpg") is None

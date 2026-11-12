@@ -5,6 +5,7 @@ from django.contrib.auth.admin import UserAdmin
 
 from mwmbl.models import (
     ApiKey,
+    BlockedUrl,
     Curation,
     DomainSubmission,
     FlagCuration,
@@ -65,6 +66,17 @@ admin.site.register(Curation, ModelAdmin)
 admin.site.register(OldIndex, ModelAdmin)
 admin.site.register(FlagCuration, ModelAdmin)
 admin.site.register(DomainSubmission, ModelAdmin)
+
+
+class BlockedUrlAdmin(ModelAdmin):
+    """Blocks one URL, such as a Commons file that should never be shown. Takes effect when the snapshot rebuilds."""
+
+    list_display = ("key", "reason", "created_at")
+    search_fields = ("key", "reason")
+    fields = ("url", "reason")
+
+
+admin.site.register(BlockedUrl, BlockedUrlAdmin)
 
 
 class MarketingConsentAdmin(ModelAdmin):

@@ -6,6 +6,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
+from mwmbl.blocked_urls import url_block_key
 from mwmbl.membership import MembershipTier, VolunteerTier
 from mwmbl.utils import bare_host
 
@@ -662,3 +663,24 @@ class CrawlerAgreement(models.Model):
         indexes = [
             models.Index(fields=["created_at"]),
         ]
+
+
+class BlockedUrl(models.Model):
+    """One URL a moderator has removed from search, without blocking the rest of its domain.
+
+    The blacklist snapshot is built from these (see mwmbl.indexer.blacklist_snapshot), so a block
+    reaches retrieval, indexing and the background purge, and no search reads this table.
+    """
+
+    url = models.TextField()
+    # What the snapshot hashes: the canonical page URL for a Commons file, else the URL itself.
+    key = models.TextField(unique=True, editable=False)
+    reason = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        self.key = url_block_key(self.url)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.key
