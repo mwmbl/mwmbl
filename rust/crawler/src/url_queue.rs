@@ -81,7 +81,7 @@ impl<T: BlacklistProvider> SharedURLQueue<T> {
                 } else {
                     curated_non_static_domains.read().await.sample(&mut rng, 1).next().cloned()
                 };
-                if let Some(random_domain) = random_domain && let Ok(false) = self.blacklist_provider.is_domain_blacklisted(&random_domain).await {
+                if let Some(random_domain) = random_domain && !self.blacklist_provider.is_domain_blacklisted(&random_domain).await {
                     if let Ok(domain_lock) = self.claim(&random_domain).await {
                         return ClaimedUrl {domain_lock, url: format!("https://{random_domain}/") };
                     }

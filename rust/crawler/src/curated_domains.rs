@@ -67,9 +67,12 @@ impl CuratedDomains {
                 curated_non_static_domains.push(domain.clone());
             }
         }
+        
+        let mut curated_domains_lock = self.curated_domains.write().await;
+        let mut curated_non_static_domains_lock = self.curated_non_static_domains.write().await;
 
-        *self.curated_domains.write().await = curated_domains;
-        *self.curated_non_static_domains.write().await = curated_non_static_domains;
+        *curated_domains_lock = curated_domains;
+        *curated_non_static_domains_lock = curated_non_static_domains;
 
         Ok(())
     }
@@ -100,9 +103,9 @@ impl<T: BlacklistProvider> CuratedBlacklistProvider<T> {
 }
 
 impl<T: BlacklistProvider> BlacklistProvider for CuratedBlacklistProvider<T> {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
-        Ok(self.parent.is_domain_blacklisted(domain).await?
-            && !self.curated_domains.is_domain_curated(domain).await)
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+        self.parent.is_domain_blacklisted(domain).await
+            && !self.curated_domains.is_domain_curated(domain).await
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         self.curated_domains.refresh().await?;

@@ -1,8 +1,8 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use anyhow::{self, Ok, bail};
+use anyhow::{self, Ok};
 use reqwest::Client;
-use tokio::{sync::RwLock, task::spawn_blocking, time::sleep};
+use tokio::{sync::RwLock, time::sleep};
 
 use crate::{
     blacklist::domain_and_parents,
@@ -18,7 +18,7 @@ pub trait BlacklistProvider: Clone + Send + Sync {
     fn is_domain_blacklisted(
         &self,
         domain: &str,
-    ) -> impl Future<Output = anyhow::Result<bool>> + Send + Sync;
+    ) -> impl Future<Output = bool>;
     fn refresh(&mut self) -> impl Future<Output = anyhow::Result<()>> + Send + Sync;
 }
 
@@ -39,24 +39,24 @@ impl BuiltInRulesBlacklistProvider {
 }
 
 impl BlacklistProvider for BuiltInRulesBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
         if EXCLUDED_DOMAINS.contains(domain) {
-            return Ok(true);
+            return true;
         }
 
         if DOMAIN_BLACKLIST_REGEX.is_match(domain) {
-            return Ok(true);
+            return true;
         }
 
         if DOMAINS.contains_key(domain) {
-            return Ok(true);
+            return true;
         }
 
         let domain_parts: Vec<&str> = domain.splitn(3, '.').collect();
         if let Some(first) = domain_parts.first() {
-            return Ok(domain_parts.len() > 2 && NUMBERS_ONLY_REGEX.is_match(first));
+            return domain_parts.len() > 2 && NUMBERS_ONLY_REGEX.is_match(first);
         }
-        Ok(false)
+        false
     }
 
     async fn refresh(&mut self) -> anyhow::Result<()> {
@@ -77,8 +77,8 @@ impl StaticBlacklistProvider {
 }
 
 impl BlacklistProvider for StaticBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
-        Ok(self.domains.contains(domain))
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+        self.domains.contains(domain)
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         Ok(())
@@ -100,9 +100,9 @@ impl<T: BlacklistProvider, T2: BlacklistProvider> CombinedBlacklistProvider<T, T
 impl<T: BlacklistProvider, T2: BlacklistProvider> BlacklistProvider
     for CombinedBlacklistProvider<T, T2>
 {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
-        Ok(self.a.is_domain_blacklisted(domain).await?
-            || self.b.is_domain_blacklisted(domain).await?)
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+        self.a.is_domain_blacklisted(domain).await
+            || self.b.is_domain_blacklisted(domain).await
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         self.a.refresh().await?;
@@ -162,11 +162,12 @@ impl RemoteBlacklistProvider {
 }
 
 impl BlacklistProvider for RemoteBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
         if let Some(domains) = &self.domains {
-            return Ok(domains.contains(domain));
+            return domains.contains(domain);
         }
-        bail!("blacklist was never loaded!");
+        eprintln!("Warning: Remote Blacklist was used but never loaded!");
+        return false;
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         if self.domains.is_none() {
@@ -209,7 +210,7 @@ impl<T: BlacklistProvider + 'static> SharedSelfRefreshingBlacklistProvider<T> {
 }
 
 impl<T: BlacklistProvider> BlacklistProvider for SharedSelfRefreshingBlacklistProvider<T> {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
         self.blacklist
             .read()
             .await
@@ -233,13 +234,13 @@ impl<T: BlacklistProvider> NormalizedBlacklistProvider<T> {
 }
 
 impl<T: BlacklistProvider> BlacklistProvider for NormalizedBlacklistProvider<T> {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
         for domain in domain_and_parents(domain) {
-            if self.blacklist.is_domain_blacklisted(&domain).await? {
-                return Ok(true);
+            if self.blacklist.is_domain_blacklisted(&domain).await {
+                return true;
             }
         }
-        Ok(false)
+        false
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         self.blacklist.refresh().await
