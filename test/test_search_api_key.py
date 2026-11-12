@@ -337,6 +337,23 @@ def test_search_missing_key_returns_results_with_null_usage(api_client):
 
 
 @pytest.mark.django_db
+def test_search_returns_indexed_commons_files_as_images_not_results(api_client):
+    from mwmbl.search_setup import ranker
+    from mwmbl.tinysearchengine.indexer import Document, DocumentSource
+
+    file = Document(
+        "Cat", "https://commons.wikimedia.org/wiki/File:Cat.jpg", "A cat.", source=DocumentSource.COMMONS_CC0
+    )
+    page = Document("Cats", "https://cats.example.com/", "About cats.")
+    with patch.object(ranker, "search", return_value=[file, page]):
+        data = api_client.get("/api/v2/search/?q=cat").json()
+
+    assert [image["page_url"] for image in data["images"]] == [file.url]
+    assert [result["url"] for result in data["results"]] == [page.url]
+    assert data["number_of_results"] == 1
+
+
+@pytest.mark.django_db
 def test_search_invalid_key(api_client):
     response = api_client.get("/api/v2/search/?q=python", **api_key_header("invalid-key"))
     assert response.status_code == 401

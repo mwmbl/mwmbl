@@ -796,7 +796,7 @@ def test_without_the_flag_there_is_no_image_search(client, access_token, fresh_q
 
 
 @pytest.mark.django_db
-def test_images_are_returned_best_first_with_their_relevance(
+def test_images_are_returned_best_first_in_the_shared_format(
     client, access_token, fresh_quota, stub_sources, stub_images
 ):
     stub_sources()
@@ -808,15 +808,11 @@ def test_images_are_returned_best_first_with_their_relevance(
         "title": "Red panda.jpg",
         "page_url": PANDA.page_url,
         "thumbnail_url": PANDA.thumbnail_url,
-        "thumbnail_width": 320,
-        "thumbnail_height": 213,
         "source": "commons",
         "license_name": "CC BY-SA 4.0",
         "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
-        "attribution": "A. Photographer",
-        "relevance": 2.9,
     }
-    assert [image["relevance"] for image in body["images"]] == [2.9, 1.7]
+    assert [image["title"] for image in body["images"]] == ["Red panda.jpg", "Red panda zoo.jpg"]
     assert stub_images.started == ["red panda"]
     assert stub_images.finish_args == ("search", [STAAN_RESULT])
 
@@ -909,3 +905,35 @@ def test_the_image_log_has_the_outcome_but_not_the_query_or_the_images(
     assert "unusual-query" not in caplog.text
     assert "Red panda" not in caplog.text
     assert PANDA.sha1 not in caplog.text
+
+
+def _indexed_file(name: str, source=DocumentSource.COMMONS_CC_BY_4_0) -> Document:
+    return Document(name, f"https://commons.wikimedia.org/wiki/File:{name}.jpg", "A file.", source=source)
+
+
+@pytest.mark.django_db
+def test_indexed_commons_files_fill_the_strip_after_seed_images_and_leave_the_web_results(
+    client, access_token, fresh_quota, stub_sources, stub_images
+):
+    tower = _indexed_file("Tower")
+    stub_sources(index=(INDEX_RESULT, tower))
+
+    body = _images(client, access_token).json()
+
+    assert [image["title"] for image in body["images"]] == ["Red panda.jpg", "Red panda zoo.jpg", "Tower.jpg"]
+    assert tower.url not in [result["url"] for result in body["results"]]
+
+
+@pytest.mark.django_db
+def test_an_indexed_file_the_seed_strip_has_is_not_shown_twice(
+    client, access_token, fresh_quota, stub_sources, stub_images
+):
+    panda = Document(
+        "Panda", "https://commons.wikimedia.org/wiki/File:Red_panda_%C3%A9.jpg", "x", source=DocumentSource.COMMONS_CC0
+    )
+    stub_sources(index=(panda,))
+
+    body = _images(client, access_token).json()
+
+    assert [image["title"] for image in body["images"]] == ["Red panda.jpg", "Red panda zoo.jpg"]
+    assert [result["url"] for result in body["results"]] == [STAAN_RESULT.url]

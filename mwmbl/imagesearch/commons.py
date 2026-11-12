@@ -39,7 +39,9 @@ FILE_NAMESPACES = {"file", "image"}
 # What MediaWiki leaves unescaped in a page URL (wfUrlencode), so a canonical URL is the one Commons gives.
 URL_SAFE_CHARACTERS = ";@$!*(),/~:"
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-THUMBNAIL_WIDTH = 320
+# 330 is one of the widths Commons keeps thumbnails at, so it serves a cached file rather than rendering one.
+# Standard search derives its thumbnail URLs at the same width (imagesearch/display.py).
+THUMBNAIL_WIDTH = 330
 TAG_PATTERN = re.compile(r"<[^>]+>")
 WHITESPACE_PATTERN = re.compile(r"\s+")
 # Characters that turn a query into CirrusSearch syntax (incategory:, insource:, phrases,
