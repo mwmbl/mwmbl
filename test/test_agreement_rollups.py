@@ -236,3 +236,27 @@ def test_get_agreement_rollups_expires_and_keys_by_days(crawlers):
     assert all(0 < client.ttl(key) <= ROLLUPS_EXPIRE_SECONDS for key in client.keys())
     assert len(client.keys()) == 2
     assert _crawler(one_day, magpie).comparisons == 2
+
+
+def test_daily_rollups_follow_the_submitter_and_its_last_version(crawlers):
+    magpie, wren, _ = crawlers
+    today = utc_today()
+    agreements = [_agreement(magpie, wren, extract=0.2), _agreement(magpie, wren, extract=0.4)]
+    agreements += [_agreement(magpie, wren, extract=0.0, extract_empty=True)]
+    for agreement, version in zip(agreements, ["0.9.2", "0.9.4", "0.9.4"]):
+        agreement.crawler_version = version
+    agreements += [_agreement(magpie, wren, extract=0.4)]
+    CrawlerAgreement.objects.bulk_create(agreements)
+    # Crawlers that don't send a version leave it null; the last version given that day still counts.
+    for agreement, hour in zip(agreements, range(1, 5)):
+        CrawlerAgreement.objects.filter(id=agreement.id).update(
+            created_at=datetime.combine(today, time(hour), tzinfo=UTC)
+        )
+
+    (day,) = _today_rollups().daily
+
+    assert day.user_id == magpie.id
+    assert day.day == today
+    assert day.comparisons == 4
+    assert day.median_extract_similarity == pytest.approx(0.4)
+    assert day.crawler_version == "0.9.4"
