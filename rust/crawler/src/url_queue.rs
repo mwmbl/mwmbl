@@ -71,7 +71,7 @@ impl<T: BlacklistProvider> SharedURLQueue<T> {
             let mut p:f32 = rng.sample(StandardUniform);
             let choose_seed_domain = p < P_SEED_DOMAIN;
             let total: f32 = (NUM_OTHER_URLS_TO_INCLUDE+NUM_TOP_DOMAIN_URLS_TO_INCLUDE+CORE_DOMAINS.len()) as f32;
-            p = (p-P_SEED_DOMAIN)/(1.0-P_SEED_DOMAIN);
+            p = rng.sample(StandardUniform);
 
             if choose_seed_domain {
                 // SELECT A SEED DOMAIN
