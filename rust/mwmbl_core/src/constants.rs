@@ -26,7 +26,7 @@ pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "lain.ovh",
 };
 
-pub static CORE_DOMAINS: phf::Set<&'static str> = phf_set! {
+pub static CORE_DOMAINS: [&str; 9] = [
     "github.com",
     "en.wikipedia.org",
     "stackoverflow.com",
@@ -36,7 +36,7 @@ pub static CORE_DOMAINS: phf::Set<&'static str> = phf_set! {
     "arxiv.org",
     "www.python.org",
     "news.ycombinator.com",
-};
+];
 
 #[allow(clippy::unwrap_used)]
 pub static DOMAIN_BLACKLIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {

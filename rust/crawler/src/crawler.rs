@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use crate::{
     CrawlerParams,
     constants::{API_PRODUCT, PROJECT_URL},
-    curated_domains::{DefaultBlackList, get_default_blacklist_provider},
+    curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     url_queue::{SharedURLQueue, URLQueue},
 };
 
@@ -16,35 +16,51 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList, T2: URLQueue = Share
     blacklist: T,
     username: Arc<RwLock<Option<String>>>,
     error_last_reported_at: Arc<HashMap<String, f32>>,
-    params: CrawlerParams,
+    params: Arc<CrawlerParams>,
 }
 
 impl Crawler {
     pub async fn new(params: CrawlerParams) -> anyhow::Result<Crawler> {
         let username = Arc::new(RwLock::new(None));
-        let blacklist = get_default_blacklist_provider(&params.remote_server).await?;
-        let url_queue = SharedURLQueue::new(blacklist.clone());
+        let curated_domains = CuratedDomains::new(&params.remote_server);
+        let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
+        let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
 
         Ok(Crawler {
             url_queue,
             blacklist,
             username,
             error_last_reported_at: Arc::new(HashMap::default()),
-            params,
+            params: Arc::new(params),
         })
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
+        println!(
+            "{:#?}",
+            self.blacklist
+                .is_domain_blacklisted("lamathematique.ovh")
+                .await
+        );
+        println!(
+            "{:#?}",
+            self.blacklist
+                .is_domain_blacklisted("pornhub.com")
+                .await
+        );
+        let url = self.url_queue.get_url().await;
+        let url2 = self.url_queue.get_url().await;
+        let url3 = self.url_queue.get_url().await;
+        let url4 = self.url_queue.get_url().await;
+        println!(
+            "{:#?} {:#?} {:#?} {:#?}",
+            url.url(), url2.url(), url3.url(), url4.url()
+        );
+
         loop {
-            println!(
-                "{:#?}",
-                self.blacklist
-                    .is_domain_blacklisted("lamathematique.ovh")
-                    .await
-            );
+            todo!();
         }
 
-        todo!();
     }
 
     pub async fn run_once(&mut self) -> anyhow::Result<()> {

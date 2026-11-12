@@ -15,6 +15,7 @@ mod constants;
 mod crawler;
 mod curated_domains;
 mod url_queue;
+mod path_creation;
 
 use std::path::PathBuf;
 
@@ -23,8 +24,8 @@ use clap::{Args, Parser, ValueEnum};
 use mwmbl_core::indexer::create_index;
 
 use crate::{
-    constants::{DATA_DIR, INDEX_NAME, NUM_PAGES},
-    crawler::Crawler,
+    constants::NUM_PAGES,
+    crawler::Crawler, path_creation::index_path,
 };
 
 #[derive(Debug, Parser)] // requires `derive` feature
@@ -65,14 +66,6 @@ pub struct CrawlerParams {
     /// URLs assigned per batch.
     #[arg(env = "CRAWL_BATCH_SIZE", long, default_value = "100")]
     crawl_batch_size: i32,
-    /// URLs assigned per batch.
-    #[arg(
-        env = "CRAWL_ALLOWED_DOMAINS",
-        long,
-        required = false,
-        value_delimiter = ','
-    )]
-    crawl_allowed_domains: Option<Vec<String>>,
     /// What to do with results the crawler decides are worth submitting:
     #[arg(env = "CRAWL_SUBMIT_MODE", long, value_enum, default_value = "index")]
     submit_mode: CrawlSubmitMode,
@@ -106,19 +99,17 @@ fn main() -> anyhow::Result<()> {
         .worker_threads(args.crawler_workers)
         .enable_all()
         .build()?
-        .block_on(async move {
-            let mut index_path = args.crawler_params.home.clone();
-            index_path.push(DATA_DIR);
-            index_path.push(INDEX_NAME);
+        .block_on(async move { tokio_main(args).await })
+}
 
-            create_index(&index_path, NUM_PAGES, false)?;
+async fn tokio_main(args: Cli) -> anyhow::Result<()> {
+    create_index(&index_path(&args.crawler_params.home), NUM_PAGES, false)?;
 
-            let mut crawler = Crawler::new(args.crawler_params).await?;
-            if args.once {
-                crawler.run_once().await?;
-            } else {
-                crawler.run().await?;
-            }
-            Ok(())
-        })
+    let mut crawler = Crawler::new(args.crawler_params).await?;
+    if args.once {
+        crawler.run_once().await?;
+    } else {
+        crawler.run().await?;
+    }
+    Ok(())
 }

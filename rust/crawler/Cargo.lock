@@ -290,6 +290,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "mwmbl_core",
+ "rand",
  "reqwest",
  "scc",
  "serde",
