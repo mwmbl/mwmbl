@@ -8,6 +8,7 @@ from ninja.errors import HttpError
 
 from mwmbl import pricing
 from mwmbl.format import format_result, format_result_v2
+from mwmbl.imagesearch.display import ImageResult, build_image_strip
 from mwmbl.indexer.dump import get_cached_dumps
 from mwmbl.models import MwmblUser
 from mwmbl.quota import (
@@ -79,23 +80,6 @@ class SearchResult(Schema):
         }
 
 
-class HitImage(Schema):
-    thumbnail_url: str = Field(
-        description="A thumbnail of the file, about 330 pixels wide. Width and height are not given: show it in a "
-        'fixed box, load it with `referrerpolicy="no-referrer"`, and hide it if it fails to load (a file narrower '
-        "than the thumbnail has none)."
-    )
-    license_name: str = Field(description="The licence the file is under, such as `CC BY-SA 4.0`. Show it.")
-    license_url: str | None = Field(
-        description="The licence's page; null when we don't know the licence's page. "
-        'Link it with `rel="noopener noreferrer nofollow"`.'
-    )
-    page_url: str = Field(
-        description="The file's page on Wikimedia Commons, which names the author. Link to it from the image: "
-        "most licences require the attribution."
-    )
-
-
 class SearchHit(Schema):
     url: str
     title: str
@@ -104,10 +88,6 @@ class SearchHit(Schema):
     content_highlights: list[str]
     engine: str
     score: float
-    image: HitImage | None = Field(
-        default=None,
-        description="The file to show as an image. Set only when `engine` is `commons`, and not for a format with no thumbnail.",
-    )
 
 
 class SearchResponse(Schema):
@@ -116,6 +96,11 @@ class SearchResponse(Schema):
     query: str
     number_of_results: int
     results: list[SearchHit]
+    images: list[ImageResult] = Field(
+        default=[],
+        description="Wikimedia Commons images to show as a strip above the web results, in rank order, with the "
+        "files they came from left out of `results`. Lay it out as the thumbnails load. Empty when there are none.",
+    )
     monthly_usage: int | None = None
     monthly_limit: int | None = None
 
@@ -324,10 +309,13 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n"
-            "- `commons` — a file from Wikimedia Commons; `image` is set unless its format has no thumbnail. The only safety check on it is "
-            "an LLM reading the file's text; nobody looks at the pixels. Load `image.thumbnail_url` with "
-            '`referrerpolicy="no-referrer"`, and show `image.license_name` and a link to `image.page_url` '
-            "with it. Escape all text before putting it in HTML, and link `image.license_url` with "
+            "- `commons` — a file from Wikimedia Commons\n\n"
+            "Commons files that rank in the top 10 (at most 4) are returned in `images` instead of `results`, "
+            "so that a strip can be shown above the web results. The only safety check on them is an LLM reading "
+            "the file's text; nobody looks at the pixels. Load `thumbnail_url` with "
+            '`referrerpolicy="no-referrer"` and hide the image if it fails to load. Show `license_name` with each '
+            "image and link the image to `page_url`, the file's page, which names the author and is its credit. "
+            "Escape all text before putting it in HTML, and link `license_url` with "
             '`rel="noopener noreferrer nofollow"`.\n\n'
             "The response includes `monthly_usage` (requests used this month) and "
             "`monthly_limit` (your plan's monthly cap); both are `null` for "
@@ -382,11 +370,13 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_usage = None
 
         raw_results = ranker.search(q, [])
-        formatted = [format_result_v2(r, i + 1, q) for i, r in enumerate(raw_results)]
+        images, web_results = build_image_strip(raw_results)
+        formatted = [format_result_v2(r, i + 1, q) for i, r in enumerate(web_results)]
         return SearchResponse(
             query=q,
             number_of_results=len(formatted),
             results=formatted,
+            images=images,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )

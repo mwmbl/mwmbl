@@ -47,7 +47,8 @@ from pydantic import Field
 
 from mwmbl import pricing
 from mwmbl.format import format_result_v2
-from mwmbl.imagesearch import commons, seed_images
+from mwmbl.imagesearch import seed_images
+from mwmbl.imagesearch.display import ImageResult, build_image_strip
 from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSearch, ImageSelection, RankedImage
 from mwmbl.indexer.index_batches import index_new_results_against_query
 from mwmbl.indexer.seed_crawl import (
@@ -81,25 +82,6 @@ logger = getLogger(__name__)
 router = Router(tags=["Combined Search"])
 
 IMAGES_SWITCHED_OFF = ImageSelection(ImageOutcome.UNAVAILABLE, [])
-
-
-class ImageResult(Schema):
-    title: str = Field(description="The file name on Commons. Plain text, but not HTML-safe: escape it.")
-    page_url: str = Field(description="The image's page on Commons, which has the full-size file and licence.")
-    thumbnail_url: str = Field(
-        description='Load this directly from Commons, with `referrerpolicy="no-referrer"`: Mwmbl does not proxy '
-        "or store images."
-    )
-    thumbnail_width: int
-    thumbnail_height: int
-    source: str = Field(examples=["commons"])
-    license_name: str
-    license_url: str
-    attribution: str = Field(description="The author, as Commons gives it. Plain text, but not HTML-safe: escape it.")
-    relevance: float = Field(
-        description="How relevant the image is to the query, as judged. Images are sorted by it, best first.",
-        examples=[2.4],
-    )
 
 
 class CombinedSearchResponse(SearchResponse):
@@ -145,10 +127,6 @@ class CombinedSearchResponse(SearchResponse):
     images_display_count: int = Field(
         description='How many of `images` to show at first. Show the rest behind a "More" button.',
         examples=[settings.IMAGES_DISPLAY_COUNT],
-    )
-    images: list[ImageResult] = Field(
-        default=[],
-        description="With `shown`, every image that passed, most relevant first. Empty otherwise.",
     )
 
 
@@ -231,12 +209,7 @@ DESCRIPTION = (
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
-    "- `commons` - a Wikimedia Commons file from the Mwmbl index. `image` is set unless the format has no thumbnail, "
-    "and then it is a text result. "
-    "The safety check on it is the LLM reading its text, with no pixel check. Load `image.thumbnail_url` with "
-    '`referrerpolicy="no-referrer"`, show `image.license_name` and a link to `image.page_url` with it, '
-    "escape all text before putting it in HTML, and link `image.license_url` with "
-    '`rel="noopener noreferrer nofollow"`.\n'
+    "- `commons` - a Wikimedia Commons file from the Mwmbl index\n"
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. With an API key every request is billed - there is no free allowance - at the "
@@ -256,19 +229,23 @@ DESCRIPTION = (
     "`GET /api/v2/combined-search/new-pages/count?q=...` counts it.\n\n"
     "If EUSP is down or unconfigured, the request loses its extra recall, not its "
     "results: the index's results are ranked and returned as usual.\n\n"
-    "With `images=true`, the search also returns images from Wikimedia Commons in `images`, most "
-    "relevant first, when the query calls for them; `image_outcome` says why there are none. To find "
+    "`images` is a strip of Wikimedia Commons images to show above the web results; the files in it are left out "
+    "of `results`. Commons files from the Mwmbl index that rank in the top 10 fill it (at most "
+    f"{settings.IMAGES_DISPLAY_COUNT}), as in `/api/v2/search/`. Every image has its own `license_name`, and its "
+    "`page_url` is the file's page, which names the author: show the licence and link the image to that page as its "
+    'credit. Load thumbnails with `referrerpolicy="no-referrer"` and hide an image whose thumbnail fails to load; '
+    "they come from Wikimedia, which sees the viewer's IP address. Remember to escape titles before putting them in HTML, and "
+    'link `license_url`, which may be null, with `rel="noopener noreferrer nofollow"`. The only safety check on an '
+    "image is an LLM reading its text: nobody looks at the pixels, and violent or otherwise disturbing images are "
+    "not screened.\n\n"
+    "With `images=true`, the search also looks for more images, which come first in the strip, when the query calls "
+    "for them; `image_outcome` says why there are none. To find "
     "them, Mwmbl's server sends the query to Wikimedia Commons, and the query, the top web results and "
     "the images' text to a third-party LLM service, on every `images=true` request except "
     "`query_refused` ones, including those whose outcome is `not_needed`. The LLM judges each image's "
-    "relevance from its text, and whether that text suggests nudity or sexual content. That is the only "
-    "safety check: nobody looks at the pixels, and violent or otherwise disturbing images are not "
-    'screened. Show the first `images_display_count` images and put the rest behind a "More" button, '
-    "without a new request. Image pages shown in `images` are left out of `results`. Titles and "
-    "attribution are plain text from Commons that is not HTML-safe, so escape them. Load thumbnails "
-    'with `referrerpolicy="no-referrer"`; they come from Wikimedia, which sees the viewer\'s IP address. '
-    "`license_url` may be empty and is set by the uploader: link it, and `page_url`, with "
-    '`rel="noopener noreferrer nofollow"`. Image search fails closed: if it fails or is slow, '
+    "relevance from its text, and whether that text suggests nudity or sexual content. Show the first "
+    '`images_display_count` images and put the rest behind a "More" button, without a new request. '
+    "Image search fails closed: if it fails or is slow, "
     "`image_outcome` is `unavailable` and the web results are unaffected. Images cost nothing extra.\n\n"
     "**Query parameter:** `q` - the search query string (required)."
 )
@@ -303,13 +280,9 @@ def to_image_result(ranked: RankedImage) -> ImageResult:
         title=image.title,
         page_url=image.page_url,
         thumbnail_url=image.thumbnail_url,
-        thumbnail_width=image.thumbnail_width,
-        thumbnail_height=image.thumbnail_height,
         source="commons",
         license_name=image.license_name,
-        license_url=image.license_url,
-        attribution=image.attribution,
-        relevance=ranked.relevance,
+        license_url=image.license_url or None,
     )
 
 
@@ -447,11 +420,10 @@ def init_router(ranker) -> None:
             image_finding,
         )
         shown_images = image_selection.images if image_selection else []
-        # An image in the strip isn't shown again as a web result. A page URL with no key can't match one, and a
-        # None in the set would match every web result that isn't a Commons file.
-        shown_keys = (commons.commons_file_key(ranked.image.page_url) for ranked in shown_images)
-        shown_files = {key for key in shown_keys if key is not None}
-        web_results = [result for result in results if commons.commons_file_key(result.url) not in shown_files]
+        # Seed Search's images lead, and Commons files from the top web results fill the strip up to its size. Every
+        # file in the strip is left out of the web results.
+        seed_strip = tuple(to_image_result(ranked) for ranked in shown_images)
+        images, web_results = build_image_strip(results, seed_strip)
 
         crawl_outcome = None
         crawls_ahead = None
@@ -480,7 +452,7 @@ def init_router(ranker) -> None:
             active_crawl_queries=active_crawl_queries,
             image_outcome=image_selection.outcome if image_selection else None,
             images_display_count=settings.IMAGES_DISPLAY_COUNT,
-            images=[to_image_result(ranked) for ranked in shown_images],
+            images=images,
         )
 
     @router.get(
