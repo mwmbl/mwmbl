@@ -1,5 +1,4 @@
 #![deny(
-    clippy::arithmetic_side_effects,
     clippy::exit,
     clippy::expect_used,
     clippy::indexing_slicing,
@@ -14,8 +13,8 @@
 mod constants;
 mod crawler;
 mod curated_domains;
-mod url_queue;
 mod path_creation;
+mod url_queue;
 
 use std::path::PathBuf;
 
@@ -23,10 +22,7 @@ use anyhow::Ok;
 use clap::{Args, Parser, ValueEnum};
 use mwmbl_core::indexer::create_index;
 
-use crate::{
-    constants::NUM_PAGES,
-    crawler::Crawler, path_creation::index_path,
-};
+use crate::{constants::NUM_PAGES, crawler::Crawler, path_creation::index_path};
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = "crawler")]

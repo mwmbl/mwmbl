@@ -8,7 +8,7 @@ use crate::{
     CrawlerParams,
     constants::{API_PRODUCT, PROJECT_URL},
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    url_queue::{SharedURLQueue},
+    url_queue::SharedURLQueue,
 };
 
 pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
@@ -44,9 +44,7 @@ impl Crawler {
         );
         println!(
             "{:#?}",
-            self.blacklist
-                .is_domain_blacklisted("pornhub.com")
-                .await
+            self.blacklist.is_domain_blacklisted("pornhub.com").await
         );
         let url = self.url_queue.get_url().await;
         let url2 = self.url_queue.get_url().await;
@@ -54,13 +52,15 @@ impl Crawler {
         let url4 = self.url_queue.get_url().await;
         println!(
             "{:#?} {:#?} {:#?} {:#?}",
-            url.url(), url2.url(), url3.url(), url4.url()
+            url.url(),
+            url2.url(),
+            url3.url(),
+            url4.url()
         );
 
         loop {
             todo!();
         }
-
     }
 
     pub async fn run_once(&mut self) -> anyhow::Result<()> {
@@ -76,7 +76,7 @@ impl Crawler {
         format!("{API_PRODUCT} ({identity})")
     }
 
-    pub async fn fetch_username(username: &mut Arc<RwLock<Option<String>>>) -> Option<String> {
+    pub async fn fetch_username(_username: &mut Arc<RwLock<Option<String>>>) -> Option<String> {
         todo!()
     }
 }

@@ -7,7 +7,8 @@ use mwmbl_core::{
         BlacklistProvider, BuiltInRulesBlacklistProvider, CombinedBlacklistProvider,
         NormalizedBlacklistProvider, RemoteBlacklistProvider,
         SharedSelfRefreshingBlacklistProvider,
-    }, hn_top_domains_filtered::DOMAINS,
+    },
+    hn_top_domains_filtered::DOMAINS,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -27,8 +28,8 @@ pub struct CuratedDomainsResponse {
 
 #[derive(Clone)]
 pub struct CuratedDomains {
-    curated_domains: Arc<RwLock<HashSet<String>>>,
-    curated_non_static_domains: Arc<RwLock<Vec<String>>>,
+    domains_set: Arc<RwLock<HashSet<String>>>,
+    non_static_domains: Arc<RwLock<Vec<String>>>,
     url: Arc<RwLock<String>>,
 }
 
@@ -37,12 +38,12 @@ impl CuratedDomains {
     pub fn new(remote_server: &str) -> Self {
         let url = format!("{remote_server}/api/v1/crawler/curated-domains");
         Self {
-            curated_domains: Arc::new(RwLock::new(HashSet::default())),
+            domains_set: Arc::new(RwLock::new(HashSet::default())),
             url: Arc::new(RwLock::new(url)),
-            curated_non_static_domains: Arc::new(RwLock::new(Vec::new())),
+            non_static_domains: Arc::new(RwLock::new(Vec::new())),
         }
     }
-    
+
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
         let response = Client::builder()
             .build()?
@@ -57,7 +58,6 @@ impl CuratedDomains {
         let mut curated_domains: HashSet<String> = HashSet::default();
         let mut curated_non_static_domains: Vec<String> = Vec::default();
 
-
         for domain in response.domains {
             curated_domains.insert(domain.name);
         }
@@ -67,9 +67,9 @@ impl CuratedDomains {
                 curated_non_static_domains.push(domain.clone());
             }
         }
-        
-        let mut curated_domains_lock = self.curated_domains.write().await;
-        let mut curated_non_static_domains_lock = self.curated_non_static_domains.write().await;
+
+        let mut curated_domains_lock = self.domains_set.write().await;
+        let mut curated_non_static_domains_lock = self.non_static_domains.write().await;
 
         *curated_domains_lock = curated_domains;
         *curated_non_static_domains_lock = curated_non_static_domains;
@@ -77,15 +77,16 @@ impl CuratedDomains {
         Ok(())
     }
     pub async fn is_domain_curated(&self, domain: &str) -> bool {
-        self.curated_domains.read().await.contains(&domain_no_www(domain))
+        self.domains_set
+            .read()
+            .await
+            .contains(&domain_no_www(domain))
     }
-    
-    pub fn get_curated_non_static_domains(&self) -> Arc<RwLock<Vec<String>>> {
-        self.curated_non_static_domains.clone()
+
+    pub fn get_non_static_domains(&self) -> Arc<RwLock<Vec<String>>> {
+        self.non_static_domains.clone()
     }
 }
-
-
 
 #[derive(Clone)]
 pub struct CuratedBlacklistProvider<T: BlacklistProvider> {
@@ -124,7 +125,9 @@ pub type DefaultBlackList = SharedSelfRefreshingBlacklistProvider<
     >,
 >;
 
-pub async fn get_default_blacklist_provider(curated_domains: CuratedDomains) -> anyhow::Result<DefaultBlackList> {
+pub async fn get_default_blacklist_provider(
+    curated_domains: CuratedDomains,
+) -> anyhow::Result<DefaultBlackList> {
     let first = BuiltInRulesBlacklistProvider::new();
     let second =
         RemoteBlacklistProvider::new(BlacklistUrls::HageziUrlTifMedium.as_str().to_owned());
