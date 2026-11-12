@@ -42,6 +42,9 @@ client = commons.new_client()
 # Image work has threads of its own, so that threads left blocked on Commons or Redis after a missed deadline
 # can never hold up web search's.
 executor = ThreadPoolExecutor(settings.IMAGE_SEARCH_THREADS, thread_name_prefix="seed-images")
+# Apart from the executor above, so that an index write waiting on a page lock can't hold up a search's judge calls, and
+# one thread, so that a burst of searches queues its writes instead of contending with the crawler for page locks.
+index_executor = ThreadPoolExecutor(1, thread_name_prefix="seed-images-index")
 # Files nominated for deletion are still on Commons while the community decides.
 DELETION_CATEGORY_PREFIXES = (
     "Deletion requests",
@@ -140,7 +143,7 @@ def index_safe_images(candidates: asyncio.Future, nsfw_scores: asyncio.Future) -
         image for image, score in zip(candidates.result(), nsfw_scores.result(), strict=True) if score < NSFW_THRESHOLD
     ]
     if safe:
-        asyncio.get_running_loop().run_in_executor(executor, write_to_index, safe)
+        asyncio.get_running_loop().run_in_executor(index_executor, write_to_index, safe)
 
 
 def write_to_index(images: list[SourceImage]) -> None:
