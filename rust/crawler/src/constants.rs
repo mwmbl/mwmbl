@@ -13,6 +13,7 @@ pub static NUM_TOP_DOMAIN_URLS_TO_INCLUDE: usize = 50;
 pub static NUM_OTHER_URLS_TO_INCLUDE: usize = 100;
 pub static NUM_PRIOTITY_QUEUES: usize = 1000;
 pub static P_SEED_DOMAIN: f32 = 0.01;
+pub static MAX_OTHER_DOMAINS: usize = 10000;
 
 pub static MAX_REDIRECTS: usize = 5;
 pub static TIMEOUT_SECONDS: usize = 3;

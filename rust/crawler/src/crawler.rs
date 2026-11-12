@@ -8,11 +8,11 @@ use crate::{
     CrawlerParams,
     constants::{API_PRODUCT, PROJECT_URL},
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    url_queue::{SharedURLQueue, URLQueue},
+    url_queue::{SharedURLQueue},
 };
 
-pub struct Crawler<T: BlacklistProvider = DefaultBlackList, T2: URLQueue = SharedURLQueue<T>> {
-    url_queue: T2,
+pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
+    url_queue: SharedURLQueue<T>,
     blacklist: T,
     username: Arc<RwLock<Option<String>>>,
     error_last_reported_at: Arc<HashMap<String, f32>>,
