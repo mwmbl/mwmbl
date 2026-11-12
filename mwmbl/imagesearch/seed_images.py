@@ -27,7 +27,7 @@ from logging import WARNING, getLogger
 
 from django.conf import settings
 
-from mwmbl.imagesearch import commons, judge, rules
+from mwmbl.imagesearch import commons, indexing, judge, rules
 from mwmbl.imagesearch.prompt import MIN_RELEVANCE, NEED_THRESHOLD, NSFW_THRESHOLD
 from mwmbl.imagesearch.types import SourceImage, Verdict
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
@@ -42,6 +42,9 @@ client = commons.new_client()
 # Image work has threads of its own, so that threads left blocked on Commons or Redis after a missed deadline
 # can never hold up web search's.
 executor = ThreadPoolExecutor(settings.IMAGE_SEARCH_THREADS, thread_name_prefix="seed-images")
+# Apart from the executor above, so that an index write waiting on a page lock can't hold up a search's judge calls, and
+# one thread, so that a burst of searches queues its writes instead of contending with the crawler for page locks.
+index_executor = ThreadPoolExecutor(1, thread_name_prefix="seed-images-index")
 # Files nominated for deletion are still on Commons while the community decides.
 DELETION_CATEGORY_PREFIXES = (
     "Deletion requests",
@@ -98,6 +101,10 @@ def start(query: str) -> ImageSearch:
     nsfw_scores = asyncio.create_task(score_nsfw(candidates))
     for future in (candidates, nsfw_scores):
         future.add_done_callback(retrieve_outcome)
+    if settings.IMAGE_INDEXING_ENABLED:
+        # A callback of its own, not part of finish: it still fires when the images miss their deadline, and the
+        # query is not among what it is given.
+        nsfw_scores.add_done_callback(lambda done: index_safe_images(candidates, done))
     return ImageSearch(query, candidates, nsfw_scores)
 
 
@@ -125,6 +132,26 @@ def log_late_selection(selection: asyncio.Future, ranking_finished_at: float) ->
     failed = selection.cancelled() or selection.exception() is not None
     outcome = "failed" if failed else selection.result().outcome
     logger.info("Late images %s: finished %.3fs after web ranking", outcome, finished_after)
+
+
+def index_safe_images(candidates: asyncio.Future, nsfw_scores: asyncio.Future) -> None:
+    """Hand the candidates the NSFW judge passed to the index, off the event loop. The score is query-independent,
+    so the relevance to this search plays no part in what is written."""
+    if nsfw_scores.cancelled() or nsfw_scores.exception() is not None:
+        return
+    safe = [
+        image for image, score in zip(candidates.result(), nsfw_scores.result(), strict=True) if score < NSFW_THRESHOLD
+    ]
+    if safe:
+        asyncio.get_running_loop().run_in_executor(index_executor, write_to_index, safe)
+
+
+def write_to_index(images: list[SourceImage]) -> None:
+    try:
+        indexing.index_images(images)
+    except Exception as e:
+        # Only the type: a message can embed a file name.
+        logger.warning("Indexing images failed: %s", type(e).__name__)
 
 
 def retrieve_outcome(future: asyncio.Future) -> None:
