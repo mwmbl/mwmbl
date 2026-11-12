@@ -441,9 +441,10 @@ def init_router(ranker) -> None:
             image_finding,
         )
         shown_images = image_selection.images if image_selection else []
-        # An image in the strip isn't shown again as a web result. Its page URL is always a Commons file page, so
-        # its key is never None.
-        shown_files = {commons.commons_file_key(ranked.image.page_url) for ranked in shown_images}
+        # An image in the strip isn't shown again as a web result. A page URL with no key can't match one, and a
+        # None in the set would match every web result that isn't a Commons file.
+        shown_keys = (commons.commons_file_key(ranked.image.page_url) for ranked in shown_images)
+        shown_files = {key for key in shown_keys if key is not None}
         web_results = [result for result in results if commons.commons_file_key(result.url) not in shown_files]
 
         crawl_outcome = None

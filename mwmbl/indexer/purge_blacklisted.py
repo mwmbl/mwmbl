@@ -73,7 +73,8 @@ def purge_documents(
                 domain = get_domain(document.url)
             except ValueError:
                 continue
-            if not is_blacklisted(domain) and not (is_blocked_url is not None and is_blocked_url(document.url)):
+            still_blocked_by_url = is_blocked_url is not None and is_blocked_url(document.url)
+            if not is_blacklisted(domain) and not still_blocked_by_url:
                 logger.info("Skipping purge of %s: no longer blacklisted", document.url)
                 continue
 

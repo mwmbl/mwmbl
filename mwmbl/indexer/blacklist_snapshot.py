@@ -341,6 +341,9 @@ class SnapshotBlacklist(BlacklistProvider):
         positions[positions >= len(array)] = 0
         return array[positions] == hashes
 
+    def is_url_blocked(self, url: str) -> bool:
+        return url in self.filter_blocked_urls([url])
+
     def filter_blocked_urls(self, urls: Iterable[str]) -> set[str]:
         """Return the subset of these URLs a moderator has blocked, see mwmbl.blocked_urls.
 

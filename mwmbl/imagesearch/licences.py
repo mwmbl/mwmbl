@@ -1,7 +1,7 @@
 """The licences a Commons file can be indexed under, as the DocumentSource members that carry them.
 
 Commons names a file's licence in free text (`LicenseShortName`), with 62 distinct values over
-17,607 Seed Search candidates, but the twelve below cover 96% of them. The rest share
+17,607 Seed Search candidates, but the ten below cover 94% of them. The rest share
 COMMONS_OTHER, and the result page then points at the file page, which names the licence.
 """
 

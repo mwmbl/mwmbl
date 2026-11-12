@@ -69,7 +69,12 @@ admin.site.register(DomainSubmission, ModelAdmin)
 
 
 class BlockedUrlAdmin(ModelAdmin):
-    """Blocks one URL, such as a Commons file that should never be shown. Takes effect when the snapshot rebuilds."""
+    """Blocks one URL, such as a Commons file that should never be shown.
+
+    A block takes effect when the blacklist snapshot rebuilds, which is scheduled a few minutes after saving
+    (BLACKLIST_SNAPSHOT_APPROVAL_DELAY_SECONDS) and then reaches each worker on its next check, so it is not
+    instant. A rebuild already running when a block is saved may have missed it, and the next is up to six hours away.
+    """
 
     list_display = ("key", "reason", "created_at")
     search_fields = ("key", "reason")

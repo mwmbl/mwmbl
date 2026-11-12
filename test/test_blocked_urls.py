@@ -4,8 +4,10 @@ import fakeredis
 import numpy as np
 import pytest
 from background_task.models import Task
+from django.core.exceptions import ValidationError
 
 from mwmbl.blocked_urls import url_block_key
+from mwmbl.imagesearch import commons, seed_images
 from mwmbl.indexer import blacklist_snapshot
 from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider, StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist, build_snapshot, publish_snapshot
@@ -15,6 +17,7 @@ from mwmbl.models import BlockedUrl
 from mwmbl.signals import BLACKLIST_SNAPSHOT_TASK
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
+from test.test_image_search import make_image
 
 FILE_URL = "https://commons.wikimedia.org/wiki/File:Cat.jpg"
 OTHER_FILE_URL = "https://commons.wikimedia.org/wiki/File:Dog.jpg"
@@ -51,8 +54,42 @@ def test_a_commons_file_has_one_key_whatever_the_spelling():
     assert keys == {FILE_URL}
 
 
-def test_any_other_url_is_its_own_key():
+def test_a_title_in_another_unicode_form_is_the_same_file():
+    decomposed = "https://commons.wikimedia.org/wiki/File:Cafe\u0301.jpg"
+    composed = "https://commons.wikimedia.org/wiki/File:Caf\u00e9.jpg"
+
+    assert url_block_key(decomposed) == url_block_key(composed)
+
+
+def test_any_other_url_is_its_own_key_without_its_fragment():
     assert url_block_key(PAGE_URL) == PAGE_URL
+    assert url_block_key(PAGE_URL + "#section") == PAGE_URL
+
+
+def test_an_unparseable_url_is_its_own_key_rather_than_an_error():
+    assert url_block_key("http://[x/") == "http://[x/"
+
+
+@pytest.mark.django_db
+def test_blocking_a_file_under_a_second_spelling_is_refused_by_the_form_check():
+    BlockedUrl.objects.create(url=FILE_URL, reason="abuse")
+    again = BlockedUrl(url="https://commons.m.wikimedia.org/wiki/File:cat.jpg", reason="again")
+
+    with pytest.raises(ValidationError):
+        again.clean()
+
+
+def test_a_bare_domain_is_not_a_valid_url_to_block():
+    with pytest.raises(ValidationError):
+        BlockedUrl(url="example.com", reason="abuse").clean_fields(exclude=["key"])
+
+
+@pytest.mark.django_db
+def test_an_unparseable_url_does_not_break_filtering(snapshot_blacklist):
+    BlockedUrl.objects.create(url=PAGE_URL, reason="abuse")
+    snapshot_blacklist()
+
+    assert find_blacklisted_urls([document("http://[x/"), document(PAGE_URL)]) == {PAGE_URL}
 
 
 @pytest.mark.django_db
@@ -145,3 +182,15 @@ def test_a_snapshot_builds_without_a_database():
     array = np.frombuffer(build_snapshot(CombinedBlacklistProvider([])), dtype=blacklist_snapshot.HASH_DTYPE)
 
     assert len(array) == 0
+
+
+@pytest.mark.django_db
+def test_seed_search_does_not_offer_a_blocked_file(snapshot_blacklist, monkeypatch, settings):
+    settings.JEV_API_KEY = "test-key"
+    blocked = make_image("Cat.jpg", page_url=FILE_URL)
+    fine = make_image("Dog.jpg", page_url=OTHER_FILE_URL)
+    monkeypatch.setattr(commons, "search_commons", lambda *args: [blocked, fine])
+    BlockedUrl.objects.create(url="https://commons.m.wikimedia.org/wiki/File:cat.jpg", reason="abuse")
+    snapshot_blacklist()
+
+    assert seed_images.find_candidates("pets") == [fine]

@@ -12,6 +12,7 @@ image search for every worker rather than being rediscovered by each.
 import html
 import re
 import threading
+import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -201,7 +202,8 @@ def fetch_json(client: httpx.Client, params: dict) -> dict:
 def file_page_url(title: str) -> str | None:
     """The canonical page URL of a file title, such as `File:Café.jpg` or `image:café jpg`; None for a title that is
     not in the File namespace."""
-    namespace, separator, name = title.partition(":")
+    # MediaWiki stores titles in NFC, so a title typed or pasted in another form is the same file.
+    namespace, separator, name = unicodedata.normalize("NFC", title).partition(":")
     # MediaWiki reads spaces and underscores alike, and collapses and trims runs of them.
     words = name.replace("_", " ").split()
     if not separator or namespace.strip().lower() not in FILE_NAMESPACES or not words:
@@ -215,7 +217,11 @@ def file_page_url(title: str) -> str | None:
 def commons_file_key(url: str) -> str | None:
     """The canonical page URL of the Commons file a URL is for, however it is encoded, on either site, as a /wiki/
     or a /w/index.php?title= URL; None for any other URL."""
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # Crawled links are untrusted, and this runs on every result; a URL that can't be parsed is no file page.
+        return None
     if parsed.hostname not in COMMONS_FILE_HOSTS:
         return None
     if parsed.path.startswith("/wiki/"):

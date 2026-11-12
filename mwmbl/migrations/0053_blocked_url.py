@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
             name="BlockedUrl",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("url", models.TextField()),
+                ("url", models.URLField(max_length=1000)),
                 ("key", models.TextField(editable=False, unique=True)),
                 ("reason", models.CharField(max_length=200)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
