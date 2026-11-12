@@ -18,9 +18,6 @@ from mwmbl.indexer.blacklist_snapshot import (
     refresh_snapshot,
 )
 
-# build_snapshot reads the blocked URLs from the database.
-pytestmark = pytest.mark.django_db
-
 
 class FakeRemoteProvider(RemoteListBlacklistProvider):
     """A remote list provider that serves a fixed set instead of fetching."""

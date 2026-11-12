@@ -121,6 +121,13 @@ def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
     return set()
 
 
+def get_blocked_urls() -> list[str]:
+    # The standalone crawler publishes its own snapshot with no database, see curated_domains.
+    if not settings.HAS_DATABASE:
+        return []
+    return list(BlockedUrl.objects.values_list("url", flat=True))
+
+
 def build_snapshot(provider: BlacklistProvider) -> bytes:
     """Download/parse the remote lists and return the sorted hash array as bytes.
 
@@ -130,7 +137,7 @@ def build_snapshot(provider: BlacklistProvider) -> bytes:
     unblocked = domains_to_unblock(get_curated_domains())
     domains = listed_domains - unblocked
     num_unblocked = len(listed_domains) - len(domains)
-    blocked_urls = list(BlockedUrl.objects.values_list("url", flat=True))
+    blocked_urls = get_blocked_urls()
     all_hashes = np.concatenate([hash_domains(domains), hash_domains(url_hash_input(url) for url in blocked_urls)])
     hashes = np.unique(all_hashes)  # np.unique sorts, which is what we need
     logger.info(

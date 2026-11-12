@@ -24,7 +24,9 @@ SAME_DOMAIN_URL = "https://example.com/fine-page"
 
 
 @pytest.fixture
-def snapshot_blacklist(monkeypatch):
+def snapshot_blacklist(monkeypatch, settings):
+    # The test settings have no database; the blocks are read from one.
+    settings.HAS_DATABASE = True
     redis_client = fakeredis.FakeRedis()
     blacklist = SnapshotBlacklist(built_in_rules=StaticBlacklistProvider(set()), redis_client=redis_client)
     monkeypatch.setattr(blacklist_snapshot, "_snapshot_blacklist", blacklist)
@@ -136,3 +138,10 @@ def test_purge_removes_a_blocked_url_but_not_its_domain_neighbour(tmp_path):
 
     assert removed == {"example.com": 1}
     assert remaining == {SAME_DOMAIN_URL}
+
+
+def test_a_snapshot_builds_without_a_database():
+    """The standalone crawler publishes its own snapshot, and has no database to read blocks from."""
+    array = np.frombuffer(build_snapshot(CombinedBlacklistProvider([])), dtype=blacklist_snapshot.HASH_DTYPE)
+
+    assert len(array) == 0
