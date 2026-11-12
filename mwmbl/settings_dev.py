@@ -15,6 +15,8 @@ DEBUG = True
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# The front end's Vite dev server, so links in emails can be followed locally.
+FRONTEND_URL = "http://localhost:5173"
 
 DATA_PATH = "./devdata"
 INDEX_NAME = "index-v2.tinysearch"
