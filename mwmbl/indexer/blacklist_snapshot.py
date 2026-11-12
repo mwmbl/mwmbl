@@ -52,6 +52,7 @@ import numpy as np
 import redis
 from django.conf import settings
 
+from mwmbl.blocked_urls import url_hash_input
 from mwmbl.curated_domains import get_curated_domains
 from mwmbl.indexer.blacklist import get_default_blacklist_provider
 from mwmbl.indexer.blacklist_providers import (
@@ -62,6 +63,7 @@ from mwmbl.indexer.blacklist_providers import (
     domain_and_parents,
     domains_to_unblock,
 )
+from mwmbl.models import BlockedUrl
 
 logger = getLogger(__name__)
 
@@ -119,6 +121,13 @@ def collect_remote_domains(provider: BlacklistProvider) -> set[str]:
     return set()
 
 
+def get_blocked_urls() -> list[str]:
+    # The standalone crawler publishes its own snapshot with no database, see curated_domains.
+    if not settings.HAS_DATABASE:
+        return []
+    return list(BlockedUrl.objects.values_list("url", flat=True))
+
+
 def build_snapshot(provider: BlacklistProvider) -> bytes:
     """Download/parse the remote lists and return the sorted hash array as bytes.
 
@@ -128,11 +137,14 @@ def build_snapshot(provider: BlacklistProvider) -> bytes:
     unblocked = domains_to_unblock(get_curated_domains())
     domains = listed_domains - unblocked
     num_unblocked = len(listed_domains) - len(domains)
-    all_hashes = hash_domains(domains)
+    blocked_urls = get_blocked_urls()
+    all_hashes = np.concatenate([hash_domains(domains), hash_domains(url_hash_input(url) for url in blocked_urls)])
     hashes = np.unique(all_hashes)  # np.unique sorts, which is what we need
     logger.info(
-        "Built blacklist snapshot: %d domains, %d unique hashes, %.1f MB; %d entries removed by curated domains",
+        "Built blacklist snapshot: %d domains and %d URLs, %d unique hashes, %.1f MB; %d entries removed by "
+        "curated domains",
         len(domains),
+        len(blocked_urls),
         len(hashes),
         hashes.nbytes / 1e6,
         num_unblocked,
@@ -316,16 +328,35 @@ class SnapshotBlacklist(BlacklistProvider):
                 candidates.append(candidate)
                 candidate_domains.append(domain)
 
-        hashes = hash_domains(candidates)
+        found = self._in_array(array, hash_domains(candidates))
+        blacklisted.update(domain for domain, hit in zip(candidate_domains, found) if hit)
+        return blacklisted
+
+    @staticmethod
+    def _in_array(array: np.ndarray, hashes: np.ndarray) -> np.ndarray:
         positions = np.searchsorted(array, hashes)
         # searchsorted can return len(array) for a hash above every entry; clamp so the
         # lookup below stays in bounds. Index 0 is always a safe stand-in because the
         # equality check is what decides membership.
         positions[positions >= len(array)] = 0
-        found = array[positions] == hashes
+        return array[positions] == hashes
 
-        blacklisted.update(domain for domain, hit in zip(candidate_domains, found) if hit)
-        return blacklisted
+    def is_url_blocked(self, url: str) -> bool:
+        return url in self.filter_blocked_urls([url])
+
+    def filter_blocked_urls(self, urls: Iterable[str]) -> set[str]:
+        """Return the subset of these URLs a moderator has blocked, see mwmbl.blocked_urls.
+
+        Hashing one URL costs about the same as hashing a domain, so this roughly doubles the
+        ~94us a query already spends on its domains.
+        """
+        urls = list(dict.fromkeys(urls))
+        array = self._array
+        if not urls or array is None or len(array) == 0:
+            return set()
+
+        found = self._in_array(array, hash_domains(url_hash_input(url) for url in urls))
+        return {url for url, hit in zip(urls, found) if hit}
 
     def is_domain_blacklisted(self, domain: str) -> bool:
         return domain in self.filter_blacklisted([domain])

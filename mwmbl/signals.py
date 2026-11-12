@@ -17,11 +17,11 @@ from logging import getLogger
 
 from background_task.models import Task
 from django.conf import settings
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from mwmbl.models import DomainSubmission
+from mwmbl.models import BlockedUrl, DomainSubmission
 
 logger = getLogger(__name__)
 
@@ -83,3 +83,11 @@ def schedule_blacklist_rebuild() -> bool:
 
     refresh_blacklist_snapshot(schedule=delay)
     return True
+
+
+@receiver(post_save, sender=BlockedUrl)
+@receiver(post_delete, sender=BlockedUrl)
+def rebuild_blacklist_snapshot_on_url_block(sender, instance: BlockedUrl, **kwargs):
+    """Schedule a snapshot rebuild when a URL is blocked or unblocked, for the same reason as an approval."""
+    if schedule_blacklist_rebuild():
+        logger.info("Scheduled a blacklist snapshot rebuild after changing the block on %s", instance.key)

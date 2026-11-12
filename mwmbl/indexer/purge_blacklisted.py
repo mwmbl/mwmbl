@@ -45,7 +45,10 @@ def pages_for_document(index: TinyIndex, document: Document) -> set[int]:
 
 
 def purge_documents(
-    index: TinyIndex, documents: Iterable[Document], is_blacklisted: Optional[Callable[[str], bool]] = None
+    index: TinyIndex,
+    documents: Iterable[Document],
+    is_blacklisted: Optional[Callable[[str], bool]] = None,
+    is_blocked_url: Optional[Callable[[str], bool]] = None,
 ) -> dict[str, int]:
     """Remove exactly these documents, by URL, from every page they are filed under.
 
@@ -59,7 +62,8 @@ def purge_documents(
 
     `is_blacklisted` re-checks each document before removal, so a domain that came off
     the blacklist between being queued and being purged is left alone. Pass None to skip
-    the re-check and remove everything given.
+    the re-check and remove everything given. A document that is blocked by URL passes the
+    re-check whatever its domain, because `is_blocked_url` says it still is.
     """
     target_urls = set()
     pages_to_urls: dict[int, set[str]] = defaultdict(set)
@@ -69,7 +73,8 @@ def purge_documents(
                 domain = get_domain(document.url)
             except ValueError:
                 continue
-            if not is_blacklisted(domain):
+            still_blocked_by_url = is_blocked_url is not None and is_blocked_url(document.url)
+            if not is_blacklisted(domain) and not still_blocked_by_url:
                 logger.info("Skipping purge of %s: no longer blacklisted", document.url)
                 continue
 

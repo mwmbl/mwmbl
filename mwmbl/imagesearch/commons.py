@@ -12,8 +12,9 @@ image search for every worker rather than being rediscovered by each.
 import html
 import re
 import threading
+import unicodedata
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import httpx
 from django.conf import settings
@@ -30,6 +31,13 @@ COOLDOWN_CACHE_KEY = "imagesearch:commons-cooldown"
 DEFAULT_COOLDOWN_SECONDS = 60
 ALLOWED_THUMBNAIL_HOSTS = {"upload.wikimedia.org", "thumb.wikimedia.org"}
 COMMONS_PAGE_HOSTS = {"commons.wikimedia.org"}
+# Where a link to a file page may point: the mobile site's pages are the same files.
+COMMONS_FILE_HOSTS = COMMONS_PAGE_HOSTS | {"commons.m.wikimedia.org"}
+FILE_PAGE_PREFIX = "https://commons.wikimedia.org/wiki/File:"
+# `Image:` is MediaWiki's old name for the File namespace, and still links to the same pages.
+FILE_NAMESPACES = {"file", "image"}
+# What MediaWiki leaves unescaped in a page URL (wfUrlencode), so a canonical URL is the one Commons gives.
+URL_SAFE_CHARACTERS = ";@$!*(),/~:"
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 THUMBNAIL_WIDTH = 320
 TAG_PATTERN = re.compile(r"<[^>]+>")
@@ -189,3 +197,36 @@ def fetch_json(client: httpx.Client, params: dict) -> dict:
     if "error" in body:
         raise SourceRejectedRequest(f"Commons API error: {body['error'].get('code')}")
     return body
+
+
+def file_page_url(title: str) -> str | None:
+    """The canonical page URL of a file title, such as `File:Café.jpg` or `image:café jpg`; None for a title that is
+    not in the File namespace."""
+    # MediaWiki stores titles in NFC, so a title typed or pasted in another form is the same file.
+    namespace, separator, name = unicodedata.normalize("NFC", title).partition(":")
+    # MediaWiki reads spaces and underscores alike, and collapses and trims runs of them.
+    words = name.replace("_", " ").split()
+    if not separator or namespace.strip().lower() not in FILE_NAMESPACES or not words:
+        return None
+    joined = "_".join(words)
+    # Commons capitalises the first letter of every title, so `File:café.jpg` is `File:Café.jpg`.
+    capitalised = joined[0].upper() + joined[1:]
+    return FILE_PAGE_PREFIX + quote(capitalised, safe=URL_SAFE_CHARACTERS)
+
+
+def commons_file_key(url: str) -> str | None:
+    """The canonical page URL of the Commons file a URL is for, however it is encoded, on either site, as a /wiki/
+    or a /w/index.php?title= URL; None for any other URL."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # Crawled links are untrusted, and this runs on every result; a URL that can't be parsed is no file page.
+        return None
+    if parsed.hostname not in COMMONS_FILE_HOSTS:
+        return None
+    if parsed.path.startswith("/wiki/"):
+        return file_page_url(unquote(parsed.path.removeprefix("/wiki/")))
+    if parsed.path == "/w/index.php":
+        titles = parse_qs(parsed.query).get("title", [""])
+        return file_page_url(titles[0])
+    return None

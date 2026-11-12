@@ -206,7 +206,7 @@ def purge_blacklisted_from_queue():
     blacklist = get_snapshot_blacklist()
     index_path = Path(settings.DATA_PATH) / settings.INDEX_NAME
     with TinyIndex(Document, str(index_path), "w") as index:
-        removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted)
+        removed_by_domain = purge_documents(index, documents, blacklist.is_domain_blacklisted, blacklist.is_url_blocked)
 
     num_removed = sum(removed_by_domain.values())
     stats_manager.record_blacklisted_removed(num_removed)

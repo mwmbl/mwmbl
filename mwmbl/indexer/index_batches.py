@@ -172,12 +172,17 @@ def filter_blacklisted_documents(documents: list[Document]) -> list[Document]:
             # Unparseable URL - keep it, matching rank.find_blacklisted_urls.
             continue
 
-    blacklisted_domains = get_snapshot_blacklist().filter_blacklisted(domains_by_url.values())
+    snapshot_blacklist = get_snapshot_blacklist()
+    blacklisted_domains = snapshot_blacklist.filter_blacklisted(domains_by_url.values())
+    blocked_urls = snapshot_blacklist.filter_blocked_urls(document.url for document in documents)
     kept = []
     for document in documents:
         domain = domains_by_url.get(document.url)
         if domain in blacklisted_domains:
             logger.info(f"Skipping indexing for blacklisted domain {domain}: {document.url}")
+            continue
+        if document.url in blocked_urls:
+            logger.info(f"Skipping indexing for blocked URL {document.url}")
             continue
         kept.append(document)
     return kept

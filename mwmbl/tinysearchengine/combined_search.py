@@ -37,7 +37,6 @@ at most IMAGE_SEARCH_GRACE_SECONDS to a search and never cost it its web results
 import asyncio
 import time
 from logging import getLogger
-from urllib.parse import unquote, urlparse
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -81,8 +80,6 @@ logger = getLogger(__name__)
 
 router = Router(tags=["Combined Search"])
 
-# Image page URLs are always on one of commons.COMMONS_PAGE_HOSTS, so their keys are never None.
-COMMONS_HOSTS = commons.COMMONS_PAGE_HOSTS | {"commons.m.wikimedia.org"}
 IMAGES_SWITCHED_OFF = ImageSelection(ImageOutcome.UNAVAILABLE, [])
 
 
@@ -294,14 +291,6 @@ OPENAPI_EXTRA = {
 }
 
 
-def commons_file_key(url: str) -> str | None:
-    """The file a Commons page URL is for, however it is encoded and on either site; None for any other URL."""
-    parsed = urlparse(url)
-    if parsed.hostname not in COMMONS_HOSTS or not parsed.path.startswith("/wiki/"):
-        return None
-    return unquote(parsed.path).replace(" ", "_")
-
-
 def to_image_result(ranked: RankedImage) -> ImageResult:
     image = ranked.image
     return ImageResult(
@@ -452,9 +441,11 @@ def init_router(ranker) -> None:
             image_finding,
         )
         shown_images = image_selection.images if image_selection else []
-        # An image in the strip isn't shown again as a web result.
-        shown_files = {commons_file_key(ranked.image.page_url) for ranked in shown_images}
-        web_results = [result for result in results if commons_file_key(result.url) not in shown_files]
+        # An image in the strip isn't shown again as a web result. A page URL with no key can't match one, and a
+        # None in the set would match every web result that isn't a Commons file.
+        shown_keys = (commons.commons_file_key(ranked.image.page_url) for ranked in shown_images)
+        shown_files = {key for key in shown_keys if key is not None}
+        web_results = [result for result in results if commons.commons_file_key(result.url) not in shown_files]
 
         crawl_outcome = None
         crawls_ahead = None

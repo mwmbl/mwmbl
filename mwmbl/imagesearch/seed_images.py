@@ -30,6 +30,7 @@ from django.conf import settings
 from mwmbl.imagesearch import commons, judge, rules
 from mwmbl.imagesearch.prompt import MIN_RELEVANCE, NEED_THRESHOLD, NSFW_THRESHOLD
 from mwmbl.imagesearch.types import SourceImage, Verdict
+from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.tinysearchengine.indexer import Document
 
 logger = getLogger(__name__)
@@ -141,7 +142,9 @@ def find_candidates(query: str) -> list[SourceImage]:
         raise NoImages(ImageOutcome.UNAVAILABLE)
     found = commons.search_commons(client, query, settings.IMAGE_SEARCH_CANDIDATES)
     settled_before = datetime.now(timezone.utc) - settings.IMAGE_SEARCH_MIN_REVISION_AGE
-    return [image for image in found if is_eligible(image, settled_before)]
+    # The snapshot is the moderators' blocklist (see mwmbl.blocked_urls); it is read from memory, not the database.
+    blocked_urls = get_snapshot_blacklist().filter_blocked_urls(image.page_url for image in found)
+    return [image for image in found if image.page_url not in blocked_urls and is_eligible(image, settled_before)]
 
 
 def is_eligible(image: SourceImage, settled_before: datetime) -> bool:
