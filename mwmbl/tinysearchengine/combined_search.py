@@ -231,6 +231,11 @@ DESCRIPTION = (
     "- `mwmbl` - organically crawled by the Mwmbl crawler\n"
     "- `eusp` - returned by the European Search Perspective (EUSP) web-search API\n"
     "- `wikipedia` - a Wikipedia page from the Mwmbl index\n"
+    "- `commons` - a Wikimedia Commons file from the Mwmbl index, with `image` set, to show as an image. "
+    "The safety check on it is the LLM reading its text, with no pixel check. Load `image.thumbnail_url` with "
+    '`referrerpolicy="no-referrer"`, show `image.license_name` and a link to `image.page_url` with it, '
+    "escape all text before putting it in HTML, and link `image.license_url` with "
+    '`rel="noopener noreferrer nofollow"`.\n'
     "- `google`, `user` - originally suggested via Google, or submitted by a user\n\n"
     "Authentication is required: a search-scoped API key in `X-API-Key`, or a JWT bearer "
     "token. With an API key every request is billed - there is no free allowance - at the "

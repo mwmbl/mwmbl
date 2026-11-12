@@ -1,5 +1,6 @@
 import re
 
+from mwmbl.imagesearch.display import image_for_result
 from mwmbl.imagesearch.licences import LICENCE_NAMES_AND_URLS
 from mwmbl.tinysearchengine.indexer import DocumentSource, DocumentState
 from mwmbl.tokenizer import clean_unicode, tokenize
@@ -216,4 +217,5 @@ def format_result_v2(result, position: int, query: str) -> dict:
         "content_highlights": _extract_highlights(v1["extract"]),
         "engine": get_result_source(result),
         "score": 1.0 / position,
+        "image": image_for_result(result),
     }

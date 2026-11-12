@@ -173,6 +173,27 @@ def test_combined_search_with_jwt(client, access_token, fresh_quota, stub_source
     assert response.json()["query"] == "tokio"
 
 
+@pytest.mark.django_db
+def test_an_indexed_commons_file_is_a_web_result_with_an_image(client, access_token, fresh_quota, stub_sources):
+    indexed_file = Document(
+        "Tokyo tower",
+        "https://commons.wikimedia.org/wiki/File:Tokyo_tower.jpg",
+        "A tower.",
+        source=DocumentSource.COMMONS_CC_BY_4_0,
+    )
+    crawled_file = Document("Tokyo gate", "https://commons.wikimedia.org/wiki/File:Tokyo_gate.jpg", "A gate.")
+    stub_sources(index=(indexed_file, crawled_file))
+
+    results = _get(client, access_token).json()["results"]
+
+    by_title = {result["title"]: result for result in results}
+    assert by_title["Tokyo tower"]["engine"] == "commons"
+    assert by_title["Tokyo tower"]["image"]["license_name"] == "CC BY 4.0"
+    assert by_title["Tokyo tower"]["image"]["page_url"] == indexed_file.url
+    assert by_title["Tokyo gate"]["image"] is None
+    assert by_title[STAAN_RESULT.title]["image"] is None
+
+
 def _get_with_key(client, api_key):
     return client.get(f"{URL}?q=tokio", HTTP_X_API_KEY=api_key.raw_key)
 

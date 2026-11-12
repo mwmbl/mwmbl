@@ -79,6 +79,23 @@ class SearchResult(Schema):
         }
 
 
+class HitImage(Schema):
+    thumbnail_url: str = Field(
+        description="A thumbnail of the file, about 330 pixels wide. Width and height are not given: show it in a "
+        'fixed box, load it with `referrerpolicy="no-referrer"`, and hide it if it fails to load (a file narrower '
+        "than the thumbnail has none)."
+    )
+    license_name: str = Field(description="The licence the file is under, such as `CC BY-SA 4.0`. Show it.")
+    license_url: str | None = Field(
+        description="The licence's page; null when we don't know the licence's page. "
+        'Link it with `rel="noopener noreferrer nofollow"`.'
+    )
+    page_url: str = Field(
+        description="The file's page on Wikimedia Commons, which names the author. Link to it from the image: "
+        "most licences require the attribution."
+    )
+
+
 class SearchHit(Schema):
     url: str
     title: str
@@ -87,6 +104,10 @@ class SearchHit(Schema):
     content_highlights: list[str]
     engine: str
     score: float
+    image: HitImage | None = Field(
+        default=None,
+        description="Set only when `engine` is `commons`: the file to show as an image. Null for every other result.",
+    )
 
 
 class SearchResponse(Schema):
@@ -302,7 +323,12 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `mwmbl` — organically crawled by the Mwmbl crawler\n"
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
-            "- `user` — submitted directly by a user\n\n"
+            "- `user` — submitted directly by a user\n"
+            "- `commons` — a file from Wikimedia Commons, with `image` set. The only safety check on it is "
+            "an LLM reading the file's text; nobody looks at the pixels. Load `image.thumbnail_url` with "
+            '`referrerpolicy="no-referrer"`, and show `image.license_name` and a link to `image.page_url` '
+            "with it. Escape all text before putting it in HTML, and link `image.license_url` with "
+            '`rel="noopener noreferrer nofollow"`.\n\n'
             "The response includes `monthly_usage` (requests used this month) and "
             "`monthly_limit` (your plan's monthly cap); both are `null` for "
             "unauthenticated requests.\n\n"
