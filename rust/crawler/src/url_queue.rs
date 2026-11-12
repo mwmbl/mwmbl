@@ -9,7 +9,7 @@ use mwmbl_core::{
 };
 use ordered_float::OrderedFloat;
 use priority_queue::DoublePriorityQueue;
-use rand::{RngExt, distr::StandardUniform, seq::IndexedRandom};
+use rand::{RngExt, seq::IndexedRandom};
 use scc::HashMap;
 use tokio::{
     sync::{Mutex, OwnedMutexGuard, RwLock},
@@ -109,17 +109,16 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
 
             if p_seed < SEED_DOMAIN_RANDOM_WEIGHT {
                 // SELECT A SEED DOMAIN
-                let curated_non_static_domains = self.curated_domains.get_non_static_domains();
+                let curated_non_static_domains_ref = self.curated_domains.get_non_static_domains();
+                let curated_non_static_domains = curated_non_static_domains_ref.read().await;
 
-                let total_seed_condidates = SEED_DOMAIN_RANDOM_WEIGHT + KNOWN_DOMAINS_RANDOM_WEIGHT;
+                let total_seed_condidates = DOMAINS_VEC.len() + curated_non_static_domains.len();
                 let p_seed_condidates: usize = rng.random_range(0..total_seed_condidates);
 
                 let random_domain = if p_seed_condidates < DOMAINS_VEC.len() {
                     DOMAINS_VEC.sample(&mut rng, 1).next().cloned()
                 } else {
                     curated_non_static_domains
-                        .read()
-                        .await
                         .sample(&mut rng, 1)
                         .next()
                         .cloned()
