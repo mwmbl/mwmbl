@@ -106,7 +106,7 @@ class SearchHit(Schema):
     score: float
     image: HitImage | None = Field(
         default=None,
-        description="Set only when `engine` is `commons`: the file to show as an image. Null for every other result.",
+        description="The file to show as an image. Set only when `engine` is `commons`, and not for a format with no thumbnail.",
     )
 
 
@@ -324,7 +324,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `wikipedia` — sourced from Wikipedia\n"
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n"
-            "- `commons` — a file from Wikimedia Commons, with `image` set. The only safety check on it is "
+            "- `commons` — a file from Wikimedia Commons; `image` is set unless its format has no thumbnail. The only safety check on it is "
             "an LLM reading the file's text; nobody looks at the pixels. Load `image.thumbnail_url` with "
             '`referrerpolicy="no-referrer"`, and show `image.license_name` and a link to `image.page_url` '
             "with it. Escape all text before putting it in HTML, and link `image.license_url` with "

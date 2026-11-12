@@ -1,3 +1,5 @@
+import pytest
+
 from mwmbl.format import DOCUMENT_PROVIDERS, format_result, format_result_v2, get_result_source
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState
 
@@ -110,6 +112,7 @@ def test_a_commons_source_on_another_site_has_no_image():
     assert format_result_v2(document, 1, "cat")["image"] is None
 
 
+@pytest.mark.django_db
 def test_formatting_an_image_makes_no_database_query(django_assert_num_queries):
     document = _commons_document("Cat.jpg", DocumentSource.COMMONS_PUBLIC_DOMAIN)
 

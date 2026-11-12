@@ -25,8 +25,10 @@ def thumbnail_url(file_name: str, width: int = THUMBNAIL_WIDTH) -> str | None:
     The directory is the start of the MD5 of the name. None for a format whose thumbnail name we can't derive
     confidently (TIFF, PDF, video and so on), which is shown as a plain text result.
     """
-    extension = file_name.rsplit(".", 1)[-1].lower()
-    if extension not in THUMBNAIL_SUFFIXES:
+    stem, dot, extension = file_name.rpartition(".")
+    extension = extension.lower()
+    # A name with no dot has no extension: `File:Png` is not a PNG.
+    if not stem or not dot or extension not in THUMBNAIL_SUFFIXES:
         return None
     name_bytes = file_name.encode("utf-8")
     suffix = THUMBNAIL_SUFFIXES[extension]

@@ -65,3 +65,8 @@ def test_a_long_svg_has_no_thumbnail_because_its_name_is_not_confirmed():
 @pytest.mark.parametrize("file_name", ["Scan.tif", "Paper.pdf", "Book.djvu", "Clip.webm", "Clip.ogv", "No_extension"])
 def test_an_unsupported_format_has_no_thumbnail(file_name):
     assert thumbnail_url(file_name) is None
+
+
+@pytest.mark.parametrize("file_name", ["png", "jpg", ".jpg"])
+def test_a_name_with_no_stem_before_the_dot_has_no_thumbnail(file_name):
+    assert thumbnail_url(file_name) is None
