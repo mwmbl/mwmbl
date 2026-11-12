@@ -1,5 +1,7 @@
 """A URL a moderator blocks is dropped by retrieval and indexing, and purged, without blocking its domain."""
 
+from datetime import datetime, timezone
+
 import fakeredis
 import numpy as np
 import pytest
@@ -8,6 +10,7 @@ from django.core.exceptions import ValidationError
 
 from mwmbl.blocked_urls import url_block_key
 from mwmbl.imagesearch import commons, seed_images
+from mwmbl.imagesearch.types import SourceImage
 from mwmbl.indexer import blacklist_snapshot
 from mwmbl.indexer.blacklist_providers import CombinedBlacklistProvider, StaticBlacklistProvider
 from mwmbl.indexer.blacklist_snapshot import SnapshotBlacklist, build_snapshot, publish_snapshot
@@ -17,7 +20,6 @@ from mwmbl.models import BlockedUrl
 from mwmbl.signals import BLACKLIST_SNAPSHOT_TASK
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, TinyIndex
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
-from test.test_image_search import make_image
 
 FILE_URL = "https://commons.wikimedia.org/wiki/File:Cat.jpg"
 OTHER_FILE_URL = "https://commons.wikimedia.org/wiki/File:Dog.jpg"
@@ -39,6 +41,26 @@ def snapshot_blacklist(monkeypatch, settings):
         blacklist.load_now()
 
     return publish
+
+
+def make_image(title: str, page_url: str) -> SourceImage:
+    return SourceImage(
+        title=title,
+        caption="",
+        page_url=page_url,
+        thumbnail_url=f"https://upload.wikimedia.org/thumb/{title}",
+        thumbnail_width=320,
+        thumbnail_height=213,
+        description="A pet in a house",
+        categories=("Pets",),
+        license_name="CC BY-SA 4.0",
+        license_url="https://creativecommons.org/licenses/by-sa/4.0",
+        attribution="A. Photographer",
+        sha1=f"sha1-of-{title}",
+        uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        revised_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        rank=1,
+    )
 
 
 def document(url):
@@ -187,8 +209,8 @@ def test_a_snapshot_builds_without_a_database():
 @pytest.mark.django_db
 def test_seed_search_does_not_offer_a_blocked_file(snapshot_blacklist, monkeypatch, settings):
     settings.JEV_API_KEY = "test-key"
-    blocked = make_image("Cat.jpg", page_url=FILE_URL)
-    fine = make_image("Dog.jpg", page_url=OTHER_FILE_URL)
+    blocked = make_image("Cat.jpg", FILE_URL)
+    fine = make_image("Dog.jpg", OTHER_FILE_URL)
     monkeypatch.setattr(commons, "search_commons", lambda *args: [blocked, fine])
     BlockedUrl.objects.create(url="https://commons.m.wikimedia.org/wiki/File:cat.jpg", reason="abuse")
     snapshot_blacklist()
