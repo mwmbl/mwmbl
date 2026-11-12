@@ -97,9 +97,9 @@ def build_image_strip(results: list, leading: tuple[ImageResult, ...] = ()) -> t
         if len(images) >= settings.IMAGES_DISPLAY_COUNT:
             break
         image = image_for_result(result)
-        # image_for_result has checked that the URL is a Commons file page, so the key exists.
-        if image is not None and commons_file_key(result.url) not in shown_files:
-            shown_files.add(commons_file_key(result.url))
+        # image_for_result has checked that the URL is a Commons file page, so the image's page URL is its key.
+        if image is not None and image.page_url not in shown_files:
+            shown_files.add(image.page_url)
             images.append(image)
     if not shown_files:
         return images, results

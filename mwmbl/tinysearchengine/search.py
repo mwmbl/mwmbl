@@ -3,6 +3,7 @@ from datetime import datetime
 from logging import getLogger
 from typing import Optional
 
+from django.conf import settings
 from ninja import Field, NinjaAPI, Router, Schema
 from ninja.errors import HttpError
 
@@ -310,7 +311,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "- `google` — originally suggested via Google\n"
             "- `user` — submitted directly by a user\n"
             "- `commons` — a file from Wikimedia Commons\n\n"
-            "Commons files that rank in the top 10 (at most 4) are returned in `images` instead of `results`, "
+            f"Commons files that rank in the top 10 (at most {settings.IMAGES_DISPLAY_COUNT}) are returned in `images` instead of `results`, "
             "so that a strip can be shown above the web results. The only safety check on them is an LLM reading "
             "the file's text; nobody looks at the pixels. Load `thumbnail_url` with "
             '`referrerpolicy="no-referrer"` and hide the image if it fails to load. Show `license_name` with each '
