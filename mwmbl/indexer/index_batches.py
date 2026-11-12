@@ -386,6 +386,8 @@ def preprocess_documents(documents, index_path):
                     term=token,
                     user_ids=document.user_ids,
                     last_crawled=document.last_crawled,
+                    # Carries what the document is from, such as a Commons file's licence.
+                    source=document.source,
                 )
                 page_documents[page].append(term_document)
     print(f"Preprocessed for {len(page_documents)} pages")
