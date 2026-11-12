@@ -101,7 +101,9 @@ def test_an_indexed_commons_file_is_an_image_with_its_licence():
 
 
 def test_a_licence_with_no_page_has_no_licence_url():
-    assert image_for_result(_commons("Cat.jpg", DocumentSource.COMMONS_OTHER)).license_url is None
+    assert image_for_result(_commons("Cat.jpg", DocumentSource.COMMONS_OTHER)).license_url == (
+        "https://commons.wikimedia.org/wiki/File:Cat.jpg"
+    )
 
 
 @pytest.mark.parametrize(

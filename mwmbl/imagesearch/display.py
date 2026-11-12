@@ -36,8 +36,9 @@ class ImageResult(Schema):
     )
     source: str = Field(examples=["commons"])
     license_name: str = Field(description="The licence the file is under, such as `CC BY-SA 4.0`. Show it.")
-    license_url: str | None = Field(
-        description="The licence's page; null when it is unknown. Set by the uploader for Seed Search images. "
+    license_url: str = Field(
+        description="The licence's page, or the file page when the licence has none we know. Set by the uploader "
+        "for Seed Search images. "
         'Link it with `rel="noopener noreferrer nofollow"`.'
     )
 
@@ -84,7 +85,8 @@ def image_for_result(result) -> ImageResult | None:
         thumbnail_url=thumbnail,
         source="commons",
         license_name=licence_name,
-        license_url=licence_url or None,
+        # COMMONS_OTHER has no licence page of its own; the file page names the licence.
+        license_url=licence_url or page_url,
     )
 
 

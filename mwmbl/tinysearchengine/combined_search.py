@@ -235,7 +235,7 @@ DESCRIPTION = (
     "`page_url` is the file's page, which names the author: show the licence and link the image to that page as its "
     'credit. Load thumbnails with `referrerpolicy="no-referrer"` and hide an image whose thumbnail fails to load; '
     "they come from Wikimedia, which sees the viewer's IP address. Remember to escape titles before putting them in HTML, and "
-    'link `license_url`, which may be null, with `rel="noopener noreferrer nofollow"`. The only safety check on an '
+    'link `license_url` with `rel="noopener noreferrer nofollow"`. The only safety check on an '
     "image is an LLM reading its text: nobody looks at the pixels, and violent or otherwise disturbing images are "
     "not screened.\n\n"
     "With `images=true`, the search also looks for more images, which come first in the strip, when the query calls "
@@ -282,7 +282,8 @@ def to_image_result(ranked: RankedImage) -> ImageResult:
         thumbnail_url=image.thumbnail_url,
         source="commons",
         license_name=image.license_name,
-        license_url=image.license_url or None,
+        # Without an https licence page, the file page, which names the licence, stands in.
+        license_url=image.license_url or image.page_url,
     )
 
 
