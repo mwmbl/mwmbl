@@ -24,6 +24,7 @@ from mwmbl.search_callers import client_network
 from mwmbl.widgets.fetch import FetchError, fetch_json
 from mwmbl.widgets.lookup import WidgetStub
 from mwmbl.widgets.spec import Display, InputSpec, InputType, OutputField, WidgetSpec
+from mwmbl.widgets.wmo import WMO_CODES
 
 MAX_TEXT_CHARS = 100
 MAX_VALUE_CHARS = 200
@@ -99,6 +100,8 @@ def output_fields(spec: WidgetSpec, data) -> list[WidgetField]:
     fields = []
     for output in spec.outputs:
         value = find_value(data, output)
+        if output.transform == "wmo_code":
+            value = WMO_CODES.get(value) if isinstance(value, int) and not isinstance(value, bool) else None
         if isinstance(value, bool):
             value = str(value).lower()
         if isinstance(value, (str, int, float)):
@@ -175,7 +178,7 @@ def widgets_router(specs: Sequence[WidgetSpec]) -> Router:
         api_url = spec.api_url.format(**{name: quote(value, safe="") for name, value in values.items()})
         assert urlsplit(api_url).netloc == spec.api_host
         try:
-            allowed = robots_allowed(api_url, get_redis_connection("default"))
+            allowed = not spec.check_api_robots or robots_allowed(api_url, get_redis_connection("default"))
         except RobotsUnavailable:
             allowed = False
         if not allowed:

@@ -40,23 +40,24 @@ class WidgetFinder:
         if self.trigger_words.isdisjoint(tokens):
             return []
         query_tokens = set(tokens)
-        # Per spec, the match with the most trigger tokens: "weather in new york" is New York's, not York's.
-        # Ties go to the one stored first.
-        best: dict[int, tuple[int, WidgetStub]] = {}
+        # Per API, the match with the most trigger tokens: "weather in new york" is New York's, not York's.
+        # Ties go to the earlier spec, then the one stored first. Specs on one API are one widget, so "york weather
+        # forecast" does not show it twice.
+        best: dict[str, tuple[tuple[int, int], WidgetStub]] = {}
         for key in trigger_query_keys(tokens, self.trigger_words):
             for document in tiny_index.retrieve(key):
                 # Crawled text can be stored under a widget key too.
                 if document.source != DocumentSource.WIDGET:
                     continue
                 match = self._match(document, query_tokens)
-                if match is not None and match[1] > best.get(match[0], (-1,))[0]:
-                    best[match[0]] = (
-                        match[1],
-                        WidgetStub(
-                            title=document.title, url=document.url, source_name=self.specs[match[0]].source_name
-                        ),
-                    )
-        return [stub for _, (_, stub) in sorted(best.items())]
+                if match is None:
+                    continue
+                spec = self.specs[match[0]]
+                score = (match[1], -match[0])
+                if score > best.get(spec.api_url, ((-1, 0),))[0]:
+                    stub = WidgetStub(title=document.title, url=document.url, source_name=spec.source_name)
+                    best[spec.api_url] = (score, stub)
+        return [stub for _, stub in sorted(best.values(), key=lambda scored: -scored[0][1])]
 
     def _match(self, document: Document, query_tokens: set[str]) -> tuple[int, int] | None:
         """The spec a document is an instance of and how many tokens it triggers on, if the query has them all."""
