@@ -102,6 +102,9 @@ class DocumentSource(IntEnum):
     # a STAAN document's score as the rank Staan gave it in this request, which a stored copy
     # does not carry. It also tells the crawler agreement log that no crawler wrote the copy.
     STAAN_INDEXED = 3
+    # A live answer from another site's service, filed under a key of its own rather than
+    # ordinary terms. See mwmbl.widgets.keys.
+    WIDGET = 4
     # A file indexed from Wikimedia Commons, one member per licence it is under, so the index
     # carries the licence in the one field it already has: the result page needs it to credit the
     # file, and standard search can't afford a database read or another request to get it. They
