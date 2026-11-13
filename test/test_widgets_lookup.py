@@ -14,7 +14,7 @@ from mwmbl.tinysearchengine import search
 from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.widgets.keys import storage_key
-from mwmbl.widgets.lookup import WidgetFinder, find_widgets
+from mwmbl.widgets.lookup import WidgetFinder
 from mwmbl.widgets.spec import WidgetSpec, load_specs
 
 API_NUMBERS = itertools.count()
@@ -59,6 +59,7 @@ def make_spec(**changes) -> WidgetSpec:
         {"api_url": "http://api.example.com/v1"},
         {"api_url": "https://evil.example.org/v1?lat={lat}"},
         {"api_url": "https://api.example.com:8443/v1"},
+        {"api_url": "https://127.0.0.1/v1", "api_host": "127.0.0.1"},
         {"api_url": "https://{units}.example.com/v1"},
         {"page_url": "https://other.example.org/forecast?lat={lat}&lon={lon}"},
         {"trigger_word": "forecast"},
@@ -142,7 +143,7 @@ SPECS = [make_spec(), WidgetSpec.model_validate(CALCULATOR)]
     ],
 )
 def test_find_widgets(tiny_index, query, titles):
-    assert [w.title for w in find_widgets(query, tiny_index, SPECS)] == titles
+    assert [w.title for w in WidgetFinder(SPECS).find(query, tiny_index)] == titles
 
 
 def test_only_widget_documents_whose_url_fits_their_spec_count(index_path):
@@ -156,13 +157,13 @@ def test_only_widget_documents_whose_url_fits_their_spec_count(index_path):
         index.store_in_page(index.get_key_page_index(key), [crawled, wrong_host])
     with TinyIndex(Document, index_path) as index:
         assert [d.title for d in index.retrieve(key)] == ["Crawled", "Evil"]
-        assert find_widgets("york weather", index, SPECS) == []
+        assert WidgetFinder(SPECS).find("york weather", index) == []
 
 
 def test_a_query_without_a_trigger_word_reads_no_keys():
     index = MagicMock()
-    assert find_widgets("python tutorial", index, SPECS) == []
-    assert find_widgets("weather york", index, []) == []
+    assert WidgetFinder(SPECS).find("python tutorial", index) == []
+    assert WidgetFinder([]).find("weather york", index) == []
     index.retrieve.assert_not_called()
 
 
@@ -199,14 +200,8 @@ def test_search_returns_stubs_with_no_outbound_call_or_query(tiny_index, monkeyp
         body = client.get("/?" + urlencode({"q": "weather in york"})).json()
         plain = client.get("/?" + urlencode({"q": "python tutorial"})).json()
 
-    assert body["widgets"] == [
-        {
-            "type": "widget",
-            "title": "York weather, UK",
-            "url": FORECASTS[0].url,
-            "source_name": "Example Weather",
-        }
-    ]
+    stub = {"type": "widget", "title": "York weather, UK", "url": FORECASTS[0].url, "source_name": "Example Weather"}
+    assert body["widgets"] == [stub]
     assert ranker.queries == ["weather in york", "python tutorial"]
     assert plain["widgets"] == []
 
@@ -214,7 +209,7 @@ def test_search_returns_stubs_with_no_outbound_call_or_query(tiny_index, monkeyp
 def test_a_tie_goes_to_the_document_stored_first(index_path):
     store(index_path, [FORECASTS[0], widget_document("York again", 1, {"york", "weather"})])
     with TinyIndex(Document, index_path) as index:
-        assert [w.title for w in find_widgets("york weather", index, SPECS)] == ["York weather, UK"]
+        assert [w.title for w in WidgetFinder(SPECS).find("york weather", index)] == ["York weather, UK"]
 
 
 def test_ordinary_retrieval_leaves_out_widget_documents():

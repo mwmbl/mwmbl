@@ -45,7 +45,8 @@ def _check_https_url(template: str, host: str | None = None) -> None:
         raise ValueError(f"{template!r} must be an https URL")
     # The host is what the SSRF guard rests on: a plain lower case name, never built from inputs, with no
     # credentials or port, and the one allowed host.
-    if not re.fullmatch(r"[a-z0-9.-]+", parts.netloc):
+    # A name, not an IP address or `localhost`: the last label starts with a letter.
+    if not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*", parts.netloc):
         raise ValueError(f"The host of {template!r} must be a plain name")
     if host is not None and parts.netloc != host:
         raise ValueError(f"{template!r} is not on the allowed host {host!r}")

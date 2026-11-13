@@ -26,11 +26,6 @@ class WidgetStub(Schema):
     source_name: str = Field(description="The provider as shown to people, for example `Open-Meteo`.")
 
 
-def document_trigger_tokens(document: Document) -> set[str]:
-    """The trigger tokens of a widget document, which are its extract's space separated words."""
-    return set(document.extract.split())
-
-
 class WidgetFinder:
     def __init__(self, specs: Sequence[WidgetSpec]):
         self.specs = list(specs)
@@ -65,7 +60,7 @@ class WidgetFinder:
 
     def _match(self, document: Document, query_tokens: set[str]) -> tuple[int, int] | None:
         """The spec a document is an instance of and how many tokens it triggers on, if the query has them all."""
-        tokens = document_trigger_tokens(document)
+        tokens = set(document.extract.split())  # a widget document's extract is its trigger tokens
         for i, spec in enumerate(self.specs):
             # The URL decides the spec, so a document cannot point a widget at a host its spec does not allow.
             if spec.match_page_url(document.url) is None:
@@ -80,8 +75,3 @@ class WidgetFinder:
 def default_finder() -> WidgetFinder:
     """The finder for the specs in the providers directory, which are read once."""
     return WidgetFinder(load_specs())
-
-
-def find_widgets(q: str, tiny_index: TinyIndex, specs: Sequence[WidgetSpec] | None = None) -> list[WidgetStub]:
-    finder = default_finder() if specs is None else WidgetFinder(specs)
-    return finder.find(q, tiny_index)

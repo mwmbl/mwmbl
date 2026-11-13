@@ -332,6 +332,8 @@ def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
 def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register the v2 search endpoint: returns SearchResponse with optional quota info."""
     calculator_results = CalculatorResults(ranker)
+    # Read the specs now, so that a broken one stops the app starting rather than failing the first search.
+    widget_finder = default_finder()
 
     @r.get(
         "",
@@ -416,7 +418,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
         arithmetic_result = calculate(q)
         if arithmetic_result is None:
-            widgets = default_finder().find(q, ranker.tiny_index)
+            widgets = widget_finder.find(q, ranker.tiny_index)
             result_query = q
             raw_results = ranker.search(q, [])
         else:
