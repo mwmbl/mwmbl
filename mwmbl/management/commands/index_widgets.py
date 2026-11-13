@@ -6,8 +6,9 @@ that is gone or changed since the last run. The keys written are remembered in D
 index cannot be searched for documents a spec used to produce.
 
 A spec whose page URL has placeholders (the weather ones) is indexed once per place, from
-`--places cities15000.txt countryInfo.txt` (GeoNames, see mwmbl.widgets.places). Without `--places` there are no
-such documents, so the places of an earlier run are removed like any other stale widget.
+`--places cities15000.txt countryInfo.txt` (GeoNames, see mwmbl.widgets.places). A plain run leaves the place
+documents alone, and their keys are remembered apart from the others'; `--places` syncs them again and
+`--no-places` removes them all.
 """
 
 import json
@@ -30,6 +31,7 @@ from mwmbl.widgets.spec import WidgetSpec, load_specs, placeholders
 logger = getLogger(__name__)
 
 KEYS_FILE_NAME = "widget-keys.json"
+PLACE_KEYS_FILE_NAME = "widget-place-keys.json"
 
 
 def widget_document(spec: WidgetSpec) -> Document:
@@ -122,23 +124,42 @@ def save_keys(path: Path, keys: set[str]):
     path.write_text(json.dumps(sorted(keys)))
 
 
+def sync_and_save(
+    keys_path: Path, index_path: str, specs: list[WidgetSpec], allowed: Callable[[WidgetSpec], bool], places=()
+) -> set[str]:
+    previous_keys = load_keys(keys_path)
+    try:
+        keys = sync_widgets(index_path, specs, allowed, previous_keys, places)
+    except BaseException:
+        save_keys(keys_path, previous_keys)  # what may have been written, so the next run can remove it
+        raise
+    save_keys(keys_path, keys)
+    return keys
+
+
 class Command(BaseCommand):
     help = "Index the widget documents of the provider specs"
 
     def add_arguments(self, parser):
-        parser.add_argument(
+        places_group = parser.add_mutually_exclusive_group()
+        places_group.add_argument(
             "--places",
             nargs=2,
             metavar=("CITIES_TSV", "COUNTRY_INFO_TXT"),
             type=Path,
-            help="GeoNames cities15000.txt and countryInfo.txt, for the weather widgets",
+            help="Sync the place documents of the weather widgets from GeoNames cities15000.txt and countryInfo.txt",
+        )
+        places_group.add_argument(
+            "--no-places", action="store_true", help="Remove all place documents (a plain run leaves them alone)"
         )
 
     def handle(self, *args, **options):
         redis = get_redis_connection("default")
         specs = load_specs()
-        keys_path = Path(settings.DATA_PATH) / KEYS_FILE_NAME
-        previous_keys = load_keys(keys_path)
+        place_specs = [spec for spec in specs if placeholders(spec.page_url)]
+        other_specs = [spec for spec in specs if not placeholders(spec.page_url)]
+        data_path = Path(settings.DATA_PATH)
+        index_path = str(data_path / settings.INDEX_NAME)
 
         def allowed(spec: WidgetSpec) -> bool:
             site_allows = site_allows_mwmbl(spec, redis)
@@ -146,16 +167,15 @@ class Command(BaseCommand):
                 logger.warning("Not indexing %s: %s does not allow Mwmbl", spec.name, spec.site)
             return site_allows
 
-        places = []
+        keys = sync_and_save(data_path / KEYS_FILE_NAME, index_path, other_specs, allowed)
+        message = f"Indexed {len(keys)} of {len(other_specs)} widgets"
         if options["places"]:
             cities_path, countries_path = options["places"]
             trigger_words = {spec.trigger_word for spec in specs}
             places = read_places(cities_path, read_countries(countries_path), trigger_words)
-        index_path = str(Path(settings.DATA_PATH) / settings.INDEX_NAME)
-        try:
-            keys = sync_widgets(index_path, specs, allowed, previous_keys, places)
-        except BaseException:
-            save_keys(keys_path, previous_keys)  # what may have been written, so the next run can remove it
-            raise
-        save_keys(keys_path, keys)
-        self.stdout.write(f"Indexed {len(keys)} of {len(specs)} widgets")
+            place_keys = sync_and_save(data_path / PLACE_KEYS_FILE_NAME, index_path, place_specs, allowed, places)
+            message += f" and {len(place_keys)} place widgets"
+        elif options["no_places"]:
+            sync_and_save(data_path / PLACE_KEYS_FILE_NAME, index_path, place_specs, lambda spec: False)
+            message += ", and removed the place widgets"
+        self.stdout.write(message)

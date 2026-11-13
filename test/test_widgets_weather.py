@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 
 from mwmbl.management.commands import index_widgets
 from mwmbl.management.commands.index_widgets import sync_widgets
@@ -14,6 +14,7 @@ from mwmbl.widgets.wmo import WMO_CODES
 
 SPECS = [spec for spec in load_specs(PROVIDERS_DIR) if spec.site == "open-meteo.com"]
 WEATHER, FORECAST = SPECS
+CALCULATOR = next(spec for spec in load_specs(PROVIDERS_DIR) if spec.site != "open-meteo.com")
 TRIGGER_WORDS = {spec.trigger_word for spec in SPECS}
 
 COUNTRIES = "#iso\tiso3\tnum\tfips\tCountry\n" + "\n".join(
@@ -164,7 +165,35 @@ def test_command_reads_places_and_skips_api_robots_for_open_meteo(tmp_path, inde
         "https://open-meteo.com/en/docs?latitude=0&longitude=0&ref=mwmbl",
         "https://open-meteo.com/en/docs?latitude=0&longitude=0&ref=mwmbl-forecast",
     }
-    assert len(json.loads((tmp_path / "widget-keys.json").read_text())) > 0
+    place_keys = json.loads((tmp_path / "widget-place-keys.json").read_text())
+    assert len(place_keys) > 0
+    assert json.loads((tmp_path / "widget-keys.json").read_text()) == []
 
     call_command("index_widgets")
+    assert len(widget_documents(index_path)) == 12
+    assert json.loads((tmp_path / "widget-place-keys.json").read_text()) == place_keys
+
+    call_command("index_widgets", no_places=True)
     assert widget_documents(index_path) == []
+    assert json.loads((tmp_path / "widget-place-keys.json").read_text()) == []
+
+
+def test_a_plain_run_keeps_places_while_it_syncs_the_other_widgets(tmp_path, index_path, settings, mocker, redis_cache):
+    settings.DATA_PATH = str(tmp_path)
+    settings.INDEX_NAME = "index.tinysearch"
+    (tmp_path / "cities.txt").write_text(CITIES)
+    (tmp_path / "countries.txt").write_text(COUNTRIES)
+    mocker.patch.object(index_widgets, "load_specs", return_value=[*SPECS, CALCULATOR])
+    robots = mocker.patch.object(index_widgets, "robots_allowed", return_value=True)
+    call_command("index_widgets", places=[tmp_path / "cities.txt", tmp_path / "countries.txt"])
+    assert len(widget_documents(index_path)) == 13
+
+    robots.return_value = False
+    call_command("index_widgets")
+    assert len(widget_documents(index_path)) == 12
+    assert json.loads((tmp_path / "widget-keys.json").read_text()) == []
+
+
+def test_places_and_no_places_cannot_be_combined(tmp_path):
+    with pytest.raises(CommandError):
+        call_command("index_widgets", "--no-places", "--places", "a", "b")
