@@ -1,9 +1,7 @@
 """Draft a widget spec from an OpenAPI GET operation and one sample answer.
-
-    uv run python -m mwmbl.widgets.openapi_import https://tannerd.net/api/openapi.json /api/v1/trip-cost
-
-The draft is for a person to finish, not to index as it stands: examples become defaults (wrong for
-required inputs, which should come from the query), and the triggers and query patterns are theirs to write.
+`python -m mwmbl.widgets.openapi_import <openapi.json URL> <path>`. For a person to finish, not to index as it
+stands: examples become defaults (wrong for required inputs, which should come from the query), and the triggers
+and query patterns are theirs to write.
 """
 
 import argparse

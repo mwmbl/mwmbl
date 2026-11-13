@@ -1,5 +1,5 @@
 import json
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import pytest
 from django.core.management import call_command
@@ -101,9 +101,7 @@ def test_each_calculator_is_triggered_and_read(index_path, name, query, values, 
     spec = SPECS[name]
     stubs = find(index_path, query)
     assert [stub.url for stub in stubs] == [spec.page_url]
-
     assert input_values(spec, spec.page_url, query) == values
-    api_url = spec.api_url.format(**{key: quote(value, safe="") for key, value in values.items()})
     assert [field.value for field in output_fields(spec, answer)] == fields
 
 
@@ -141,8 +139,10 @@ def test_sync_removes_blocked_and_stale_widgets_and_keeps_crawled_documents(inde
     assert len(keys) == 5
     assert len(widget_documents(index_path)) == 6  # a key no run has recorded is not known to be stale
 
-    keys = sync_widgets(index_path, specs, lambda spec: True, {"widget:calc gone"})
+    previous = {"widget:calc gone"}
+    keys = sync_widgets(index_path, specs, lambda spec: True, previous)
     assert len(keys) == 5 and len(widget_documents(index_path)) == 5
+    assert previous == keys | {"widget:calc gone"}
     assert sync_widgets(index_path, specs, lambda spec: True, keys) == keys  # idempotent
 
     blocked = "date-difference-calculator"

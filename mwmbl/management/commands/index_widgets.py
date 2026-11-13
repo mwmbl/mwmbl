@@ -1,6 +1,4 @@
-"""Write the widget documents of the provider specs into the search index.
-
-    uv run manage.py index_widgets --settings=mwmbl.settings_dev
+"""Write the widget documents of the provider specs into the search index (`manage.py index_widgets`).
 
 One document per spec, filed under its widget key (see mwmbl.widgets.keys). A site whose robots.txt
 does not allow Mwmbl its page or API is skipped, and its document is removed, as is the document of a spec
@@ -86,16 +84,16 @@ def sync_widgets(
     """Make the index's widget documents those of the allowed specs, and return their keys.
 
     The documents of a blocked site, and those a changed or removed spec used to produce (their keys are
-    `previous_keys`), are deleted first; then the rest are written, replacing any older copy by URL.
+    `previous_keys`), are deleted first; then the rest are written. It adds the keys it may write to `previous_keys`.
     """
     documents = [widget_document(spec) for spec in specs]
     titles = [document.title for document in documents]
     if len(set(titles)) != len(titles):
         raise ValueError(f"Widget titles must be unique, got {sorted(titles)}")
     wanted = [document for spec, document in zip(specs, documents) if allowed(spec)]
-    managed_keys = previous_keys | {document.term for document in documents}
+    previous_keys |= {document.term for document in documents}
     with TinyIndex(Document, index_path, "w") as index:
-        remove_stale_widgets(index, managed_keys, {(document.term, document.url) for document in wanted})
+        remove_stale_widgets(index, previous_keys, {(document.term, document.url) for document in wanted})
     index_widget_documents([(document, document.term) for document in wanted], index_path)
     return {document.term for document in wanted}
 
@@ -123,6 +121,10 @@ class Command(BaseCommand):
                 logger.warning("Not indexing %s: %s does not allow Mwmbl", spec.name, spec.site)
             return site_allows
 
-        keys = sync_widgets(str(Path(settings.DATA_PATH) / settings.INDEX_NAME), specs, allowed, previous_keys)
+        try:
+            keys = sync_widgets(str(Path(settings.DATA_PATH) / settings.INDEX_NAME), specs, allowed, previous_keys)
+        except BaseException:
+            save_keys(keys_path, previous_keys)  # what may have been written, so the next run can remove it
+            raise
         save_keys(keys_path, keys)
         self.stdout.write(f"Indexed {len(keys)} of {len(specs)} widgets")
