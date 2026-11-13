@@ -175,8 +175,7 @@ def test_a_trigger_word_costs_at_most_21_key_reads():
 
 
 class StubRanker:
-    def __init__(self, tiny_index):
-        self.tiny_index = tiny_index
+    def __init__(self):
         self.queries = []
 
     def search(self, s, additional_results, use_external_search=True):
@@ -192,8 +191,8 @@ def test_search_returns_stubs_with_no_outbound_call_or_query(tiny_index, monkeyp
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(search, "default_finder", lambda: WidgetFinder(SPECS))
     api = NinjaAPI(urls_namespace=f"test-lookup-{next(API_NUMBERS)}")
-    ranker = StubRanker(tiny_index)
-    search._register_search_v2(api, ranker)
+    ranker = StubRanker()
+    search._register_search_v2(api, ranker, tiny_index)
     client = TestClient(api)
 
     with django_assert_num_queries(0):
