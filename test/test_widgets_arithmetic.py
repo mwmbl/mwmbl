@@ -113,7 +113,7 @@ def ranker():
 @pytest.fixture
 def client(ranker):
     api = NinjaAPI(urls_namespace=f"test-arithmetic-{next(API_NUMBERS)}")
-    search._register_search_v2(api, ranker)
+    search._register_search_v2(api, ranker, None)
     return TestClient(api)
 
 

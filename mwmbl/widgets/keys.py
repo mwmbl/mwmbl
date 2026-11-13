@@ -16,6 +16,7 @@ KEY_PREFIX = "widget:"
 
 # 6 tokens give 6 single keys and 15 pairs: at most 21 page reads for a query.
 MAX_QUERY_TOKENS = 6
+MAX_QUERY_KEYS = MAX_QUERY_TOKENS + MAX_QUERY_TOKENS * (MAX_QUERY_TOKENS - 1) // 2
 
 
 def _key(tokens) -> str:
@@ -43,3 +44,17 @@ def query_keys(tokens: list[str]) -> list[str]:
     single_keys = [_key([token]) for token in unique_tokens]
     pair_keys = [_key(pair) for pair in combinations(unique_tokens, 2)]
     return single_keys + pair_keys
+
+
+def trigger_query_keys(tokens: list[str], trigger_words: frozenset[str] | set[str]) -> list[str]:
+    """The keys to read for a query, given the words that trigger a spec.
+
+    A document is stored under its trigger word, alone or with its anchor, so only keys with a trigger
+    word are worth reading. Every other token of the query is then within reach of the 21 reads.
+    """
+    unique_tokens = list(dict.fromkeys(tokens))
+    words = [token for token in unique_tokens if token in trigger_words]
+    keys = [_key([word]) for word in words]
+    for word in words:
+        keys += [_key([word, token]) for token in unique_tokens if token != word]
+    return list(dict.fromkeys(keys))[:MAX_QUERY_KEYS]

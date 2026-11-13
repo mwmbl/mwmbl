@@ -201,7 +201,7 @@ def register_routers(ranker, combined_ranker, tiny_index):
 
     # Initialise routers that depend on runtime objects
     search_module.init_router(ranker, tiny_index)
-    search_module.init_v2_router(ranker)
+    search_module.init_v2_router(ranker, tiny_index)
     super_search_module.init_router()
     combined_search_module.init_router(combined_ranker)
     crawler_module.init_router(ranker)
