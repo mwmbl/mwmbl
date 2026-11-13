@@ -1,0 +1,14 @@
+{
+  "name": "date-difference-calculator",
+  "site": "tannerd.net", "source_name": "tannerd.net",
+  "page_url": "https://tannerd.net/tools/date-difference-calculator/?ref=mwmbl",
+  "api_url": "https://tannerd.net/api/v1/date-difference?start_date={start_date}&end_date={end_date}", "api_host": "tannerd.net",
+  "inputs": [
+    {"name": "start_date", "type": "date", "label": "Start date", "pattern": "(\\d{4}-\\d{2}-\\d{2})"},
+    {"name": "end_date", "type": "date", "label": "End date", "pattern": "\\d{4}-\\d{2}-\\d{2}\\D+?(\\d{4}-\\d{2}-\\d{2})"}
+  ],
+  "outputs": [
+    {"label": "Days between", "path": "result.absolute_days", "unit": "days"}
+  ],
+  "trigger_word": "days", "trigger_tokens": ["days", "between", ":date"], "cache_ttl_seconds": 3600
+}
