@@ -99,6 +99,7 @@ def test_non_arithmetic_queries_pay_only_the_regex(monkeypatch):
 class StubRanker:
     def __init__(self):
         self.queries = []
+        self.tiny_index = None
 
     def search(self, s, additional_results, use_external_search=True):
         self.queries.append(s)

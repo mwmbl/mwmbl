@@ -2,7 +2,7 @@ import dataclasses
 import time
 from datetime import datetime
 from logging import getLogger
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from django.conf import settings
 from ninja import Field, NinjaAPI, Router, Schema
@@ -23,6 +23,7 @@ from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.tinysearchengine.indexer import TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
 from mwmbl.widgets.arithmetic import calculate
+from mwmbl.widgets.lookup import WidgetStub, default_finder
 
 logger = getLogger(__name__)
 
@@ -119,11 +120,13 @@ class SearchResponse(Schema):
         description="Wikimedia Commons images to show as a strip above the web results, in rank order, with the "
         "files they came from left out of `results`. Lay it out as the thumbnails load. Empty when there are none.",
     )
-    widgets: list[CalculationWidget] = Field(
+    widgets: list[Annotated[CalculationWidget | WidgetStub, Field(discriminator="type")]] = Field(
         default=[],
-        description="Answers to show above the results. Clients that do not know a widget's `type` may ignore it. "
-        "Currently only `calculation`, for a query that is arithmetic such as `164*8`; `results` are then those "
-        f"for `{CALCULATOR_QUERY}`, because the query itself has nothing to search for.",
+        description="Answers to show above the results. Clients may ignore them, or any `type` they do not know. "
+        "`calculation` is the answer to a query that is arithmetic such as `164*8`; `results` are then those "
+        f"for `{CALCULATOR_QUERY}`, because the query itself has nothing to search for. `widget` is a stub for a "
+        "service on another site that applies to the query, such as the weather somewhere: it has no values, "
+        "and a client that wants them fills it from `/api/v2/widgets/` with its `url`.",
     )
     monthly_usage: int | None = None
     monthly_limit: int | None = None
@@ -413,7 +416,7 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
         arithmetic_result = calculate(q)
         if arithmetic_result is None:
-            widgets = []
+            widgets = default_finder().find(q, ranker.tiny_index)
             result_query = q
             raw_results = ranker.search(q, [])
         else:

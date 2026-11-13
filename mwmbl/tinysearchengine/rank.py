@@ -366,7 +366,8 @@ class Ranker:
                 ]
 
             if items is not None:
-                pages += items
+                # The tokenizer keeps "widget:calculator" whole, so typing a widget key would find its document.
+                pages += [item for item in items if item.source != DocumentSource.WIDGET]
 
         return Retrieval(q, terms, completions, is_complete, curated_items, pages)
 
