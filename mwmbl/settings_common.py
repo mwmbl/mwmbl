@@ -511,3 +511,10 @@ IMAGE_INDEXING_ENABLED = os.environ.get("IMAGE_INDEXING_ENABLED", "false").lower
 # A file uploaded more recently is left out of the index. Commons deletes most copyright violations, and the spam
 # uploaded to be found, within days by speedy deletion.
 IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=30)
+
+# Widgets (mwmbl.widgets): the widget endpoint's calls to a provider's API.
+WIDGET_FETCH_TIMEOUT_SECONDS = 2
+WIDGET_MAX_RESPONSE_BYTES = 64 * 1024
+WIDGET_RATE_LIMIT_PER_MINUTE = 30  # per caller address
+WIDGET_SPEC_FETCHES_PER_SECOND = 20  # upstream calls per spec, whoever asks: bounds cache-busting inputs
+WIDGET_LOCK_SECONDS = 10  # how long one request may hold a cache miss before another may fetch
