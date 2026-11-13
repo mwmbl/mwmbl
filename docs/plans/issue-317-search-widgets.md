@@ -2,167 +2,200 @@
 
 A widget is a live answer from another site's service, such as a tannerd.net calculator or
 an Open-Meteo forecast. It is shown above the results and always links back to that site.
-Standard search must not get slower, and almost every request comes from a bot or a SearXNG
-client that would never show a widget. So the work is split in two:
+Standard search must not get noticeably slower, and almost all requests come from bots and
+SearXNG clients that never show a widget.
 
-1. **Search does no new work.** Widgets are ordinary documents in the index with a new
-   `DocumentSource.WIDGET`, filed under the terms they answer ("london weather", "weather
-   london", "percentage change"). Ranking retrieves them like any other page. Standard
-   search pulls them into a `widgets` list the same way `build_image_strip` pulls out
-   Commons files, which costs one comparison per result. Nothing calls out, and nothing
-   reads Postgres.
-2. **The front end asks for the live data.** `GET /api/v2/widgets/?url=<widget url>&q=<query>`
-   calls the provider, caches the answer and returns it in a standard shape. Only a browser
-   that is going to show the widget makes this request.
+Search therefore only works out *which* widget applies, cheaply. A browser that is going to
+show the widget fetches its data separately. Arithmetic is the one exception: it is computed
+in place.
 
-**Widgets are data, not code.** Each provider is described by a declarative spec stored in
-Postgres:
+**Widget documents are filed under their own keys.** A widget is an ordinary index document
+with `DocumentSource.WIDGET`. It is not filed under ordinary terms. It has a set of
+*trigger tokens*, such as `{new, york, weather}` or `{:n, km, miles}`, and is stored under
+exactly one key: `widget:` followed by a sorted pair of those tokens. The pair is the
+spec's trigger word plus the instance's most distinctive token, e.g. `widget:weather york`.
+A widget with a single trigger token gets a single-token key, e.g. `widget:calculator`.
 
-- the site's name and home page
-- a page URL template, which is the link back
-- an API URL template, which must be on the same host
-- typed parameters, each with an optional pattern for pulling it out of the query
-- output fields as JSON paths with labels and units
-- how long to cache the answer, and which terms to index it under
+**Lookup at search time works like this:**
 
-Adding a provider means adding a spec, with no new Python. That is what lets a site be
-submitted later and have an AI draft its spec. tannerd.net already publishes everything a
-draft needs: an OpenAPI file at `/api/openapi.json`, `llms.txt` and agent-skills metadata.
+1. Run the query through the *widget tokenizer*. It lowercases, drops stopwords, splits
+   `10km` into `:n km`, and replaces values with placeholders: `:n`, `:money`, `:date` and
+   `:time`. `%` is kept as a token of its own.
+2. If none of the tokens is in the in-memory set of trigger words, stop. The set comes
+   from the specs, so this takes about a microsecond and nearly every query stops here.
+3. Otherwise, read every single-token key and every unordered pair of tokens, from at most
+   6 tokens, so at most 21 page reads.
+4. Keep a document only if *all* its trigger tokens are in the query. Return at most one
+   per spec, and when a spec matches more than once, keep the first stored (cities are
+   stored most populous first).
 
-**A widget document's URL is the site's own page with the parameters filled in.** For
-tannerd.net that is its `share_url`, for example
-`https://tannerd.net/tools/percentage-change-calculator/`. For a weather location it is
-`https://open-meteo.com/en/docs?latitude=51.51&longitude=-0.13`. The widget endpoint
-therefore needs no lookup per instance: it matches the URL to a spec by its template and
-reads the parameters from the URL itself. The result link is also exactly the link back.
+This handles word order ("weather london"), stopwords ("weather in london"), extra words
+("london weather today") and multi-word places ("weather in new york"). York, New York and
+York, PA can share the key `widget:weather york`, and the "all trigger tokens" check picks
+the right one.
 
-What we know about the providers:
+`TinyIndex.retrieve` already discards documents another term put on the same page, so
+widget keys never show up among ordinary results. Pages are still shared by hash, though,
+so widget documents are kept ahead of other documents when a page fills up.
 
-- **tannerd.net.** About 25 free calculator endpoints that need no key and send
-  `access-control-allow-origin: *` and `max-age=300`. Every answer carries `source`,
-  `share_url` and `citation`. `robots.txt` allows `use=full`. Most calculators need
-  several inputs, so the widget is mainly a small form generated from the OpenAPI
-  parameters, pre-filled from the query where possible ("percentage change 50 to 75",
-  "days until 2026-12-25", "salary to hourly 50000").
-- **Open-Meteo.** One forecast API covering every location. Instances come from the
-  GeoNames cities15000 list (about 26k places, CC BY 4.0, so it needs attribution). Its
-  free tier is non-commercial; see the open questions.
+**The search response carries stubs only.** It gets a list of `{type, title, url,
+source_name}`. The stub's `url` is the site's own page with the inputs filled in, such as
+tannerd.net's `share_url` or `https://open-meteo.com/en/docs?latitude=51.51&longitude=-0.13`.
+It is both the link back and everything the widget endpoint needs.
+`GET /api/v2/widgets/?url=&q=` matches the URL to a spec, takes the values from `q`, calls
+the site with an SSRF guard and a Redis cache, and returns fields, inputs and links.
 
-The server makes these calls rather than the browser, even where CORS would allow the
-browser to. That way the viewer's IP is never sent to a third party, one cache serves
-everyone, and the endpoint is the only place a spec's output is turned into text.
+**Providers are data, not code.** Each provider is a declarative JSON spec checked into
+`mwmbl/widgets/providers/`. It gives:
 
-## PR 1: WIDGET document source and keeping widget documents on index pages
-**Estimated added lines:** ~200
-**Files:** mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_batches.py, mwmbl/format.py,
-test/test_index_batches.py
+- the site and the API URL templates, with the API host the only one allowed
+- typed inputs and the patterns that pull them from the query
+- output fields as JSON paths, plus a display type: `fields`, `form` or `forecast`
+- the trigger tokens and the cache TTL
 
+A site is excluded if its robots.txt blocks Mwmbl. The specs move to Postgres when user
+submissions arrive, in a later issue.
+
+Searches with no trigger word gain one set-membership check. A widget query gains at most 21
+page reads, and an arithmetic query gains one cached lookup. A CI benchmark over the rankeval
+queries checks that the median search time does not move.
+
+## PR 1: Widget tokenizer, widget keys and the WIDGET source
+**Estimated added lines:** ~350
+**Files:** mwmbl/widgets/__init__.py, mwmbl/widgets/tokens.py, mwmbl/widgets/keys.py,
+mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_batches.py, mwmbl/format.py,
+test/test_widgets_tokens.py, test/test_index_batches.py
+
+- `widget_tokens(text)` implements the normalisation above. It is pure, and it is
+  table-tested on "10km in miles", "$50 to eur", "20% of 150", "days until 2026-12-25",
+  "weather in new york" and similar queries.
+- `storage_key(trigger_tokens, anchor)` gives the one key a document is stored under.
+  `query_keys(tokens)` gives the single-token and pair keys, capped at 6 tokens.
+  Property test: any document whose trigger tokens are a subset of the query's tokens
+  has its storage key in `query_keys`.
 - Add `DocumentSource.WIDGET = 4` and `DOCUMENT_PROVIDERS[WIDGET] = "widget"`.
-- `index_documents_against_terms(documents_by_term, index_path)` files a document under
-  exactly the terms it is given. Widgets need this because their terms are not derived
-  from their text.
-- In `sort_documents`, place WIDGET documents ahead of other documents, after curated
-  ones, so a crowded 4 KB page never drops them. Their extracts are short, so the space
-  they take is small.
-- This touches shared indexer code, so raise `CRAWLER_VERSION` or include the no-change
-  line in the commit message, whichever applies.
+- `index_widget_documents(documents_with_keys, index_path)` writes each document under its
+  key. In `sort_documents`, WIDGET documents go ahead of other documents, after curated
+  ones.
+- This touches the indexer, so the commit needs a `CRAWLER_VERSION` bump or the
+  no-change line.
 
-## PR 2: Widget specs and the widget strip in standard search
+## PR 2: Arithmetic, computed inline, with "calculator" results beneath
+**Estimated added lines:** ~300
+**Files:** mwmbl/widgets/arithmetic.py, mwmbl/tinysearchengine/search.py,
+test/test_widgets_arithmetic.py
+
+- A regex rejects every query that is not numbers, spaces, `.+-*/^%()` and at least one
+  operator. It takes under a microsecond.
+- Queries that pass go through `ast.parse(q, mode="eval")` and a node walk. The walk
+  allows numeric constants, `+ - * / % **`, unary minus and brackets. `^` means power.
+  The arithmetic uses `Fraction`, so 0.1+0.2 gives 0.3. Never `eval`.
+- Limits: 100 characters, an exponent of at most 1000 in absolute value, and results
+  over 10^100 shown in scientific notation or rejected. `9**9**9` and the like are
+  rejected without being computed.
+- The response gets a complete `calculation` widget (`expression`, `result`), not a stub.
+- A query like "164*8" has no useful terms, so the results are replaced by those for
+  "calculator". These come from `ranker.search("calculator")` cached in memory for an
+  hour, so an arithmetic query reuses one ranking pass rather than running a new one.
+- Tests cover precedence, division by zero (no widget), the rejected inputs, and a
+  benchmark that non-arithmetic queries pay only the regex.
+
+## PR 3: Provider specs and widget stubs in search
 **Estimated added lines:** ~400
-**Files:** mwmbl/widgets/models.py, mwmbl/widgets/spec.py, mwmbl/widgets/display.py,
-mwmbl/migrations/…, mwmbl/tinysearchengine/search.py, test/test_widgets_display.py
+**Files:** mwmbl/widgets/spec.py, mwmbl/widgets/lookup.py, mwmbl/tinysearchengine/search.py,
+test/test_widgets_lookup.py
 
-- Two models: `WidgetProvider` (name, site URL, allowed API host, approved flag) and
-  `WidgetSpec`. The spec is JSON validated by a pydantic schema, plus `index_terms`.
-- `build_widget_strip(results, query)` mirrors `build_image_strip`. It takes WIDGET
-  documents out of the results and keeps at most one per spec.
-- For a strict trigger such as weather, all of the widget document's own tokens must
-  appear in the query. This stops "york weather" from returning New York.
-- Only `{type, title, url, source_name}` comes from the index, so this step never reads
-  Postgres. The source name is derived from the URL's host.
-- Add `widgets: list[WidgetStub]` to `SearchResponse`. Document that clients call the
-  widget endpoint to fill a stub, and that it is safe to ignore.
-- Test that search makes no outbound call and no database query when widgets are
-  present, using `django_assert_num_queries(0)` and `pytest-httpx` with nothing
-  registered.
+- A pydantic `WidgetSpec` is loaded from `mwmbl/widgets/providers/*.json` at startup.
+  The set of trigger words and the URL-template index are built from it.
+- `find_widgets(q, tiny_index)` follows the lookup steps above and runs before
+  `ranker.search`.
+- Add `widgets: list[Widget]` to `SearchResponse` as a union of the calculation widget
+  and the stub. Document that clients may ignore widgets, or fill stubs from
+  `/api/v2/widgets/`.
+- Test that search makes no outbound call and no database query, with widgets in the
+  index. Test that a query without a trigger word reads no widget keys.
 
-## PR 3: The widget endpoint
+## PR 4: The widget endpoint
 **Estimated added lines:** ~450
 **Files:** mwmbl/widgets/api.py, mwmbl/widgets/fetch.py, mwmbl/api.py, mwmbl/settings_common.py,
 test/test_widgets_api.py
 
-- `GET /api/v2/widgets/?url=&q=` matches the URL to an approved spec, or returns 404.
-  Specs are cached in memory and refreshed every minute.
-- It fills the parameters from the URL first, then from the query patterns, then from
-  the spec's defaults. It then builds the API URL from the template.
-- SSRF rules: the API host must equal `WidgetProvider.allowed_host`, only https and GET
-  are allowed, there are no redirects, the timeout is 2 s and the response is capped at
-  64 KB.
-- Answers are cached in Redis, keyed on the spec and the parameters, using the spec's
-  TTL. A `SET NX` lock makes concurrent misses share one upstream call. The endpoint is
-  rate-limited per IP.
+- `GET /api/v2/widgets/?url=&q=` matches `url` to a spec's page template, or returns
+  404. Inputs are filled from the URL first, then the query, then the spec's defaults,
+  and the API URL is built from them.
+- Fetch rules:
+  - https and GET only, to the spec's API host only
+  - no redirects
+  - a 2 s timeout and a 64 KB cap on the response
+- Answers are cached in Redis, keyed on the spec and the inputs, for the spec's TTL. A
+  `SET NX` lock makes concurrent misses share one upstream call. The endpoint has a rate
+  limit per IP.
+- Every request also checks the site's robots.txt for Mwmbl's user agent, cached for a
+  day. A site that blocks us returns 404.
 - The response is the stub plus:
-  - `fields` as `[{label, value, unit}]`, plain text, with the client told to escape it
-  - `inputs`, the parameter schema, so the client can draw a form
-  - `source_url` and `share_url`, the link back, using `rel="noopener nofollow"`
+  - `display`
+  - `fields`: `[{label, value, unit}]`, plain text, which the client is told to escape
+  - `inputs`, the schema of the spec's inputs
+  - `share_url`, linked with `rel="noopener nofollow"`
 - Tests use `pytest-httpx` and the `redis_cache` fixture.
 
-## PR 4: tannerd.net provider
-**Estimated added lines:** ~350
-**Files:** mwmbl/widgets/providers/tannerd.json, mwmbl/management/commands/index_widgets.py,
-mwmbl/widgets/openapi_import.py, test/test_widgets_tannerd.py
+## PR 5: tannerd.net provider and the widget indexing command
+**Estimated added lines:** ~400
+**Files:** mwmbl/widgets/openapi_import.py, mwmbl/widgets/providers/tannerd.json,
+mwmbl/management/commands/index_widgets.py, test/test_widgets_tannerd.py
 
 - `openapi_import` turns an OpenAPI GET operation into a draft spec. Its parameters
-  become inputs, its examples become defaults and its summary becomes the title. The
-  output fields come from one sample call. A person reviews the draft.
-- Check in the reviewed specs for 5–10 calculators that people plausibly search for:
-  percentage change, date difference, salary to hourly, trip cost, unit price compare
-  and electricity cost. Each gets query patterns and index terms.
-- `manage.py index_widgets` writes one document per spec to the index, using PR 1.
+  become inputs, its examples become defaults, and one sample call gives the output
+  fields. tannerd.net publishes its OpenAPI at `/api/openapi.json`: 25 read-only,
+  keyless endpoints that send `access-control-allow-origin: *` and include `share_url`
+  in every answer.
+- Check in reviewed specs for calculators people plausibly search for:
+  - percentage change: `{:n, percentage, change}`
+  - date difference: `{days, until, :date}`
+  - salary to hourly
+  - trip cost
+  - unit price compare
+  - electricity cost
+- `manage.py index_widgets` checks each provider's robots.txt. It skips a blocked site
+  and purges its keys, then writes one document per spec instance. It reuses
+  `purge_blacklisted`'s page rewrite to delete documents.
 
-## PR 5: Open-Meteo weather provider
+## PR 6: Open-Meteo weather provider
 **Estimated added lines:** ~350
 **Files:** mwmbl/widgets/providers/open_meteo.json, mwmbl/widgets/places.py,
 mwmbl/management/commands/index_widgets.py, test/test_widgets_weather.py
 
-- The spec has a URL template with `latitude` and `longitude` and fields for current
-  conditions plus a 3-day forecast. The cache TTL is 30 minutes.
-- `index_widgets --places <cities.tsv>` downloads GeoNames at run time and keeps it out
-  of the repo. For each place it writes one document, titled "<Name> weather, <Country>",
-  under "<name> weather" and "weather <name>". Where two places share a name, it keeps the
-  one with the larger population.
-- Before indexing, check how the tokenizer handles "weather in london" and "london
-  weather today" against the query log. Add term variants only where the log shows the
-  searches exist.
+- The spec takes `latitude` and `longitude` in its URL template. It shows current
+  conditions and 3 days of forecast (`display: forecast`), with WMO weather codes turned
+  into text. The cache lasts 30 minutes.
+- `index_widgets --places <cities.tsv>` reads GeoNames cities15000, about 26k places
+  under CC BY 4.0, downloaded at run time and never committed.
+- Each place gets one document, titled "<Name> weather, <Country>". Its trigger tokens
+  are `{weather}` plus the name's tokens, and its anchor is the name's rarest token.
+  Places are written most populous first.
+- Also index the place under `forecast`.
 
-## PR 6: Front-end rendering
+## PR 7: Front-end rendering
 **Estimated added lines:** ~300
 **Files:** front-end/…
 
-- For each stub, call the widget endpoint and render the fields, plus the form when the
-  widget has inputs. Credit the site prominently and link it to `share_url`.
-- If the call fails, hide the widget without showing an error.
+- Render the calculation widget straight away. Fill stubs from the widget endpoint into
+  space reserved in advance, so the page doesn't jump.
+- Each display type gets its own component. Credit the site prominently and link it to
+  `share_url`. If the fetch fails, hide the widget.
+- If the front end renders results on the server, fill the stubs in-process there and
+  skip the second round trip.
 
 ## Later (separate issue): user-submitted widget sites
-A submission takes a site URL. A Seed Search-style worker finds the site's OpenAPI file,
-`llms.txt` or agent-skills file and drafts a spec with `openapi_import` plus an LLM. The
-spec goes to a moderation queue (`mwmbl/moderation/`) and is indexed only after a person
-approves it. These rules are already in the PR 2 and 3 schema:
+- A submission takes a site URL. A worker finds the site's OpenAPI file, `llms.txt` or
+  agent-skills file and drafts a spec with `openapi_import` plus an LLM.
+- The spec goes to a moderation queue and is indexed only once a person approves it.
+- A widget sits above the results, so it is valuable to spammers. Reviewers must check
+  the trigger tokens, so a site can't claim popular queries, and that the API host is
+  the submitter's own site.
+- Sites without an API could be embedded in a sandboxed iframe that loads only on click,
+  since loading it shares the viewer's IP with the site.
 
-- the API host must be the submitter's own site
-- the endpoints are read-only
-- outputs are text only, never HTML
-- index terms are reviewed, so a submission can't take over popular queries
-
-## Open questions
-- **Open-Meteo licence.** Its free API is non-commercial. Widgets shown on mwmbl.org are
-  probably fine, but API v2 customers are paying. Stubs carry no Open-Meteo data, so they
-  may be outside its terms. Still, either confirm with Open-Meteo or limit
-  `/api/v2/widgets/` to the mwmbl.org front end.
-- **The objection on #317.** A widget answers the question, and the link back may not
-  make up for the visit the site loses. tannerd.net says it wants agent and AI use
-  (`use=full`). Should providers have to opt in, for example by being listed in their
-  `robots.txt` or `llms.txt`, before we add them?
-- **Ranking.** The plan returns any widget document that retrieval finds, with no ranker
-  involvement. Alternatively, a widget could be shown only if it ranks in the top 10, as
-  the image strip does.
+## To evaluate
+- Whether a widget should be shown only when it, or the site behind it, would rank well.
+  Keeping widgets under their own keys makes this easy to switch per spec.
