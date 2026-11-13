@@ -168,6 +168,7 @@ v2_api = NinjaExtraAPI(
             {"name": "Super Search"},
             {"name": "Membership"},
             {"name": "Notifications"},
+            {"name": "Widgets"},
         ]
     },
 )
@@ -198,6 +199,8 @@ def register_routers(ranker, combined_ranker, tiny_index):
     from mwmbl.platform.api import router as platform_router
     from mwmbl.platform.membership_v2 import router as membership_v2_router
     from mwmbl.platform.notifications import router as notifications_router
+    from mwmbl.widgets.api import widgets_router
+    from mwmbl.widgets.lookup import default_finder
 
     # Initialise routers that depend on runtime objects
     search_module.init_router(ranker, tiny_index)
@@ -215,3 +218,4 @@ def register_routers(ranker, combined_ranker, tiny_index):
     v2_api.add_router("/combined-search/", combined_search_module.router, tags=["Combined Search"])
     v2_api.add_router("/membership/", membership_v2_router, tags=["Membership"])
     v2_api.add_router("/notifications/", notifications_router, tags=["Notifications"])
+    v2_api.add_router("/widgets/", widgets_router(default_finder().specs), tags=["Widgets"])

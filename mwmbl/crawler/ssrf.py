@@ -24,7 +24,7 @@ class UnsafeURLError(ValueError):
     """Raised when a URL resolves to an address we refuse to fetch."""
 
 
-def _ip_is_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def ip_is_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for ordinary, routable public addresses."""
     # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) so the v4 checks apply.
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
@@ -45,7 +45,7 @@ def is_safe_host(host: str) -> bool:
 
     # IP literal? Check it directly without a DNS lookup.
     try:
-        return _ip_is_safe(ipaddress.ip_address(host))
+        return ip_is_safe(ipaddress.ip_address(host))
     except ValueError:
         pass
 
@@ -62,7 +62,7 @@ def is_safe_host(host: str) -> bool:
             ip = ipaddress.ip_address(addr)
         except ValueError:
             return False
-        if not _ip_is_safe(ip):
+        if not ip_is_safe(ip):
             return False
     return True
 
