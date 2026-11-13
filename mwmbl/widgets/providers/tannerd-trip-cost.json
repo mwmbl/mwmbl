@@ -1,0 +1,17 @@
+{
+  "name": "trip-cost-calculator",
+  "site": "tannerd.net", "source_name": "tannerd.net",
+  "page_url": "https://tannerd.net/tools/trip-cost-calculator/?ref=mwmbl",
+  "api_url": "https://tannerd.net/api/v1/trip-cost?miles={miles}&mpg={mpg}&gas_price={gas_price}", "api_host": "tannerd.net",
+  "inputs": [
+    {"name": "miles", "type": "number", "label": "Miles", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:miles|mile|mi)\\b"},
+    {"name": "mpg", "type": "number", "label": "Miles per gallon", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*mpg"},
+    {"name": "gas_price", "type": "number", "label": "Gas price per gallon", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:/|per |a )\\s*(?:gal|gallon)"}
+  ],
+  "outputs": [
+    {"label": "Trip cost", "path": "result.trip_cost_with_tolls", "unit": ""},
+    {"label": "Gallons", "path": "result.gallons_needed", "unit": "gal"},
+    {"label": "Cost per mile", "path": "result.cost_per_mile", "unit": ""}
+  ],
+  "trigger_word": "mpg", "trigger_tokens": ["mpg", "trip", "cost", ":n"], "cache_ttl_seconds": 3600
+}

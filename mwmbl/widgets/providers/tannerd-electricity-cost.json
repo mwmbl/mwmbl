@@ -1,0 +1,18 @@
+{
+  "name": "electricity-cost-calculator",
+  "site": "tannerd.net", "source_name": "tannerd.net",
+  "page_url": "https://tannerd.net/tools/electricity-cost-calculator/?ref=mwmbl",
+  "api_url": "https://tannerd.net/api/v1/electricity-cost?watts={watts}&hours_per_day={hours_per_day}&rate_per_kwh={rate_per_kwh}", "api_host": "tannerd.net",
+  "inputs": [
+    {"name": "watts", "type": "number", "label": "Watts", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:watts?|w)\\b"},
+    {"name": "hours_per_day", "type": "number", "label": "Hours per day", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:hours|hrs|hr|h)\\b"},
+    {"name": "rate_per_kwh", "type": "number", "label": "Rate per kWh", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:/|per |a )\\s*kwh"}
+  ],
+  "outputs": [
+    {"label": "Per day", "path": "result.cost_per_day", "unit": ""},
+    {"label": "Per month", "path": "result.cost_per_month", "unit": ""},
+    {"label": "Per year", "path": "result.cost_per_year", "unit": ""},
+    {"label": "Energy per month", "path": "result.kwh_per_month", "unit": "kWh"}
+  ],
+  "trigger_word": "kwh", "trigger_tokens": ["kwh", "electricity", "cost", ":n"], "cache_ttl_seconds": 3600
+}
