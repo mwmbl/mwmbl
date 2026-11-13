@@ -4,6 +4,17 @@ use std::path::{Path, PathBuf};
 
 const GITHUB_URL: &str = "https://github.com/marcomq/rust-xgboost/raw/refs/tags/v3.0.1/xgboost-sys/lib/";
 
+/// The profile directory (e.g. `target/release`) is the parent of the `build` directory that
+/// holds OUT_DIR. Cargo 1.100 nests build outputs one level deeper
+/// (`build/<pkg>/<hash>/out`, was `build/<pkg>-<hash>/out`), so count no levels.
+fn profile_dir(out_dir: &str) -> PathBuf {
+    let build_dir = Path::new(out_dir)
+        .ancestors()
+        .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+        .unwrap_or_else(|| panic!("no `build` directory above OUT_DIR {out_dir}"));
+    build_dir.parent().unwrap().to_path_buf()
+}
+
 fn main() {
     let target = env::var("TARGET").unwrap();
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -54,7 +65,7 @@ fn main() {
         if let Ok(xgboost_lib_dir) = std::env::var("XGBOOST_LIB_DIR") {
             println!("cargo:rustc-link-search=native={}", xgboost_lib_dir);
         } else {
-            let deps_path = dunce::canonicalize(Path::new(&format!("{}/../../../deps", out_dir))).unwrap();
+            let deps_path = dunce::canonicalize(profile_dir(&out_dir).join("deps")).unwrap();
             let deps_path = deps_path.to_string_lossy();
             println!("cargo:rustc-link-search=native={}", deps_path);
             if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
