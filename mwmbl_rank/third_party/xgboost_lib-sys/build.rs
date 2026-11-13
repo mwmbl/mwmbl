@@ -65,7 +65,10 @@ fn main() {
         if let Ok(xgboost_lib_dir) = std::env::var("XGBOOST_LIB_DIR") {
             println!("cargo:rustc-link-search=native={}", xgboost_lib_dir);
         } else {
-            let deps_path = dunce::canonicalize(profile_dir(&out_dir).join("deps")).unwrap();
+            // Cargo 1.100 no longer creates `deps` before running build scripts on a clean build.
+            let deps_dir = profile_dir(&out_dir).join("deps");
+            std::fs::create_dir_all(&deps_dir).unwrap();
+            let deps_path = dunce::canonicalize(deps_dir).unwrap();
             let deps_path = deps_path.to_string_lossy();
             println!("cargo:rustc-link-search=native={}", deps_path);
             if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
