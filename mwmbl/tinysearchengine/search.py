@@ -1,7 +1,8 @@
 import dataclasses
+import time
 from datetime import datetime
 from logging import getLogger
-from typing import Optional
+from typing import Literal, Optional
 
 from django.conf import settings
 from ninja import Field, NinjaAPI, Router, Schema
@@ -21,11 +22,16 @@ from mwmbl.quota import (
 from mwmbl.search_auth import SearchApiKeyAuth
 from mwmbl.tinysearchengine.indexer import TinyIndex
 from mwmbl.tinysearchengine.rank import HeuristicRanker
+from mwmbl.widgets.arithmetic import calculate
 
 logger = getLogger(__name__)
 
 
 SCORE_THRESHOLD = 0.25
+
+# "164*8" has no terms worth searching for, so an arithmetic query shows the results for this instead.
+CALCULATOR_QUERY = "calculator"
+CALCULATOR_RESULTS_TTL_SECONDS = 3600
 
 # Module-level routers
 router = Router(tags=["Search"])  # v1
@@ -91,6 +97,17 @@ class SearchHit(Schema):
     score: float
 
 
+class CalculationWidget(Schema):
+    """An answer computed by Mwmbl itself from arithmetic in the query. It makes no outbound call."""
+
+    type: Literal["calculation"] = "calculation"
+    expression: str = Field(description="The query's arithmetic as typed, with surrounding space removed.")
+    result: str = Field(
+        description="The exact result, rounded to 12 significant digits, in scientific notation when very large "
+        "or small. Plain text: escape it."
+    )
+
+
 class SearchResponse(Schema):
     """Search response with optional Mwmbl usage metadata."""
 
@@ -101,6 +118,12 @@ class SearchResponse(Schema):
         default=[],
         description="Wikimedia Commons images to show as a strip above the web results, in rank order, with the "
         "files they came from left out of `results`. Lay it out as the thumbnails load. Empty when there are none.",
+    )
+    widgets: list[CalculationWidget] = Field(
+        default=[],
+        description="Answers to show above the results. Clients that do not know a widget's `type` may ignore it. "
+        "Currently only `calculation`, for a query that is arithmetic such as `164*8`; `results` are then those "
+        f"for `{CALCULATOR_QUERY}`, because the query itself has nothing to search for.",
     )
     monthly_usage: int | None = None
     monthly_limit: int | None = None
@@ -248,6 +271,23 @@ def _upgrade_message(max_monthly_spend_cents: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+class CalculatorResults:
+    """The ranked results for the calculator query, kept for an hour so that arithmetic queries, which are all
+    answered with the same results, share one ranking pass."""
+
+    def __init__(self, ranker: HeuristicRanker):
+        self.ranker = ranker
+        self.results = None
+        self.expires_at = 0.0
+
+    def get(self):
+        now = time.monotonic()
+        if self.results is None or now >= self.expires_at:
+            self.results = self.ranker.search(CALCULATOR_QUERY, [])
+            self.expires_at = now + CALCULATOR_RESULTS_TTL_SECONDS
+        return self.results
+
+
 def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register the v1 search endpoint: returns a plain list of SearchResult."""
 
@@ -288,6 +328,7 @@ def _register_search_v1(r: Router | NinjaAPI, ranker: HeuristicRanker):
 
 def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
     """Register the v2 search endpoint: returns SearchResponse with optional quota info."""
+    calculator_results = CalculatorResults(ranker)
 
     @r.get(
         "",
@@ -370,14 +411,23 @@ def _register_search_v2(r: Router | NinjaAPI, ranker: HeuristicRanker):
             monthly_limit = None
             monthly_usage = None
 
-        raw_results = ranker.search(q, [])
+        arithmetic_result = calculate(q)
+        if arithmetic_result is None:
+            widgets = []
+            result_query = q
+            raw_results = ranker.search(q, [])
+        else:
+            widgets = [CalculationWidget(expression=q.strip(), result=arithmetic_result)]
+            result_query = CALCULATOR_QUERY
+            raw_results = calculator_results.get()
         images, web_results = build_image_strip(raw_results)
-        formatted = [format_result_v2(r, i + 1, q) for i, r in enumerate(web_results)]
+        formatted = [format_result_v2(r, i + 1, result_query) for i, r in enumerate(web_results)]
         return SearchResponse(
             query=q,
             number_of_results=len(formatted),
             results=formatted,
             images=images,
+            widgets=widgets,
             monthly_usage=monthly_usage,
             monthly_limit=monthly_limit,
         )
