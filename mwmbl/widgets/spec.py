@@ -25,6 +25,7 @@ _JSON_PATH = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[\d+\])*")
 
 InputType = Literal["number", "text", "date", "choice"]
 Display = Literal["fields", "form", "forecast"]
+Transform = Literal["wmo_code"]
 
 
 def placeholders(template: str) -> list[str]:
@@ -85,6 +86,7 @@ class OutputField(BaseModel):
     label: str
     path: str
     unit: str = ""
+    transform: Transform | None = None  # `wmo_code`: a WMO weather code shown as words
 
     @field_validator("path")
     @classmethod
@@ -106,6 +108,9 @@ class WidgetSpec(BaseModel):
     inputs: list[InputSpec] = []
     outputs: list[OutputField] = Field(min_length=1)
     display: Display = "fields"
+    # False only for a documented public API whose robots.txt disallows everything, which is meant for crawlers
+    # and not for calls like ours. The spec's page is still checked.
+    check_api_robots: bool = True
     trigger_word: str  # puts a query in the lookup's trigger set; one of trigger_tokens
     trigger_tokens: list[str] = Field(min_length=1)  # tokens (see widget_tokens) a query must all have
     cache_ttl_seconds: int = Field(ge=1, le=MAX_CACHE_TTL_SECONDS)

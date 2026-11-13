@@ -4,11 +4,15 @@ One document per spec, filed under its widget key (see mwmbl.widgets.keys). A si
 does not allow Mwmbl its page or API is skipped, and its document is removed, as is the document of a spec
 that is gone or changed since the last run. The keys written are remembered in DATA_PATH, because the
 index cannot be searched for documents a spec used to produce.
+
+A spec whose page URL has placeholders (the weather ones) is indexed once per place, from
+`--places cities15000.txt countryInfo.txt` (GeoNames, see mwmbl.widgets.places). Without `--places` there are no
+such documents, so the places of an earlier run are removed like any other stale widget.
 """
 
 import json
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from logging import getLogger
 from pathlib import Path
 
@@ -20,7 +24,8 @@ from mwmbl.crawler.retrieve import RobotsUnavailable, robots_allowed
 from mwmbl.indexer.index_batches import index_widget_documents
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, TinyIndex
 from mwmbl.widgets.keys import storage_key
-from mwmbl.widgets.spec import WidgetSpec, load_specs
+from mwmbl.widgets.places import Place, place_documents, read_countries, read_places
+from mwmbl.widgets.spec import WidgetSpec, load_specs, placeholders
 
 logger = getLogger(__name__)
 
@@ -46,9 +51,11 @@ def widget_document(spec: WidgetSpec) -> Document:
 
 def site_allows_mwmbl(spec: WidgetSpec, redis) -> bool:
     """Whether robots.txt lets Mwmbl fetch the spec's page and its API. An unreadable robots.txt does not."""
-    api_url = spec.api_url.format(**{input_spec.name: "0" for input_spec in spec.inputs})
+    zeros = {input_spec.name: "0" for input_spec in spec.inputs}
     try:
-        return robots_allowed(spec.page_url, redis) and robots_allowed(api_url, redis)
+        return robots_allowed(spec.page_url.format(**zeros), redis) and (
+            not spec.check_api_robots or robots_allowed(spec.api_url.format(**zeros), redis)
+        )
     except RobotsUnavailable:
         return False
 
@@ -79,18 +86,27 @@ def remove_stale_widgets(index: TinyIndex, keys: set[str], wanted: set[tuple[str
 
 
 def sync_widgets(
-    index_path: str, specs: list[WidgetSpec], allowed: Callable[[WidgetSpec], bool], previous_keys: set[str]
+    index_path: str,
+    specs: list[WidgetSpec],
+    allowed: Callable[[WidgetSpec], bool],
+    previous_keys: set[str],
+    places: Sequence[Place] = (),
 ) -> set[str]:
     """Make the index's widget documents those of the allowed specs, and return their keys.
 
     The documents of a blocked site, and those a changed or removed spec used to produce (their keys are
     `previous_keys`), are deleted first; then the rest are written. It adds the keys it may write to `previous_keys`.
     """
-    documents = [widget_document(spec) for spec in specs]
-    titles = [document.title for document in documents]
-    if len(set(titles)) != len(titles):
-        raise ValueError(f"Widget titles must be unique, got {sorted(titles)}")
-    wanted = [document for spec, document in zip(specs, documents) if allowed(spec)]
+    documents_by_spec = {}
+    for spec in specs:
+        has_places = bool(placeholders(spec.page_url))
+        documents_by_spec[spec.name] = place_documents(spec, places) if has_places else [widget_document(spec)]
+    documents = [document for spec_documents in documents_by_spec.values() for document in spec_documents]
+    for what, values in (("titles", [d.title for d in documents]), ("URLs", [d.url for d in documents])):
+        if len(set(values)) != len(values):
+            raise ValueError(f"Widget {what} must be unique")
+    allowed_specs = [spec for spec in specs if allowed(spec)]
+    wanted = [document for spec in allowed_specs for document in documents_by_spec[spec.name]]
     previous_keys |= {document.term for document in documents}
     with TinyIndex(Document, index_path, "w") as index:
         remove_stale_widgets(index, previous_keys, {(document.term, document.url) for document in wanted})
@@ -109,6 +125,15 @@ def save_keys(path: Path, keys: set[str]):
 class Command(BaseCommand):
     help = "Index the widget documents of the provider specs"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--places",
+            nargs=2,
+            metavar=("CITIES_TSV", "COUNTRY_INFO_TXT"),
+            type=Path,
+            help="GeoNames cities15000.txt and countryInfo.txt, for the weather widgets",
+        )
+
     def handle(self, *args, **options):
         redis = get_redis_connection("default")
         specs = load_specs()
@@ -121,8 +146,14 @@ class Command(BaseCommand):
                 logger.warning("Not indexing %s: %s does not allow Mwmbl", spec.name, spec.site)
             return site_allows
 
+        places = []
+        if options["places"]:
+            cities_path, countries_path = options["places"]
+            trigger_words = {spec.trigger_word for spec in specs}
+            places = read_places(cities_path, read_countries(countries_path), trigger_words)
+        index_path = str(Path(settings.DATA_PATH) / settings.INDEX_NAME)
         try:
-            keys = sync_widgets(str(Path(settings.DATA_PATH) / settings.INDEX_NAME), specs, allowed, previous_keys)
+            keys = sync_widgets(index_path, specs, allowed, previous_keys, places)
         except BaseException:
             save_keys(keys_path, previous_keys)  # what may have been written, so the next run can remove it
             raise

@@ -1,0 +1,30 @@
+{
+  "name": "open-meteo-weather",
+  "site": "open-meteo.com", "source_name": "Open-Meteo.com",
+  "page_url": "https://open-meteo.com/en/docs?latitude={latitude}&longitude={longitude}&ref=mwmbl",
+  "api_url": "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=4&timezone=auto", "api_host": "api.open-meteo.com",
+  "check_api_robots": false,
+  "inputs": [
+    {"name": "latitude", "type": "number", "label": "Latitude"},
+    {"name": "longitude", "type": "number", "label": "Longitude"}
+  ],
+  "outputs": [
+    {"label": "Temperature", "path": "current.temperature_2m", "unit": "°C"},
+    {"label": "Conditions", "path": "current.weather_code", "unit": "", "transform": "wmo_code"},
+    {"label": "Wind", "path": "current.wind_speed_10m", "unit": "km/h"},
+    {"label": "Day 1", "path": "daily.time[1]", "unit": ""},
+    {"label": "Day 1 conditions", "path": "daily.weather_code[1]", "unit": "", "transform": "wmo_code"},
+    {"label": "Day 1 high", "path": "daily.temperature_2m_max[1]", "unit": "°C"},
+    {"label": "Day 1 low", "path": "daily.temperature_2m_min[1]", "unit": "°C"},
+    {"label": "Day 2", "path": "daily.time[2]", "unit": ""},
+    {"label": "Day 2 conditions", "path": "daily.weather_code[2]", "unit": "", "transform": "wmo_code"},
+    {"label": "Day 2 high", "path": "daily.temperature_2m_max[2]", "unit": "°C"},
+    {"label": "Day 2 low", "path": "daily.temperature_2m_min[2]", "unit": "°C"},
+    {"label": "Day 3", "path": "daily.time[3]", "unit": ""},
+    {"label": "Day 3 conditions", "path": "daily.weather_code[3]", "unit": "", "transform": "wmo_code"},
+    {"label": "Day 3 high", "path": "daily.temperature_2m_max[3]", "unit": "°C"},
+    {"label": "Day 3 low", "path": "daily.temperature_2m_min[3]", "unit": "°C"}
+  ],
+  "display": "forecast",
+  "trigger_word": "weather", "trigger_tokens": ["weather"], "cache_ttl_seconds": 1800
+}
