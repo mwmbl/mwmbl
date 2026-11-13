@@ -1,9 +1,11 @@
 import itertools
 import socket
 import threading
+import time
 from copy import deepcopy
 from urllib.parse import quote
 
+import httpcore
 import httpx
 import pytest
 from ninja import NinjaAPI
@@ -186,3 +188,17 @@ def test_fetch_timeout_is_an_error(httpx_mock):
     httpx_mock.add_exception(httpx.ReadTimeout("slow"))
     with pytest.raises(FetchError):
         fetch_json("https://api.example.com/v1", "api.example.com")
+
+
+def test_fetch_refuses_deeply_nested_json(httpx_mock):
+    httpx_mock.add_response(content=b"[" * 30_000)
+    with pytest.raises(FetchError):
+        fetch_json("https://api.example.com/v1", "api.example.com")
+
+
+def test_fetch_deadline_covers_slow_reads(monkeypatch):
+    from mwmbl.widgets.fetch import _DeadlineBackend
+
+    backend = _DeadlineBackend(time.monotonic() - 1)
+    with pytest.raises(httpcore.ConnectTimeout):
+        backend.connect_tcp("127.0.0.1", 9)
