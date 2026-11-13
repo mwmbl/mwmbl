@@ -48,6 +48,8 @@ def read_places(path: Path, countries: dict[str, str], trigger_words: set[str]) 
     for line in path.read_text(encoding="utf-8").splitlines():
         columns = line.split("\t")
         tokens = tuple(token for token in widget_tokens(columns[2]) if token not in trigger_words)
+        if len(tokens) > 2 and tokens[-1] == "city":  # "New York City" is searched for as "New York"
+            tokens = tokens[:-1]
         if tokens:
             population = int(columns[14])
             rows.append((population, columns[1], tokens, countries[columns[8]], columns[10], columns[4], columns[5]))

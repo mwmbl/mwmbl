@@ -126,6 +126,7 @@ def test_weather_and_forecast_find_the_place_and_the_longest_name_wins(places, i
     assert [s.title for s in find(index_path, "weather york")] == ["York weather, United Kingdom"]
     assert [s.title for s in find(index_path, "York forecast")] == ["York forecast, United Kingdom"]
     assert [s.title for s in find(index_path, "new york city weather")] == ["New York City weather, United States"]
+    assert [s.title for s in find(index_path, "weather in new york")] == ["New York City weather, United States"]
     assert [s.title for s in find(index_path, "york weather forecast")] == ["York weather, United Kingdom"]
     assert [s.title for s in find(index_path, "weather in springfield")] == ["Springfield (MO) weather, United States"]
     assert [s.title for s in find(index_path, "zurich weather")] == ["Zürich weather, United Kingdom"]
