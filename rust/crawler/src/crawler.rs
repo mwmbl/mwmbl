@@ -1,14 +1,20 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use mwmbl_core::blacklist_providers::BlacklistProvider;
-use scc::HashMap;
-use tokio::sync::RwLock;
+use rand::{Rng, RngExt, random_range};
+use reqwest::{Client, redirect::Policy};
+use scc::{HashCache, HashMap};
+use tokio::{spawn, sync::RwLock, time::sleep};
 
 use crate::{
     CrawlerParams,
-    constants::{API_PRODUCT, PROJECT_URL},
+    constants::{API_PRODUCT, MAX_REDIRECTS, PROJECT_URL, TIMEOUT},
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    url_queue::SharedURLQueue,
+    retrieve::{CachedRobotFile, RobotCache, crawl},
+    url_queue::{ClaimedUrl, SharedURLQueue},
 };
 
 pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
@@ -17,6 +23,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     username: Arc<RwLock<Option<String>>>,
     error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
+    robots_cache: RobotCache,
 }
 
 impl Crawler {
@@ -31,40 +38,50 @@ impl Crawler {
             blacklist,
             username,
             error_last_reported_at: Arc::new(HashMap::default()),
+            robots_cache: RobotCache::new(&Self::crawl_user_agent(&params.contact_info)),
             params: Arc::new(params),
         })
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        println!(
-            "{:#?}",
-            self.blacklist
-                .is_domain_blacklisted("lamathematique.ovh")
-                .await
-        );
-        println!(
-            "{:#?}",
-            self.blacklist.is_domain_blacklisted("pornhub.com").await
-        );
-        let url = self.url_queue.get_url().await;
-        let url2 = self.url_queue.get_url().await;
-        let url3 = self.url_queue.get_url().await;
-        let url4 = self.url_queue.get_url().await;
-        println!(
-            "{:#?} {:#?} {:#?} {:#?}",
-            url.url(),
-            url2.url(),
-            url3.url(),
-            url4.url()
-        );
+        let mut rng = rand::rng();
+        let user_agent = Crawler::crawl_user_agent(&self.params.contact_info);
+
+        let client = reqwest::Client::builder()
+            .brotli(true)
+            .deflate(true)
+            .gzip(true)
+            .zstd(true)
+            .read_timeout(TIMEOUT)
+            .user_agent(user_agent)
+            .redirect(Policy::limited(MAX_REDIRECTS + 1))
+            .build()?;
 
         loop {
-            todo!();
+            let url = self.url_queue.get_url().await;
+            let cache = self.robots_cache.clone();
+            let crawl_client = client.clone();
+            let handle = spawn(async move { crawl(url, cache, crawl_client).await });
+
+            match handle.await {
+                Ok(result) => todo!(),
+                Err(err) => eprintln!("Unexpected error while crawling: {err}"),
+            }
+            sleep(Duration::from_secs_f32(rng.random_range(
+                0.9 * self.params.crawl_delay_seconds..1.1 * self.params.crawl_delay_seconds,
+            )))
+            .await;
         }
     }
 
     pub async fn run_once(&mut self) -> anyhow::Result<()> {
         todo!();
+    }
+
+    pub fn crawl_user_agent(contact_info: &str) -> String {
+        format!(
+            "{API_PRODUCT} (https://github.com/mwmbl/mwmbl/ contact {contact_info})"
+        )
     }
 
     pub fn api_user_agent(username: Option<&String>) -> String {

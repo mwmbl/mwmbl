@@ -14,6 +14,7 @@ mod constants;
 mod crawler;
 mod curated_domains;
 mod path_creation;
+mod retrieve;
 mod url_queue;
 
 use std::path::PathBuf;
@@ -59,9 +60,12 @@ pub struct CrawlerParams {
     /// is replaced with ~ in the message, so a report does not name the volunteer's account.
     #[arg(env = "CRAWL_REPORT_ERRORS", long, default_value = "true")]
     crawl_report_errors: bool,
-    /// URLs assigned per batch.
-    #[arg(env = "CRAWL_BATCH_SIZE", long, default_value = "100")]
-    crawl_batch_size: i32,
+    /// Whether to send the errors the crawl loops catch to the Mwmbl server, so we can see when
+    /// crawlers are failing. Reports carry the exception and traceback, the crawler version and
+    /// the device name. File paths are sent relative to the Python path, and the home directory
+    /// is replaced with ~ in the message, so a report does not name the volunteer's account.
+    #[arg(env = "CRAWL_DELAY_SECONDS", long, default_value = "0.0")]
+    crawl_delay_seconds: f32,
     /// What to do with results the crawler decides are worth submitting:
     #[arg(env = "CRAWL_SUBMIT_MODE", long, value_enum, default_value = "index")]
     submit_mode: CrawlSubmitMode,

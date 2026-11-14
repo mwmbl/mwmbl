@@ -10,6 +10,7 @@ use mwmbl_core::{
 use ordered_float::OrderedFloat;
 use priority_queue::DoublePriorityQueue;
 use rand::{RngExt, seq::IndexedRandom};
+use reqwest::Url;
 use scc::HashMap;
 use tokio::{
     sync::{Mutex, OwnedMutexGuard, RwLock},
@@ -24,39 +25,37 @@ use crate::{
     curated_domains::CuratedDomains,
 };
 
-type Queues = DoublePriorityQueue<String, OrderedFloat<f32>>;
+type DomainQueue = DoublePriorityQueue<String, OrderedFloat<f32>>;
+type UrlQueue = DoublePriorityQueue<Url, OrderedFloat<f32>>;
 
 #[derive(Clone)]
 pub struct SharedURLQueue<T: BlacklistProvider, const S: usize = 1000> {
     blacklist_provider: T,
     curated_domains: CuratedDomains,
-    domain_claims: Arc<HashMap<String, Arc<Mutex<String>>>>,
-    domain_urls: Arc<HashMap<String, Queues>>,
-    domain_scores: Arc<[RwLock<Queues>; S]>,
+    domain_claims: Arc<HashMap<String, Arc<Mutex<()>>>>,
+    domain_urls: Arc<HashMap<String, UrlQueue>>,
+    domain_scores: Arc<[RwLock<DomainQueue>; S]>,
     build_hasher: Arc<RandomState>,
 }
 
 pub struct ClaimedUrl {
-    domain_lock: OwnedMutexGuard<String>,
-    url: String,
-    domain_claims: Weak<HashMap<String, Arc<Mutex<String>>>>,
+    domain_lock: OwnedMutexGuard<()>,
+    url: reqwest::Url,
+    domain_claims: Weak<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl ClaimedUrl {
-    pub fn url(&self) -> &str {
+    pub fn url(&self) -> &reqwest::Url {
         &self.url
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.domain_lock
     }
 }
 
 impl Drop for ClaimedUrl {
     fn drop(&mut self) {
-        let domain = self.domain_lock.clone();
-        if let Some(claims) = self.domain_claims.upgrade() {
-            claims.remove_sync(&domain);
+        if let Some(claims) = self.domain_claims.upgrade()
+            && let Some(domain) = self.url.domain()
+        {
+            claims.clone().remove_sync(domain);
         }
     }
 }
@@ -68,7 +67,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
             domain_urls: Arc::new(HashMap::default()),
             domain_claims: Arc::new(HashMap::default()),
             curated_domains,
-            domain_scores: Arc::new(std::array::from_fn(|_| RwLock::new(Queues::new()))),
+            domain_scores: Arc::new(std::array::from_fn(|_| RwLock::new(DomainQueue::new()))),
             build_hasher: Arc::new(RandomState::new()),
         }
     }
@@ -76,7 +75,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     pub async fn claim_domain(
         &mut self,
         domain: &str,
-    ) -> Result<OwnedMutexGuard<String>, tokio::sync::TryLockError> {
+    ) -> Result<OwnedMutexGuard<()>, tokio::sync::TryLockError> {
         let entry = self.domain_claims.entry_async(domain.to_owned()).await;
         match entry {
             scc::hash_map::Entry::Occupied(occupied_entry) => {
@@ -84,7 +83,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 mutex.try_lock_owned()
             }
             scc::hash_map::Entry::Vacant(vacant_entry) => {
-                let mutex = Arc::new(Mutex::new(domain.to_owned()));
+                let mutex = Arc::new(Mutex::new(()));
                 vacant_entry
                     .insert_entry(mutex)
                     .get()
@@ -128,11 +127,13 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                         .blacklist_provider
                         .is_domain_blacklisted(&random_domain)
                         .await
-                    && let Ok(domain_lock) = self.claim_domain(&random_domain).await
+                    && let Ok(url) = Url::parse(&format!("https://{random_domain}/"))
+                    && let Some(random_domain) = url.domain()
+                    && let Ok(domain_lock) = self.claim_domain(random_domain).await
                 {
                     return ClaimedUrl {
                         domain_lock,
-                        url: format!("https://{random_domain}/"),
+                        url,
                         domain_claims: Arc::downgrade(&self.domain_claims),
                     };
                 }
@@ -235,7 +236,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         None
     }
 
-    fn get_priority_queue(&self, domain: &str) -> Option<&RwLock<Queues>> {
+    fn get_priority_queue(&self, domain: &str) -> Option<&RwLock<DomainQueue>> {
         #[allow(clippy::cast_possible_truncation)]
         self.domain_scores
             .get(self.build_hasher.hash_one(domain) as usize % S)

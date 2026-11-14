@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Duration};
 
 use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 
@@ -18,6 +18,10 @@ pub static SEED_DOMAIN_RANDOM_WEIGHT: usize = 1;
 pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
 
 pub static MAX_REDIRECTS: usize = 5;
-pub static TIMEOUT_SECONDS: usize = 3;
+pub static TIMEOUT: Duration = Duration::from_secs(3);
+pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
 pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| DOMAINS.keys().cloned().collect());
+
+pub static ROBOTS_CACHE_TTL_SECONDS: Duration = Duration::from_hours(24);
+pub static ROBOTS_CACHE_ERROR_TTL_SECONDS: Duration = Duration::from_hours(1);
