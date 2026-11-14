@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use anyhow::Ok;
 use mwmbl_core::{
@@ -8,9 +8,11 @@ use mwmbl_core::{
         NormalizedBlacklistProvider, RemoteBlacklistProvider,
         SharedSelfRefreshingBlacklistProvider,
     },
+    hn_top_domains_filtered::DOMAINS,
 };
 use reqwest::Client;
 use serde::Deserialize;
+use tokio::sync::RwLock;
 
 use crate::crawler::Crawler;
 
@@ -26,8 +28,9 @@ pub struct CuratedDomainsResponse {
 
 #[derive(Clone)]
 pub struct CuratedDomains {
-    curated_domains: HashSet<String>,
-    url: String,
+    domains_set: Arc<RwLock<HashSet<String>>>,
+    non_static_domains: Arc<RwLock<Vec<String>>>,
+    url: Arc<RwLock<String>>,
 }
 
 impl CuratedDomains {
@@ -35,14 +38,16 @@ impl CuratedDomains {
     pub fn new(remote_server: &str) -> Self {
         let url = format!("{remote_server}/api/v1/crawler/curated-domains");
         Self {
-            curated_domains: HashSet::default(),
-            url,
+            domains_set: Arc::new(RwLock::new(HashSet::default())),
+            url: Arc::new(RwLock::new(url)),
+            non_static_domains: Arc::new(RwLock::new(Vec::new())),
         }
     }
+
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
         let response = Client::builder()
             .build()?
-            .get(self.url.clone())
+            .get(self.url.read().await.clone())
             .header("User-Agent", Crawler::api_user_agent(None))
             .timeout(Duration::from_secs(10))
             .send()
@@ -50,14 +55,36 @@ impl CuratedDomains {
 
         let response: CuratedDomainsResponse = response.error_for_status()?.json().await?;
 
+        let mut curated_domains: HashSet<String> = HashSet::default();
+        let mut curated_non_static_domains: Vec<String> = Vec::default();
+
         for domain in response.domains {
-            self.curated_domains.insert(domain.name);
+            curated_domains.insert(domain.name);
         }
+
+        for domain in &curated_domains {
+            if !DOMAINS.contains_key(domain) {
+                curated_non_static_domains.push(domain.clone());
+            }
+        }
+
+        let mut curated_domains_lock = self.domains_set.write().await;
+        let mut curated_non_static_domains_lock = self.non_static_domains.write().await;
+
+        *curated_domains_lock = curated_domains;
+        *curated_non_static_domains_lock = curated_non_static_domains;
 
         Ok(())
     }
-    pub fn is_domain_curated(&self, domain: &str) -> bool {
-        self.curated_domains.contains(&domain_no_www(domain))
+    pub async fn is_domain_curated(&self, domain: &str) -> bool {
+        self.domains_set
+            .read()
+            .await
+            .contains(&domain_no_www(domain))
+    }
+
+    pub fn get_non_static_domains(&self) -> Arc<RwLock<Vec<String>>> {
+        self.non_static_domains.clone()
     }
 }
 
@@ -77,9 +104,9 @@ impl<T: BlacklistProvider> CuratedBlacklistProvider<T> {
 }
 
 impl<T: BlacklistProvider> BlacklistProvider for CuratedBlacklistProvider<T> {
-    async fn is_domain_blacklisted(&self, domain: &str) -> anyhow::Result<bool> {
-        Ok(self.parent.is_domain_blacklisted(domain).await?
-            && !self.curated_domains.is_domain_curated(domain))
+    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+        self.parent.is_domain_blacklisted(domain).await
+            && !self.curated_domains.is_domain_curated(domain).await
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         self.curated_domains.refresh().await?;
@@ -98,7 +125,9 @@ pub type DefaultBlackList = SharedSelfRefreshingBlacklistProvider<
     >,
 >;
 
-pub async fn get_default_blacklist_provider(server_url: &str) -> anyhow::Result<DefaultBlackList> {
+pub async fn get_default_blacklist_provider(
+    curated_domains: CuratedDomains,
+) -> anyhow::Result<DefaultBlackList> {
     let first = BuiltInRulesBlacklistProvider::new();
     let second =
         RemoteBlacklistProvider::new(BlacklistUrls::HageziUrlTifMedium.as_str().to_owned());
@@ -106,7 +135,7 @@ pub async fn get_default_blacklist_provider(server_url: &str) -> anyhow::Result<
     let first_second = CombinedBlacklistProvider::new(first, second);
     let combined = CombinedBlacklistProvider::new(first_second, third);
     let normalized = NormalizedBlacklistProvider::new(combined);
-    let curated = CuratedBlacklistProvider::new(normalized, CuratedDomains::new(server_url));
+    let curated = CuratedBlacklistProvider::new(normalized, curated_domains);
     let refreshing = SharedSelfRefreshingBlacklistProvider::new(curated);
     refreshing.await
 }
