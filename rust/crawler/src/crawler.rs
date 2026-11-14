@@ -57,6 +57,8 @@ impl Crawler {
             .redirect(Policy::limited(MAX_REDIRECTS + 1))
             .build()?;
 
+        let mut n = 3;
+
         loop {
             let url = self.url_queue.get_url().await;
             let cache = self.robots_cache.clone();
@@ -64,13 +66,24 @@ impl Crawler {
             let handle = spawn(async move { crawl(url, cache, crawl_client).await });
 
             match handle.await {
-                Ok(result) => todo!(),
-                Err(err) => eprintln!("Unexpected error while crawling: {err}"),
+                Ok((_claimed_url,Ok(result))) => {
+                    println!("{result:#?}");
+                    n-=1;
+                    if n==0{
+                        return Ok(());
+                    }
+                },
+                Ok((_claimed_url,Err(err))) => {
+                    eprintln!("Unexpected error while crawling: {err:#?}");
+                },
+                Err(err) => eprintln!("can't join handle: {err}"),
             }
-            sleep(Duration::from_secs_f32(rng.random_range(
-                0.9 * self.params.crawl_delay_seconds..1.1 * self.params.crawl_delay_seconds,
-            )))
-            .await;
+            if self.params.crawl_delay_seconds > 0.0 {
+                sleep(Duration::from_secs_f32(rng.random_range(
+                    0.9 * self.params.crawl_delay_seconds..1.1 * self.params.crawl_delay_seconds,
+                )))
+                .await;
+            }
         }
     }
 
