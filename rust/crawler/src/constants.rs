@@ -25,3 +25,12 @@ pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| DOMAINS.keys().
 
 pub static ROBOTS_CACHE_TTL_SECONDS: Duration = Duration::from_hours(24);
 pub static ROBOTS_CACHE_ERROR_TTL_SECONDS: Duration = Duration::from_hours(1);
+
+pub static NUM_EXTRACT_CHARS: usize = 155;
+pub static NUM_TITLE_CHARS: usize = 65;
+
+pub static DEFAULT_DOMAIN_DELAY: Duration = Duration::from_secs(5);
+pub static MAX_BLOCK_COOL_OFF: Duration = Duration::from_hours(6);
+pub static MAX_DOMAIN_DELAY: Duration = MAX_BLOCK_COOL_OFF;
+
+pub static BLOCK_COOL_OFF: Duration = Duration::from_mins(1);

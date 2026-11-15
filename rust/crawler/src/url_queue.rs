@@ -1,6 +1,7 @@
 use std::{
     hash::{BuildHasher, RandomState},
     sync::{Arc, Weak},
+    time::Duration,
 };
 
 use mwmbl_core::{
@@ -14,7 +15,8 @@ use reqwest::Url;
 use scc::HashMap;
 use tokio::{
     sync::{Mutex, OwnedMutexGuard, RwLock},
-    task::yield_now,
+    task::{self, yield_now},
+    time::sleep,
 };
 
 use crate::{
@@ -42,20 +44,80 @@ pub struct ClaimedUrl {
     domain_lock: OwnedMutexGuard<()>,
     url: reqwest::Url,
     domain_claims: Weak<HashMap<String, Arc<Mutex<()>>>>,
+    released: bool,
 }
 
 impl ClaimedUrl {
     pub fn url(&self) -> &reqwest::Url {
         &self.url
     }
+    pub fn release_after_delay(self, resolved_domain: Option<&str>, delay: Duration) {
+        let resolved_domain = resolved_domain.map(std::borrow::ToOwned::to_owned).clone();
+        task::spawn(async move {
+            let mut claimed_url = self;
+            if let Some(domain) = claimed_url.url.domain() {
+                let other_claim: Option<(OwnedMutexGuard<()>, String)> =
+                    if let Some(resolved_domain) = resolved_domain
+                        && resolved_domain != domain
+                        && let Some(claims) = claimed_url.domain_claims.upgrade()
+                    {
+                        let res = arc_claim_domain(claims, &resolved_domain).await;
+                        if res.is_err() {
+                            eprintln!("Error: Cannot lock resolved_domain.");
+                        }
+                        res.ok().map(|lock| (lock, resolved_domain))
+                    } else {
+                        None
+                    };
+
+                sleep(delay).await;
+
+                if let Some(claims) = claimed_url.domain_claims.upgrade() {
+                    claims.remove_async(domain).await;
+                    if let Some((_guard, domain)) = other_claim {
+                        claims.remove_async(&domain).await;
+                    }
+                }
+                println!("Released Domain");
+                claimed_url.released = true;
+            } else {
+                eprintln!("Error: domain not found.");
+            }
+            drop(claimed_url);
+        });
+    }
 }
 
 impl Drop for ClaimedUrl {
     fn drop(&mut self) {
-        if let Some(claims) = self.domain_claims.upgrade()
-            && let Some(domain) = self.url.domain()
-        {
-            claims.clone().remove_sync(domain);
+        if !self.released {
+            eprintln!("Error: URL dropped without proper release");
+            if let Some(claims) = self.domain_claims.upgrade()
+                && let Some(domain) = self.url.domain()
+            {
+                claims.remove_sync(domain);
+            }
+        }
+    }
+}
+
+async fn arc_claim_domain(
+    domain_claims: Arc<HashMap<String, Arc<Mutex<()>>>>,
+    domain: &str,
+) -> Result<OwnedMutexGuard<()>, tokio::sync::TryLockError> {
+    let entry = domain_claims.entry_async(domain.to_owned()).await;
+    match entry {
+        scc::hash_map::Entry::Occupied(occupied_entry) => {
+            let mutex = occupied_entry.get().clone();
+            mutex.try_lock_owned()
+        }
+        scc::hash_map::Entry::Vacant(vacant_entry) => {
+            let mutex = Arc::new(Mutex::new(()));
+            vacant_entry
+                .insert_entry(mutex)
+                .get()
+                .clone()
+                .try_lock_owned()
         }
     }
 }
@@ -73,24 +135,10 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     }
 
     pub async fn claim_domain(
-        &mut self,
+        &self,
         domain: &str,
     ) -> Result<OwnedMutexGuard<()>, tokio::sync::TryLockError> {
-        let entry = self.domain_claims.entry_async(domain.to_owned()).await;
-        match entry {
-            scc::hash_map::Entry::Occupied(occupied_entry) => {
-                let mutex = occupied_entry.get().clone();
-                mutex.try_lock_owned()
-            }
-            scc::hash_map::Entry::Vacant(vacant_entry) => {
-                let mutex = Arc::new(Mutex::new(()));
-                vacant_entry
-                    .insert_entry(mutex)
-                    .get()
-                    .clone()
-                    .try_lock_owned()
-            }
-        }
+        arc_claim_domain(self.domain_claims.clone(), domain).await
     }
 
     pub async fn get_url(&mut self) -> ClaimedUrl {
@@ -135,6 +183,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                         domain_lock,
                         url,
                         domain_claims: Arc::downgrade(&self.domain_claims),
+                        released: false,
                     };
                 }
             } else if p_url_group
@@ -226,6 +275,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                     domain_lock,
                     url,
                     domain_claims: Arc::downgrade(&self.domain_claims),
+                    released: false,
                 });
             }
             let _ = urls.remove();
