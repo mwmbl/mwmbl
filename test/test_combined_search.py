@@ -129,6 +129,10 @@ def stub_sources(monkeypatch):
             calls["additional_results"] = additional_results
             return retrieval + list(additional_results)
 
+        def fake_search(query, additional_results):
+            calls["calculator_query"] = query
+            return list(index)
+
         def fake_index(documents, query, path):
             calls["indexed"] = [document.url for document in documents]
             calls["indexed_query"] = query
@@ -145,6 +149,7 @@ def stub_sources(monkeypatch):
 
         monkeypatch.setattr(combined_ranker, "retrieve", fake_retrieve)
         monkeypatch.setattr(combined_ranker, "search_retrieved", fake_search_retrieved)
+        monkeypatch.setattr(combined_ranker, "search", fake_search)
         return calls
 
     return configure
@@ -974,11 +979,20 @@ def test_a_query_without_a_trigger_word_has_no_widgets(client, access_token, fre
 
 
 @pytest.mark.django_db
-def test_arithmetic_is_computed_and_searched_as_the_calculator(client, access_token, fresh_quota, stub_sources):
+def test_arithmetic_is_answered_from_the_calculator_results_alone(client, access_token, fresh_quota, stub_sources):
     calls = stub_sources()
 
-    body = client.get(URL + "?" + urlencode({"q": " 164*8 "}), HTTP_AUTHORIZATION=f"Bearer {access_token}").json()
+    response = client.get(
+        URL + "?" + urlencode({"q": " 164*8 ", "crawl": "true", "images": "true"}),
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    body = response.json()
 
     assert body["widgets"] == [{"type": "calculation", "expression": "164*8", "result": "1312"}]
     assert body["query"] == " 164*8 "
-    assert calls["staan_query"] == calls["retrieve_query"] == calls["indexed_query"] == "calculator"
+    assert body["monthly_usage"] == 1
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url]
+    assert body["crawl_outcome"] is None
+    assert body["image_outcome"] is None
+    assert body["pages_indexed"] == 0
+    assert calls == {"calculator_query": "calculator"}
