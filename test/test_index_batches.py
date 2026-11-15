@@ -12,9 +12,10 @@ from mwmbl.indexer.index_batches import (
     combine_documents,
     index_documents,
     index_results_against_query,
+    index_widget_documents,
     sort_documents,
 )
-from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentState, TinyIndex
+from mwmbl.tinysearchengine.indexer import PAGE_SIZE, Document, DocumentSource, DocumentState, TinyIndex
 
 
 class UrlRanker:
@@ -332,3 +333,45 @@ def test_index_results_against_query_cleans_text_that_cannot_be_stored(index_pat
     with TinyIndex(item_factory=Document, index_path=index_path, mode="r") as index:
         stored = index.retrieve("rust")
     assert [d.title for d in stored] == ["Rust "]
+
+
+def test_sort_documents_puts_widgets_after_curated_and_before_the_rest():
+    curated = Document("curated", "c", "x", term="weather", state=DocumentState.FROM_USER_APPROVED)
+    ordinary = Document("ordinary", "a", "x", term="widget:weather york")
+    widget = Document("York weather", "w1", "x", term="widget:weather york", source=DocumentSource.WIDGET)
+    new_widget = Document("Paris weather", "w2", "x", term="widget:paris weather", source=DocumentSource.WIDGET)
+
+    sorted_documents = sort_documents([new_widget], [ordinary, widget, curated], UrlRanker())
+
+    assert [doc.url for doc in sorted_documents] == ["c", "w1", "w2", "a"]
+
+
+def test_sort_documents_replaces_a_widget_where_it_was_stored():
+    first = Document("First", "w1", "x", term="widget:a b", source=DocumentSource.WIDGET)
+    second = Document("Second", "w2", "x", term="widget:a b", source=DocumentSource.WIDGET)
+    updated = Document("First, updated", "w1", "y", term="widget:a b", source=DocumentSource.WIDGET)
+
+    sorted_documents = sort_documents([updated], [first, second], UrlRanker())
+
+    assert [doc.title for doc in sorted_documents] == ["First, updated", "Second"]
+
+
+def test_index_widget_documents_files_them_under_their_key():
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "index.tinysearch")
+        with TinyIndex.create(Document, index_path, num_pages=64, page_size=PAGE_SIZE):
+            pass
+        york = Document("York weather", "https://example.com/york", "Forecast")
+        calculator = Document("Calculator", "https://example.com/calc", "Sums")
+
+        index_widget_documents([(york, "widget:weather york"), (calculator, "widget:calculator")], index_path)
+
+        with TinyIndex(Document, index_path) as index:
+            [found] = index.retrieve("widget:weather york")
+            assert (found.title, found.term, found.source) == (
+                "York weather",
+                "widget:weather york",
+                DocumentSource.WIDGET,
+            )
+            assert [doc.url for doc in index.retrieve("widget:calculator")] == ["https://example.com/calc"]
+            assert index.retrieve("weather") == []

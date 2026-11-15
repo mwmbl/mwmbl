@@ -24,6 +24,7 @@ DOCUMENT_PROVIDERS = {
     DocumentSource.STAAN: "eusp",
     # The same label for Staan's results once they are in our index: they are still Staan's.
     DocumentSource.STAAN_INDEXED: "eusp",
+    DocumentSource.WIDGET: "widget",
     **{source: "commons" for source in LICENCE_NAMES_AND_URLS},
 }
 

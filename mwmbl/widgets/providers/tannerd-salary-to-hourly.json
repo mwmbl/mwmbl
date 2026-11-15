@@ -1,0 +1,16 @@
+{
+  "name": "salary-to-hourly-calculator",
+  "site": "tannerd.net", "source_name": "tannerd.net",
+  "page_url": "https://tannerd.net/tools/salary-to-hourly-calculator/?ref=mwmbl",
+  "api_url": "https://tannerd.net/api/v1/salary-to-hourly?annual_salary={annual_salary}&hours_per_week={hours_per_week}", "api_host": "tannerd.net",
+  "inputs": [
+    {"name": "annual_salary", "type": "number", "label": "Annual salary", "pattern": "^(?!.*\\b(?:month|monthly|biweekly|daily)\\b).*?(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d.,k])(?=\\s*(?:a |per |/ ?)?(?:year|yr|annual|salary))"},
+    {"name": "hours_per_week", "type": "number", "label": "Hours per week", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)\\s*(?:hours|hrs|hr|h)\\b", "default": "40"}
+  ],
+  "outputs": [
+    {"label": "Hourly", "path": "result.hourly_equivalent", "unit": "per hour"},
+    {"label": "Weekly", "path": "result.weekly_equivalent", "unit": "per week"},
+    {"label": "Monthly", "path": "result.monthly_equivalent", "unit": "per month"}
+  ],
+  "trigger_word": "hourly", "trigger_tokens": ["hourly", "salary", ":n"], "cache_ttl_seconds": 3600
+}

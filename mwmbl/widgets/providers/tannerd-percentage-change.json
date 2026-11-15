@@ -1,0 +1,16 @@
+{
+  "name": "percentage-change-calculator",
+  "site": "tannerd.net", "source_name": "tannerd.net",
+  "page_url": "https://tannerd.net/tools/percentage-change-calculator/?ref=mwmbl",
+  "api_url": "https://tannerd.net/api/v1/percentage-change?original={original}&new_value={new_value}", "api_host": "tannerd.net",
+  "inputs": [
+    {"name": "original", "type": "number", "label": "Original value", "pattern": "(?<![\\d.,])(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)(?=\\s*%?\\s*(?:to|->|and|vs)\\s*\\d)"},
+    {"name": "new_value", "type": "number", "label": "New value", "pattern": "\\d\\s*%?\\s*(?:to|->|and|vs)\\s*(\\d+(?:\\.\\d+)?)(?![\\d,]|\\.\\d)"}
+  ],
+  "outputs": [
+    {"label": "Change", "path": "result.percentage_change", "unit": "%"},
+    {"label": "Difference", "path": "result.difference", "unit": ""},
+    {"label": "Direction", "path": "result.direction", "unit": ""}
+  ],
+  "trigger_word": "percentage", "trigger_tokens": ["percentage", "change", ":n"], "cache_ttl_seconds": 3600
+}

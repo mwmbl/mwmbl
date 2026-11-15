@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -25,7 +25,7 @@ from ninja_jwt.tokens import RefreshToken
 from test_image_search import make_image
 
 import mwmbl.tinysearchengine.combined_search as combined_search
-from mwmbl import pricing
+from mwmbl import pricing, search_setup
 from mwmbl.imagesearch import commons, seed_images
 from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSelection, RankedImage
 from mwmbl.indexer import seed_crawl
@@ -40,6 +40,7 @@ from mwmbl.quota import (
 )
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
 from mwmbl.utils import utc_today
+from mwmbl.widgets.lookup import WidgetStub, default_finder
 
 User = get_user_model()
 
@@ -128,6 +129,10 @@ def stub_sources(monkeypatch):
             calls["additional_results"] = additional_results
             return retrieval + list(additional_results)
 
+        def fake_search(query, additional_results):
+            calls["calculator_query"] = query
+            return list(index)
+
         def fake_index(documents, query, path):
             calls["indexed"] = [document.url for document in documents]
             calls["indexed_query"] = query
@@ -144,6 +149,7 @@ def stub_sources(monkeypatch):
 
         monkeypatch.setattr(combined_ranker, "retrieve", fake_retrieve)
         monkeypatch.setattr(combined_ranker, "search_retrieved", fake_search_retrieved)
+        monkeypatch.setattr(combined_ranker, "search", fake_search)
         return calls
 
     return configure
@@ -937,3 +943,56 @@ def test_an_indexed_file_the_seed_strip_has_is_not_shown_twice(
 
     assert [image["title"] for image in body["images"]] == ["Red panda.jpg", "Red panda zoo.jpg"]
     assert [result["url"] for result in body["results"]] == [STAAN_RESULT.url]
+
+
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_widgets_the_query_triggers_are_in_the_response(client, access_token, fresh_quota, stub_sources, monkeypatch):
+    calls = stub_sources()
+    stub = WidgetStub(title="York weather, UK", url="https://example.com/york", source_name="Example Weather")
+    found = {}
+
+    def fake_find(query, tiny_index):
+        found["query"] = query
+        found["tiny_index"] = tiny_index
+        return [stub]
+
+    # As with the ranker, the router closed over the finder at registration time.
+    monkeypatch.setattr(default_finder(), "find", fake_find)
+
+    body = _get(client, access_token, query="weather in york").json()
+
+    assert body["widgets"] == [stub.dict()]
+    assert found == {"query": "weather in york", "tiny_index": search_setup.tiny_index}
+    assert calls["staan_query"] == "weather in york"
+
+
+@pytest.mark.django_db
+def test_a_query_without_a_trigger_word_has_no_widgets(client, access_token, fresh_quota, stub_sources):
+    stub_sources()
+
+    assert _get(client, access_token, query="rust").json()["widgets"] == []
+
+
+@pytest.mark.django_db
+def test_arithmetic_is_answered_from_the_calculator_results_alone(client, access_token, fresh_quota, stub_sources):
+    calls = stub_sources()
+
+    response = client.get(
+        URL + "?" + urlencode({"q": " 164*8 ", "crawl": "true", "images": "true"}),
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    body = response.json()
+
+    assert body["widgets"] == [{"type": "calculation", "expression": "164*8", "result": "1312"}]
+    assert body["query"] == " 164*8 "
+    assert body["monthly_usage"] == 1
+    assert [result["url"] for result in body["results"]] == [INDEX_RESULT.url]
+    assert body["crawl_outcome"] is None
+    assert body["image_outcome"] is None
+    assert body["pages_indexed"] == 0
+    assert calls == {"calculator_query": "calculator"}

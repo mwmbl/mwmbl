@@ -341,9 +341,26 @@ def combine_documents(existing_documents, documents, mark_synced, ranker):
     return combined_documents
 
 
+def _widgets_first(existing_widgets: list[Document], incoming_widgets: list[Document]) -> list[Document]:
+    """The page's widget documents in the order they were first stored, which is the order of
+    preference (places are stored most populous first). A document stored again replaces its
+    old copy where it was; new ones go last."""
+    incoming_by_url = {doc.url: doc for doc in incoming_widgets}
+    kept = [incoming_by_url.pop(doc.url, doc) for doc in existing_widgets]
+    return kept + list(incoming_by_url.values())
+
+
 def sort_documents(documents, all_existing_documents, ranker):
     curated_documents = [doc for doc in all_existing_documents if doc.state in CURATED_STATES]
-    existing_documents = [doc for doc in all_existing_documents if doc.state not in CURATED_STATES]
+    uncurated_documents = [doc for doc in all_existing_documents if doc.state not in CURATED_STATES]
+    # They are not ranked, and they come before every other document so that the trim of a full
+    # page, which shares it with ordinary terms by hash, takes the ordinary ones.
+    existing_widgets = [doc for doc in uncurated_documents if doc.source == DocumentSource.WIDGET]
+    existing_documents = [doc for doc in uncurated_documents if doc.source != DocumentSource.WIDGET]
+    widget_documents = _widgets_first(
+        existing_widgets, [doc for doc in documents if doc.source == DocumentSource.WIDGET]
+    )
+    documents = [doc for doc in documents if doc.source != DocumentSource.WIDGET]
 
     term_documents = defaultdict(list)
 
@@ -365,8 +382,26 @@ def sort_documents(documents, all_existing_documents, ranker):
 
     numbered_docs = [enumerate(docs) for docs in ordered_term_docs.values()]
     combined_docs = [doc for docs in numbered_docs for doc in docs]
-    indexes, sorted_documents = zip(*sorted(combined_docs, key=lambda x: x[0]))
-    return curated_documents + list(sorted_documents)
+    sorted_documents = [doc for _, doc in sorted(combined_docs, key=lambda x: x[0])]
+    return curated_documents + widget_documents + sorted_documents
+
+
+def index_widget_documents(documents_with_keys: Iterable[tuple[Document, str]], index_path: str) -> Counter:
+    """Write each widget document under its key (see mwmbl.widgets.keys.storage_key).
+
+    Not index_documents: a widget is filed under its key alone, not under the terms of its
+    text, and its source says what it is. They come from reviewed provider specs rather than
+    from the crawl, so the blacklist the crawl's paths enforce is not applied here.
+    """
+    page_documents = defaultdict(list)
+    with TinyIndex(Document, index_path, "r") as indexer:
+        for document, key in documents_with_keys:
+            cleaned = cleaned_document(document)
+            widget_document = Document(
+                cleaned.title, cleaned.url, cleaned.extract, term=key, source=DocumentSource.WIDGET
+            )
+            page_documents[indexer.get_key_page_index(key)].append(widget_document)
+    return index_pages(index_path, page_documents)
 
 
 def preprocess_documents(documents, index_path):
