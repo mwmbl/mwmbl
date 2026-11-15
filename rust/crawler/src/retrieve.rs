@@ -1,6 +1,5 @@
 use dom_query::Document;
-use kreuzberg::{ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, extract_bytes, extraction::html::ConversionOptions};
-use omniparse::detection::TypeDetector;
+use kreuzberg::{ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, core::mime, extract_bytes, extraction::html::ConversionOptions};
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
@@ -210,19 +209,19 @@ async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCod
     Ok((data, status, url))
 }
 
+#[allow(clippy::field_reassign_with_default)]
 async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, StatusCode, Url)> {
     let (data, status, url) = fetch(client, url).await?;
     if status.is_success() {
-        let detector = TypeDetector::new();
-        let detection = detector.detect_from_bytes(&data);
-        if detection.mime_type == "text/html" {
+        let mime = mime::detect_mime_type_from_bytes(&data)?;
+        
+        if mime == "text/html" {
             return Ok((String::from_utf8(data)?, status, url));
         }
-
         let mut config = ExtractionConfig::default();
         config.output_format = OutputFormat::Html;
         config.use_cache = false;
-        let result = extract_bytes(&data, &detection.mime_type, &config).await?;
+        let result = extract_bytes(&data, &mime, &config).await?;
         return Ok((result.content, status, url));
     }
     bail!("Fetch error: status code: {status}");
