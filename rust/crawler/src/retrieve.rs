@@ -322,14 +322,14 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
         .clean_styles(true)
         .build();
 
-    let (article_html, article_excerpt, article_title, article_lang) =
+    let (article_html, article_excerpt, article_title) =
         match Readability::new(html, Some(resolved_url.as_str()), Some(read_options)) {
             Ok(article) => match article.parse() {
                 Some(article) => {
                     if let (Some(html), Some(excerpt), Some(title)) =
                         (article.content, article.excerpt, article.title)
                     {
-                        (html, excerpt, title, article.lang)
+                        (html, excerpt, title)
                     } else {
                         return CrawlResults::HtmlParsingError {
                             timestamp,
@@ -373,22 +373,7 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
         };
     }
 
-    let words = if let Some(lang) = article_lang
-        && let Some(lang) = stop_words::lookup(lang)
-    {
-        lang
-    } else {
-        let Some(words) = stop_words::lookup(stop_words::Language::English) else {
-            return CrawlResults::ParagraphParsingError {
-                timestamp,
-                url,
-                resolved_url,
-            };
-        };
-        words
-    };
-
-    let extract = trim_size(&clean_text(&article_excerpt, words), NUM_EXTRACT_CHARS);
+    let extract = trim_size(&article_excerpt, NUM_EXTRACT_CHARS);
     let title = trim_size(&article_title, NUM_TITLE_CHARS);
 
     CrawlResults::CrawlContent {
@@ -400,38 +385,6 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
         extra_links,
         resolved_url,
     }
-}
-
-fn clean_text(text: &str, stop_words: &[&str]) -> String {
-    let lowercase_doc = text.to_ascii_lowercase();
-
-    let regex_for_punctuation = human_regex::one_or_more(human_regex::punctuation());
-    let text_without_punctuation = regex_for_punctuation
-        .to_regex()
-        .replace_all(&lowercase_doc, " ");
-
-    // Make a regex to match stopwords with trailing spaces and punctuation
-    let regex_for_stop_words = human_regex::word_boundary()
-        + human_regex::exactly(1, human_regex::or(stop_words))
-        + human_regex::word_boundary()
-        + human_regex::one_or_more(human_regex::whitespace());
-
-    // Remove stop words
-    let clean_text = regex_for_stop_words
-        .to_regex()
-        .replace_all(&text_without_punctuation, "");
-    clean_text
-        .split_whitespace()
-        .filter(|p| !p.is_empty())
-        .fold(String::new(), |acc, elem| {
-            if acc.len() > NUM_EXTRACT_CHARS + 1 {
-                acc
-            } else {
-                acc + elem + " "
-            }
-        })
-        .trim_end()
-        .to_owned()
 }
 
 fn trim_size(string: &str, size: usize) -> String {
