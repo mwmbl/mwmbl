@@ -504,3 +504,10 @@ IMAGE_SEARCH_THREADS = 8
 # Space-separated SHA-1s, or Commons file page URLs percent-encoded as the API gives them
 # (https://commons.wikimedia.org/wiki/File:Caf%C3%A9.jpg), never to show until approvals can be revoked.
 IMAGE_SEARCH_DENIED_FILES = set(os.environ.get("IMAGE_SEARCH_DENIED_FILES", "").lower().split())
+# Whether Seed Search writes the Commons files its NSFW judge passed to the search index, so standard search can serve
+# them. Off by default: the COMMONS_* DocumentSource values must be deployed to every worker first, or one that
+# doesn't know them can't read the pages they are written to.
+IMAGE_INDEXING_ENABLED = os.environ.get("IMAGE_INDEXING_ENABLED", "false").lower() == "true"
+# A file uploaded more recently is left out of the index. Commons deletes most copyright violations, and the spam
+# uploaded to be found, within days by speedy deletion.
+IMAGE_INDEX_MIN_UPLOAD_AGE = timedelta(days=30)

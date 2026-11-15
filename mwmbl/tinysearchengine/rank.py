@@ -178,7 +178,7 @@ def get_wiki_score(url):
 
 
 def find_blacklisted_urls(documents: list[Document]) -> set[str]:
-    """URLs among these documents whose domain is blacklisted.
+    """URLs among these documents whose domain is blacklisted, or that a moderator blocked.
 
     Enforcing the blacklist here, on the read path, is what actually guarantees a
     blacklisted domain is never shown. The write-path checks (crawl assignment, link
@@ -199,8 +199,10 @@ def find_blacklisted_urls(documents: list[Document]) -> set[str]:
             continue
         domains_to_urls[domain].add(document.url)
 
-    blacklisted_domains = get_snapshot_blacklist().filter_blacklisted(domains_to_urls)
-    return {url for domain in blacklisted_domains for url in domains_to_urls[domain]}
+    snapshot_blacklist = get_snapshot_blacklist()
+    blacklisted_domains = snapshot_blacklist.filter_blacklisted(domains_to_urls)
+    blocked_urls = snapshot_blacklist.filter_blocked_urls(document.url for document in documents)
+    return {url for domain in blacklisted_domains for url in domains_to_urls[domain]} | blocked_urls
 
 
 def deduplicate(results, seen_titles):

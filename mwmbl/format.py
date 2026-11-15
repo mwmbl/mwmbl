@@ -1,5 +1,6 @@
 import re
 
+from mwmbl.imagesearch.licences import LICENCE_NAMES_AND_URLS
 from mwmbl.tinysearchengine.indexer import DocumentSource, DocumentState
 from mwmbl.tokenizer import clean_unicode, tokenize
 
@@ -23,6 +24,7 @@ DOCUMENT_PROVIDERS = {
     DocumentSource.STAAN: "eusp",
     # The same label for Staan's results once they are in our index: they are still Staan's.
     DocumentSource.STAAN_INDEXED: "eusp",
+    **{source: "commons" for source in LICENCE_NAMES_AND_URLS},
 }
 
 
