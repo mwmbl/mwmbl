@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core import mail
@@ -206,7 +207,7 @@ def test_taken_reserved_and_invalid_usernames_are_refused(client, member, userna
 
 
 def _confirm_url_sent_to(address: str) -> str:
-    links = [re.search(r"https://\S+/confirm-email-change\S+", m.body) for m in mail.outbox if m.to == [address]]
+    links = [re.search(r"https?://\S+/confirm-email-change\S+", m.body) for m in mail.outbox if m.to == [address]]
     return [link for link in links if link][-1].group()
 
 
@@ -245,7 +246,7 @@ def test_a_new_email_replaces_the_old_one_once_confirmed(client, member):
     response = _change_email(client, member, "new@example.com")
 
     assert response.status_code == 200
-    assert _confirm_url_sent_to("new@example.com").startswith("https://mwmbl.org/account/confirm-email-change?")
+    assert _confirm_url_sent_to("new@example.com").startswith(f"{settings.FRONTEND_URL}/account/confirm-email-change?")
     # Until the link is followed, nothing changes and the new address can't log in.
     member.refresh_from_db()
     assert member.email == "member@example.com"

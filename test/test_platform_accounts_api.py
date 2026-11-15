@@ -3,10 +3,14 @@ Account and submission endpoints of the platform API: registration conflicts, em
 confirmation, account deletion, and who may delete or decide a domain submission.
 """
 
+import re
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 from allauth.account.models import EmailAddress, EmailConfirmationHMAC
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core import mail
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import DomainEvidence, DomainSubmission
@@ -74,6 +78,23 @@ def test_registration_records_accepted_agreements(client, db):
     response = _register(client, agreements=["TERMS_OF_SERVICE_GUI"])
 
     assert response.status_code == 200, response.content
+
+
+def test_the_confirmation_link_goes_to_the_front_end_and_confirms_the_address(client, db, settings):
+    # allauth won't resend to an address within a cooldown, and other tests register new@.
+    _register(client, email="confirm-link@example.com")
+
+    link = re.search(r"https?://\S+", mail.outbox[0].body).group()
+    assert link.startswith(f"{settings.FRONTEND_URL}/account/confirm-email?")
+    params = parse_qs(urlparse(link).query)
+    response = client.post(
+        f"{BASE}/confirm-email",
+        data={"email": params["email"][0], "key": params["key"][0]},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200, response.content
+    assert EmailAddress.objects.get(email="confirm-link@example.com").verified is True
 
 
 def test_confirming_with_an_unknown_key_is_rejected(client, db):
