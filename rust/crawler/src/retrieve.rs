@@ -1,3 +1,6 @@
+use dom_query::Document;
+use kreuzberg::{ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, extract_bytes, extraction::html::ConversionOptions};
+use omniparse::detection::TypeDetector;
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
@@ -210,11 +213,18 @@ async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCod
 async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, StatusCode, Url)> {
     let (data, status, url) = fetch(client, url).await?;
     if status.is_success() {
-        let data = match String::from_utf8(data) {
-            Ok(str) => str,
-            Err(err) => err.as_bytes().iter().map(|x| char::from(*x)).collect(),
-        };
-        return Ok((data, status, url));
+        let detector = TypeDetector::new();
+        let detection = detector.detect_from_bytes(&data);
+        if detection.mime_type == "text/html" {
+            return Ok((String::from_utf8(data)?, status, url));
+        }
+
+        let mut config = ExtractionConfig::default();
+        config.effective_disable_ocr();
+        config.output_format = OutputFormat::Html;
+        config.use_cache = false;
+        let result = extract_bytes(&data, &detection.mime_type, &config).await?;
+        return Ok((result.content, status, url));
     }
     bail!("Fetch error: status code: {status}");
 }
@@ -331,7 +341,7 @@ fn sanitize(html: &str, resolved_url: Url, status: StatusCode, timestamp: Instan
         .clean_styles(true)
         .build();
 
-    let (article_html, article_excerpt, article_title) =
+    let (article_html, article_excerpt, mut article_title) =
         match Readability::new(html, Some(resolved_url.as_str()), Some(read_options)) {
             Ok(article) => match article.parse() {
                 Some(article) => {
@@ -384,6 +394,10 @@ fn sanitize(html: &str, resolved_url: Url, status: StatusCode, timestamp: Instan
             url,
             resolved_url,
         };
+    }
+
+    if article_title.is_empty() {
+        article_title = Document::from(article_html).select_single("h1").text().to_string();
     }
 
     // Note for the future: look into what we can get with markdown:
