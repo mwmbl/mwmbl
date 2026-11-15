@@ -71,11 +71,13 @@ from mwmbl.quota import (
 )
 from mwmbl.search_auth import CrawlApiKeyAuth, authenticate_user
 from mwmbl.search_setup import index_path
-from mwmbl.tinysearchengine.indexer import Document
+from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 from mwmbl.tinysearchengine.rank import find_blacklisted_urls
-from mwmbl.tinysearchengine.search import SearchResponse
+from mwmbl.tinysearchengine.search import CALCULATOR_QUERY, CalculationWidget, SearchResponse
 from mwmbl.tinysearchengine.staan import get_staan_results
 from mwmbl.volunteer_membership import user_combined_search_monthly_limit
+from mwmbl.widgets.arithmetic import calculate
+from mwmbl.widgets.lookup import default_finder
 
 logger = getLogger(__name__)
 
@@ -220,6 +222,8 @@ DESCRIPTION = (
     "every response.\n\n"
     "EUSP's results are added to the Mwmbl index; `pages_indexed` reports how many new "
     "pages that added.\n\n"
+    "`widgets` are the same as in `/api/v2/search/`. For an arithmetic query such as `164*8` "
+    f"it holds the `calculation`, and the search, with everything above, is run for `{CALCULATOR_QUERY}`.\n\n"
     "With `crawl=true` (JWT only), the search also starts a background crawl of the EUSP results "
     "that were not already in the Mwmbl index, following their links within the domains EUSP "
     f"returned, up to {settings.SEED_CRAWL_MAX_PAGES_PER_DOMAIN:,} pages per domain. You can have "
@@ -354,7 +358,10 @@ def _keyed_monthly_limit(user) -> int:
     return pricing.combined_search_monthly_cap(spend_cents, get_monthly_count(user.id))
 
 
-def init_router(ranker) -> None:
+def init_router(ranker, tiny_index: TinyIndex) -> None:
+    # Read the specs now, so that a broken one stops the app starting rather than failing the first search.
+    widget_finder = default_finder()
+
     @router.get(
         "",
         response=CombinedSearchResponse,
@@ -400,15 +407,26 @@ def init_router(ranker) -> None:
                 await sync_to_async(decrement_monthly_combined_search)(user.id)
                 raise HttpError(429, f"Combined Search monthly quota exceeded: {monthly_limit} requests per month.")
 
+        # As in /api/v2/search/, arithmetic such as "164*8" has nothing to search for, so the
+        # calculator answers it and everything below runs for CALCULATOR_QUERY instead.
+        arithmetic_result = calculate(q)
+        search_query = q if arithmetic_result is None else CALCULATOR_QUERY
+
         # The first phase of images needs only the query, so it starts before anything else.
         image_started_at = time.monotonic()
-        image_search = seed_images.start(q) if images and settings.IMAGE_SEARCH_ENABLED else None
+        image_search = seed_images.start(search_query) if images and settings.IMAGE_SEARCH_ENABLED else None
         # The index lookup doesn't need Staan's answer, so it runs while Staan is in flight
-        # rather than after it. get_staan_results returns [] on failure by itself.
-        retrieval, staan_results = await asyncio.gather(
-            asyncio.to_thread(ranker.retrieve, q),
-            asyncio.to_thread(get_staan_results, q),
+        # rather than after it. get_staan_results returns [] on failure by itself. Widget lookup
+        # reads the index only for a query with a trigger word, so it rides along.
+        retrieval, staan_results, widget_stubs = await asyncio.gather(
+            asyncio.to_thread(ranker.retrieve, search_query),
+            asyncio.to_thread(get_staan_results, search_query),
+            asyncio.to_thread(widget_finder.find, q, tiny_index),
         )
+        if arithmetic_result is None:
+            widgets = widget_stubs
+        else:
+            widgets = [CalculationWidget(expression=q.strip(), result=arithmetic_result)]
         # Ranking only reads what was already retrieved, so the index write and the second phase of
         # images can overlap it.
         web_ranking = asyncio.create_task(asyncio.to_thread(ranker.search_retrieved, retrieval, staan_results))
@@ -417,7 +435,7 @@ def init_router(ranker) -> None:
         )
         results, new_staan_urls, image_selection = await asyncio.gather(
             web_ranking,
-            asyncio.to_thread(index_staan_results, q, staan_results),
+            asyncio.to_thread(index_staan_results, search_query, staan_results),
             image_finding,
         )
         shown_images = image_selection.images if image_selection else []
@@ -431,15 +449,15 @@ def init_router(ranker) -> None:
         active_crawl_queries = None
         if crawl:
             crawl_outcome = await sync_to_async(start_seed_crawl)(
-                user.id, q, retrieval.pages, staan_results, new_staan_urls
+                user.id, search_query, retrieval.pages, staan_results, new_staan_urls
             )
             if crawl_outcome == CrawlOutcome.SCHEDULED:
                 await sync_to_async(record_seed_search)(user.id)
-                crawls_ahead = await sync_to_async(get_crawls_ahead)(user.id, q)
+                crawls_ahead = await sync_to_async(get_crawls_ahead)(user.id, search_query)
             if crawl_outcome == CrawlOutcome.TOO_MANY_CRAWLS:
                 active_crawl_queries = await sync_to_async(get_active_seed_crawl_queries)(user.id)
 
-        formatted = [format_result_v2(result, i + 1, q) for i, result in enumerate(web_results)]
+        formatted = [format_result_v2(result, i + 1, search_query) for i, result in enumerate(web_results)]
         return CombinedSearchResponse(
             query=q,
             number_of_results=len(formatted),
@@ -454,6 +472,7 @@ def init_router(ranker) -> None:
             image_outcome=image_selection.outcome if image_selection else None,
             images_display_count=settings.IMAGES_DISPLAY_COUNT,
             images=images,
+            widgets=widgets,
         )
 
     @router.get(

@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -25,7 +25,7 @@ from ninja_jwt.tokens import RefreshToken
 from test_image_search import make_image
 
 import mwmbl.tinysearchengine.combined_search as combined_search
-from mwmbl import pricing
+from mwmbl import pricing, search_setup
 from mwmbl.imagesearch import commons, seed_images
 from mwmbl.imagesearch.seed_images import ImageOutcome, ImageSelection, RankedImage
 from mwmbl.indexer import seed_crawl
@@ -40,6 +40,7 @@ from mwmbl.quota import (
 )
 from mwmbl.tinysearchengine.indexer import Document, DocumentSource, DocumentState, TinyIndex
 from mwmbl.utils import utc_today
+from mwmbl.widgets.lookup import WidgetStub, default_finder
 
 User = get_user_model()
 
@@ -937,3 +938,47 @@ def test_an_indexed_file_the_seed_strip_has_is_not_shown_twice(
 
     assert [image["title"] for image in body["images"]] == ["Red panda.jpg", "Red panda zoo.jpg"]
     assert [result["url"] for result in body["results"]] == [STAAN_RESULT.url]
+
+
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_widgets_the_query_triggers_are_in_the_response(client, access_token, fresh_quota, stub_sources, monkeypatch):
+    calls = stub_sources()
+    stub = WidgetStub(title="York weather, UK", url="https://example.com/york", source_name="Example Weather")
+    found = {}
+
+    def fake_find(query, tiny_index):
+        found["query"] = query
+        found["tiny_index"] = tiny_index
+        return [stub]
+
+    # As with the ranker, the router closed over the finder at registration time.
+    monkeypatch.setattr(default_finder(), "find", fake_find)
+
+    body = _get(client, access_token, query="weather in york").json()
+
+    assert body["widgets"] == [stub.dict()]
+    assert found == {"query": "weather in york", "tiny_index": search_setup.tiny_index}
+    assert calls["staan_query"] == "weather in york"
+
+
+@pytest.mark.django_db
+def test_a_query_without_a_trigger_word_has_no_widgets(client, access_token, fresh_quota, stub_sources):
+    stub_sources()
+
+    assert _get(client, access_token, query="rust").json()["widgets"] == []
+
+
+@pytest.mark.django_db
+def test_arithmetic_is_computed_and_searched_as_the_calculator(client, access_token, fresh_quota, stub_sources):
+    calls = stub_sources()
+
+    body = client.get(URL + "?" + urlencode({"q": " 164*8 "}), HTTP_AUTHORIZATION=f"Bearer {access_token}").json()
+
+    assert body["widgets"] == [{"type": "calculation", "expression": "164*8", "result": "1312"}]
+    assert body["query"] == " 164*8 "
+    assert calls["staan_query"] == calls["retrieve_query"] == calls["indexed_query"] == "calculator"
