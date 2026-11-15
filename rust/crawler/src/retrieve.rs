@@ -220,7 +220,6 @@ async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, St
         }
 
         let mut config = ExtractionConfig::default();
-        config.effective_disable_ocr();
         config.output_format = OutputFormat::Html;
         config.use_cache = false;
         let result = extract_bytes(&data, &detection.mime_type, &config).await?;
