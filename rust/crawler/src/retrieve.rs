@@ -69,12 +69,12 @@ pub enum CrawlResults {
         extract: String,
         links: Vec<Url>,
         extra_links: Vec<Url>,
-    }  
+    },
 }
 
 impl CrawlResults {
     pub fn is_error(&self) -> bool {
-        !matches!(self, CrawlResults::CrawlContent { timestamp: _, url: _, resolved_url: _, title: _, extract: _, links: _, extra_links: _ })
+        !matches!(self, CrawlResults::CrawlContent { .. })
     }
 }
 
@@ -315,12 +315,7 @@ pub async fn crawl(
     (claimed_url, sanitize(&html, resolved_url, timestamp, url))
 }
 
-fn sanitize(
-    html: &str,
-    resolved_url: Url,
-    timestamp: Instant,
-    url: Url,
-) -> CrawlResults {
+fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> CrawlResults {
     let read_options = ReadabilityOptions::builder()
         .sanitize_content(true)
         .clean_whitespace(true)

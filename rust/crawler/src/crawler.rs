@@ -68,42 +68,18 @@ impl Crawler {
                 let (url, result) = crawl(url, cache.clone(), crawl_client).await;
 
                 let resolved_domain = match &result {
-                        crate::retrieve::CrawlResults::NoDomainError {
-                            timestamp: _,
-                            url: _,
-                        }
-                        | crate::retrieve::CrawlResults::RobotsDeniedError {
-                            timestamp: _,
-                            url: _,
-                        }
-                        | crate::retrieve::CrawlResults::RobotsUnavailableError {
-                            timestamp: _,
-                            url: _,
-                            err: _,
-                        }
-                        | crate::retrieve::CrawlResults::AbortError {
-                            timestamp: _,
-                            url: _,
-                            err: _,
-                        } => None,
-                        crate::retrieve::CrawlResults::NoResponseTextError {
-                            timestamp: _,
-                            url: _,
-                            resolved_url,
-                        }
-                        | crate::retrieve::CrawlResults::HtmlParsingError {
-                            timestamp: _,
-                            url: _,
-                            resolved_url,
-                            err: _,
-                        }
-                        | crate::retrieve::CrawlResults::ParagraphParsingError {
-                            timestamp: _,
-                            url: _,
-                            resolved_url,
-                        } => resolved_url.domain(),
-                        crate::retrieve::CrawlResults::CrawlContent { timestamp, url, resolved_url, title, extract, links, extra_links }=> resolved_url.domain(),
-               
+                    crate::retrieve::CrawlResults::NoDomainError { .. }
+                    | crate::retrieve::CrawlResults::RobotsDeniedError { .. }
+                    | crate::retrieve::CrawlResults::RobotsUnavailableError { .. }
+                    | crate::retrieve::CrawlResults::AbortError { .. } => None,
+                    crate::retrieve::CrawlResults::NoResponseTextError { resolved_url, .. }
+                    | crate::retrieve::CrawlResults::HtmlParsingError { resolved_url, .. }
+                    | crate::retrieve::CrawlResults::ParagraphParsingError {
+                        resolved_url, ..
+                    }
+                    | crate::retrieve::CrawlResults::CrawlContent { resolved_url, .. } => {
+                        resolved_url.domain()
+                    }
                 };
 
                 if let Some(domain) = url.url().domain() {
