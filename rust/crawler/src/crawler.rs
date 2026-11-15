@@ -67,36 +67,46 @@ impl Crawler {
             spawn(async move {
                 let (url, result) = crawl(url, cache.clone(), crawl_client).await;
 
-                let resolved_domain = match &result {
+                let (resolved_domain, status) = match &result {
                     crate::retrieve::CrawlResults::NoDomainError { .. }
                     | crate::retrieve::CrawlResults::RobotsDeniedError { .. }
                     | crate::retrieve::CrawlResults::RobotsUnavailableError { .. }
-                    | crate::retrieve::CrawlResults::AbortError { .. } => None,
-                    crate::retrieve::CrawlResults::NoResponseTextError { resolved_url, .. }
-                    | crate::retrieve::CrawlResults::HtmlParsingError { resolved_url, .. }
+                    | crate::retrieve::CrawlResults::AbortError { .. } => (None, None),
+                    crate::retrieve::CrawlResults::NoResponseTextError {
+                        resolved_url,
+                        status,
+                        ..
+                    }
+                    | crate::retrieve::CrawlResults::HtmlParsingError {
+                        resolved_url,
+                        status,
+                        ..
+                    }
                     | crate::retrieve::CrawlResults::ParagraphParsingError {
-                        resolved_url, ..
+                        resolved_url,
+                        status,
+                        ..
                     }
-                    | crate::retrieve::CrawlResults::CrawlContent { resolved_url, .. } => {
-                        resolved_url.domain()
-                    }
+                    | crate::retrieve::CrawlResults::CrawlContent {
+                        resolved_url,
+                        status,
+                        ..
+                    } => (resolved_url.domain(), Some(*status)),
                 };
 
                 if let Some(domain) = url.url().domain() {
-                    let time_a = cache.domain_delay(result.is_error(), domain).await;
+                    let time_a = cache.domain_delay(status, domain).await;
                     let time_b = if let Some(resolved_domain) = resolved_domain
                         && resolved_domain != domain
                     {
-                        cache.domain_delay(result.is_error(), domain).await
+                        cache
+                            .domain_delay(status, resolved_domain)
+                            .await
                     } else {
-                        None
+                        Duration::ZERO
                     };
-                    let time = max(
-                        time_a.unwrap_or(Duration::ZERO),
-                        time_b.unwrap_or(DEFAULT_DOMAIN_DELAY),
-                    );
+                    let time = max(time_a, time_b);
                     let time = min(MAX_DOMAIN_DELAY, time);
-                    println!("{time:#?}");
                     url.release_after_delay(resolved_domain, time);
                 }
                 println!("{result:#?}");

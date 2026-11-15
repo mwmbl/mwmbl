@@ -1,4 +1,6 @@
 use readabilityrs::ReadabilityOptions;
+#[cfg(feature = "servo")]
+use std::str::FromStr;
 use std::{
     cmp::min,
     collections::HashSet,
@@ -9,10 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "servo")]
+use crate::constants::TIMEOUT;
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, MAX_BLOCK_COOL_OFF, MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS,
-        ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS,
+        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS
     },
     url_queue::ClaimedUrl,
 };
@@ -48,22 +51,26 @@ pub enum CrawlResults {
     NoResponseTextError {
         timestamp: Instant,
         url: Url,
+        status: StatusCode,
         resolved_url: Url,
     },
     HtmlParsingError {
         timestamp: Instant,
         url: Url,
         resolved_url: Url,
+        status: StatusCode,
         err: anyhow::Error,
     },
     ParagraphParsingError {
         timestamp: Instant,
         url: Url,
+        status: StatusCode,
         resolved_url: Url,
     },
     CrawlContent {
         timestamp: Instant,
         url: Url,
+        status: StatusCode,
         resolved_url: Url,
         title: String,
         extract: String,
@@ -108,17 +115,18 @@ impl CachedRobotFile {
         }
         None
     }
-    pub fn delay(&self, errored: bool) -> Option<Duration> {
-        if errored {
+    pub fn delay(&self, status: Option<StatusCode>) -> Duration {
+        
+        if status.is_some_and(|status|status.is_success()) {
             let value = self.error_count.fetch_add(1, Ordering::Relaxed);
-            return Some(min(BLOCK_COOL_OFF * (1 << value), MAX_BLOCK_COOL_OFF));
+            return min(BLOCK_COOL_OFF * (1 << value), MAX_BLOCK_COOL_OFF);
         }
         self.error_count.store(0, Ordering::Relaxed);
 
         if let Some(robot) = &self.robot {
-            return robot.delay.map(Duration::from_secs_f32);
+            return robot.delay.map_or(DEFAULT_DOMAIN_DELAY, Duration::from_secs_f32);
         }
-        None
+        ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
     pub fn is_valid(&self) -> bool {
         self.robot_fetched.duration_since(Instant::now()) < self.cache_ttl
@@ -152,15 +160,15 @@ impl RobotCache {
         None
     }
 
-    pub async fn domain_delay(&mut self, errored: bool, domain: &str) -> Option<Duration> {
+    pub async fn domain_delay(&mut self, status: Option<StatusCode>, domain: &str) -> Duration {
         if let Some(occupied_entry) = self.cache.get_async(domain).await {
-            let delay = occupied_entry.delay(errored);
+            let delay = occupied_entry.delay(status);
             if !occupied_entry.get().is_valid() {
                 let _ = occupied_entry.remove();
             }
             return delay;
         }
-        None
+        ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
 
     pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
@@ -199,20 +207,20 @@ async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCod
     Ok((data, status, url))
 }
 
-async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, Url)> {
+async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, StatusCode, Url)> {
     let (data, status, url) = fetch(client, url).await?;
     if status.is_success() {
         let data = match String::from_utf8(data) {
             Ok(str) => str,
             Err(err) => err.as_bytes().iter().map(|x| char::from(*x)).collect(),
         };
-        return Ok((data, url));
+        return Ok((data, status, url));
     }
     bail!("Fetch error: status code: {status}");
 }
 
 #[cfg(feature = "servo")]
-async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, Url)> {
+async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, StatusCode, Url)> {
     let options = &FetchOptions::new(url.as_str())
         .timeout(TIMEOUT)
         .user_agent(user_agent)
@@ -221,7 +229,8 @@ async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, Url
     let page = servo_fetch::fetch(options).await?;
 
     let resolved_url = Url::from_str(&page.url)?;
-    Ok((page.html, resolved_url))
+    // Assume 200 code for servo as the value is not exposed: https://github.com/konippi/servo-fetch/issues/586
+    Ok((page.html, StatusCode::OK, resolved_url))
 }
 
 async fn robot_allowed(
@@ -241,7 +250,7 @@ async fn robot_allowed(
     {
         let robot = CachedRobotFile::new(
             ROBOTS_CACHE_TTL_SECONDS,
-            &robots_cache.user_agent,
+            robots_cache.user_agent(),
             Some(&data),
         );
         let allowed = robot.can_fetch(url).unwrap_or_default();
@@ -253,7 +262,7 @@ async fn robot_allowed(
             domain,
             CachedRobotFile::new(
                 ROBOTS_CACHE_ERROR_TTL_SECONDS,
-                &robots_cache.user_agent,
+                robots_cache.user_agent(),
                 None,
             ),
         )
@@ -293,12 +302,12 @@ pub async fn crawl(
     }
 
     let res = cfg_select! {
-        feature = "servo" => fetch_servo(&url, &robots_cache.user_agent),
+        feature = "servo" => fetch_servo(&url, robots_cache.user_agent()),
         _ => fetch_default(&client, &url)
     }
     .await;
 
-    let (html, resolved_url) = match res {
+    let (html, status, resolved_url) = match res {
         Ok(v) => v,
         Err(err) => {
             return (
@@ -312,10 +321,10 @@ pub async fn crawl(
         }
     };
 
-    (claimed_url, sanitize(&html, resolved_url, timestamp, url))
+    (claimed_url, sanitize(&html, resolved_url, status, timestamp, url))
 }
 
-fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> CrawlResults {
+fn sanitize(html: &str, resolved_url: Url, status: StatusCode, timestamp: Instant, url: Url) -> CrawlResults {
     let read_options = ReadabilityOptions::builder()
         .sanitize_content(true)
         .clean_whitespace(true)
@@ -334,6 +343,7 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
                         return CrawlResults::HtmlParsingError {
                             timestamp,
                             url,
+                            status,
                             err: Error::msg("Article missing information"),
                             resolved_url,
                         };
@@ -343,6 +353,7 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
                     return CrawlResults::HtmlParsingError {
                         timestamp,
                         url,
+                        status,
                         err: Error::msg("Cannot parse article"),
                         resolved_url,
                     };
@@ -352,6 +363,7 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
                 return CrawlResults::HtmlParsingError {
                     timestamp,
                     url,
+                    status,
                     err: e.into(),
                     resolved_url,
                 };
@@ -368,10 +380,15 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
     if article_excerpt.is_empty() {
         return CrawlResults::NoResponseTextError {
             timestamp,
+            status,
             url,
             resolved_url,
         };
     }
+
+    // Note for the future: look into what we can get with markdown:
+    // ideas: source code, all internal sub-titles (heandings), internal references, bold/italic text for keywords, latex math, images
+    // secondary indexes only for source code and math latex expressions could be an incredible feature, like "code search" and "math search"
 
     let extract = trim_size(&article_excerpt, NUM_EXTRACT_CHARS);
     let title = trim_size(&article_title, NUM_TITLE_CHARS);
@@ -381,6 +398,7 @@ fn sanitize(html: &str, resolved_url: Url, timestamp: Instant, url: Url) -> Craw
         url,
         title,
         extract,
+        status,
         links: new_links,
         extra_links,
         resolved_url,
