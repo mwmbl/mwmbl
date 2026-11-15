@@ -49,7 +49,7 @@ impl BlacklistProvider for BuiltInRulesBlacklistProvider {
         }
 
         if DOMAINS.contains_key(domain) {
-            return true;
+            return false;
         }
 
         let domain_parts: Vec<&str> = domain.splitn(3, '.').collect();
