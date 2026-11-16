@@ -305,3 +305,12 @@ def test_device_results_need_a_crawl_scoped_key(client, user, device):
 
     assert client.get(DEVICE_RESULTS_URL, {"device_name": device.hostname}).status_code == 401
     assert client.get(DEVICE_RESULTS_URL, {"device_name": device.hostname}, HTTP_X_API_KEY=raw_key).status_code == 401
+
+
+@pytest.mark.parametrize("since", ["nan", "inf", "-1", "1e20"])
+def test_device_results_reject_a_since_that_is_not_a_time(client, device, crawl_key, since):
+    response = client.get(
+        DEVICE_RESULTS_URL, {"device_name": device.hostname, "since": since}, HTTP_X_API_KEY=crawl_key
+    )
+
+    assert response.status_code == 422

@@ -11,7 +11,7 @@ from uuid import uuid4
 import requests
 import sentry_sdk
 from django.conf import settings
-from ninja import NinjaAPI, Router, Schema
+from ninja import NinjaAPI, Query, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
@@ -63,6 +63,10 @@ def _truncated(text: str, limit: int) -> str:
 
 
 INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope required)."
+
+# Bounds for a `since` timestamp. Comparisons with NaN are false, so the range also rejects NaN,
+# and the upper bound (year 2096) keeps datetime.fromtimestamp from raising on huge values.
+MAX_SINCE_TIMESTAMP = 4_000_000_000
 
 # Module-level router used by the unified v1 API
 router = Router(tags=["Crawler"])
@@ -330,7 +334,7 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             "`X-API-Key` request header, and covers only that key's owner's devices."
         ),
     )
-    def get_device_results(request, device_name: str, since: float | None = None):
+    def get_device_results(request, device_name: str, since: float | None = Query(None, ge=0, le=MAX_SINCE_TIMESTAMP)):
         api_key = _get_crawl_api_key(request.headers.get("X-API-Key", ""))
         if api_key is None:
             return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
