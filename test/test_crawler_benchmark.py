@@ -3,13 +3,16 @@
 import argparse
 import csv
 import json
+import signal
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import psutil
 import pytest
 import requests
 
+from mwmbl import cli
 from mwmbl.crawler import benchmark
 from mwmbl.crawler.benchmark import (
     Benchmark,
@@ -476,3 +479,107 @@ def test_a_read_gives_up_after_the_last_attempt(monkeypatch):
 
 def test_the_machines_memory_can_be_read_on_this_platform():
     assert benchmark.total_memory_mb() > 0
+
+
+def parse(*arguments):
+    parser = argparse.ArgumentParser()
+    benchmark.add_arguments(parser)
+    return parser.parse_args(arguments)
+
+
+def test_the_defaults_are_the_documented_grid_and_timings():
+    args = parse()
+
+    assert (args.processes, args.threads) == ([1, 2, 3, 4, 5], [10, 25, 50, 100])
+    assert (args.warmup, args.duration, args.runner) == (300, 1800, "compose")
+    assert args.output.name.startswith("benchmark-results-") and args.output.suffix == ".csv"
+
+
+def test_every_search_space_and_timing_default_can_be_overridden():
+    args = parse("--processes", "1,3", "--threads", "8", "--warmup", "90s", "--duration", "2h", "--output", "r.csv")
+
+    assert (args.processes, args.threads, args.warmup, args.duration) == ([1, 3], [8], 90, 7200)
+    assert args.output == Path("r.csv")
+
+
+@pytest.fixture
+def sigterm_handler_restored():
+    original = signal.getsignal(signal.SIGTERM)
+    yield
+    signal.signal(signal.SIGTERM, original)
+
+
+@pytest.mark.parametrize("runner", ["compose", "process"])
+def test_main_runs_the_grid_with_the_chosen_runner_and_prints_the_winner(
+    tmp_path, monkeypatch, capsys, sigterm_handler_restored, runner
+):
+    crawler = FakeCrawler()
+    commands = []
+    clock = Clock()
+    monkeypatch.setattr(benchmark, "MWMBL_API_KEY", "key")
+    monkeypatch.setattr(benchmark, "ComposeCrawler", lambda compose_file: crawler)
+    monkeypatch.setattr(benchmark, "ProcessCrawler", lambda command: commands.append(command) or crawler)
+    monkeypatch.setattr(benchmark, "DeviceScores", lambda server, api_key, device_name: FakeScores(crawler))
+    monkeypatch.setattr(benchmark, "Benchmark", partial(Benchmark, sleep=clock.sleep, clock=clock))
+    output = tmp_path / "r.csv"
+
+    exit_code = benchmark.main(
+        ["--processes", "1", "--threads", "10,25", "--warmup", "1m", "--duration", "2m", "--output", str(output)]
+        + ["--device-name", DEVICE, "--runner", runner, "--crawler-command", "my-crawler --flag", "--no-memory-check"]
+    )
+
+    report = capsys.readouterr().out
+    assert exit_code == 0
+    assert "WINNER" in report and "CRAWL_THREADS=25" in report
+    assert [row["threads"] for row in csv.DictReader(output.open())] == ["10", "25"]
+    assert commands == ([["my-crawler", "--flag"]] if runner == "process" else [])
+
+
+def test_main_needs_the_crawl_key_to_read_scores(monkeypatch):
+    monkeypatch.setattr(benchmark, "MWMBL_API_KEY", " ")
+
+    with pytest.raises(SystemExit, match="MWMBL_API_KEY"):
+        benchmark.main([])
+
+
+def test_the_device_name_is_the_flag_then_the_environment_then_a_stored_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(benchmark, "MWMBL_DEVICE_NAME", "")
+
+    generated = benchmark.device_name_for(parse())
+    assert generated.startswith("crawler-")
+    assert benchmark.device_name_for(parse()) == generated
+    monkeypatch.setattr(benchmark, "MWMBL_DEVICE_NAME", "from-environment")
+    assert benchmark.device_name_for(parse()) == "from-environment"
+    assert benchmark.device_name_for(parse("--device-name", "from-flag")) == "from-flag"
+
+
+def test_sigterm_is_handled_like_ctrl_c():
+    with pytest.raises(KeyboardInterrupt):
+        benchmark.interrupt(signal.SIGTERM, None)
+
+
+def test_compose_knows_whether_the_container_is_up(monkeypatch):
+    output = {"stdout": "abc123\n"}
+    monkeypatch.setattr(
+        benchmark.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, **output)
+    )
+    compose = ComposeCrawler(Path("docker-compose.yml"))
+
+    assert compose.is_running()
+    compose.ensure_running()
+    output["stdout"] = ""
+    assert not compose.is_running()
+    with pytest.raises(RuntimeError, match="stopped"):
+        compose.ensure_running()
+
+
+def test_the_mwmbl_command_runs_the_benchmark_subcommand(monkeypatch):
+    received = []
+    monkeypatch.setattr(benchmark, "run", lambda args: received.append(args) or 0)
+
+    assert cli.main(["benchmark", "--processes", "2", "--threads", "5"]) == 0
+
+    assert (received[0].processes, received[0].threads) == ([2], [5])
+    with pytest.raises(SystemExit):
+        cli.main([])
