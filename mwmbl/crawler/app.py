@@ -11,7 +11,7 @@ from uuid import uuid4
 import requests
 import sentry_sdk
 from django.conf import settings
-from ninja import NinjaAPI, Router, Schema
+from ninja import NinjaAPI, Query, Router, Schema
 from ninja.errors import HttpError
 from redis import Redis
 
@@ -20,6 +20,7 @@ from mwmbl.crawler.agreement import record_agreements
 from mwmbl.crawler.batch import (
     CrawlerErrorReport,
     DatasetRequest,
+    DeviceResultsResponse,
     Error,
     HashedDataset,
     PostResultsResponse,
@@ -29,9 +30,9 @@ from mwmbl.crawler.batch import (
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
 from mwmbl.crawler_errors import record_crawler_error
-from mwmbl.devices import record_device, record_device_results
+from mwmbl.devices import HOSTNAME_MAX_LENGTH, get_device_results_since, record_device, record_device_results
 from mwmbl.indexer.index_batches import index_documents
-from mwmbl.models import ApiKey
+from mwmbl.models import ApiKey, Device
 from mwmbl.settings import (
     DATE_REGEX,
     FILE_NAME_SUFFIX,
@@ -62,6 +63,10 @@ def _truncated(text: str, limit: int) -> str:
 
 
 INVALID_CRAWL_KEY_MESSAGE = "Invalid API key or insufficient scope (crawl scope required)."
+
+# Bounds for a `since` timestamp. Comparisons with NaN are false, so the range also rejects NaN,
+# and the upper bound (year 2096) keeps datetime.fromtimestamp from raising on huge values.
+MAX_SINCE_TIMESTAMP = 4_000_000_000
 
 # Module-level router used by the unified v1 API
 router = Router(tags=["Crawler"])
@@ -316,6 +321,38 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             for term in terms:
                 response["new_items"] += [dataclasses.asdict(item) for item in ranker.get_raw_results(term)]
         return response
+
+    @r.get(
+        "/device-results",
+        response={200: DeviceResultsResponse, 401: Error},
+        summary="Results a crawler device has submitted",
+        description=(
+            "How many results the named device of the key's owner has submitted, in total and since a "
+            "time, so a crawler can be benchmarked without a login. Pass `since` as a Unix timestamp, "
+            "typically a previous response's `server_time`. Counts what the server added to the index "
+            "from the device's submissions, kept for 30 days. Requires a crawl-scoped API key in the "
+            "`X-API-Key` request header, and covers only that key's owner's devices."
+        ),
+    )
+    def get_device_results(request, device_name: str, since: float | None = Query(None, ge=0, le=MAX_SINCE_TIMESTAMP)):
+        api_key = _get_crawl_api_key(request.headers.get("X-API-Key", ""))
+        if api_key is None:
+            return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
+
+        server_time = datetime.now(timezone.utc)
+        device = Device.objects.filter(user=api_key.user, hostname=device_name[:HOSTNAME_MAX_LENGTH]).first()
+        if device is None:
+            return {"known": False, "results_total": 0, "results_since": 0, "server_time": server_time.timestamp()}
+        results_since = (
+            0 if since is None else get_device_results_since(device, datetime.fromtimestamp(since, timezone.utc))
+        )
+        return {
+            "known": True,
+            "results_total": device.total_results,
+            "results_since": results_since,
+            "crawler_version": device.crawler_version or None,
+            "server_time": server_time.timestamp(),
+        }
 
     @r.post(
         "/errors",
