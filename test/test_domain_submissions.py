@@ -8,12 +8,14 @@ import json
 
 import pytest
 from allauth.account.models import EmailAddress
+from background_task.models import Task
 from django.apps import apps as django_apps
 from django.contrib.auth.models import Permission
 from django.urls import reverse
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import DomainSubmission, MwmblUser
+from mwmbl.views import BulkDomainSubmissionForm
 
 normalize_names = importlib.import_module("mwmbl.migrations.0032_normalize_domain_submission_names").normalize_names
 fix_names = importlib.import_module("mwmbl.migrations.0033_fix_domain_submission_names").fix_names
@@ -71,11 +73,11 @@ def test_form_stores_bare_domain(client, user):
 
 
 @pytest.mark.django_db
-def test_form_submits_each_domain_in_bulk(client, user):
+def test_form_submits_each_distinct_domain_once_in_bulk(client, user):
     client.force_login(user)
     response = client.post(
         reverse("submit_domain"),
-        {"name": "x.com\nhttps://Y.com\nhttp://z.com/a/b/c\n\nhttps://WWW.Example.co.uk/path\nx.com"},
+        {"name": "x.com\nhttps://Y.com\nhttp://z.com/a/b/c\n\nhttps://WWW.Example.co.uk/path\nX.com"},
     )
 
     assert response.status_code == 302
@@ -85,7 +87,6 @@ def test_form_submits_each_domain_in_bulk(client, user):
         "y.com",
         "z.com",
         "www.example.co.uk",
-        "x.com",
     ]
     assert all(submission.submitted_by == user and submission.status == "PENDING" for submission in submissions)
 
@@ -118,6 +119,31 @@ def test_form_rejects_too_many_domains(client, user):
     assert response.status_code == 200
     assert b"Enter no more than 1000 domains or URLs." in response.content
     assert not DomainSubmission.objects.exists()
+
+
+@pytest.mark.django_db
+def test_bulk_submission_schedules_one_crawl_per_domain(client, user):
+    client.force_login(user)
+    client.post(reverse("submit_domain"), {"name": "x.com\nhttps://x.com/a\ny.com"})
+
+    scheduled = sorted(json.loads(task.task_params)[0][0] for task in Task.objects.all())
+    assert scheduled == ["x.com", "y.com"]
+
+
+@pytest.mark.django_db
+def test_form_accepts_the_maximum_number_of_domains(client, user):
+    client.force_login(user)
+    response = client.post(reverse("submit_domain"), {"name": "\n".join(f"d{i}.com" for i in range(1000))})
+
+    assert response.status_code == 302
+    assert DomainSubmission.objects.count() == 1000
+
+
+def test_form_rejects_an_overlong_line_without_echoing_it():
+    form = BulkDomainSubmissionForm({"name": "x.com\n" + "a" * 301 + ".com"})
+
+    assert not form.is_valid()
+    assert form.errors["name"] == ["Line 2: longer than 300 characters."]
 
 
 @pytest.mark.django_db

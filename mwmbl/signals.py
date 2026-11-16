@@ -35,6 +35,9 @@ def enrich_new_submission(sender, instance: DomainSubmission, created: bool, **k
 
     Only on creation: a moderator saving a decision must not trigger a re-crawl. The task
     itself skips domains whose evidence is still fresh, so a resubmitted domain costs nothing.
+
+    The bulk submission view uses bulk_create, which sends no post_save, and schedules its own
+    crawls.
     """
     if not created:
         return

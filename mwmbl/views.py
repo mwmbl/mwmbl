@@ -20,6 +20,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 from requests.exceptions import RequestException
 
+from mwmbl.background import enrich_domain_submission
 from mwmbl.crawler.app import stats_manager
 from mwmbl.crawler.ssrf import UnsafeURLError, validate_url
 from mwmbl.justext.core import (
@@ -49,6 +50,8 @@ from mwmbl.utils import add_term_infos, float_or_none, normalize_domain, parse_u
 
 MAX_CURATED_SCORE = 1_111_111.0
 MAX_DOMAIN_SUBMISSIONS = 1000
+# The length of DomainSubmission.name.
+MAX_SUBMISSION_LINE_LENGTH = 300
 
 
 logger = getLogger(__name__)
@@ -241,29 +244,36 @@ class BulkDomainSubmissionForm(Form):
     name = CharField(
         label="Domains or URLs",
         widget=Textarea,
-        help_text="Enter up to 1000 domains or URLs, one per line. Subdomains such as www are kept.",
+        help_text=f"Enter up to {MAX_DOMAIN_SUBMISSIONS} domains or URLs, one per line. Subdomains such as www are kept.",
         strip=False,
+        max_length=MAX_DOMAIN_SUBMISSIONS * (MAX_SUBMISSION_LINE_LENGTH + 2),
     )
 
     def clean_name(self):
-        names = []
         errors = []
+        names = []
         lines = [
             (number, line) for number, line in enumerate(self.cleaned_data["name"].splitlines(), 1) if line.strip()
         ]
         if len(lines) > MAX_DOMAIN_SUBMISSIONS:
             raise ValidationError(f"Enter no more than {MAX_DOMAIN_SUBMISSIONS} domains or URLs.")
         for line_number, line in lines:
-            form = DomainSubmissionForm({"name": line})
-            if form.is_valid():
-                names.append(form.cleaned_data["name"])
-            else:
-                errors.extend(f"Line {line_number}: {error}" for error in form.errors["name"])
+            # Checked first so that an over-long line is never echoed back in an error.
+            if len(line) > MAX_SUBMISSION_LINE_LENGTH:
+                errors.append(f"Line {line_number}: longer than {MAX_SUBMISSION_LINE_LENGTH} characters.")
+                continue
+            try:
+                validate_domain(line)
+            except ValidationError as error:
+                errors.extend(f"Line {line_number}: {message}" for message in error.messages)
+                continue
+            names.append(normalize_domain(line))
         if errors:
             raise ValidationError(errors)
         if not names:
             raise ValidationError("Enter at least one domain or URL.")
-        return names
+        # Each distinct name costs a crawl and a moderator decision, so a repeat adds nothing.
+        return list(dict.fromkeys(names))
 
 
 class DomainSubmissionApprovalForm(ModelForm):
@@ -277,9 +287,17 @@ def submit_domain(request):
     if request.method == "POST":
         form = BulkDomainSubmissionForm(request.POST)
         if form.is_valid():
+            names = form.cleaned_data["name"]
+            submitted_on = timezone.now()
+            submissions = [
+                DomainSubmission(name=name, submitted_by=request.user, submitted_on=submitted_on) for name in names
+            ]
             with transaction.atomic():
-                for name in form.cleaned_data["name"]:
-                    DomainSubmission.objects.create(name=name, submitted_by=request.user, submitted_on=timezone.now())
+                # bulk_create sends no post_save, so the crawl that enrich_new_submission would
+                # schedule per row is scheduled here, once per distinct domain.
+                DomainSubmission.objects.bulk_create(submissions)
+                for name in names:
+                    enrich_domain_submission(name)
             return redirect("domain_submissions")
     else:
         form = BulkDomainSubmissionForm()
