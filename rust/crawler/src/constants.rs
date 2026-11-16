@@ -10,7 +10,7 @@ pub static DATA_DIR: &str = ".mwmbl";
 pub static PROJECT_URL: &str = "https://github.com/mwmbl/mwmbl";
 pub static API_PRODUCT: &str = concat!("mwmbl-crawler/", env!("CARGO_PKG_VERSION"));
 // What robots.txt groups are matched against.
-pub static ROBOTS_USER_AGENT: &str = "mwmbl";
+pub static ROBOTS_USER_AGENT: &str = "mwmbl-crawler";
 
 pub static TOP_CURATED_DOMAIN_RANDOM_WEIGHT: usize = 50;
 pub static TOP_OTHER_DOMAIN_RANDOM_WEIGHT: usize = 100;
