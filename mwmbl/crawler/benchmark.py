@@ -20,11 +20,11 @@ Run as `mwmbl benchmark` or `python -m mwmbl.crawler.benchmark`.
 import argparse
 import csv
 import itertools
+import json
 import os
 import re
 import shlex
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -50,9 +50,13 @@ STATUS_SKIPPED = "SKIPPED"
 STATUS_INTERRUPTED = "INTERRUPTED"
 
 COMPOSE_SERVICE = "mwmbl-crawler"
+# What the benchmark overrides, so what restoring the user's crawler has to put back.
+RESTORED_SETTINGS = ("CRAWLER_WORKERS", "CRAWL_THREADS", "MWMBL_DEVICE_NAME")
 CRAWLER_EXECUTABLES = ("mwmbl-crawl", "mwmbl.crawl")
 STOP_TIMEOUT_SECONDS = 60
 PROGRESS_INTERVAL_SECONDS = 60
+READ_ATTEMPTS = 3
+READ_RETRY_SECONDS = 10
 
 # Rough, and only used to skip combinations that would obviously exhaust memory: the indexing
 # process and Redis, then each crawl worker. Memory scales with processes, not threads. The
@@ -63,7 +67,6 @@ DEFAULT_MEMORY_PER_PROCESS_MB = 400
 CSV_COLUMNS = [
     "timestamp",
     "hostname",
-    "device_name",
     "crawler_version",
     "processes",
     "threads",
@@ -92,6 +95,10 @@ class Result:
     crawler_version: str = "unknown"
     error: str = ""
     finished_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class NothingSubmitted(RuntimeError):
+    """The server saw nothing from the device: a setup mistake, not a bad configuration."""
 
 
 @dataclass
@@ -128,7 +135,7 @@ def all_configurations(process_counts: list[int], thread_counts: list[int]) -> l
 
 
 def total_memory_mb() -> float:
-    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
+    return psutil.virtual_memory().total / 2**20
 
 
 class Crawler(Protocol):
@@ -149,12 +156,14 @@ class ComposeCrawler:
     """The crawler as the compose service in docker-compose.yml.
 
     The settings go to compose through the environment of the commands run here, which take
-    precedence over .env, so no file of the user's is ever written. Restoring is starting the
-    service without them.
+    precedence over .env, so no file of the user's is ever written. Restoring starts the service
+    with the settings the container it replaced was running with. `--pull never` throughout, since
+    the service's `pull_policy: always` would otherwise swap the crawler version under a run.
     """
 
     def __init__(self, compose_file: Path):
         self.command = ["docker", "compose", "-f", str(compose_file)]
+        self.original_env: dict[str, str] = {}
 
     def _run(self, *args: str, env: dict[str, str] | None = None) -> str:
         completed = subprocess.run(
@@ -170,10 +179,21 @@ class ComposeCrawler:
         return bool(self._run("ps", "--status", "running", "-q", COMPOSE_SERVICE).strip())
 
     def stop_existing(self) -> None:
+        """Stop the user's crawler, first noting the settings it runs with: they may have come from
+        the shell that started it, and then nothing in .env or here would bring them back."""
+        container = self._run("ps", "-q", COMPOSE_SERVICE).strip()
+        inspected = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .Config.Env}}", container],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assignments = [line.split("=", 1) for line in json.loads(inspected.stdout)]
+        self.original_env = {name: value for name, value in assignments if name in RESTORED_SETTINGS}
         self.stop()
 
     def start(self, env: dict[str, str]) -> None:
-        self._run("up", "-d", COMPOSE_SERVICE, env=env)
+        self._run("up", "-d", "--pull", "never", COMPOSE_SERVICE, env=env)
 
     def ensure_running(self) -> None:
         if not self.is_running():
@@ -184,7 +204,7 @@ class ComposeCrawler:
 
     def restore(self, was_running: bool) -> None:
         if was_running:
-            self._run("up", "-d", COMPOSE_SERVICE)
+            self.start(self.original_env)
 
 
 class ProcessCrawler:
@@ -222,16 +242,30 @@ class ProcessCrawler:
         if exit_code is not None:
             raise RuntimeError(f"the crawler exited with code {exit_code}")
 
+    def _signal_group(self, signal_number: int) -> bool:
+        """Send the signal to the process group, which is the crawler's workers as well as its
+        leader. Signal 0 only asks whether any member is left."""
+        assert self.process is not None
+        try:
+            os.killpg(self.process.pid, signal_number)
+        except ProcessLookupError:
+            return False
+        return True
+
     def stop(self) -> None:
         if self.process is None:
             return
-        if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGTERM)
-            try:
-                self.process.wait(STOP_TIMEOUT_SECONDS)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
+        # Not only while the leader lives: the workers are not daemons, so they outlast a leader
+        # that was killed, and would go on crawling beside the next configuration.
+        self._signal_group(signal.SIGTERM)
+        deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
+        # poll() reaps the leader, which otherwise stays a zombie and keeps the group alive.
+        while self.process.poll() is None or self._signal_group(0):
+            if time.monotonic() > deadline:
+                self._signal_group(signal.SIGKILL)
                 self.process.wait()
+                break
+            time.sleep(0.2)
         self.process = None
 
     def restore(self, was_running: bool) -> None:
@@ -254,8 +288,17 @@ class DeviceScores:
         params = (
             {"device_name": self.device_name} if since is None else {"device_name": self.device_name, "since": since}
         )
-        response = requests.get(self.url, params=params, headers=self.headers, timeout=30)
-        response.raise_for_status()
+        # Retried because a timeout at the end of a 30 minute measurement would otherwise throw
+        # the measurement away, with the crawler already stopped; a read can safely be repeated.
+        for attempt in range(1, READ_ATTEMPTS + 1):
+            try:
+                response = requests.get(self.url, params=params, headers=self.headers, timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt == READ_ATTEMPTS:
+                    raise
+                time.sleep(READ_RETRY_SECONDS)
         body = response.json()
         return DeviceReading(
             body["known"], body["results_since"], body["server_time"], body.get("crawler_version") or "unknown"
@@ -276,7 +319,6 @@ class Benchmark:
         duration_seconds: int,
         csv_path: Path,
         memory_per_process_mb: int | None,
-        crawler_version: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ):
@@ -288,19 +330,20 @@ class Benchmark:
         self.duration_seconds = duration_seconds
         self.csv_path = csv_path
         self.memory_per_process_mb = memory_per_process_mb
-        self.crawler_version = crawler_version
         self.sleep = sleep
         self.clock = clock
 
     def run(self) -> list[Result]:
-        # Before anything is stopped, and before a 30 minute wait finds out the key is wrong.
+        # Before anything is stopped, so that an unwritable CSV path or a wrong key is found out
+        # now and not after the first 35 minutes with the user's crawler down.
+        self.csv_path.touch()
         self.scores.check_access()
         was_running = self.crawler.is_running()
-        if was_running:
-            self.crawler.stop_existing()
 
         results: list[Result] = []
         try:
+            if was_running:
+                self.crawler.stop_existing()
             for number, configuration in enumerate(self.configurations, start=1):
                 print(f"\n[{number}/{len(self.configurations)}] {describe(configuration)}", flush=True)
                 try:
@@ -309,6 +352,11 @@ class Benchmark:
                     print("  interrupted", flush=True)
                     self.record(results, Result(configuration, STATUS_INTERRUPTED, error="interrupted"))
                     break
+                except NothingSubmitted as error:
+                    # The same setup error would cost every remaining configuration its full duration.
+                    print(f"  FAILED: {error}\n  Stopping: the other configurations would fail the same way.")
+                    self.record(results, Result(configuration, STATUS_FAILED, error=str(error)))
+                    break
                 self.record(results, result)
                 print(f"  {result.status}: {result.index_score if result.index_score is not None else result.error}")
         finally:
@@ -316,7 +364,8 @@ class Benchmark:
                 self.crawler.stop()
             finally:
                 self.crawler.restore(was_running)
-            print("\nRestored the original crawler configuration.", flush=True)
+            if was_running:
+                print("\nRestored the original crawler.", flush=True)
         return results
 
     def record(self, results: list[Result], result: Result) -> None:
@@ -340,14 +389,15 @@ class Benchmark:
             window_start = self.scores.read().server_time
             self.wait(self.duration_seconds, "measuring")
             final = self.scores.read(since=window_start)
-            if not final.known:
-                raise RuntimeError(
-                    f"device {self.device_name!r} is not in the account's device list, so nothing was "
-                    "submitted. Check MWMBL_API_KEY, CRAWL_SUBMIT_MODE and the device name."
+            if not final.known or final.results_since == 0:
+                raise NothingSubmitted(
+                    f"the server saw nothing from device {self.device_name!r} in the measurement window. Check that "
+                    "MWMBL_REMOTE_SERVER, MWMBL_API_KEY and CRAWL_SUBMIT_MODE are the same here as for the crawler."
                 )
-            version = self.crawler_version or final.crawler_version
-            return Result(configuration, STATUS_OK, final.results_since, version)
-        except Exception as error:
+            return Result(configuration, STATUS_OK, final.results_since, final.crawler_version)
+        except NothingSubmitted:
+            raise
+        except (RuntimeError, requests.RequestException, subprocess.CalledProcessError, OSError) as error:
             # One configuration failing must not cost the results of the rest.
             return Result(configuration, STATUS_FAILED, error=f"{type(error).__name__}: {error}")
         finally:
@@ -361,6 +411,8 @@ class Benchmark:
             print(
                 f"  {label}: {format_duration(round(max(remaining - PROGRESS_INTERVAL_SECONDS, 0)))} left", flush=True
             )
+        # A crash in the last interval would otherwise be scored as a slow configuration.
+        self.crawler.ensure_running()
 
 
 def describe(configuration: Configuration) -> str:
@@ -377,8 +429,7 @@ def append_csv(path: Path, device_name: str, warmup_seconds: int, duration_secon
         writer.writerow(
             {
                 "timestamp": result.finished_at.isoformat(timespec="seconds"),
-                "hostname": socket.gethostname(),
-                "device_name": device_name,
+                "hostname": device_name,
                 "crawler_version": result.crawler_version,
                 "processes": result.configuration.processes,
                 "threads": result.configuration.threads,
@@ -469,7 +520,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "else the name in ~/.mwmbl/device-name (created if missing). With --runner compose the crawler "
         "is started with this name.",
     )
-    parser.add_argument("--crawler-version", default=None, help="For the CSV. Default: what the server says")
     parser.add_argument("--memory-per-process-mb", type=int, default=DEFAULT_MEMORY_PER_PROCESS_MB)
     parser.add_argument("--no-memory-check", action="store_true", help="Run combinations that look too big for RAM")
 
@@ -507,7 +557,6 @@ def run(args: argparse.Namespace) -> int:
         args.duration,
         args.output,
         None if args.no_memory_check else args.memory_per_process_mb,
-        args.crawler_version,
     )
     total_seconds = len(configurations) * (args.warmup + args.duration)
     print(f"{len(configurations)} configurations on device {device_name}, about {format_duration(total_seconds)}")

@@ -2,10 +2,13 @@
 
 import argparse
 import csv
+import json
 import subprocess
 from pathlib import Path
 
+import psutil
 import pytest
+import requests
 
 from mwmbl.crawler import benchmark
 from mwmbl.crawler.benchmark import (
@@ -28,10 +31,12 @@ DEVICE = "crawler-test"
 class FakeCrawler:
     """Records what it was asked to do, and fails the way a real crawler could be made to."""
 
-    def __init__(self, running_at_start=False, fail_start_for=None):
+    def __init__(self, running_at_start=False, fail_start_for=None, die_after_checks=None, stop_existing_error=None):
         self.running = running_at_start
-        self.was_running = running_at_start
         self.fail_start_for = fail_start_for
+        self.die_after_checks = die_after_checks
+        self.stop_existing_error = stop_existing_error
+        self.checks = 0
         self.events: list[tuple] = []
         self.started_while_running = False
 
@@ -39,6 +44,8 @@ class FakeCrawler:
         return self.running
 
     def stop_existing(self):
+        if self.stop_existing_error:
+            raise self.stop_existing_error
         self.stop()
 
     def start(self, env):
@@ -50,7 +57,9 @@ class FakeCrawler:
         self.events.append(("start", env))
 
     def ensure_running(self):
-        assert self.running
+        self.checks += 1
+        if self.die_after_checks is not None and self.checks > self.die_after_checks:
+            raise RuntimeError("the crawler died")
 
     def stop(self):
         self.running = False
@@ -64,9 +73,10 @@ class FakeScores:
     """The server's view: a window opened by a read without `since` gains threads x processes of the
     configuration the crawler was last started with, and is reported by the read that gives `since`."""
 
-    def __init__(self, crawler, device_exists=True):
+    def __init__(self, crawler, device_exists=True, results=None):
         self.crawler = crawler
         self.device_exists = device_exists
+        self.results = results
         self.since_given = []
 
     def check_access(self):
@@ -77,7 +87,7 @@ class FakeScores:
             return DeviceReading(False, 0, 1700000000.0, "unknown")
         self.since_given.append(since)
         env = [event for event in self.crawler.events if event[0] == "start"][-1][1]
-        gain = int(env["CRAWL_THREADS"]) * int(env["CRAWLER_WORKERS"])
+        gain = int(env["CRAWL_THREADS"]) * int(env["CRAWLER_WORKERS"]) if self.results is None else self.results
         return DeviceReading(self.device_exists, gain, since + 600, "1.2.3")
 
 
@@ -197,11 +207,12 @@ def test_results_are_written_to_csv_as_they_complete_and_appended_to(tmp_path):
     assert [(r["processes"], r["threads"], r["index_score"]) for r in rows] == [("2", "25", "50"), ("1", "10", "10")]
     row = rows[0]
     assert row["status"] == "OK"
-    assert row["device_name"] == DEVICE
+    assert row["hostname"] == DEVICE
+    assert "device_name" not in row
     assert row["crawler_version"] == "1.2.3"
     assert row["duration_seconds"] == "600"
     assert row["warmup_seconds"] == "120"
-    assert row["hostname"] and row["timestamp"]
+    assert row["timestamp"]
     assert path.read_text().count("timestamp,hostname") == 1
 
 
@@ -216,13 +227,43 @@ def test_a_configuration_that_fails_is_recorded_and_the_rest_still_run(tmp_path)
     assert crawler.events[-1] == ("restore", False)
 
 
-def test_a_device_that_never_appears_is_a_failure_not_a_score_of_zero(tmp_path):
-    crawler = FakeCrawler()
-    scores = FakeScores(crawler, device_exists=False)
-    [result] = make_benchmark(tmp_path, crawler, scores, [Configuration(1, 10)]).run()
+@pytest.mark.parametrize("scores_kwargs", [{"device_exists": False}, {"results": 0}])
+def test_nothing_submitted_is_a_setup_error_that_stops_the_run_but_still_restores(tmp_path, scores_kwargs):
+    crawler = FakeCrawler(running_at_start=True)
+    scores = FakeScores(crawler, **scores_kwargs)
+    results = make_benchmark(tmp_path, crawler, scores).run()
+
+    assert [r.status for r in results] == ["FAILED"]
+    assert "MWMBL_REMOTE_SERVER" in results[0].error
+    assert len([e for e in crawler.events if e[0] == "start"]) == 1
+    assert crawler.events[-1] == ("restore", True)
+
+
+@pytest.mark.parametrize("die_after_checks", [1, 2])
+def test_a_crawler_that_dies_mid_wait_or_in_the_last_interval_is_a_failure(tmp_path, die_after_checks):
+    crawler = FakeCrawler(die_after_checks=die_after_checks)
+    [result] = make_benchmark(tmp_path, crawler, configurations=[Configuration(1, 10)]).run()
 
     assert result.status == "FAILED"
-    assert "not in the account's device list" in result.error
+    assert "the crawler died" in result.error
+
+
+def test_an_interrupt_while_stopping_the_users_crawler_still_restores_it(tmp_path):
+    crawler = FakeCrawler(running_at_start=True, stop_existing_error=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        make_benchmark(tmp_path, crawler).run()
+
+    assert crawler.events[-1] == ("restore", True)
+
+
+def test_an_unwritable_output_path_is_found_before_anything_is_stopped(tmp_path):
+    crawler = FakeCrawler(running_at_start=True)
+
+    with pytest.raises(FileNotFoundError):
+        make_benchmark(tmp_path, crawler, csv_path=tmp_path / "missing" / "results.csv").run()
+
+    assert crawler.events == []
 
 
 def test_a_crawler_that_was_running_is_stopped_first_and_restored_after(tmp_path):
@@ -330,26 +371,33 @@ def test_scores_are_read_from_the_server_with_the_crawl_key(monkeypatch):
     assert calls == [(url, {"device_name": DEVICE, "since": 4.0}, "key-1"), (url, {"device_name": DEVICE}, "key-1")]
 
 
-def test_compose_gets_the_settings_in_its_environment_and_restores_without_them(monkeypatch):
+def test_compose_gets_the_settings_in_its_environment_and_restores_the_original_ones(monkeypatch):
     runs = []
 
-    def run(command, env, check, capture_output, text):
-        runs.append((command[4:], env.get("CRAWLER_WORKERS")))
+    def run(command, env=None, check=None, capture_output=None, text=None):
+        if command[0] == "docker" and command[1] == "inspect":
+            environment = ["PATH=/bin", "CRAWLER_WORKERS=4", "CRAWL_THREADS=75", "MWMBL_API_KEY=secret"]
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(environment))
+        runs.append((command[4:], env.get("CRAWLER_WORKERS"), env.get("MWMBL_API_KEY")))
         return subprocess.CompletedProcess(command, 0, stdout="abc\n")
 
     monkeypatch.setattr(benchmark.subprocess, "run", run)
     monkeypatch.delenv("CRAWLER_WORKERS", raising=False)
     compose = ComposeCrawler(Path("docker-compose.yml"))
 
+    compose.stop_existing()
     compose.start({"CRAWLER_WORKERS": "3"})
     compose.stop()
     compose.restore(was_running=True)
     compose.restore(was_running=False)
 
+    assert compose.original_env == {"CRAWLER_WORKERS": "4", "CRAWL_THREADS": "75"}
     assert runs == [
-        (["up", "-d", "mwmbl-crawler"], "3"),
-        (["stop", "mwmbl-crawler"], None),
-        (["up", "-d", "mwmbl-crawler"], None),
+        (["ps", "-q", "mwmbl-crawler"], None, None),
+        (["stop", "mwmbl-crawler"], None, None),
+        (["up", "-d", "--pull", "never", "mwmbl-crawler"], "3", None),
+        (["stop", "mwmbl-crawler"], None, None),
+        (["up", "-d", "--pull", "never", "mwmbl-crawler"], "4", None),
     ]
 
 
@@ -372,3 +420,59 @@ def test_a_process_crawler_refuses_to_run_beside_another_crawler(monkeypatch):
 
     with pytest.raises(SystemExit, match="already running"):
         crawler.stop_existing()
+
+
+def test_workers_that_outlive_the_crawlers_leader_are_stopped_too(tmp_path, monkeypatch):
+    monkeypatch.setattr(benchmark, "STOP_TIMEOUT_SECONDS", 5)
+    pid_file = tmp_path / "worker.pid"
+    crawler = ProcessCrawler(["sh", "-c", f"sleep 60 & echo $! > {pid_file}; exit 0"])
+    crawler.start({})
+    crawler.process.wait()
+    worker = psutil.Process(int(pid_file.read_text()))
+    assert worker.is_running()
+
+    crawler.stop()
+
+    assert not worker.is_running() or worker.status() == psutil.STATUS_ZOMBIE
+
+
+def test_a_read_that_fails_transiently_is_retried(monkeypatch):
+    attempts = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"known": True, "results_since": 1, "server_time": 2.0}
+
+    def flaky(url, params, headers, timeout):
+        attempts.append(1)
+        if len(attempts) < benchmark.READ_ATTEMPTS:
+            raise requests.ConnectionError("reset")
+        return Response()
+
+    monkeypatch.setattr(benchmark.requests, "get", flaky)
+    monkeypatch.setattr(benchmark.time, "sleep", lambda seconds: None)
+
+    assert DeviceScores("https://api.example", "key", DEVICE).read().results_since == 1
+    assert len(attempts) == benchmark.READ_ATTEMPTS
+
+
+def test_a_read_gives_up_after_the_last_attempt(monkeypatch):
+    attempts = []
+
+    def down(url, params, headers, timeout):
+        attempts.append(1)
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(benchmark.requests, "get", down)
+    monkeypatch.setattr(benchmark.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(requests.ConnectionError):
+        DeviceScores("https://api.example", "key", DEVICE).read()
+    assert len(attempts) == benchmark.READ_ATTEMPTS
+
+
+def test_the_machines_memory_can_be_read_on_this_platform():
+    assert benchmark.total_memory_mb() > 0
