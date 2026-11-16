@@ -20,6 +20,28 @@ The crawler can be configured using the following environment variables:
 
 Batches crawled by different workers at the same time can share domains, since each worker samples its domains independently. The core domains (Wikipedia, GitHub and so on) are in every batch, so they are the usual overlap. With the default 2 workers, about 0.7% of fetches start while another fetch to the same domain is in flight. Overlap grows with `CRAWLER_WORKERS`. The crawler records it in Redis, and `redis-cli HGETALL crawl-domain-overlap` gives the totals: `fetches`, `overlapped` (fetches that started while another fetch to their domain was in flight) and `duplicate_domains` (should stay 0).
 
+### Benchmarking `CRAWLER_WORKERS` and `CRAWL_THREADS`
+
+`mwmbl benchmark` (or `python -m mwmbl.crawler.benchmark`) finds the best combination for a machine by trying every one, one at a time, and comparing the index score each earns:
+
+```sh
+export MWMBL_API_KEY=...   # the crawl key your crawler already uses; no login or password needed
+mwmbl benchmark --processes 1,2,3,4,5 --threads 10,25,50,100 --warmup 5m --duration 30m --output results.csv
+```
+
+Those are the defaults, apart from `--output`, which is `benchmark-results-<date>.csv` and is appended to, so several runs or machines can share a file. For each combination it stops the crawler, starts it with the two variables set, waits out the warmup, measures, and stops it again. It ends with a ranked table and the winner, and whether it finishes, fails or is interrupted with Ctrl+C it puts the crawler back as it found it.
+
+- `--runner compose` (default) stops and restarts the `mwmbl-crawler` service of `--compose-file`. Settings are passed in the environment of the `docker compose` commands, so `.env` is never edited, and the crawler is brought back with its original settings if it was running. It is started with `MWMBL_DEVICE_NAME` set to `--device-name` (else `MWMBL_DEVICE_NAME`, else `~/.mwmbl/device-name`, created if missing), so the benchmark may appear as a new device; pass the name your crawler already uses to avoid that.
+- `--runner process` runs `--crawler-command` (default `mwmbl-crawl`) as a child process. It refuses to start while another crawler is running, so stop yours first.
+
+**What the score is.** For every submission the server adds the number of URLs that were new to the index to the device's totals, and keeps each submission for 30 days. The benchmark asks `GET /api/v1/crawler/device-results?device_name=...&since=...`, authenticated with the same crawl-scoped `MWMBL_API_KEY` as the crawler, which covers only that key's owner's devices. At the end of warmup it takes the server's clock from a first call, and at the end of the measurement it asks for the results submitted since then. The score is therefore exactly what the device contributed in that window, timed by the server, not a difference of two totals or the devices page's rolling "last 24 hours", which every configuration shares. Local Redis holds only the crawl queue, and the crawler is never told how many of its results were new, so the server's count is the only exact measure.
+
+**What it cannot tell you.** Each combination runs once, so differences of a few percent are noise. Results reach the server in batches some time after crawling, so a short `--duration` gives a rougher number. Combinations run in a fixed order, and the pages a crawler finds new fall as the index fills. Repeat a close contest, in the opposite order if you can.
+
+Combinations whose estimated memory (`--memory-per-process-mb` per process plus a fixed 600MB) exceeds the machine's RAM are marked `SKIPPED`; `--no-memory-check` runs them anyway. The winner is always chosen by score.
+
+The CSV has the timestamp, `hostname` (this machine's, so it names your computer if you share the file), device name, crawler version as the server last recorded it, process and thread counts, warmup and measurement seconds, index score, status and any error.
+
 ### Rate Limiting Configuration
 - `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds each crawl thread waits between the URLs it crawls. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
 
