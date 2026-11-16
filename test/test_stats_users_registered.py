@@ -2,18 +2,19 @@
 Tests for the weekly count of registered users shown on the stats endpoint.
 """
 
-import json
 from datetime import datetime, time, timedelta, timezone
 from unittest.mock import patch
 
 import fakeredis
 import pytest
+from allauth.account.models import EmailAddress
 
 from mwmbl.crawler.stats import (
     REGISTRATION_WEEKS,
     USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS,
     USERS_REGISTERED_WEEKLY_KEY,
     StatsManager,
+    WeeklyRegistrations,
 )
 from mwmbl.models import MwmblUser
 from mwmbl.utils import utc_today
@@ -30,10 +31,15 @@ def _this_week_start():
     return today - timedelta(days=today.weekday())
 
 
-def _register(username: str, joined: datetime) -> None:
+def _register(username: str, joined: datetime) -> MwmblUser:
     user = MwmblUser.objects.create_user(username=username, password="testpass")
     user.date_joined = joined
     user.save()
+    return user
+
+
+def _add_email(user: MwmblUser, verified: bool) -> None:
+    EmailAddress.objects.create(user=user, email=f"{user.username}@example.com", verified=verified, primary=True)
 
 
 def _at_noon(day) -> datetime:
@@ -48,7 +54,8 @@ def test_registrations_are_counted_in_the_week_they_happened():
     _register("bob", _at_noon(utc_today()))
     _register("carol", _at_noon(last_week_start + timedelta(days=3)))
 
-    weekly = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
+    registrations = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
+    weekly = registrations.total()
 
     assert len(weekly) == REGISTRATION_WEEKS
     assert list(weekly)[-1] == str(this_week_start)
@@ -63,7 +70,8 @@ def test_the_window_starts_on_the_monday_a_year_back():
     _register("too-old", _at_noon(first_week_start - timedelta(days=1)))
     _register("oldest", datetime.combine(first_week_start, time(0), tzinfo=timezone.utc))
 
-    weekly = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
+    registrations = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
+    weekly = registrations.total()
 
     assert list(weekly)[0] == str(first_week_start)
     assert weekly[str(first_week_start)] == 1
@@ -82,7 +90,7 @@ def test_weekly_registrations_are_cached_in_redis():
 
     assert second == first
     cache_key = USERS_REGISTERED_WEEKLY_KEY.format(week_start=_this_week_start())
-    assert json.loads(redis.get(cache_key)) == first
+    assert WeeklyRegistrations.model_validate_json(redis.get(cache_key)) == first
     assert 0 < redis.ttl(cache_key) <= USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS
 
 
@@ -95,3 +103,40 @@ def test_weekly_registrations_are_part_of_the_stats():
         stats = stats_manager.get_stats()
 
     assert stats.users_registered_weekly[str(_this_week_start())] == 1
+    assert stats.users_unverified_weekly[str(_this_week_start())] == 1
+    assert stats.users_verified_weekly[str(_this_week_start())] == 0
+
+
+@pytest.mark.django_db
+def test_registrations_are_split_by_whether_the_email_was_verified():
+    this_week = str(_this_week_start())
+    joined = _at_noon(utc_today())
+    _add_email(_register("verified", joined), verified=True)
+    _add_email(_register("unverified", joined), verified=False)
+    _register("no-email-row", joined)
+    two_addresses = _register("one-verified-of-two", joined)
+    _add_email(two_addresses, verified=False)
+    EmailAddress.objects.create(user=two_addresses, email="second@example.com", verified=True, primary=False)
+
+    registrations = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
+
+    assert registrations.verified[this_week] == 2
+    assert registrations.unverified[this_week] == 2
+    assert list(registrations.verified) == list(registrations.unverified)
+
+
+@pytest.mark.django_db
+def test_the_stats_total_is_verified_plus_unverified():
+    stats_manager = StatsManager(fakeredis.FakeRedis(decode_responses=True))
+    joined = _at_noon(utc_today())
+    _add_email(_register("verified", joined), verified=True)
+    _register("bot", joined)
+    _register("another-bot", joined)
+
+    with patch("mwmbl.crawler.stats.get_counts", return_value=NO_INDEX_COUNTS):
+        stats = stats_manager.get_stats()
+
+    this_week = str(_this_week_start())
+    assert stats.users_verified_weekly[this_week] == 1
+    assert stats.users_unverified_weekly[this_week] == 2
+    assert stats.users_registered_weekly[this_week] == 3
