@@ -975,7 +975,7 @@ requires-dist = [
     { name = "onnxruntime", specifier = ">=1.27.0" },
     { name = "pandas", specifier = ">=1.3.5,<2.0.0" },
     { name = "polar-sdk", specifier = "==0.31.7" },
-    { name = "protego", specifier = ">=0.3.1" },
+    { name = "protego", specifier = ">=0.7.0" },
     { name = "psutil", specifier = ">=6.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.3" },
     { name = "py-spy", specifier = ">=0.4.1" },

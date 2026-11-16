@@ -382,3 +382,54 @@ def test_a_redirect_into_a_disallowed_path_is_not_followed(monkeypatch, redis):
 
     assert _error_name(result) == "RobotsDenied"
     assert "http://93.184.216.34/bad-bot" not in requested
+
+
+@pytest.mark.parametrize("word", ["github", "contact"])
+def test_groups_match_our_name_not_other_words_in_the_user_agent(monkeypatch, redis, word):
+    _fetching(monkeypatch, 200, f"User-agent: {word}\nDisallow: /\n\nUser-agent: mwmbl\nAllow: /\n".encode())
+
+    assert robots_allowed(URL, redis) is True
+
+
+def test_a_byte_order_mark_in_an_old_cache_entry_does_not_hide_the_first_group(redis):
+    lines = ["﻿User-agent: *", "Disallow: /private/"]
+    redis.set(
+        "robots:example.test", json.dumps({"content": lines, "unavailable": False, "expires_at": time.time() + 60})
+    )
+
+    assert robots_allowed(URL, redis) is False
+
+
+def test_a_fractional_crawl_delay_is_rounded_up(monkeypatch, redis):
+    _fetching(monkeypatch, 200, b"User-agent: *\nCrawl-delay: 1.5\n")
+
+    assert robots_crawl_delay(URL, redis) == 2
+
+
+def test_a_redirect_to_another_scheme_does_not_poison_that_sites_robots_cache(monkeypatch, redis):
+    def fake_get(url, **kwargs):
+        if url.endswith("/robots.txt"):
+            return _Response(404)
+        return _Response(302, location="ftp://victim.test/")
+
+    monkeypatch.setattr(retrieve, "get_session", lambda: SimpleNamespace(get=fake_get))
+
+    result = crawl_url("http://93.184.216.34/start", redis)
+
+    assert _error_name(result) == "AbortError"
+    assert redis.get("robots:victim.test") is None
+
+
+def test_an_allowed_redirect_to_another_host_is_followed(monkeypatch, redis):
+    responses = {
+        "http://93.184.216.34/robots.txt": _Response(404),
+        "http://93.184.216.34/start": _Response(301, location="http://93.184.216.35/page"),
+        "http://93.184.216.35/robots.txt": _Response(200, b"User-agent: *\nDisallow: /private/\n"),
+        "http://93.184.216.35/page": _Response(200, b"<html><body><p>A page about something.</p></body></html>"),
+    }
+    monkeypatch.setattr(retrieve, "get_session", lambda: SimpleNamespace(get=lambda url, **kwargs: responses[url]))
+
+    result = crawl_url("http://93.184.216.34/start", redis)
+
+    assert result["error"] is None
+    assert result["resolved_url"] == "http://93.184.216.35/page"

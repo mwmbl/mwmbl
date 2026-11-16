@@ -1,4 +1,5 @@
 import json
+import math
 import random
 import re
 import ssl
@@ -56,6 +57,10 @@ MAX_FALLBACK_PARAGRAPH_LINK_DENSITY = 0.5
 DEFAULT_ENCODING = "utf8"
 DEFAULT_ENC_ERRORS = "replace"
 MAX_SITE_URLS = 100
+# What robots.txt groups are matched against. Protego looks for a group's name anywhere in
+# the user agent it is given, so the full USER_AGENT would match "User-agent: github" or a
+# word in the operator's contact details.
+ROBOTS_USER_AGENT = "mwmbl"
 USER_AGENT = f"mwmbl/{CRAWLER_VERSION} (https://github.com/mwmbl/mwmbl/ contact {MWMBL_CONTACT_INFO})"
 
 ROBOTS_CACHE_TTL_SECONDS = 60 * 60 * 24
@@ -140,6 +145,9 @@ def fetch(url, robots_redis: Redis | None = None):
         if r.is_redirect and r.next is not None:
             r.close()
             url = urljoin(url, r.headers.get("Location", ""))
+            # Validate before looking up robots.txt: otherwise a redirect to ftp://victim/ caches
+            # victim's robots.txt as unavailable, and stops us crawling it for an hour.
+            validate_url(url)
             if robots_redis is not None and not robots_allowed(url, robots_redis):
                 raise RobotsDenied(f"Robots do not allow redirect target {url}")
             continue
@@ -187,15 +195,15 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         logger.info(f"Unable to parse URL: {url}")
         return False
 
-    allowed = get_robots(parsed_url, redis).can_fetch(url, USER_AGENT)
+    allowed = get_robots(parsed_url, redis).can_fetch(url, ROBOTS_USER_AGENT)
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
 
 def robots_crawl_delay(url: str, redis: Redis) -> int | None:
     """The Crawl-delay robots.txt asks of us, in seconds, if it asks for one."""
-    crawl_delay = get_robots(urlparse(url), redis).crawl_delay(USER_AGENT)
-    return int(crawl_delay) if crawl_delay is not None else None
+    crawl_delay = get_robots(urlparse(url), redis).crawl_delay(ROBOTS_USER_AGENT)
+    return math.ceil(crawl_delay) if crawl_delay is not None else None
 
 
 def get_robots(parsed_url: ParseResult, redis: Redis) -> Protego:
@@ -220,7 +228,8 @@ def get_robots(parsed_url: ParseResult, redis: Redis) -> Protego:
     # a user agent (robotparser kept only the first "User-agent: *" group, so a site whose
     # first group was "Allow: /" had the rest of its rules ignored), picks the longest
     # matching rule rather than the first, and understands * and $ in paths.
-    return Protego.parse("\n".join(content))
+    # Entries cached before robots.txt was decoded as utf-8-sig can still start with a BOM.
+    return Protego.parse("\n".join(content).removeprefix("\ufeff"))
 
 
 def _fetch_robots(robots_url: str) -> tuple[list[str], bool]:
