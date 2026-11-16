@@ -42,10 +42,6 @@ def _add_email(user: MwmblUser, verified: bool) -> None:
     EmailAddress.objects.create(user=user, email=f"{user.username}@example.com", verified=verified, primary=True)
 
 
-def _total(registrations: WeeklyRegistrations) -> dict[str, int]:
-    return {week: count + registrations.unverified[week] for week, count in registrations.verified.items()}
-
-
 def _at_noon(day) -> datetime:
     return datetime.combine(day, time(12), tzinfo=timezone.utc)
 
@@ -59,7 +55,7 @@ def test_registrations_are_counted_in_the_week_they_happened():
     _register("carol", _at_noon(last_week_start + timedelta(days=3)))
 
     registrations = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
-    weekly = _total(registrations)
+    weekly = registrations.total()
 
     assert len(weekly) == REGISTRATION_WEEKS
     assert list(weekly)[-1] == str(this_week_start)
@@ -75,7 +71,7 @@ def test_the_window_starts_on_the_monday_a_year_back():
     _register("oldest", datetime.combine(first_week_start, time(0), tzinfo=timezone.utc))
 
     registrations = StatsManager(fakeredis.FakeRedis(decode_responses=True)).get_users_registered_weekly()
-    weekly = _total(registrations)
+    weekly = registrations.total()
 
     assert list(weekly)[0] == str(first_week_start)
     assert weekly[str(first_week_start)] == 1

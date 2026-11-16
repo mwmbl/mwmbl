@@ -54,11 +54,16 @@ INDEX_HISTORY_DAYS = 365
 class WeeklyRegistrations(BaseModel):
     """Registrations per week, split by whether the user has since verified their email.
 
-    Most bot sign-ups never verify, so the unverified count is where they show up.
+    Most bot sign-ups never verify, so the unverified count is where they show up. Verification is
+    read when the counts are built, not at sign-up, so people who verify a few days late move from
+    unverified to verified: the latest week or two overstate the unverified share.
     """
 
     verified: dict[str, int]
     unverified: dict[str, int]
+
+    def total(self) -> dict[str, int]:
+        return {week: count + self.unverified[week] for week, count in self.verified.items()}
 
 
 class DomainStats(BaseModel):
@@ -194,10 +199,6 @@ class StatsManager:
         user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
 
         registrations = self.get_users_registered_weekly()
-        registrations_total = {
-            week: verified_count + registrations.unverified[week]
-            for week, verified_count in registrations.verified.items()
-        }
 
         return MwmblStats(
             users_crawled_daily=users_crawled_daily,
@@ -207,7 +208,7 @@ class StatsManager:
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
             blacklisted_results_removed_daily={},
-            users_registered_weekly=registrations_total,
+            users_registered_weekly=registrations.total(),
             users_verified_weekly=registrations.verified,
             users_unverified_weekly=registrations.unverified,
             **self.get_seed_search_totals(),
@@ -257,7 +258,8 @@ class StatsManager:
         return leaderboard
 
     def get_users_registered_weekly(self) -> WeeklyRegistrations:
-        """Registrations per week for the last year, keyed by the Monday starting each week.
+        """Registrations per week for the last year, keyed by the Monday starting each week, split by
+        whether each user has verified their email as of now.
 
         Cached in Redis because it scans the user table on every stats request otherwise.
         """
