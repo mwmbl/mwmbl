@@ -4,7 +4,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock, atomic::AtomicBool},
-    thread::sleep,
 };
 
 use anyhow::Context;
@@ -16,8 +15,7 @@ use strum_macros::{Display, EnumCount, EnumIter};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     spawn,
-    sync::{RwLock, futures},
-    task::JoinHandle,
+    task::JoinHandle, time::sleep,
 };
 
 use crate::{
@@ -97,7 +95,7 @@ impl DomainLinkDatabase {
 
         spawn(async move {
             loop {
-                sleep(LINK_DOMAIN_DB_SAVE_INTERVAL);
+                sleep(LINK_DOMAIN_DB_SAVE_INTERVAL).await;
                 if let Some(db) = weak.upgrade() {
                     let mut tasks: Vec<JoinHandle<()>> = Vec::with_capacity(DomainGroups::COUNT);
 
@@ -172,10 +170,13 @@ impl DomainLinkDatabase {
         };
 
         if let Some((bloom, changed)) = self.links.get(&group) {
+            let mut any_change = false;
             for v in target {
-                bloom.insert(v);
+                any_change |= !bloom.insert(v);
             }
-            changed.store(true, std::sync::atomic::Ordering::SeqCst);
+            if any_change {
+                changed.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
     }
 }
