@@ -1,5 +1,8 @@
 use dom_query::Document;
-use kreuzberg::{ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, core::mime, extract_bytes, extraction::html::ConversionOptions};
+use kreuzberg::{
+    ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, core::mime, extract_bytes,
+    extraction::html::ConversionOptions,
+};
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
@@ -17,18 +20,19 @@ use std::{
 use crate::constants::TIMEOUT;
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS
+        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_FETCH_SIZE,
+        NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, ROBOTS_CACHE_ERROR_TTL_SECONDS,
+        ROBOTS_CACHE_TTL_SECONDS,
     },
+    robots::{RobotCache, robot_allowed},
     url_queue::ClaimedUrl,
 };
 use anyhow::{Error, bail};
 use futures_util::StreamExt;
 use readabilityrs::Readability;
 use reqwest::{Client, StatusCode, Url};
-use scc::HashCache;
 #[cfg(feature = "servo")]
 use servo_fetch::{FetchOptions, SessionBrokerConfig, VisibilityPolicy, extract::ExtractInput};
-use texting_robots::Robot;
 
 #[derive(Debug)]
 pub enum CrawlResults {
@@ -85,112 +89,37 @@ impl CrawlResults {
     pub fn is_error(&self) -> bool {
         !matches!(self, CrawlResults::CrawlContent { .. })
     }
-}
-
-#[derive(Clone)]
-pub struct CachedRobotFile {
-    cache_ttl: Duration,
-    robot_fetched: Instant,
-    robot: Option<Arc<Robot>>,
-    error_count: Arc<AtomicU64>,
-}
-
-impl CachedRobotFile {
-    pub fn new(cache_ttl: Duration, user_agent: &str, txt: Option<&[u8]>) -> Self {
-        let robot = if let Some(txt) = txt
-            && let Ok(robot) = Robot::new(user_agent, txt)
-        {
-            Some(Arc::new(robot))
-        } else {
-            None
-        };
-        Self {
-            cache_ttl,
-            robot_fetched: Instant::now(),
-            robot,
-            error_count: Arc::new(0.into()),
-        }
-    }
-    pub fn can_fetch(&self, url: &Url) -> Option<bool> {
-        if let Some(robot) = &self.robot {
-            return Some(robot.allowed(url.as_str()));
-        }
-        None
-    }
-    pub fn delay(&self, status: Option<StatusCode>) -> Duration {
-        
-        if status.is_some_and(|status|status.is_success()) {
-            let value = self.error_count.fetch_add(1, Ordering::Relaxed);
-            return min(BLOCK_COOL_OFF * (1 << value), MAX_BLOCK_COOL_OFF);
-        }
-        self.error_count.store(0, Ordering::Relaxed);
-
-        if let Some(robot) = &self.robot {
-            return robot.delay.map_or(DEFAULT_DOMAIN_DELAY, Duration::from_secs_f32);
-        }
-        ROBOTS_CACHE_ERROR_TTL_SECONDS
-    }
-    pub fn is_valid(&self) -> bool {
-        self.robot_fetched.duration_since(Instant::now()) < self.cache_ttl
-    }
-}
-
-#[derive(Clone)]
-pub struct RobotCache {
-    cache: Arc<HashCache<String, CachedRobotFile>>,
-    user_agent: String,
-}
-
-impl RobotCache {
-    #[must_use]
-    pub fn new(user_agent: &str) -> Self {
-        RobotCache {
-            cache: Arc::new(HashCache::new()),
-            user_agent: user_agent.to_owned(),
-        }
-    }
-
-    pub async fn can_fetch(&mut self, domain: &str, url: &Url) -> Option<bool> {
-        if let Some(occupied_entry) = self.cache.get_async(domain).await {
-            return if occupied_entry.get().is_valid() {
-                let _ = occupied_entry.remove();
-                None
-            } else {
-                occupied_entry.get().can_fetch(url)
-            };
-        }
-        None
-    }
-
-    pub async fn domain_delay(&mut self, status: Option<StatusCode>, domain: &str) -> Duration {
-        if let Some(occupied_entry) = self.cache.get_async(domain).await {
-            let delay = occupied_entry.delay(status);
-            if !occupied_entry.get().is_valid() {
-                let _ = occupied_entry.remove();
+    pub fn get_resolved_info(&self) -> (Option<&str>, Option<StatusCode>) {
+        match &self {
+            crate::retrieve::CrawlResults::NoDomainError { .. }
+            | crate::retrieve::CrawlResults::RobotsDeniedError { .. }
+            | crate::retrieve::CrawlResults::RobotsUnavailableError { .. }
+            | crate::retrieve::CrawlResults::AbortError { .. } => (None, None),
+            crate::retrieve::CrawlResults::NoResponseTextError {
+                resolved_url,
+                status,
+                ..
             }
-            return delay;
+            | crate::retrieve::CrawlResults::HtmlParsingError {
+                resolved_url,
+                status,
+                ..
+            }
+            | crate::retrieve::CrawlResults::ParagraphParsingError {
+                resolved_url,
+                status,
+                ..
+            }
+            | crate::retrieve::CrawlResults::CrawlContent {
+                resolved_url,
+                status,
+                ..
+            } => (resolved_url.domain(), Some(*status)),
         }
-        ROBOTS_CACHE_ERROR_TTL_SECONDS
-    }
-
-    pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
-        let _ = self.cache.put_async(domain.to_owned(), file).await;
-    }
-
-    pub fn user_agent(&self) -> &str {
-        &self.user_agent
     }
 }
 
-fn get_robot_url(url: &Url) -> Url {
-    let mut robot_path = url.clone();
-    robot_path.set_path("robots.txt");
-    robot_path.set_query(None);
-    robot_path.set_fragment(None);
-    robot_path
-}
-
-async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCode, Url)> {
+pub async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCode, Url)> {
     let r = client.get(url.clone()).send().await?;
 
     let status = r.status();
@@ -214,7 +143,7 @@ async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, St
     let (data, status, url) = fetch(client, url).await?;
     if status.is_success() {
         let mime = mime::detect_mime_type_from_bytes(&data)?;
-        
+
         if mime == "text/html" {
             return Ok((String::from_utf8(data)?, status, url));
         }
@@ -239,43 +168,6 @@ async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, Sta
     let resolved_url = Url::from_str(&page.url)?;
     // Assume 200 code for servo as the value is not exposed: https://github.com/konippi/servo-fetch/issues/586
     Ok((page.html, StatusCode::OK, resolved_url))
-}
-
-async fn robot_allowed(
-    url: &Url,
-    domain: &str,
-    client: &Client,
-    robots_cache: &mut RobotCache,
-) -> anyhow::Result<bool> {
-    let robot_url = get_robot_url(url);
-
-    if let Some(can_fetch) = robots_cache.can_fetch(domain, url).await {
-        return Ok(can_fetch);
-    }
-
-    if let Ok((data, status, _)) = fetch(client, &robot_url).await
-        && status.is_success()
-    {
-        let robot = CachedRobotFile::new(
-            ROBOTS_CACHE_TTL_SECONDS,
-            robots_cache.user_agent(),
-            Some(&data),
-        );
-        let allowed = robot.can_fetch(url).unwrap_or_default();
-        robots_cache.put(domain, robot).await;
-        return Ok(allowed);
-    }
-    robots_cache
-        .put(
-            domain,
-            CachedRobotFile::new(
-                ROBOTS_CACHE_ERROR_TTL_SECONDS,
-                robots_cache.user_agent(),
-                None,
-            ),
-        )
-        .await;
-    bail!("robots.txt unavailable for {domain}");
 }
 
 pub async fn crawl(
@@ -329,10 +221,19 @@ pub async fn crawl(
         }
     };
 
-    (claimed_url, sanitize(&html, resolved_url, status, timestamp, url))
+    (
+        claimed_url,
+        sanitize(&html, resolved_url, status, timestamp, url),
+    )
 }
 
-fn sanitize(html: &str, resolved_url: Url, status: StatusCode, timestamp: Instant, url: Url) -> CrawlResults {
+fn sanitize(
+    html: &str,
+    resolved_url: Url,
+    status: StatusCode,
+    timestamp: Instant,
+    url: Url,
+) -> CrawlResults {
     let read_options = ReadabilityOptions::builder()
         .sanitize_content(true)
         .clean_whitespace(true)
@@ -395,7 +296,10 @@ fn sanitize(html: &str, resolved_url: Url, status: StatusCode, timestamp: Instan
     }
 
     if article_title.is_empty() {
-        article_title = Document::from(article_html).select_single("h1").text().to_string();
+        article_title = Document::from(article_html)
+            .select_single("h1")
+            .text()
+            .to_string();
     }
 
     // Note for the future: look into what we can get with markdown:

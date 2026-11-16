@@ -78,7 +78,6 @@ impl ClaimedUrl {
                         claims.remove_async(&domain).await;
                     }
                 }
-                println!("Released Domain");
                 claimed_url.released = true;
             } else {
                 eprintln!("Error: domain not found.");

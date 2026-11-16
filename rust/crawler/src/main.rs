@@ -13,8 +13,10 @@
 mod constants;
 mod crawler;
 mod curated_domains;
+mod domainlinkdb;
 mod path_creation;
 mod retrieve;
+mod robots;
 mod url_queue;
 
 use std::path::PathBuf;

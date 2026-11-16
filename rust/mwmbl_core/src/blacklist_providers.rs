@@ -7,18 +7,14 @@ use tokio::{sync::RwLock, time::sleep};
 use crate::{
     blacklist::domain_and_parents,
     constants::{
-        BLACKLIST_REFRESH_CHECK_SECONDS, DOMAIN_BLACKLIST_REGEX, EXCLUDED_DOMAINS,
-        NUMBERS_ONLY_REGEX,
+        BLACKLIST_REFRESH_CHECK, DOMAIN_BLACKLIST_REGEX, EXCLUDED_DOMAINS, NUMBERS_ONLY_REGEX,
     },
     hn_top_domains_filtered::DOMAINS,
 };
 extern crate reqwest;
 
 pub trait BlacklistProvider: Clone + Send + Sync {
-    fn is_domain_blacklisted(
-        &self,
-        domain: &str,
-    ) -> impl Future<Output = bool>;
+    fn is_domain_blacklisted(&self, domain: &str) -> impl Future<Output = bool>;
     fn refresh(&mut self) -> impl Future<Output = anyhow::Result<()>> + Send + Sync;
 }
 
@@ -101,8 +97,7 @@ impl<T: BlacklistProvider, T2: BlacklistProvider> BlacklistProvider
     for CombinedBlacklistProvider<T, T2>
 {
     async fn is_domain_blacklisted(&self, domain: &str) -> bool {
-        self.a.is_domain_blacklisted(domain).await
-            || self.b.is_domain_blacklisted(domain).await
+        self.a.is_domain_blacklisted(domain).await || self.b.is_domain_blacklisted(domain).await
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         self.a.refresh().await?;
@@ -193,11 +188,11 @@ impl<T: BlacklistProvider + 'static> SharedSelfRefreshingBlacklistProvider<T> {
         tokio::spawn(async move {
             let weak = weak.clone();
             loop {
-                sleep(Duration::from_secs(BLACKLIST_REFRESH_CHECK_SECONDS)).await;
+                sleep(BLACKLIST_REFRESH_CHECK).await;
                 if let Some(blacklist) = weak.upgrade() {
                     let mut blacklist = blacklist.write().await;
                     if let Err(err) = blacklist.refresh().await {
-                        println!("Error while refreshing blacklist : {err}");
+                        eprintln!("Error while refreshing blacklist : {err}");
                     }
                 } else {
                     break;

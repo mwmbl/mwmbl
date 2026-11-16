@@ -1,6 +1,7 @@
 use std::{sync::LazyLock, time::Duration};
 
 use mwmbl_core::hn_top_domains_filtered::DOMAINS;
+use ordered_float::OrderedFloat;
 
 pub static INDEX_NAME: &str = "crawl-index.tinysearch";
 pub static NUM_PAGES: usize = 100_000;
@@ -21,7 +22,11 @@ pub static MAX_REDIRECTS: usize = 5;
 pub static TIMEOUT: Duration = Duration::from_secs(3);
 pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
-pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| DOMAINS.keys().cloned().collect());
+pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
+    let mut v: Vec<_> = DOMAINS.iter().collect();
+    v.sort_by_key(|(_, v)| OrderedFloat::from(**v));
+    v.into_iter().map(|(k, _)| k.to_owned()).collect()
+});
 
 pub static ROBOTS_CACHE_TTL_SECONDS: Duration = Duration::from_hours(24);
 pub static ROBOTS_CACHE_ERROR_TTL_SECONDS: Duration = Duration::from_hours(1);
@@ -34,3 +39,7 @@ pub static MAX_BLOCK_COOL_OFF: Duration = Duration::from_hours(6);
 pub static MAX_DOMAIN_DELAY: Duration = MAX_BLOCK_COOL_OFF;
 
 pub static BLOCK_COOL_OFF: Duration = Duration::from_mins(1);
+
+pub static NUM_DOMAINS_IN_BLOOM_FILTER: usize = 100_000;
+
+pub static LINK_DOMAIN_DB_SAVE_INTERVAL: Duration = Duration::from_mins(5);

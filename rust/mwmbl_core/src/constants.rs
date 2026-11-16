@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Duration};
 
 use phf::phf_set;
 use regex::Regex;
@@ -9,7 +9,7 @@ pub static INDEX_VERSION: i32 = 1;
 pub static METADATA_CONSTANT: &[u8; 17] = b"mwmbl-tiny-search";
 pub static ITEM_FACTORY: &str = "Document";
 
-pub static BLACKLIST_REFRESH_CHECK_SECONDS: u64 = 300;
+pub static BLACKLIST_REFRESH_CHECK: Duration = Duration::from_secs(300);
 
 pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "web.archive.org",

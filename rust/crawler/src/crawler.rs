@@ -6,7 +6,7 @@ use std::{
 
 use mwmbl_core::blacklist_providers::BlacklistProvider;
 use rand::RngExt;
-use reqwest::redirect::Policy;
+use reqwest::{Client, redirect::Policy};
 use scc::HashMap;
 use tokio::{spawn, sync::RwLock, task::yield_now, time::sleep};
 
@@ -16,7 +16,9 @@ use crate::{
         API_PRODUCT, DEFAULT_DOMAIN_DELAY, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    retrieve::{RobotCache, crawl},
+    domainlinkdb::DomainLinkDatabase,
+    retrieve::crawl,
+    robots::RobotCache,
     url_queue::SharedURLQueue,
 };
 
@@ -27,6 +29,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
+    domainlinkdb: Arc<DomainLinkDatabase>,
 }
 
 impl Crawler {
@@ -35,6 +38,7 @@ impl Crawler {
         let curated_domains = CuratedDomains::new(&params.remote_server);
         let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
+        let domainlinkdb = DomainLinkDatabase::new(&params.home).await?;
 
         Ok(Crawler {
             url_queue,
@@ -43,65 +47,42 @@ impl Crawler {
             error_last_reported_at: Arc::new(HashMap::default()),
             robots_cache: RobotCache::new(&Self::crawl_user_agent(&params.contact_info)),
             params: Arc::new(params),
+            domainlinkdb,
         })
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut rng = rand::rng();
-        let user_agent = Crawler::crawl_user_agent(&self.params.contact_info);
-
-        let client = reqwest::Client::builder()
+    fn get_client(&self) -> anyhow::Result<reqwest::Client> {
+        Ok(reqwest::Client::builder()
             .brotli(true)
             .deflate(true)
             .gzip(true)
             .zstd(true)
             .read_timeout(TIMEOUT)
-            .user_agent(user_agent)
+            .user_agent(Self::crawl_user_agent(&self.params.contact_info))
             .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .build()?;
+            .build()?)
+    }
+
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        let mut rng = rand::rng();
+        let client = self.get_client()?;
 
         loop {
             let url = self.url_queue.get_url().await;
             let mut cache = self.robots_cache.clone();
             let crawl_client = client.clone();
+
             spawn(async move {
                 let (url, result) = crawl(url, cache.clone(), crawl_client).await;
 
-                let (resolved_domain, status) = match &result {
-                    crate::retrieve::CrawlResults::NoDomainError { .. }
-                    | crate::retrieve::CrawlResults::RobotsDeniedError { .. }
-                    | crate::retrieve::CrawlResults::RobotsUnavailableError { .. }
-                    | crate::retrieve::CrawlResults::AbortError { .. } => (None, None),
-                    crate::retrieve::CrawlResults::NoResponseTextError {
-                        resolved_url,
-                        status,
-                        ..
-                    }
-                    | crate::retrieve::CrawlResults::HtmlParsingError {
-                        resolved_url,
-                        status,
-                        ..
-                    }
-                    | crate::retrieve::CrawlResults::ParagraphParsingError {
-                        resolved_url,
-                        status,
-                        ..
-                    }
-                    | crate::retrieve::CrawlResults::CrawlContent {
-                        resolved_url,
-                        status,
-                        ..
-                    } => (resolved_url.domain(), Some(*status)),
-                };
+                let (resolved_domain, status) = result.get_resolved_info();
 
                 if let Some(domain) = url.url().domain() {
                     let time_a = cache.domain_delay(status, domain).await;
                     let time_b = if let Some(resolved_domain) = resolved_domain
                         && resolved_domain != domain
                     {
-                        cache
-                            .domain_delay(status, resolved_domain)
-                            .await
+                        cache.domain_delay(status, resolved_domain).await
                     } else {
                         Duration::ZERO
                     };
@@ -109,7 +90,7 @@ impl Crawler {
                     let time = min(MAX_DOMAIN_DELAY, time);
                     url.release_after_delay(resolved_domain, time);
                 }
-                println!("{result:#?}");
+
                 todo!()
                 // TODO record_urls_in_database
             });
@@ -124,17 +105,7 @@ impl Crawler {
     }
 
     pub async fn run_once(&mut self) -> anyhow::Result<()> {
-        let user_agent = Crawler::crawl_user_agent(&self.params.contact_info);
-
-        let client = reqwest::Client::builder()
-            .brotli(true)
-            .deflate(true)
-            .gzip(true)
-            .zstd(true)
-            .read_timeout(TIMEOUT)
-            .user_agent(user_agent)
-            .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .build()?;
+        let client = self.get_client()?;
 
         let url = self.url_queue.get_url().await;
         let cache = self.robots_cache.clone();
@@ -148,7 +119,7 @@ impl Crawler {
         Ok(())
     }
 
-    pub fn crawl_user_agent(contact_info: &str) -> String {
+    fn crawl_user_agent(contact_info: &str) -> String {
         format!("{API_PRODUCT} (https://github.com/mwmbl/mwmbl/ contact {contact_info})")
     }
 
