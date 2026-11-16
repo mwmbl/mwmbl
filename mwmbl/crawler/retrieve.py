@@ -10,9 +10,9 @@ from multiprocessing.pool import ThreadPool
 from ssl import SSLCertVerificationError
 from typing import List, Optional
 from urllib.parse import ParseResult, urljoin, urlparse, urlunsplit
-from urllib.robotparser import RobotFileParser
 
 import requests
+from protego import Protego
 from redis import Redis
 from requests import ReadTimeout
 from requests.adapters import HTTPAdapter
@@ -115,12 +115,15 @@ def get_session() -> requests.Session:
     return _thread_local.session
 
 
-def fetch(url):
+def fetch(url, robots_redis: Redis | None = None):
     """
     Fetch with a maximum timeout and maximum fetch size to avoid big pages bringing us down.
 
     Redirects are followed manually so each hop can be re-validated against the
     SSRF guard: a public URL must not be able to 3xx us into an internal address.
+    Given robots_redis, each redirect target must also be allowed by its site's robots.txt,
+    or RobotsDenied is raised: checking only the URL we were asked for let a redirect walk
+    us into a disallowed path (#333). The caller checks the first URL itself.
 
     Returns (status code, content, resolved URL). The resolved URL is the last hop, which is
     the only place the redirect chain is visible to a caller: it says which host actually
@@ -137,6 +140,8 @@ def fetch(url):
         if r.is_redirect and r.next is not None:
             r.close()
             url = urljoin(url, r.headers.get("Location", ""))
+            if robots_redis is not None and not robots_allowed(url, robots_redis):
+                raise RobotsDenied(f"Robots do not allow redirect target {url}")
             continue
 
         size = 0
@@ -171,6 +176,10 @@ class RobotsUnavailable(Exception):
     """
 
 
+class RobotsDenied(Exception):
+    """robots.txt disallows the URL for our user agent."""
+
+
 def robots_allowed(url: str, redis: Redis) -> bool:
     try:
         parsed_url = urlparse(url)
@@ -178,19 +187,18 @@ def robots_allowed(url: str, redis: Redis) -> bool:
         logger.info(f"Unable to parse URL: {url}")
         return False
 
-    allowed = get_robots(parsed_url, redis).can_fetch(USER_AGENT, url)
+    allowed = get_robots(parsed_url, redis).can_fetch(url, USER_AGENT)
     logger.debug(f"Robots allowed for {url}: {allowed}")
     return allowed
 
 
 def robots_crawl_delay(url: str, redis: Redis) -> int | None:
     """The Crawl-delay robots.txt asks of us, in seconds, if it asks for one."""
-    # typeshed says str, but RobotFileParser only ever stores an int.
     crawl_delay = get_robots(urlparse(url), redis).crawl_delay(USER_AGENT)
     return int(crawl_delay) if crawl_delay is not None else None
 
 
-def get_robots(parsed_url: ParseResult, redis: Redis) -> RobotFileParser:
+def get_robots(parsed_url: ParseResult, redis: Redis) -> Protego:
     """The site's robots.txt rules, from the cache when they are there. Raises RobotsUnavailable."""
     domain = parsed_url.netloc
     cached = _get_robots_from_cache(redis, domain)
@@ -208,9 +216,11 @@ def get_robots(parsed_url: ParseResult, redis: Redis) -> RobotFileParser:
     if unavailable:
         raise RobotsUnavailable(f"robots.txt unavailable for {domain}")
 
-    parse_robots = RobotFileParser()
-    parse_robots.parse(content)
-    return parse_robots
+    # Protego follows RFC 9309 where urllib.robotparser does not: it merges every group for
+    # a user agent (robotparser kept only the first "User-agent: *" group, so a site whose
+    # first group was "Allow: /" had the rest of its rules ignored), picks the longest
+    # matching rule rather than the first, and understands * and $ in paths.
+    return Protego.parse("\n".join(content))
 
 
 def _fetch_robots(robots_url: str) -> tuple[list[str], bool]:
@@ -231,7 +241,8 @@ def _fetch_robots(robots_url: str) -> tuple[list[str], bool]:
         logger.debug(f"Robots status code: {status_code}")
         return [], False
 
-    for encoding in ["utf-8", "iso-8859-1"]:
+    # utf-8-sig drops a byte order mark, which would otherwise hide the first User-agent line.
+    for encoding in ["utf-8-sig", "iso-8859-1"]:
         try:
             return content.decode(encoding).splitlines(), False
         except UnicodeDecodeError:
@@ -397,48 +408,30 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - 1] + "…" if len(text) > limit else text
 
 
+def _crawl_error(url: str, js_timestamp: int, name: str, message: str) -> dict:
+    return {
+        "url": url,
+        "status": None,
+        "timestamp": js_timestamp,
+        "content": None,
+        "error": {"name": name, "message": message},
+    }
+
+
 def crawl_url(url, redis: Redis):
     logger.info(url)
     js_timestamp = int(time.time() * 1000)
     try:
-        allowed = robots_allowed(url, redis)
+        if not robots_allowed(url, redis):
+            raise RobotsDenied("Robots do not allow this URL")
+        status_code, content, resolved_url = fetch(url, robots_redis=redis)
     except RobotsUnavailable as e:
-        return {
-            "url": url,
-            "status": None,
-            "timestamp": js_timestamp,
-            "content": None,
-            "error": {
-                "name": "RobotsUnavailable",
-                "message": str(e),
-            },
-        }
-    if not allowed:
-        return {
-            "url": url,
-            "status": None,
-            "timestamp": js_timestamp,
-            "content": None,
-            "error": {
-                "name": "RobotsDenied",
-                "message": "Robots do not allow this URL",
-            },
-        }
-
-    try:
-        status_code, content, resolved_url = fetch(url)
+        return _crawl_error(url, js_timestamp, "RobotsUnavailable", str(e))
+    except RobotsDenied as e:
+        return _crawl_error(url, js_timestamp, "RobotsDenied", str(e))
     except ALLOWED_EXCEPTIONS as e:
         logger.debug(f"Exception crawling URl {url}: {e}")
-        return {
-            "url": url,
-            "status": None,
-            "timestamp": js_timestamp,
-            "content": None,
-            "error": {
-                "name": "AbortError",
-                "message": str(e),
-            },
-        }
+        return _crawl_error(url, js_timestamp, "AbortError", str(e))
 
     if len(content) == 0:
         return {
