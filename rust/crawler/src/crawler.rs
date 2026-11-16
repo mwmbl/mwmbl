@@ -6,14 +6,19 @@ use std::{
 
 use mwmbl_core::blacklist_providers::BlacklistProvider;
 use rand::RngExt;
-use reqwest::{Client, redirect::Policy};
+use reqwest::redirect::Policy;
 use scc::HashMap;
-use tokio::{spawn, sync::RwLock, task::yield_now, time::sleep};
+use tokio::{
+    spawn,
+    sync::{RwLock, Semaphore},
+    task::yield_now,
+    time::sleep,
+};
 
 use crate::{
     CrawlerParams,
     constants::{
-        API_PRODUCT, DEFAULT_DOMAIN_DELAY, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT,
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     domainlinkdb::DomainLinkDatabase,
@@ -30,6 +35,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
     domainlinkdb: Arc<DomainLinkDatabase>,
+    crawl_semaphore: Arc<Semaphore>,
 }
 
 impl Crawler {
@@ -45,7 +51,8 @@ impl Crawler {
             blacklist,
             username,
             error_last_reported_at: Arc::new(HashMap::default()),
-            robots_cache: RobotCache::new(&Self::crawl_user_agent(&params.contact_info)),
+            robots_cache: RobotCache::new(),
+            crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
             params: Arc::new(params),
             domainlinkdb,
         })
@@ -58,7 +65,7 @@ impl Crawler {
             .gzip(true)
             .zstd(true)
             .read_timeout(TIMEOUT)
-            .user_agent(Self::crawl_user_agent(&self.params.contact_info))
+            .user_agent(self.crawl_user_agent())
             .redirect(Policy::limited(MAX_REDIRECTS + 1))
             .build()?)
     }
@@ -68,12 +75,26 @@ impl Crawler {
         let client = self.get_client()?;
 
         loop {
+            let permit = self.crawl_semaphore.clone().acquire_owned().await?;
             let url = self.url_queue.get_url().await;
             let mut cache = self.robots_cache.clone();
             let crawl_client = client.clone();
+            #[cfg(feature = "servo")]
+            let user_agent = self.crawl_user_agent();
 
             spawn(async move {
-                let (url, result) = crawl(url, cache.clone(), crawl_client).await;
+                let permit = permit;
+
+                let (url, result) = crawl(
+                    url,
+                    cache.clone(),
+                    crawl_client,
+                    #[cfg(feature = "servo")]
+                    user_agent,
+                )
+                .await;
+
+                drop(permit);
 
                 let (resolved_domain, status) = result.get_resolved_info();
 
@@ -110,7 +131,19 @@ impl Crawler {
         let url = self.url_queue.get_url().await;
         let cache = self.robots_cache.clone();
         let crawl_client = client.clone();
-        let handle = spawn(async move { crawl(url, cache, crawl_client).await });
+
+        #[cfg(feature = "servo")]
+        let user_agent = self.crawl_user_agent();
+        let handle = spawn(async move {
+            crawl(
+                url,
+                cache,
+                crawl_client,
+                #[cfg(feature = "servo")]
+                user_agent,
+            )
+            .await
+        });
 
         match handle.await {
             Ok((_claimed_url, result)) => println!("{result:#?}"),
@@ -119,8 +152,11 @@ impl Crawler {
         Ok(())
     }
 
-    fn crawl_user_agent(contact_info: &str) -> String {
-        format!("{API_PRODUCT} (https://github.com/mwmbl/mwmbl/ contact {contact_info})")
+    fn crawl_user_agent(&self) -> String {
+        format!(
+            "{API_PRODUCT} (https://github.com/mwmbl/mwmbl/ contact {})",
+            self.params.contact_info
+        )
     }
 
     pub fn api_user_agent(username: Option<&String>) -> String {

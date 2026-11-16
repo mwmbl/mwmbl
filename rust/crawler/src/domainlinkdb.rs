@@ -11,11 +11,12 @@ use fastbloom::AtomicBloomFilter;
 use futures_util::future::join_all;
 use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{Display, EnumCount, EnumIter};
+use strum_macros::{Display, EnumIter};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     spawn,
-    task::JoinHandle, time::sleep,
+    task::JoinHandle,
+    time::sleep,
 };
 
 use crate::{
@@ -23,7 +24,7 @@ use crate::{
     path_creation::bloom_path,
 };
 
-#[derive(EnumIter, Display, EnumCount, Hash, PartialEq, Eq, Clone)]
+#[derive(EnumIter, Display, strum_macros::EnumCount, Hash, PartialEq, Eq, Clone)]
 pub enum DomainGroups {
     Github,
     WikipediaEn,

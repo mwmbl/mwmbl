@@ -78,6 +78,9 @@ pub struct CrawlerParams {
         default_value = "https://api.mwmbl.org"
     )]
     remote_server: String,
+    /// maximum amount of simultaneous crawling task that can run at any point.
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "100")]
+    max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
     home: PathBuf,

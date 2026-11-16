@@ -16,7 +16,7 @@ use tokio::time::Instant;
 use crate::{
     constants::{
         BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, ROBOTS_CACHE_ERROR_TTL_SECONDS,
-        ROBOTS_CACHE_TTL_SECONDS,
+        ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
     },
     retrieve::fetch,
 };
@@ -30,9 +30,9 @@ pub struct CachedRobotFile {
 }
 
 impl CachedRobotFile {
-    pub fn new(cache_ttl: Duration, user_agent: &str, txt: Option<&[u8]>) -> Self {
+    pub fn new(cache_ttl: Duration, txt: Option<&[u8]>) -> Self {
         let robot = if let Some(txt) = txt
-            && let Ok(robot) = Robot::new(user_agent, txt)
+            && let Ok(robot) = Robot::new(ROBOTS_USER_AGENT, txt)
         {
             Some(Arc::new(robot))
         } else {
@@ -81,15 +81,13 @@ fn get_robot_url(url: &Url) -> Url {
 #[derive(Clone)]
 pub struct RobotCache {
     cache: Arc<HashCache<String, CachedRobotFile>>,
-    user_agent: String,
 }
 
 impl RobotCache {
     #[must_use]
-    pub fn new(user_agent: &str) -> Self {
+    pub fn new() -> Self {
         RobotCache {
             cache: Arc::new(HashCache::new()),
-            user_agent: user_agent.to_owned(),
         }
     }
 
@@ -119,10 +117,6 @@ impl RobotCache {
     pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
         let _ = self.cache.put_async(domain.to_owned(), file).await;
     }
-
-    pub fn user_agent(&self) -> &str {
-        &self.user_agent
-    }
 }
 
 pub async fn robot_allowed(
@@ -140,11 +134,7 @@ pub async fn robot_allowed(
     if let Ok((data, status, _)) = fetch(client, &robot_url).await
         && status.is_success()
     {
-        let robot = CachedRobotFile::new(
-            ROBOTS_CACHE_TTL_SECONDS,
-            robots_cache.user_agent(),
-            Some(&data),
-        );
+        let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&data));
         let allowed = robot.can_fetch(url).unwrap_or_default();
         robots_cache.put(domain, robot).await;
         return Ok(allowed);
@@ -152,11 +142,7 @@ pub async fn robot_allowed(
     robots_cache
         .put(
             domain,
-            CachedRobotFile::new(
-                ROBOTS_CACHE_ERROR_TTL_SECONDS,
-                robots_cache.user_agent(),
-                None,
-            ),
+            CachedRobotFile::new(ROBOTS_CACHE_ERROR_TTL_SECONDS, None),
         )
         .await;
     bail!("robots.txt unavailable for {domain}");

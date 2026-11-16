@@ -1,28 +1,21 @@
 use dom_query::Document;
 use kreuzberg::{
-    ExtractionConfig, HtmlOutputConfig, HtmlTheme, OutputFormat, core::mime, extract_bytes,
-    extraction::html::ConversionOptions,
+    ExtractionConfig, OutputFormat, core::mime, extract_bytes,
 };
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
 use std::{
-    cmp::min,
     collections::HashSet,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 #[cfg(feature = "servo")]
 use crate::constants::TIMEOUT;
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_FETCH_SIZE,
-        NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, ROBOTS_CACHE_ERROR_TTL_SECONDS,
-        ROBOTS_CACHE_TTL_SECONDS,
+        MAX_FETCH_SIZE,
+        NUM_EXTRACT_CHARS, NUM_TITLE_CHARS,
     },
     robots::{RobotCache, robot_allowed},
     url_queue::ClaimedUrl,
@@ -139,25 +132,37 @@ pub async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, Statu
 }
 
 #[allow(clippy::field_reassign_with_default)]
-async fn fetch_default(client: &Client, url: &Url) -> anyhow::Result<(String, StatusCode, Url)> {
-    let (data, status, url) = fetch(client, url).await?;
-    if status.is_success() {
+async fn fetch_default(
+    client: &Client,
+    robots_cache: &mut RobotCache,
+    url: &Url,
+) -> anyhow::Result<(String, StatusCode, Url)> {
+    let (data, status, resolved_url) = fetch(client, url).await?;
+
+    if let Some(domain) = resolved_url.domain()
+        && robot_allowed(&resolved_url, domain, client, robots_cache).await?
+    {
         let mime = mime::detect_mime_type_from_bytes(&data)?;
 
         if mime == "text/html" {
-            return Ok((String::from_utf8(data)?, status, url));
+            return Ok((String::from_utf8(data)?, status, resolved_url));
         }
         let mut config = ExtractionConfig::default();
         config.output_format = OutputFormat::Html;
         config.use_cache = false;
         let result = extract_bytes(&data, &mime, &config).await?;
-        return Ok((result.content, status, url));
+        return Ok((result.content, status, resolved_url));
     }
-    bail!("Fetch error: status code: {status}");
+    bail!("Robots.txt unallowed or missing on resolved domain");
 }
 
 #[cfg(feature = "servo")]
-async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, StatusCode, Url)> {
+async fn fetch_servo(
+    client: &Client,
+    robots_cache: &mut RobotCache,
+    url: &Url,
+    user_agent: &str,
+) -> anyhow::Result<(String, StatusCode, Url)> {
     let options = &FetchOptions::new(url.as_str())
         .timeout(TIMEOUT)
         .user_agent(user_agent)
@@ -166,14 +171,21 @@ async fn fetch_servo(url: &Url, user_agent: &str) -> anyhow::Result<(String, Sta
     let page = servo_fetch::fetch(options).await?;
 
     let resolved_url = Url::from_str(&page.url)?;
-    // Assume 200 code for servo as the value is not exposed: https://github.com/konippi/servo-fetch/issues/586
-    Ok((page.html, StatusCode::OK, resolved_url))
+
+    if let Some(domain) = resolved_url.domain()
+        && robot_allowed(&resolved_url, domain, client, robots_cache).await?
+    {
+        // Assume 200 code for servo as the value is not exposed: https://github.com/konippi/servo-fetch/issues/586
+        return Ok((page.html, StatusCode::OK, resolved_url));
+    }
+    bail!("Robots.txt unallowed or missing on resolved domain");
 }
 
 pub async fn crawl(
     claimed_url: ClaimedUrl,
     mut robots_cache: RobotCache,
     client: Client,
+    #[cfg(feature = "servo")] user_agent: String,
 ) -> (ClaimedUrl, CrawlResults) {
     let url = claimed_url.url().clone();
     let timestamp = Instant::now();
@@ -202,8 +214,8 @@ pub async fn crawl(
     }
 
     let res = cfg_select! {
-        feature = "servo" => fetch_servo(&url, robots_cache.user_agent()),
-        _ => fetch_default(&client, &url)
+        feature = "servo" => fetch_servo(&client, &mut robots_cache, &url, &user_agent),
+        _ => fetch_default(&client, &mut robots_cache, &url)
     }
     .await;
 
