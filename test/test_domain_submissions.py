@@ -5,6 +5,7 @@ domain, so that the submission list can reverse the "domain" URL for each one.
 
 import importlib
 import json
+from datetime import timedelta
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -12,10 +13,11 @@ from background_task.models import Task
 from django.apps import apps as django_apps
 from django.contrib.auth.models import Permission
 from django.urls import reverse
+from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.models import DomainSubmission, MwmblUser
-from mwmbl.views import BulkDomainSubmissionForm
+from mwmbl.views import MAX_DOMAIN_SUBMISSIONS_PER_DAY, BulkDomainSubmissionForm
 
 normalize_names = importlib.import_module("mwmbl.migrations.0032_normalize_domain_submission_names").normalize_names
 fix_names = importlib.import_module("mwmbl.migrations.0033_fix_domain_submission_names").fix_names
@@ -62,8 +64,8 @@ def test_submission_list_renders_after_migration(client, user):
 
 
 @pytest.mark.django_db
-def test_form_stores_bare_domain(client, user):
-    client.force_login(user)
+def test_form_stores_bare_domain(client, verified_user):
+    client.force_login(verified_user)
     response = client.post(reverse("submit_domain"), {"name": "https://www.idolbronze.com/"})
 
     assert response.status_code == 302
@@ -73,8 +75,8 @@ def test_form_stores_bare_domain(client, user):
 
 
 @pytest.mark.django_db
-def test_form_submits_each_distinct_domain_once_in_bulk(client, user):
-    client.force_login(user)
+def test_form_submits_each_distinct_domain_once_in_bulk(client, verified_user):
+    client.force_login(verified_user)
     response = client.post(
         reverse("submit_domain"),
         {"name": "x.com\nhttps://Y.com\nhttp://z.com/a/b/c\n\nhttps://WWW.Example.co.uk/path\nX.com"},
@@ -88,12 +90,14 @@ def test_form_submits_each_distinct_domain_once_in_bulk(client, user):
         "z.com",
         "www.example.co.uk",
     ]
-    assert all(submission.submitted_by == user and submission.status == "PENDING" for submission in submissions)
+    assert all(
+        submission.submitted_by == verified_user and submission.status == "PENDING" for submission in submissions
+    )
 
 
 @pytest.mark.django_db
-def test_form_reports_invalid_lines_without_saving_any_domains(client, user):
-    client.force_login(user)
+def test_form_reports_invalid_lines_without_saving_any_domains(client, verified_user):
+    client.force_login(verified_user)
     response = client.post(reverse("submit_domain"), {"name": "\nx.com\nnot a domain\nhttps://y.com\ninvalid"})
 
     assert response.status_code == 200
@@ -103,8 +107,8 @@ def test_form_reports_invalid_lines_without_saving_any_domains(client, user):
 
 
 @pytest.mark.django_db
-def test_form_rejects_empty_bulk_submission(client, user):
-    client.force_login(user)
+def test_form_rejects_empty_bulk_submission(client, verified_user):
+    client.force_login(verified_user)
     response = client.post(reverse("submit_domain"), {"name": "\n \n"})
 
     assert response.status_code == 200
@@ -112,18 +116,18 @@ def test_form_rejects_empty_bulk_submission(client, user):
 
 
 @pytest.mark.django_db
-def test_form_rejects_too_many_domains(client, user):
-    client.force_login(user)
-    response = client.post(reverse("submit_domain"), {"name": "\n".join(["example.com"] * 1001)})
+def test_form_rejects_too_many_domains(client, verified_user):
+    client.force_login(verified_user)
+    response = client.post(reverse("submit_domain"), {"name": "\n".join(["example.com"] * 251)})
 
     assert response.status_code == 200
-    assert b"Enter no more than 1000 domains or URLs." in response.content
+    assert b"Enter no more than 250 domains or URLs." in response.content
     assert not DomainSubmission.objects.exists()
 
 
 @pytest.mark.django_db
-def test_bulk_submission_schedules_one_crawl_per_domain(client, user):
-    client.force_login(user)
+def test_bulk_submission_schedules_one_crawl_per_domain(client, verified_user):
+    client.force_login(verified_user)
     client.post(reverse("submit_domain"), {"name": "x.com\nhttps://x.com/a\ny.com"})
 
     scheduled = sorted(json.loads(task.task_params)[0][0] for task in Task.objects.all())
@@ -131,12 +135,51 @@ def test_bulk_submission_schedules_one_crawl_per_domain(client, user):
 
 
 @pytest.mark.django_db
-def test_form_accepts_the_maximum_number_of_domains(client, user):
-    client.force_login(user)
-    response = client.post(reverse("submit_domain"), {"name": "\n".join(f"d{i}.com" for i in range(1000))})
+def test_form_accepts_the_maximum_number_of_domains(client, verified_user):
+    client.force_login(verified_user)
+    response = client.post(reverse("submit_domain"), {"name": "\n".join(f"d{i}.com" for i in range(250))})
 
     assert response.status_code == 302
-    assert DomainSubmission.objects.count() == 1000
+    assert DomainSubmission.objects.count() == 250
+
+
+@pytest.mark.django_db
+def test_form_requires_a_verified_email(client, user):
+    client.force_login(user)
+    response = client.post(reverse("submit_domain"), {"name": "x.com"})
+
+    assert response.status_code == 200
+    assert b"Verify your email address" in response.content
+    assert not DomainSubmission.objects.exists()
+    assert not Task.objects.exists()
+
+
+@pytest.mark.django_db
+def test_form_limits_domains_submitted_per_day(client, verified_user):
+    now = timezone.now()
+    DomainSubmission.objects.bulk_create(
+        DomainSubmission(name=f"old{i}.com", submitted_by=verified_user, submitted_on=now)
+        for i in range(MAX_DOMAIN_SUBMISSIONS_PER_DAY)
+    )
+    client.force_login(verified_user)
+    response = client.post(reverse("submit_domain"), {"name": "new.com"})
+
+    assert response.status_code == 200
+    assert b"at most 500 domains a day" in response.content
+    assert not DomainSubmission.objects.filter(name="new.com").exists()
+
+
+@pytest.mark.django_db
+def test_daily_limit_ignores_submissions_older_than_a_day(client, verified_user):
+    old = timezone.now() - timedelta(days=2)
+    DomainSubmission.objects.bulk_create(
+        DomainSubmission(name=f"old{i}.com", submitted_by=verified_user, submitted_on=old)
+        for i in range(MAX_DOMAIN_SUBMISSIONS_PER_DAY)
+    )
+    client.force_login(verified_user)
+    response = client.post(reverse("submit_domain"), {"name": "new.com"})
+
+    assert response.status_code == 302
 
 
 def test_form_rejects_an_overlong_line_without_echoing_it():

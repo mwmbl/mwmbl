@@ -5,6 +5,7 @@ domain submission pages.
 """
 
 import pytest
+from allauth.account.models import EmailAddress
 from django.contrib.auth.models import Permission
 from django.urls import reverse
 from django.utils import timezone
@@ -306,6 +307,7 @@ def test_accepting_a_flag_reverts_the_curation(client, moderator, curation):
 
 @pytest.mark.django_db
 def test_submit_domain_form_and_submission(client, curator):
+    EmailAddress.objects.create(user=curator, email=curator.email, verified=True, primary=True)
     client.force_login(curator)
     url = reverse("submit_domain")
 

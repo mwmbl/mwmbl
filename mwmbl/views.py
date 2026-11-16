@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import asdict
+from datetime import timedelta
 from logging import getLogger
 from typing import Optional
 from urllib.parse import urlencode
@@ -49,7 +50,8 @@ from mwmbl.tokenizer import tokenize
 from mwmbl.utils import add_term_infos, float_or_none, normalize_domain, parse_url, validate_domain
 
 MAX_CURATED_SCORE = 1_111_111.0
-MAX_DOMAIN_SUBMISSIONS = 1000
+MAX_DOMAIN_SUBMISSIONS = 250
+MAX_DOMAIN_SUBMISSIONS_PER_DAY = 500
 # The length of DomainSubmission.name.
 MAX_SUBMISSION_LINE_LENGTH = 300
 
@@ -289,16 +291,28 @@ def submit_domain(request):
         if form.is_valid():
             names = form.cleaned_data["name"]
             submitted_on = timezone.now()
-            submissions = [
-                DomainSubmission(name=name, submitted_by=request.user, submitted_on=submitted_on) for name in names
-            ]
-            with transaction.atomic():
-                # bulk_create sends no post_save, so the crawl that enrich_new_submission would
-                # schedule per row is scheduled here, once per distinct domain.
-                DomainSubmission.objects.bulk_create(submissions)
-                for name in names:
-                    enrich_domain_submission(name)
-            return redirect("domain_submissions")
+            recent = DomainSubmission.objects.filter(
+                submitted_by=request.user, submitted_on__gte=submitted_on - timedelta(days=1)
+            ).count()
+            if not request.user.emailaddress_set.filter(verified=True).exists():
+                form.add_error("name", "Verify your email address before submitting domains.")
+            elif recent + len(names) > MAX_DOMAIN_SUBMISSIONS_PER_DAY:
+                form.add_error(
+                    "name",
+                    f"You can submit at most {MAX_DOMAIN_SUBMISSIONS_PER_DAY} domains a day; "
+                    f"you have submitted {recent} in the last 24 hours.",
+                )
+            else:
+                submissions = [
+                    DomainSubmission(name=name, submitted_by=request.user, submitted_on=submitted_on) for name in names
+                ]
+                with transaction.atomic():
+                    # bulk_create sends no post_save, so the crawl that enrich_new_submission would
+                    # schedule per row is scheduled here, once per distinct domain.
+                    DomainSubmission.objects.bulk_create(submissions)
+                    for name in names:
+                        enrich_domain_submission(name)
+                return redirect("domain_submissions")
     else:
         form = BulkDomainSubmissionForm()
     return render(request, "mwmbl/domain_submission.html", {"form": form})
