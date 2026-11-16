@@ -246,3 +246,62 @@ def test_an_over_long_version_is_truncated_rather_than_losing_the_submission(use
     record_device(user, "long-version", "9" * 1000)
 
     assert len(Device.objects.get(user=user, hostname="long-version").crawler_version) == 255
+
+
+DEVICE_RESULTS_URL = "/api/v1/crawler/device-results"
+
+
+@pytest.fixture
+def crawl_key(user):
+    raw_key, key_hash = generate_api_key()
+    ApiKey.objects.create(user=user, key=key_hash, name="Crawl", scopes=[ApiKey.Scope.CRAWL])
+    return raw_key
+
+
+def test_device_results_count_only_submissions_since_the_given_time(client, device, crawl_key):
+    now = datetime.now(timezone.utc)
+    record_device_results(device, 10, now - timedelta(minutes=30))
+    record_device_results(device, 7, now - timedelta(minutes=5))
+    since = (now - timedelta(minutes=10)).timestamp()
+
+    response = client.get(
+        DEVICE_RESULTS_URL, {"device_name": device.hostname, "since": since}, HTTP_X_API_KEY=crawl_key
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert (body["known"], body["results_total"], body["results_since"]) == (True, 17, 7)
+    assert body["server_time"] >= now.timestamp()
+
+
+def test_device_results_without_since_give_the_total_only(client, device, crawl_key):
+    record_device_results(device, 4, datetime.now(timezone.utc))
+
+    body = client.get(DEVICE_RESULTS_URL, {"device_name": device.hostname}, HTTP_X_API_KEY=crawl_key).json()
+
+    assert (body["results_total"], body["results_since"]) == (4, 0)
+
+
+def test_device_results_for_an_unknown_name_say_so(client, device, crawl_key):
+    body = client.get(DEVICE_RESULTS_URL, {"device_name": "nope"}, HTTP_X_API_KEY=crawl_key).json()
+
+    assert body["known"] is False
+    assert body["results_total"] == 0
+
+
+def test_device_results_cover_only_the_keys_own_devices(client, user, crawl_key):
+    stranger = User.objects.create_user(username="other", email="other@example.com", password="correctpassword")
+    other = Device.objects.create(user=stranger, hostname="theirs")
+    record_device_results(other, 50, datetime.now(timezone.utc))
+
+    body = client.get(DEVICE_RESULTS_URL, {"device_name": "theirs"}, HTTP_X_API_KEY=crawl_key).json()
+
+    assert body["known"] is False
+
+
+def test_device_results_need_a_crawl_scoped_key(client, user, device):
+    raw_key, key_hash = generate_api_key()
+    ApiKey.objects.create(user=user, key=key_hash, name="Search", scopes=[ApiKey.Scope.SEARCH])
+
+    assert client.get(DEVICE_RESULTS_URL, {"device_name": device.hostname}).status_code == 401
+    assert client.get(DEVICE_RESULTS_URL, {"device_name": device.hostname}, HTTP_X_API_KEY=raw_key).status_code == 401
