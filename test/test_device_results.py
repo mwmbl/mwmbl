@@ -14,6 +14,7 @@ from django.test import Client
 from ninja_jwt.tokens import RefreshToken
 
 from mwmbl.devices import (
+    HOSTNAME_MAX_LENGTH,
     MAX_DEVICES_PER_USER,
     SUBMISSION_HISTORY_DAYS,
     get_device_activity,
@@ -314,3 +315,26 @@ def test_device_results_reject_a_since_that_is_not_a_time(client, device, crawl_
     )
 
     assert response.status_code == 422
+
+
+def test_device_results_count_a_submission_made_exactly_at_since(client, device, crawl_key):
+    at = datetime(2026, 11, 2, 12, 30, tzinfo=timezone.utc)
+    record_device_results(device, 5, at)
+
+    at_since = client.get(
+        DEVICE_RESULTS_URL, {"device_name": device.hostname, "since": at.timestamp()}, HTTP_X_API_KEY=crawl_key
+    ).json()
+    just_after = client.get(
+        DEVICE_RESULTS_URL, {"device_name": device.hostname, "since": at.timestamp() + 1}, HTTP_X_API_KEY=crawl_key
+    ).json()
+
+    assert (at_since["results_since"], just_after["results_since"]) == (5, 0)
+
+
+def test_device_results_find_a_device_whose_long_name_was_truncated_on_save(client, user, crawl_key):
+    long_name = "x" * (HOSTNAME_MAX_LENGTH + 40)
+    record_device(user, long_name)
+
+    body = client.get(DEVICE_RESULTS_URL, {"device_name": long_name}, HTTP_X_API_KEY=crawl_key).json()
+
+    assert body["known"] is True

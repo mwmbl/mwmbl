@@ -30,7 +30,7 @@ from mwmbl.crawler.batch import (
 from mwmbl.crawler.stats import MwmblStats, StatsManager
 from mwmbl.crawler.version import parse_release_version
 from mwmbl.crawler_errors import record_crawler_error
-from mwmbl.devices import get_device_results_since, record_device, record_device_results
+from mwmbl.devices import HOSTNAME_MAX_LENGTH, get_device_results_since, record_device, record_device_results
 from mwmbl.indexer.index_batches import index_documents
 from mwmbl.models import ApiKey, Device
 from mwmbl.settings import (
@@ -340,7 +340,7 @@ def _register_routes(r: Router | NinjaAPI, ranker: HeuristicRanker):
             return 401, {"message": INVALID_CRAWL_KEY_MESSAGE}
 
         server_time = datetime.now(timezone.utc)
-        device = Device.objects.filter(user=api_key.user, hostname=device_name).first()
+        device = Device.objects.filter(user=api_key.user, hostname=device_name[:HOSTNAME_MAX_LENGTH]).first()
         if device is None:
             return {"known": False, "results_total": 0, "results_since": 0, "server_time": server_time.timestamp()}
         results_since = (
