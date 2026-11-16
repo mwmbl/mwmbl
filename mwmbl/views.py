@@ -10,7 +10,9 @@ import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.forms import CharField, ModelForm, RadioSelect
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.forms import CharField, Form, ModelForm, RadioSelect, Textarea
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -46,6 +48,7 @@ from mwmbl.tokenizer import tokenize
 from mwmbl.utils import add_term_infos, float_or_none, normalize_domain, parse_url, validate_domain
 
 MAX_CURATED_SCORE = 1_111_111.0
+MAX_DOMAIN_SUBMISSIONS = 1000
 
 
 logger = getLogger(__name__)
@@ -234,6 +237,35 @@ class DomainSubmissionForm(ModelForm):
         return normalize_domain(self.cleaned_data["name"])
 
 
+class BulkDomainSubmissionForm(Form):
+    name = CharField(
+        label="Domains or URLs",
+        widget=Textarea,
+        help_text="Enter up to 1000 domains or URLs, one per line. Subdomains such as www are kept.",
+        strip=False,
+    )
+
+    def clean_name(self):
+        names = []
+        errors = []
+        lines = [
+            (number, line) for number, line in enumerate(self.cleaned_data["name"].splitlines(), 1) if line.strip()
+        ]
+        if len(lines) > MAX_DOMAIN_SUBMISSIONS:
+            raise ValidationError(f"Enter no more than {MAX_DOMAIN_SUBMISSIONS} domains or URLs.")
+        for line_number, line in lines:
+            form = DomainSubmissionForm({"name": line})
+            if form.is_valid():
+                names.append(form.cleaned_data["name"])
+            else:
+                errors.extend(f"Line {line_number}: {error}" for error in form.errors["name"])
+        if errors:
+            raise ValidationError(errors)
+        if not names:
+            raise ValidationError("Enter at least one domain or URL.")
+        return names
+
+
 class DomainSubmissionApprovalForm(ModelForm):
     class Meta:
         model = DomainSubmission
@@ -243,15 +275,14 @@ class DomainSubmissionApprovalForm(ModelForm):
 @login_required
 def submit_domain(request):
     if request.method == "POST":
-        form = DomainSubmissionForm(request.POST)
+        form = BulkDomainSubmissionForm(request.POST)
         if form.is_valid():
-            domain_submission = form.save(commit=False)
-            domain_submission.submitted_by = request.user
-            domain_submission.submitted_on = timezone.now()
-            domain_submission.save()
+            with transaction.atomic():
+                for name in form.cleaned_data["name"]:
+                    DomainSubmission.objects.create(name=name, submitted_by=request.user, submitted_on=timezone.now())
             return redirect("domain_submissions")
     else:
-        form = DomainSubmissionForm()
+        form = BulkDomainSubmissionForm()
     return render(request, "mwmbl/domain_submission.html", {"form": form})
 
 

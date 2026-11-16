@@ -71,6 +71,56 @@ def test_form_stores_bare_domain(client, user):
 
 
 @pytest.mark.django_db
+def test_form_submits_each_domain_in_bulk(client, user):
+    client.force_login(user)
+    response = client.post(
+        reverse("submit_domain"),
+        {"name": "x.com\nhttps://Y.com\nhttp://z.com/a/b/c\n\nhttps://WWW.Example.co.uk/path\nx.com"},
+    )
+
+    assert response.status_code == 302
+    submissions = list(DomainSubmission.objects.order_by("id"))
+    assert [submission.name for submission in submissions] == [
+        "x.com",
+        "y.com",
+        "z.com",
+        "www.example.co.uk",
+        "x.com",
+    ]
+    assert all(submission.submitted_by == user and submission.status == "PENDING" for submission in submissions)
+
+
+@pytest.mark.django_db
+def test_form_reports_invalid_lines_without_saving_any_domains(client, user):
+    client.force_login(user)
+    response = client.post(reverse("submit_domain"), {"name": "\nx.com\nnot a domain\nhttps://y.com\ninvalid"})
+
+    assert response.status_code == 200
+    assert b"Line 3:" in response.content
+    assert b"Line 5:" in response.content
+    assert not DomainSubmission.objects.exists()
+
+
+@pytest.mark.django_db
+def test_form_rejects_empty_bulk_submission(client, user):
+    client.force_login(user)
+    response = client.post(reverse("submit_domain"), {"name": "\n \n"})
+
+    assert response.status_code == 200
+    assert not DomainSubmission.objects.exists()
+
+
+@pytest.mark.django_db
+def test_form_rejects_too_many_domains(client, user):
+    client.force_login(user)
+    response = client.post(reverse("submit_domain"), {"name": "\n".join(["example.com"] * 1001)})
+
+    assert response.status_code == 200
+    assert b"Enter no more than 1000 domains or URLs." in response.content
+    assert not DomainSubmission.objects.exists()
+
+
+@pytest.mark.django_db
 def test_api_stores_bare_domain(client, access_token):
     response = client.post(
         "/api/v1/platform/domain-submissions/?domain=https://www.idolbronze.com/",
