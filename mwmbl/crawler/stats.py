@@ -3,8 +3,9 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from logging import getLogger
 
+from allauth.account.models import EmailAddress
 from django.db import models
-from django.db.models import Count, Sum
+from django.db.models import Count, Exists, OuterRef, Sum
 from django.db.models.functions import TruncWeek
 from pydantic import BaseModel
 from redis import Redis
@@ -30,9 +31,11 @@ UNKNOWN_CRAWLER_VERSION = "unknown"
 # very long digit strings.
 RELEASED_CRAWLER_VERSION = re.compile(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}")
 
-USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-{week_start}"
+# Versioned with the shape of what is cached, so a deploy that changes the shape never reads a
+# payload written by the previous release, which would fail validation.
+USERS_REGISTERED_WEEKLY_KEY = "users-registered-weekly-v2-{week_start}"
 # Dated, so a payload built before UTC midnight is never served after it.
-STATS_CACHE_KEY = "stats-payload-{date}"
+STATS_CACHE_KEY = "stats-payload-v2-{date}"
 LEADERBOARD_CACHE_KEY = "leaderboard-{period}-{date}"
 
 LONG_EXPIRE_SECONDS = 60 * 60 * 24 * 30
@@ -46,6 +49,16 @@ ALL_TIME_LEADERBOARD_CACHE_SECONDS = 60 * 60 * 24
 USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS = 60 * 60
 REGISTRATION_WEEKS = 52
 INDEX_HISTORY_DAYS = 365
+
+
+class WeeklyRegistrations(BaseModel):
+    """Registrations per week, split by whether the user has since verified their email.
+
+    Most bot sign-ups never verify, so the unverified count is where they show up.
+    """
+
+    verified: dict[str, int]
+    unverified: dict[str, int]
 
 
 class DomainStats(BaseModel):
@@ -96,7 +109,10 @@ class MwmblStats(BaseModel):
     # Always empty: kept for one release because front-ends older than mwmbl/front-end#94 read it
     # unguarded and would 500 without it.
     blacklisted_results_removed_daily: dict[str, int]
+    # Verified plus unverified, kept for front-ends that predate the split.
     users_registered_weekly: dict[str, int]
+    users_verified_weekly: dict[str, int]
+    users_unverified_weekly: dict[str, int]
     seed_searches_total: int
     seed_pages_indexed_total: int
     seed_sites_discovered_total: int
@@ -177,6 +193,12 @@ class StatsManager:
         user_results_count_key = USER_RESULTS_COUNT_KEY.format(date=date_time.date())
         user_results_counts = self.redis.zrevrange(user_results_count_key, 0, 100, withscores=True)
 
+        registrations = self.get_users_registered_weekly()
+        registrations_total = {
+            week: verified_count + registrations.unverified[week]
+            for week, verified_count in registrations.verified.items()
+        }
+
         return MwmblStats(
             users_crawled_daily=users_crawled_daily,
             users_crawled_30d=len(all_users),
@@ -185,7 +207,9 @@ class StatsManager:
             dataset_queries_daily=dataset_queries_daily,
             dataset_results_daily=dataset_results_daily,
             blacklisted_results_removed_daily={},
-            users_registered_weekly=self.get_users_registered_weekly(),
+            users_registered_weekly=registrations_total,
+            users_verified_weekly=registrations.verified,
+            users_unverified_weekly=registrations.unverified,
             **self.get_seed_search_totals(),
             index_history=self.get_index_history(),
             **index_stats,
@@ -232,7 +256,7 @@ class StatsManager:
         self.redis.set(cache_key, json.dumps(leaderboard), ex=ALL_TIME_LEADERBOARD_CACHE_SECONDS)
         return leaderboard
 
-    def get_users_registered_weekly(self) -> dict[str, int]:
+    def get_users_registered_weekly(self) -> WeeklyRegistrations:
         """Registrations per week for the last year, keyed by the Monday starting each week.
 
         Cached in Redis because it scans the user table on every stats request otherwise.
@@ -243,25 +267,29 @@ class StatsManager:
         cache_key = USERS_REGISTERED_WEEKLY_KEY.format(week_start=this_week_start)
         cached = self.redis.get(cache_key)
         if cached is not None:
-            return json.loads(cached)
+            return WeeklyRegistrations.model_validate_json(cached)
 
         first_week_start = this_week_start - timedelta(weeks=REGISTRATION_WEEKS - 1)
+        verified_email = EmailAddress.objects.filter(user=OuterRef("pk"), verified=True)
         weekly_counts = (
             MwmblUser.objects.filter(date_joined__date__gte=first_week_start)
             .exclude(username=SEED_CRAWLER_USERNAME)
-            .annotate(week=TruncWeek("date_joined"))
-            .values("week")
+            .annotate(week=TruncWeek("date_joined"), is_verified=Exists(verified_email))
+            .values("week", "is_verified")
             .annotate(num_users=Count("id"))
         )
-        counts_by_week = {row["week"].date(): row["num_users"] for row in weekly_counts}
+        counts_by_week_and_status = {
+            (row["week"].date(), row["is_verified"]): row["num_users"] for row in weekly_counts
+        }
 
-        users_registered_weekly = {}
-        for i in range(REGISTRATION_WEEKS):
-            week_start = first_week_start + timedelta(weeks=i)
-            users_registered_weekly[str(week_start)] = counts_by_week.get(week_start, 0)
+        week_starts = [first_week_start + timedelta(weeks=i) for i in range(REGISTRATION_WEEKS)]
+        registrations = WeeklyRegistrations(
+            verified={str(week): counts_by_week_and_status.get((week, True), 0) for week in week_starts},
+            unverified={str(week): counts_by_week_and_status.get((week, False), 0) for week in week_starts},
+        )
 
-        self.redis.set(cache_key, json.dumps(users_registered_weekly), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS)
-        return users_registered_weekly
+        self.redis.set(cache_key, registrations.model_dump_json(), ex=USERS_REGISTERED_WEEKLY_EXPIRE_SECONDS)
+        return registrations
 
     def get_user_stats(self, username: str) -> dict:
         """Per-user stats for the last 30 days from the UserStats table."""

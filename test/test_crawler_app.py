@@ -57,6 +57,8 @@ def test_stats_api_still_serves_the_replacement_stats_page(client, monkeypatch, 
     assert stats["seed_searches_total"] == 3
     assert stats["seed_pages_indexed_total"] == 7
     assert stats["users_registered_weekly"]
+    assert stats["users_verified_weekly"]
+    assert stats["users_unverified_weekly"]
     assert stats["index_history"] == []
 
 
