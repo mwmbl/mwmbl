@@ -62,7 +62,7 @@ def test_get_first_paragraph_none_when_no_body_prose():
 
 def _crawl_html(monkeypatch, html: str) -> dict:
     monkeypatch.setattr(retrieve, "robots_allowed", lambda url, redis: True)
-    monkeypatch.setattr(retrieve, "fetch", lambda url: (200, html.encode("utf8"), url))
+    monkeypatch.setattr(retrieve, "fetch", lambda url, robots_redis=None: (200, html.encode("utf8"), url))
     return retrieve.crawl_url("https://example.test/page", fakeredis.FakeStrictRedis())
 
 

@@ -69,6 +69,13 @@ def record_device_results(device: Device, num_results: int, now: datetime) -> No
         DeviceSubmission.objects.filter(device=device, submitted_at__lt=cutoff).delete()
 
 
+def get_device_results_since(device: Device, since: datetime) -> int:
+    """Results the device submitted at or after `since`, from the per-submission rows kept for
+    SUBMISSION_HISTORY_DAYS. Unlike the last-24-hours window, it covers exactly the interval asked for."""
+    total = DeviceSubmission.objects.filter(device=device, submitted_at__gte=since).aggregate(total=Sum("num_results"))
+    return total["total"] or 0
+
+
 def get_device_activity(device_ids: list[int], now: datetime) -> dict[int, dict]:
     """Results submitted in the last hour, the last 24 hours and on each of the last 30 UTC days,
     for each device. Days run oldest first and include those with nothing submitted."""

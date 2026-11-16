@@ -291,6 +291,14 @@ class StatusResponse(Schema):
     status: str = Field(example="ok")
 
 
+class DeviceResultsResponse(Schema):
+    known: bool = Field(description="Whether this account has a device of that name.")
+    results_total: int = Field(description="Results the device has submitted since it was first counted.")
+    results_since: int = Field(description="Results it submitted at or after `since`; 0 when `since` is not given.")
+    crawler_version: Optional[str] = Field(default=None, description="From the device's latest submission.")
+    server_time: float = Field(description="The server's clock, as a Unix timestamp, for use as a later `since`.")
+
+
 class Error(Schema):
     """A generic error response."""
 
