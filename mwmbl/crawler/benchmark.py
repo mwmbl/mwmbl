@@ -6,8 +6,14 @@ combination that fetched the most pages a minute, and the cheaper one when two t
 
 What is measured is the crawler's own count of fetches, `crawl-domain-overlap fetches` in its
 Redis, which every worker adds its batch to as the batch finishes. Nothing is read from the
-Mwmbl server: submissions reach it minutes after the fetches that produced them, so measuring
-what it indexed needs windows of half an hour, where fetch throughput settles in seconds.
+Mwmbl server, so no API key is needed.
+
+It has to run for a long time to mean anything. The crawler starts its workers five seconds
+apart, after downloading the blocklists, and its indexing and sync with the main index only
+begin once there are batches to index, and compete with the workers for CPU and network from
+then on. A run of seconds measures a crawler that is not yet doing what it does for the rest of
+its life. The defaults are a 5 minute warmup and a 30 minute window per configuration, which
+makes trying all twenty default combinations a job for overnight.
 
 Batches arrive in bursts, so the window opens at the first batch to finish after warmup and
 closes at the first one to finish after the duration has passed. Both ends are then exact
@@ -45,8 +51,8 @@ from typing import Callable, Protocol
 
 DEFAULT_PROCESS_COUNTS = [1, 2, 3, 4, 5]
 DEFAULT_THREAD_COUNTS = [10, 25, 50, 100]
-DEFAULT_WARMUP = "10s"
-DEFAULT_DURATION = "30s"
+DEFAULT_WARMUP = "5m"
+DEFAULT_DURATION = "30m"
 
 STATUS_OK = "OK"
 STATUS_FAILED = "FAILED"
@@ -62,8 +68,10 @@ RESTORED_SETTINGS = ("CRAWLER_WORKERS", "CRAWL_THREADS")
 # The crawler is PID 1 in its container and has no SIGTERM handler, so the default ten seconds
 # of grace is always spent waiting for a signal that is ignored. Everything durable is in Redis.
 CONTAINER_STOP_GRACE_SECONDS = 2
-PROGRESS_INTERVAL_SECONDS = 10
-POLL_INTERVAL_SECONDS = 1
+PROGRESS_INTERVAL_SECONDS = 60
+# Each poll of the counter is a docker exec, and a window is minutes long, so a second's resolution
+# would be a lot of process spawns for an error of a fraction of a percent.
+POLL_INTERVAL_SECONDS = 5
 # A crawler that has finished no batch in this many durations is not slow, it is stuck.
 GIVE_UP_AFTER_DURATIONS = 6
 
@@ -118,10 +126,11 @@ def parse_duration(text: str) -> int:
 
 
 def format_duration(seconds: int) -> str:
-    for unit_seconds, unit in ((3600, "h"), (60, "m")):
-        if seconds and seconds % unit_seconds == 0:
-            return f"{seconds // unit_seconds}{unit}"
-    return f"{seconds}s"
+    """Like 1h 2m 33s, leaving out the units that are zero: 30m, 1m 29s, 45s."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = [f"{value}{unit}" for value, unit in ((hours, "h"), (minutes, "m"), (seconds, "s")) if value]
+    return " ".join(parts) or "0s"
 
 
 def all_configurations(process_counts: list[int], thread_counts: list[int]) -> list[Configuration]:
@@ -322,10 +331,14 @@ class Benchmark:
         last_seen = self.crawler.fetches()
         opened: tuple[float, int] | None = None
         window_end = 0.0
+        next_progress_at = 0.0
         while self.clock() < give_up_at:
             self.crawler.ensure_running()
             self.sleep(POLL_INTERVAL_SECONDS)
             now = self.clock()
+            if opened is not None and now >= next_progress_at:
+                print(f"  measuring: {format_duration(round(max(window_end - now, 0)))} left", flush=True)
+                next_progress_at = now + PROGRESS_INTERVAL_SECONDS
             fetches = self.crawler.fetches()
             if fetches == last_seen:
                 continue
@@ -333,7 +346,6 @@ class Benchmark:
             if opened is None:
                 opened = (now, fetches)
                 window_end = now + self.duration_seconds
-                print("  measuring", flush=True)
             elif now >= window_end:
                 opened_at, opened_fetches = opened
                 return (fetches - opened_fetches) / (now - opened_at) * 60
@@ -510,7 +522,10 @@ def run(args: argparse.Namespace) -> int:
         None if args.no_memory_check else args.memory_per_process_mb,
     )
     total = len(all_configurations(args.processes, args.threads))
-    print(f"{total} configurations, each about {format_duration(args.warmup + args.duration)} or more")
+    each = args.warmup + args.duration
+    print(
+        f"{total} configurations of at least {format_duration(each)} each: about {format_duration(total * each)} in all"
+    )
 
     signal.signal(signal.SIGTERM, interrupt)
     results = benchmark.run()

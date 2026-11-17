@@ -7,7 +7,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --processes 1,2,4
 #
-# It stops your crawler, tries settings on it for a few seconds each, and starts it again as it was.
+# It stops your crawler, tries settings on it for 35 minutes each, and starts it again as it was.
+# All 20 default combinations take about 12 hours, so run it overnight or narrow --processes and --threads.
 set -eu
 
 BENCHMARK_URL="${MWMBL_BENCHMARK_URL:-https://raw.githubusercontent.com/mwmbl/mwmbl/main/mwmbl/crawler/benchmark.py}"

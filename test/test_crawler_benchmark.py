@@ -165,9 +165,14 @@ def test_counts_must_be_positive_integers(text):
         parse_counts(text)
 
 
-def test_a_zero_duration_is_shown_in_seconds():
+def test_durations_are_shown_in_hours_minutes_and_seconds_without_the_zero_ones():
     assert benchmark.format_duration(0) == "0s"
+    assert benchmark.format_duration(30) == "30s"
+    assert benchmark.format_duration(89) == "1m 29s"
     assert benchmark.format_duration(1800) == "30m"
+    assert benchmark.format_duration(1729) == "28m 49s"
+    assert benchmark.format_duration(3600) == "1h"
+    assert benchmark.format_duration(3753) == "1h 2m 33s"
 
 
 def test_durations_have_a_unit():
@@ -541,7 +546,7 @@ def test_the_defaults_are_the_documented_grid_and_timings():
     args = parse()
 
     assert (args.processes, args.threads) == ([1, 2, 3, 4, 5], [10, 25, 50, 100])
-    assert (args.warmup, args.duration, args.runner) == (10, 30, "compose")
+    assert (args.warmup, args.duration, args.runner) == (300, 1800, "compose")
     assert args.output.name.startswith("benchmark-results-fetches-") and args.output.suffix == ".csv"
 
 
