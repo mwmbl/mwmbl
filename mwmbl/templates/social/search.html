@@ -28,12 +28,12 @@
   {% for post in posts %}
     <article class="social-post">
       <p>
-        {% if post.author_url %}<a href="{{ post.author_url }}" rel="nofollow noopener">{{ post.author }}</a>{% else %}{{ post.author }}{% endif %}
+        {% if post.author_url %}<a href="{{ post.author_url }}" rel="ugc nofollow">{{ post.author }}</a>{% else %}{{ post.author }}{% endif %}
         · <time datetime="{{ post.published|date:'c' }}">{{ post.published|date:"j M Y" }}</time>
       </p>
       {% if post.title %}<p class="social-post-title">{{ post.title }}</p>{% endif %}
       <p>{{ post.extract }}</p>
-      {% if post.url %}<p><a href="{{ post.url }}" rel="nofollow noopener">View the original post</a></p>{% endif %}
+      {% if post.url %}<p><a href="{{ post.url }}" rel="ugc nofollow">View the original post</a></p>{% endif %}
     </article>
   {% endfor %}
 </div>

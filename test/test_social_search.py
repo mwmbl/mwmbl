@@ -83,9 +83,10 @@ def test_the_page_shows_each_post_with_author_date_and_links(client, httpx_mock)
 
     page = response.content.decode()
     assert response.status_code == 200
-    assert f'<a href="{POST["author_uri"]}" rel="nofollow noopener">@alice@mastodon.example</a>' in page
+    assert response["X-Robots-Tag"] == "noindex"
+    assert f'<a href="{POST["author_uri"]}" rel="ugc nofollow">@alice@mastodon.example</a>' in page
     assert '<time datetime="2025-11-17T00:00:00+00:00">17 Nov 2025</time>' in page
-    assert f'<a href="{POST["uri"]}" rel="nofollow noopener">View the original post</a>' in page
+    assert f'<a href="{POST["uri"]}" rel="ugc nofollow">View the original post</a>' in page
     assert "Garlic planted today #gardening" in page
     assert "Allotment tips" in page
     assert "@bob@lemmy.example" in page

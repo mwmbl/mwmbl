@@ -195,4 +195,8 @@ def search(request):
         "unavailable": unavailable,
         "footer_links": settings.FOOTER_LINKS,
     }
-    return render(request, "social/search.html", context, status=503 if unavailable else 200)
+    response = render(request, "social/search.html", context, status=503 if unavailable else 200)
+    # Other search engines indexing this page would copy the posts beyond the reach of Mwmbl
+    # Social's removals.
+    response["X-Robots-Tag"] = "noindex"
+    return response
