@@ -27,11 +27,11 @@ locally.
 2. Fill in `MWMBL_SOCIAL_CONTACT_EMAIL` in `config.env` and check the index sizes (below).
 3. Create the secrets file (see [Secrets](#secrets)).
 4. Run `deploy/social/setup.sh` from the repository root.
-5. As root on the server, give the storage directory to the image's user. Check its uid first:
+5. As root on the server, give the storage directory to the image's user, which has the fixed
+   uid and gid 10001:
 
    ```bash
-   docker run --rm --entrypoint id ghcr.io/mwmbl/social:main
-   chown <uid>:<gid> /var/lib/dokku/data/storage/social.mwmbl.org
+   chown 10001:10001 /var/lib/dokku/data/storage/social.mwmbl.org
    ```
 
 6. Deploy (below).
