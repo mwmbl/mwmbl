@@ -21,6 +21,8 @@ Nothing here says "Python": it needs only a way to start and stop the crawler wi
 and CRAWL_THREADS set, and to read its Redis.
 
 Run as `make optimize`, `mwmbl benchmark` or `python -m mwmbl.crawler.benchmark`.
+For the default Compose crawler, set MWMBL_API_KEY and MWMBL_CONTACT_INFO in .env or
+the environment before running the benchmark.
 """
 
 import argparse
@@ -214,6 +216,26 @@ class ComposeCrawler:
     def is_running(self) -> bool:
         return bool(self._run("ps", "--status", "running", "-q", COMPOSE_SERVICE).strip())
 
+    def validate(self) -> None:
+        config = json.loads(self._run("config", "--format", "json", COMPOSE_SERVICE))
+        environment = config["services"][COMPOSE_SERVICE].get("environment", {})
+        problems = []
+        api_key = environment.get("MWMBL_API_KEY")
+        if (
+            environment.get("CRAWL_SUBMIT_MODE") != "off"
+            and "MWMBL_API_KEY" in environment
+            and (not api_key or api_key.strip() in ("", "CREATE_ME"))
+        ):
+            problems.append("MWMBL_API_KEY")
+        contact = environment.get("MWMBL_CONTACT_INFO")
+        if "MWMBL_CONTACT_INFO" in environment and (not contact or contact.strip() in ("", "CHANGE_ME@example.com")):
+            problems.append("MWMBL_CONTACT_INFO")
+        if problems:
+            raise SystemExit(
+                f"Set {', '.join(problems)} in your environment or .env before benchmarking the crawler. "
+                "Use --env-file to select another settings file."
+            )
+
     def stop_existing(self) -> None:
         """Stop the user's crawler, first noting the settings it runs with: they may have come from
         the shell that started it, and then nothing in .env or here would bring them back."""
@@ -233,7 +255,8 @@ class ComposeCrawler:
 
     def ensure_running(self) -> None:
         if not self.is_running():
-            raise RuntimeError("the crawler container stopped")
+            logs = shlex.join([*self.command, "logs", "--tail", "100", COMPOSE_SERVICE])
+            raise RuntimeError(f"the crawler container stopped; inspect its logs with: {logs}")
 
     def fetches(self) -> int:
         counted = self._run("exec", "-T", REDIS_SERVICE, "redis-cli", "HGET", FETCHES_KEY, FETCHES_FIELD)
@@ -569,7 +592,9 @@ def run(args: argparse.Namespace) -> int:
     load_dotenv(env_file)
     crawler: Crawler
     if args.runner == "compose":
-        crawler = ComposeCrawler(args.compose_file)
+        compose = ComposeCrawler(args.compose_file)
+        compose.validate()
+        crawler = compose
     else:
         crawler = ProcessCrawler(shlex.split(args.crawler_command))
     benchmark = Benchmark(
@@ -589,7 +614,7 @@ def run(args: argparse.Namespace) -> int:
     results = benchmark.run()
     print("\n" + format_report(results))
     print(f"\nResults appended to {args.output}")
-    return 0
+    return 0 if any(result.status == STATUS_OK for result in results) else 1
 
 
 def main(argv: list[str] | None = None) -> int:

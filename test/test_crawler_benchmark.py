@@ -85,6 +85,9 @@ class FakeCrawler:
     def is_running(self):
         return self.running
 
+    def validate(self):
+        pass
+
     def stop_existing(self):
         if self.stop_existing_error:
             raise self.stop_existing_error
@@ -454,6 +457,46 @@ def test_compose_gets_the_settings_in_its_environment_and_restores_the_original_
     ]
 
 
+@pytest.mark.parametrize(
+    ("environment", "missing"),
+    [
+        ({"MWMBL_API_KEY": "", "MWMBL_CONTACT_INFO": None}, "MWMBL_API_KEY, MWMBL_CONTACT_INFO"),
+        ({"MWMBL_API_KEY": "CREATE_ME", "MWMBL_CONTACT_INFO": "contact@example.com"}, "MWMBL_API_KEY"),
+        ({"MWMBL_API_KEY": "secret", "MWMBL_CONTACT_INFO": "CHANGE_ME@example.com"}, "MWMBL_CONTACT_INFO"),
+    ],
+)
+def test_compose_rejects_missing_settings_before_stopping_anything(monkeypatch, environment, missing):
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command[4:])
+        config = {"services": {"mwmbl-crawler": {"environment": environment}}}
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(config))
+
+    monkeypatch.setattr(benchmark.subprocess, "run", run)
+    with pytest.raises(SystemExit, match=missing) as error:
+        ComposeCrawler(Path("docker-compose.yml")).validate()
+
+    assert "secret" not in str(error.value)
+    assert commands == [["config", "--format", "json", "mwmbl-crawler"]]
+
+
+def test_compose_accepts_resolved_settings_and_custom_services(monkeypatch):
+    environment = {"MWMBL_API_KEY": "secret", "MWMBL_CONTACT_INFO": "contact@example.com"}
+    config = {"services": {"mwmbl-crawler": {"environment": environment}}}
+    monkeypatch.setattr(
+        benchmark.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(config)),
+    )
+    compose = ComposeCrawler(Path("docker-compose.yml"))
+    compose.validate()
+    environment.update({"MWMBL_API_KEY": "", "CRAWL_SUBMIT_MODE": "off"})
+    compose.validate()
+    config["services"]["mwmbl-crawler"]["environment"] = {}
+    compose.validate()
+
+
 @pytest.mark.parametrize(("output", "expected"), [("12345\n", 12345), ("\n", 0)])
 def test_compose_reads_the_fetch_counter_from_the_crawlers_redis(monkeypatch, output, expected):
     commands = []
@@ -599,6 +642,19 @@ def test_the_env_file_beside_the_compose_file_is_loaded_by_default(tmp_path, mon
     assert benchmark.os.environ["BENCHMARK_TEST_SET_ALREADY"] == "from-the-shell"
 
 
+def test_main_returns_failure_when_no_configuration_completes(tmp_path, monkeypatch, sigterm_handler_restored):
+    crawler = FakeCrawler(Clock(), fail_start_for="10")
+    monkeypatch.setattr(benchmark, "ProcessCrawler", lambda command: crawler)
+    monkeypatch.setattr(benchmark, "Benchmark", partial(Benchmark, sleep=crawler.clock.sleep, clock=crawler.clock))
+
+    assert (
+        benchmark.main(
+            ["--runner", "process", "--processes", "1", "--threads", "10", "--output", str(tmp_path / "r.csv")]
+        )
+        == 1
+    )
+
+
 def test_sigterm_is_handled_like_ctrl_c():
     with pytest.raises(KeyboardInterrupt):
         benchmark.interrupt(signal.SIGTERM, None)
@@ -615,7 +671,7 @@ def test_compose_knows_whether_the_container_is_up(monkeypatch):
     compose.ensure_running()
     output["stdout"] = ""
     assert not compose.is_running()
-    with pytest.raises(RuntimeError, match="stopped"):
+    with pytest.raises(RuntimeError, match="logs --tail 100 mwmbl-crawler"):
         compose.ensure_running()
 
 
