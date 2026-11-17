@@ -20,25 +20,18 @@ because `serve` takes an exclusive lock on `/data/writer.lock`. Don't `ps:scale`
 
 ## First-time setup
 
-You need SSH access as `dokku@mwmbl.org`, root on the server for one step, and `sops` and `age`
-locally.
+You need SSH access as `dokku@mwmbl.org`, and `sops` and `age` locally.
 
 1. Point DNS for `social.mwmbl.org` at the server.
 2. Fill in `MWMBL_SOCIAL_CONTACT_EMAIL` in `config.env` and check the index sizes (below).
 3. Create the secrets file (see [Secrets](#secrets)).
-4. Run `deploy/social/setup.sh` from the repository root.
-5. As root on the server, give the storage directory to the image's user, which has the fixed
-   uid and gid 10001:
-
-   ```bash
-   chown 10001:10001 /var/lib/dokku/data/storage/social.mwmbl.org
-   ```
-
-6. Deploy (below).
-7. Run `setup.sh` again: now the app is deployed, it enables Let's Encrypt. This uses the
+4. Run `deploy/social/setup.sh` from the repository root. It gives the storage directory to
+   the image's user, which has the fixed uid and gid 10001.
+5. Deploy (below).
+6. Run `setup.sh` again: now the app is deployed, it enables Let's Encrypt. This uses the
    letsencrypt email set for the server with `letsencrypt:set --global email`; if there isn't
    one, set it first.
-8. Check `https://social.mwmbl.org/actor` answers, and that `https://social.mwmbl.org/`
+7. Check `https://social.mwmbl.org/actor` answers, and that `https://social.mwmbl.org/`
    redirects to the sign-up page.
 
 `setup.sh` saves config without restarting the app, so after changing `config.env` or the
@@ -55,8 +48,9 @@ When an index page is full, its lowest-scored items are dropped.
 ### Commands not checked against our server
 
 `setup.sh` follows the current Dokku documentation; it has not been run against our server.
-Check these on its Dokku version: `storage:ensure-directory --chown false` (deprecated in recent
-Dokku in favour of `storage:create`, still accepted), `ports:set` and `ports:report` (Dokku 0.31
+Check these on its Dokku version: `storage:ensure-directory --chown 10001` (deprecated in recent
+Dokku in favour of `storage:create`, still accepted; if this Dokku rejects a numeric `--chown`,
+use `--chown false` and, as root, `chown 10001:10001` the directory), `ports:set` and `ports:report` (Dokku 0.31
 or later; older versions use `proxy:ports-set`), `ps:scale --skip-deploy`,
 `ps:report --deployed`, and `letsencrypt:active` from the letsencrypt plugin.
 

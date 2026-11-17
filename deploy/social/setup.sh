@@ -33,9 +33,8 @@ if ! dokku apps:exists "$APP" >/dev/null 2>&1; then
 	dokku apps:create "$APP"
 fi
 
-# The container runs as the image's `mwmbl` user, not one of the --chown presets, so the
-# directory's owner is set by hand once (README.md, first-time setup).
-dokku storage:ensure-directory --chown false "$APP"
+# The image runs as the fixed uid and gid 10001; `--chown <uid>` gives the directory <uid>:<uid>.
+dokku storage:ensure-directory --chown 10001 "$APP"
 # Captured first: with pipefail, grep -q exiting early could fail the pipeline.
 mounts=$(dokku storage:list "$APP")
 if ! grep -qF "$STORAGE:/data" <<<"$mounts"; then
