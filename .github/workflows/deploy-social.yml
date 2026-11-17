@@ -15,6 +15,9 @@ on:
 # Two deploys at once would race to replace the single container.
 concurrency: deploy-social
 
+# The job only pulls a public image and uses the SSH key secret, so it needs no token scopes.
+permissions: {}
+
 jobs:
   deploy:
     name: Deploy social.mwmbl.org
