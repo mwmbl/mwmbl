@@ -1,8 +1,8 @@
 """Find the crawler configuration that fetches the most pages on this machine.
 
-Tries combinations of process count and thread count one at a time: stop the crawler, start it
+Tries every combination of process count and thread count one at a time: stop the crawler, start it
 with that combination, let it warm up, then measure for a fixed time. The winner is the
-combination that fetched the most pages a minute.
+combination that fetched the most pages a minute, and the cheaper one when two tie.
 
 What is measured is the crawler's own count of fetches, `crawl-domain-overlap fetches` in its
 Redis, which every worker adds its batch to as the batch finishes. Nothing is read from the
@@ -12,10 +12,6 @@ what it indexed needs windows of half an hour, where fetch throughput settles in
 Batches arrive in bursts, so the window opens at the first batch to finish after warmup and
 closes at the first one to finish after the duration has passed. Both ends are then exact
 counts of whole batches, not a fixed time that cuts through them.
-
-The search stops climbing wherever more threads, or more processes, no longer fetch noticeably
-more, since the winner is always the cheapest configuration that is close to the best.
-`--exhaustive` tries every combination instead.
 
 Nothing here says "Python": it needs only a way to start and stop the crawler with CRAWLER_WORKERS
 and CRAWL_THREADS set, and to read its Redis.
@@ -45,16 +41,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterator, Protocol
+from typing import Callable, Protocol
 
 DEFAULT_PROCESS_COUNTS = [1, 2, 3, 4, 5]
 DEFAULT_THREAD_COUNTS = [10, 25, 50, 100]
 DEFAULT_WARMUP = "10s"
 DEFAULT_DURATION = "30s"
-
-# How much more a configuration has to fetch than the one before it to be worth climbing past.
-# Below this, two configurations are within the noise of a run this short, and the cheaper wins.
-MINIMUM_GAIN = 0.10
 
 STATUS_OK = "OK"
 STATUS_FAILED = "FAILED"
@@ -138,38 +130,6 @@ def all_configurations(process_counts: list[int], thread_counts: list[int]) -> l
 
 def total_memory_mb() -> float:
     return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
-
-
-def search(
-    process_counts: list[int], thread_counts: list[int], rates: dict[Configuration, float], exhaustive: bool
-) -> Iterator[Configuration]:
-    """The configurations to try, cheapest first, reading each one's rate from `rates` once it has run.
-
-    Within a process count the threads climb until a step gains less than MINIMUM_GAIN. The process
-    counts climb until the first thread count of one gains less than that over the same thread count
-    with the process count before: doubling the concurrency fetched no more, so the machine, the
-    network or the sites are the limit. Configurations that fail or are skipped have no rate and
-    do not end a climb.
-    """
-    thread_floor = thread_counts[0]
-    previous_processes = None
-    for processes in process_counts:
-        previous_rate = None
-        for threads in thread_counts:
-            configuration = Configuration(processes, threads)
-            yield configuration
-            rate = rates.get(configuration)
-            if rate is None:
-                continue
-            if not exhaustive and previous_rate is not None and rate < previous_rate * (1 + MINIMUM_GAIN):
-                break
-            previous_rate = rate
-            if exhaustive or threads != thread_floor or previous_processes is None:
-                continue
-            fewer_processes_rate = rates.get(Configuration(previous_processes, threads))
-            if fewer_processes_rate is not None and rate < fewer_processes_rate * (1 + MINIMUM_GAIN):
-                return
-        previous_processes = processes
 
 
 class Crawler(Protocol):
@@ -276,7 +236,6 @@ class Benchmark:
         self,
         process_counts: list[int],
         thread_counts: list[int],
-        exhaustive: bool,
         crawler: Crawler,
         warmup_seconds: int,
         duration_seconds: int,
@@ -287,7 +246,6 @@ class Benchmark:
     ):
         self.process_counts = process_counts
         self.thread_counts = thread_counts
-        self.exhaustive = exhaustive
         self.crawler = crawler
         self.warmup_seconds = warmup_seconds
         self.duration_seconds = duration_seconds
@@ -303,11 +261,10 @@ class Benchmark:
         was_running = self.crawler.is_running()
 
         results: list[Result] = []
-        rates: dict[Configuration, float] = {}
         try:
             if was_running:
                 self.crawler.stop_existing()
-            plan = search(self.process_counts, self.thread_counts, rates, self.exhaustive)
+            plan = all_configurations(self.process_counts, self.thread_counts)
             for number, configuration in enumerate(plan, start=1):
                 print(f"\n[{number}] {describe(configuration)}", flush=True)
                 try:
@@ -317,8 +274,6 @@ class Benchmark:
                     self.record(results, Result(configuration, STATUS_INTERRUPTED, error="interrupted"))
                     break
                 self.record(results, result)
-                if result.fetches_per_minute is not None:
-                    rates[configuration] = result.fetches_per_minute
                 shown = f"{result.fetches_per_minute:.0f} fetches/min" if result.fetches_per_minute else result.error
                 print(f"  {result.status}: {shown}")
         finally:
@@ -485,11 +440,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="At least this long between the batch that opens the measurement and the one that closes it",
     )
     parser.add_argument(
-        "--exhaustive",
-        action="store_true",
-        help="Try every combination, instead of stopping a climb once more threads or processes stop helping",
-    )
-    parser.add_argument(
         "--output",
         type=Path,
         default=Path(f"benchmark-results-fetches-{datetime.now(timezone.utc).date().isoformat()}.csv"),
@@ -553,15 +503,14 @@ def run(args: argparse.Namespace) -> int:
     benchmark = Benchmark(
         args.processes,
         args.threads,
-        args.exhaustive,
         crawler,
         args.warmup,
         args.duration,
         args.output,
         None if args.no_memory_check else args.memory_per_process_mb,
     )
-    most = len(all_configurations(args.processes, args.threads))
-    print(f"Up to {most} configurations, each about {format_duration(args.warmup + args.duration)} or more")
+    total = len(all_configurations(args.processes, args.threads))
+    print(f"{total} configurations, each about {format_duration(args.warmup + args.duration)} or more")
 
     signal.signal(signal.SIGTERM, interrupt)
     results = benchmark.run()

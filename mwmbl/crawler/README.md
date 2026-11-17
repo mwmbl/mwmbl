@@ -22,23 +22,25 @@ Batches crawled by different workers at the same time can share domains, since e
 
 ### Benchmarking `CRAWLER_WORKERS` and `CRAWL_THREADS`
 
-`make optimize` (or `make crawler`; `mwmbl benchmark` and `python -m mwmbl.crawler.benchmark` are the same thing) finds the best combination for a machine in about ten minutes, by trying combinations one at a time and comparing how many pages a minute the crawler fetches with each:
+`make optimize` (or `make crawler`; `mwmbl benchmark` and `python -m mwmbl.crawler.benchmark` are the same thing) finds the best combination for a machine in 15 to 20 minutes, by trying every combination one at a time and comparing how many pages a minute the crawler fetches with each:
 
 ```sh
 make optimize
-make optimize ARGS='--exhaustive --processes 1,2,4 --threads 25,50,100 --duration 60s'
+make optimize ARGS='--processes 1,2,4 --threads 25,50,100 --duration 60s'
 ```
 
 It needs only Docker and `python3` 3.9 or later: `benchmark.py` uses nothing but the standard library, so nothing is installed or built, and `make optimize` runs it with the system `python3`. Run `deploy/crawler/benchmark.sh` in the directory the crawler is started from: in a checkout it runs the `benchmark.py` beside it, and piped from `curl` it downloads `benchmark.py` from `main` first. Either way it passes on its arguments:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
-curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --exhaustive
+curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --processes 1,2,4
 ```
+
+The script stops with an explanation if your user may not use Docker (not in the `docker` group) or the daemon is not running.
 
 Nothing needs exporting. Compose reads the `.env` beside `docker-compose.yml` for the crawler as it always does (or the file given with `--env-file`). No API key is used: the benchmark reads only the crawler's own Redis.
 
-For each combination it stops the crawler, starts it with `CRAWLER_WORKERS` and `CRAWL_THREADS` set, waits out `--warmup` (default 10s), measures, and stops it again. It ends with a ranked table and the winner, and whether it finishes, fails or is interrupted with Ctrl+C it puts the crawler back as it found it. By default the search climbs: threads go up for a process count until more of them fetch less than 10% more, and process counts go up until doubling them fetches less than 10% more at the lowest thread count. `--exhaustive` tries every combination of `--processes` (default 1 to 5) and `--threads` (default 10, 25, 50, 100).
+For each combination it stops the crawler, starts it with `CRAWLER_WORKERS` and `CRAWL_THREADS` set, waits out `--warmup` (default 10s), measures, and stops it again. It ends with a ranked table and the winner, and whether it finishes, fails or is interrupted with Ctrl+C it puts the crawler back as it found it. It tries every combination of `--processes` (default 1 to 5) and `--threads` (default 10, 25, 50, 100).
 
 - `--runner compose` (default) stops and restarts the `mwmbl-crawler` service of `--compose-file`, with a two second stop grace instead of ten since the crawler ignores SIGTERM as PID 1. Settings are passed in the environment of the `docker compose` commands, so `.env` is never edited. Before stopping your crawler it records the `CRAWLER_WORKERS` and `CRAWL_THREADS` the container runs with, wherever they came from, and starts it again with those at the end. Every `up` uses `--pull never`, so a crawler release landing mid-run cannot change the version being measured (the image must already be present, as it is for a running crawler). Compose names its project after the directory, so run it from the checkout your crawler was started from.
 - `--runner process` runs `--crawler-command` (default: the Python running the benchmark, as `python -m mwmbl.crawl`, with the checkout on `PYTHONPATH`) as a child process, against the Redis in `REDIS_URL`, and stops its whole process group, workers included, between configurations. It loads `.env` beside `--compose-file` (or `--env-file`; anything already in the environment wins) into the environment the crawler inherits. It is for a crawler run from source, and the crawler's dependencies, including the Rust extension `mwmbl_rank`, must already be installed in that Python, which `pip3` alone cannot do: use `uv run mwmbl benchmark --runner process`. From any other Python, `pip3 install -r deploy/crawler/benchmark-requirements.txt` adds what the runner itself imports (`psutil`, `redis`, `python-dotenv`), then `python3 -m mwmbl.crawler.benchmark --runner process` from the checkout. It refuses to start while another crawler is running, so stop yours first. A Redis with no queue in it gives a cold-start crawl, so prefer `compose` unless you know the queue is warm.

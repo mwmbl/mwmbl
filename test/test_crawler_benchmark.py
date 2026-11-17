@@ -24,7 +24,6 @@ from mwmbl.crawler.benchmark import (
     format_report,
     parse_counts,
     parse_duration,
-    search,
 )
 from mwmbl.crawler.benchmark_process import ProcessCrawler
 
@@ -123,7 +122,6 @@ def make_benchmark(tmp_path, crawler, process_counts=(1, 2), thread_counts=(10, 
     arguments = {
         "process_counts": list(process_counts),
         "thread_counts": list(thread_counts),
-        "exhaustive": True,
         "crawler": crawler,
         "warmup_seconds": 20,
         "duration_seconds": 60,
@@ -233,61 +231,11 @@ def test_the_counter_from_before_a_restart_is_not_counted(tmp_path):
     assert result.fetches_per_minute == 60
 
 
-def test_threads_stop_climbing_when_more_of_them_do_not_help():
-    rates: dict[Configuration, float] = {}
-    table = {10: 100, 25: 200, 50: 205, 100: 400}
-    plan = search([1], [10, 25, 50, 100], rates, exhaustive=False)
-
-    tried = []
-    for configuration in plan:
-        tried.append(configuration.threads)
-        rates[configuration] = table[configuration.threads]
-
-    assert tried == [10, 25, 50]
-
-
-def test_processes_stop_climbing_when_more_of_them_do_not_help():
-    rates: dict[Configuration, float] = {}
-    best = {1: 100, 2: 200, 3: 205, 4: 400}
-    plan = search([1, 2, 3, 4], [10], rates, exhaustive=False)
-
-    tried = []
-    for configuration in plan:
-        tried.append(configuration.processes)
-        rates[configuration] = best[configuration.processes]
-
-    assert tried == [1, 2, 3]
-
-
-def test_a_climb_goes_on_past_a_configuration_that_failed():
-    rates: dict[Configuration, float] = {}
-    plan = search([1], [10, 25, 50], rates, exhaustive=False)
-
-    tried = []
-    for configuration in plan:
-        tried.append(configuration.threads)
-        if configuration.threads != 25:
-            rates[configuration] = configuration.threads * 10
-
-    assert tried == [10, 25, 50]
-
-
-def test_exhaustive_tries_every_combination_whatever_it_finds():
-    rates: dict[Configuration, float] = {}
-
-    tried = []
-    for configuration in search([1, 2], [10, 25], rates, exhaustive=True):
-        tried.append(configuration)
-        rates[configuration] = 100
-
-    assert tried == all_configurations([1, 2], [10, 25])
-
-
-def test_the_benchmark_searches_unless_told_to_be_exhaustive(tmp_path):
+def test_every_combination_is_tried_even_when_more_threads_and_processes_stop_helping(tmp_path):
     flat = FakeCrawler(Clock(), rate=lambda env: 600)
-    results = make_benchmark(tmp_path, flat, [1, 2, 3], [10, 25, 50], exhaustive=False).run()
+    results = make_benchmark(tmp_path, flat, [1, 2, 3], [10, 25, 50]).run()
 
-    assert [(r.configuration.processes, r.configuration.threads) for r in results] == [(1, 10), (1, 25), (2, 10)]
+    assert [r.configuration for r in results] == all_configurations([1, 2, 3], [10, 25, 50])
 
 
 def test_results_are_written_to_csv_as_they_complete_and_appended_to(tmp_path):
@@ -593,15 +541,14 @@ def test_the_defaults_are_the_documented_grid_and_timings():
     args = parse()
 
     assert (args.processes, args.threads) == ([1, 2, 3, 4, 5], [10, 25, 50, 100])
-    assert (args.warmup, args.duration, args.runner, args.exhaustive) == (10, 30, "compose", False)
+    assert (args.warmup, args.duration, args.runner) == (10, 30, "compose")
     assert args.output.name.startswith("benchmark-results-fetches-") and args.output.suffix == ".csv"
 
 
 def test_every_search_space_and_timing_default_can_be_overridden():
-    args = parse("--processes", "1,3", "--threads", "8", "--warmup", "90s", "--duration", "2h", "--exhaustive")
+    args = parse("--processes", "1,3", "--threads", "8", "--warmup", "90s", "--duration", "2h")
 
     assert (args.processes, args.threads, args.warmup, args.duration) == ([1, 3], [8], 90, 7200)
-    assert args.exhaustive
 
 
 @pytest.fixture
@@ -627,7 +574,7 @@ def test_main_runs_the_grid_with_the_chosen_runner_and_prints_the_winner(
 
     exit_code = benchmark.main(
         ["--processes", "1", "--threads", "10,25", "--warmup", "10s", "--duration", "40s", "--output", str(output)]
-        + ["--runner", runner, "--crawler-command", "my-crawler --flag", "--no-memory-check", "--exhaustive"]
+        + ["--runner", runner, "--crawler-command", "my-crawler --flag", "--no-memory-check"]
         + ["--env-file", str(tmp_path / "missing.env"), "--compose-file", str(compose_file)]
     )
 

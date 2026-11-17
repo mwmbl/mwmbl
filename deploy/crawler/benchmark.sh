@@ -5,7 +5,7 @@
 #
 #   ./deploy/crawler/benchmark.sh                  (in a checkout: runs the benchmark.py beside it)
 #   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --exhaustive
+#   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --processes 1,2,4
 #
 # It stops your crawler, tries settings on it for a few seconds each, and starts it again as it was.
 set -eu
