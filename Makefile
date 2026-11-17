@@ -164,8 +164,9 @@ run-background:
 
 # Stops your crawler, tries settings on it for a few seconds each, and starts it again as it was.
 # .env is read from beside docker-compose.yml, so there is nothing to export first.
+# The system python3 and not uv: the benchmark needs only the standard library, so nothing is built.
 optimize:
-	uv run mwmbl benchmark $(ARGS)
+	python3 -m mwmbl.crawler.benchmark $(ARGS)
 
 crawler: optimize
 

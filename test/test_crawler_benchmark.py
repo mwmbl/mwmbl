@@ -5,6 +5,7 @@ import csv
 import json
 import signal
 import subprocess
+import sys
 from functools import partial
 from pathlib import Path
 
@@ -12,12 +13,11 @@ import psutil
 import pytest
 
 from mwmbl import cli
-from mwmbl.crawler import benchmark
+from mwmbl.crawler import benchmark, benchmark_process
 from mwmbl.crawler.benchmark import (
     Benchmark,
     ComposeCrawler,
     Configuration,
-    ProcessCrawler,
     Result,
     all_configurations,
     format_report,
@@ -25,6 +25,7 @@ from mwmbl.crawler.benchmark import (
     parse_duration,
     search,
 )
+from mwmbl.crawler.benchmark_process import ProcessCrawler
 
 # The fake crawler's batches finish together, every this many seconds.
 BATCH_SECONDS = 10
@@ -518,7 +519,7 @@ def test_a_process_crawler_reads_the_fetch_counter_from_redis(monkeypatch):
 
     urls = []
     monkeypatch.setenv("REDIS_URL", "redis://example:6379/3")
-    monkeypatch.setattr(benchmark.Redis, "from_url", lambda url: urls.append(url) or FakeRedis())
+    monkeypatch.setattr(benchmark_process.Redis, "from_url", lambda url: urls.append(url) or FakeRedis())
 
     assert ProcessCrawler(["sleep", "60"]).fetches() == 42
     assert urls == ["redis://example:6379/3"]
@@ -546,7 +547,7 @@ def test_a_process_crawler_refuses_to_run_beside_another_crawler(monkeypatch):
 
 
 def test_workers_that_outlive_the_crawlers_leader_are_stopped_too(tmp_path, monkeypatch):
-    monkeypatch.setattr(benchmark, "STOP_TIMEOUT_SECONDS", 5)
+    monkeypatch.setattr(benchmark_process, "STOP_TIMEOUT_SECONDS", 5)
     pid_file = tmp_path / "worker.pid"
     crawler = ProcessCrawler(["sh", "-c", f"sleep 60 & echo $! > {pid_file}; exit 0"])
     crawler.start({})
@@ -598,15 +599,17 @@ def test_main_runs_the_grid_with_the_chosen_runner_and_prints_the_winner(
     clock = Clock()
     crawler = FakeCrawler(clock)
     commands = []
-    monkeypatch.setattr(benchmark, "ComposeCrawler", lambda compose_file: crawler)
-    monkeypatch.setattr(benchmark, "ProcessCrawler", lambda command: commands.append(command) or crawler)
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.touch()
+    monkeypatch.setattr(benchmark, "ComposeCrawler", lambda compose_file, env_file: crawler)
+    monkeypatch.setattr(benchmark_process, "ProcessCrawler", lambda command: commands.append(command) or crawler)
     monkeypatch.setattr(benchmark, "Benchmark", partial(Benchmark, sleep=clock.sleep, clock=clock))
     output = tmp_path / "r.csv"
 
     exit_code = benchmark.main(
         ["--processes", "1", "--threads", "10,25", "--warmup", "10s", "--duration", "40s", "--output", str(output)]
         + ["--runner", runner, "--crawler-command", "my-crawler --flag", "--no-memory-check", "--exhaustive"]
-        + ["--env-file", str(tmp_path / "missing.env")]
+        + ["--env-file", str(tmp_path / "missing.env"), "--compose-file", str(compose_file)]
     )
 
     report = capsys.readouterr().out
@@ -630,7 +633,7 @@ def test_the_env_file_beside_the_compose_file_is_loaded_by_default(tmp_path, mon
             super().start(env)
 
     crawler = Recording(clock)
-    monkeypatch.setattr(benchmark, "ProcessCrawler", lambda command: crawler)
+    monkeypatch.setattr(benchmark_process, "ProcessCrawler", lambda command: crawler)
     monkeypatch.setattr(benchmark, "Benchmark", partial(Benchmark, sleep=clock.sleep, clock=clock))
     arguments = ["--runner", "process", "--processes", "1", "--threads", "10", "--no-memory-check"]
 
@@ -644,7 +647,7 @@ def test_the_env_file_beside_the_compose_file_is_loaded_by_default(tmp_path, mon
 
 def test_main_returns_failure_when_no_configuration_completes(tmp_path, monkeypatch, sigterm_handler_restored):
     crawler = FakeCrawler(Clock(), fail_start_for="10")
-    monkeypatch.setattr(benchmark, "ProcessCrawler", lambda command: crawler)
+    monkeypatch.setattr(benchmark_process, "ProcessCrawler", lambda command: crawler)
     monkeypatch.setattr(benchmark, "Benchmark", partial(Benchmark, sleep=crawler.clock.sleep, clock=crawler.clock))
 
     assert (
@@ -658,6 +661,38 @@ def test_main_returns_failure_when_no_configuration_completes(tmp_path, monkeypa
 def test_sigterm_is_handled_like_ctrl_c():
     with pytest.raises(KeyboardInterrupt):
         benchmark.interrupt(signal.SIGTERM, None)
+
+
+def test_the_compose_runner_refuses_a_directory_with_no_compose_file(tmp_path):
+    with pytest.raises(SystemExit, match="directory you start your crawler from"):
+        benchmark.main(["--compose-file", str(tmp_path / "docker-compose.yml"), "--output", str(tmp_path / "r.csv")])
+
+
+def test_compose_is_given_the_env_file_when_there_is_one(monkeypatch):
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    monkeypatch.setattr(benchmark.subprocess, "run", run)
+    ComposeCrawler(Path("docker-compose.yml"), Path("crawler.env")).stop()
+
+    assert commands[0][:6] == ["docker", "compose", "-f", "docker-compose.yml", "--env-file", "crawler.env"]
+
+
+def test_the_benchmark_runs_as_a_lone_file_with_only_the_standard_library(tmp_path):
+    # -S leaves out site-packages, so any third-party import fails. Volunteers get this file alone.
+    script = Path(benchmark.__file__)
+    completed = subprocess.run(
+        [sys.executable, "-S", str(script), "--compose-file", str(tmp_path / "docker-compose.yml")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "directory you start your crawler from" in completed.stderr
 
 
 def test_compose_knows_whether_the_container_is_up(monkeypatch):

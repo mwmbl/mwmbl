@@ -29,12 +29,19 @@ make optimize
 make optimize ARGS='--exhaustive --processes 1,2,4 --threads 25,50,100 --duration 60s'
 ```
 
-Nothing needs exporting. The settings in `.env` beside `docker-compose.yml` are loaded (or `--env-file`; anything already in the environment wins), and compose reads the same file for the crawler itself. No API key is used: the benchmark reads only the crawler's own Redis.
+It needs only Docker and `python3` 3.9 or later: `benchmark.py` uses nothing but the standard library, so nothing is installed or built, and `make optimize` runs it with the system `python3`. Without a checkout, run `deploy/crawler/benchmark.sh` in the directory the crawler is started from; it downloads `benchmark.py` and runs it, passing on its arguments:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --exhaustive
+```
+
+Nothing needs exporting. Compose reads the `.env` beside `docker-compose.yml` for the crawler as it always does (or the file given with `--env-file`). No API key is used: the benchmark reads only the crawler's own Redis.
 
 For each combination it stops the crawler, starts it with `CRAWLER_WORKERS` and `CRAWL_THREADS` set, waits out `--warmup` (default 10s), measures, and stops it again. It ends with a ranked table and the winner, and whether it finishes, fails or is interrupted with Ctrl+C it puts the crawler back as it found it. By default the search climbs: threads go up for a process count until more of them fetch less than 10% more, and process counts go up until doubling them fetches less than 10% more at the lowest thread count. `--exhaustive` tries every combination of `--processes` (default 1 to 5) and `--threads` (default 10, 25, 50, 100).
 
 - `--runner compose` (default) stops and restarts the `mwmbl-crawler` service of `--compose-file`, with a two second stop grace instead of ten since the crawler ignores SIGTERM as PID 1. Settings are passed in the environment of the `docker compose` commands, so `.env` is never edited. Before stopping your crawler it records the `CRAWLER_WORKERS` and `CRAWL_THREADS` the container runs with, wherever they came from, and starts it again with those at the end. Every `up` uses `--pull never`, so a crawler release landing mid-run cannot change the version being measured (the image must already be present, as it is for a running crawler). Compose names its project after the directory, so run it from the checkout your crawler was started from.
-- `--runner process` runs `--crawler-command` (default `mwmbl-crawl`) as a child process, against the Redis in `REDIS_URL`, and stops its whole process group, workers included, between configurations. It refuses to start while another crawler is running, so stop yours first. A Redis with no queue in it gives a cold-start crawl, so prefer `compose` unless you know the queue is warm.
+- `--runner process` runs `--crawler-command` (default `mwmbl-crawl`) as a child process, against the Redis in `REDIS_URL`, and stops its whole process group, workers included, between configurations. It loads `.env` beside `--compose-file` (or `--env-file`; anything already in the environment wins) into the environment the crawler inherits. It needs the project installed (`uv run mwmbl benchmark --runner process`), since it reads Redis with the `redis` package. It refuses to start while another crawler is running, so stop yours first. A Redis with no queue in it gives a cold-start crawl, so prefer `compose` unless you know the queue is warm.
 
 **What it measures.** The crawler adds each batch's URLs to `crawl-domain-overlap`'s `fetches` in its Redis as the batch finishes. The window opens at the first batch to finish after warmup and closes at the first to finish once `--duration` (default 30s) has passed, and the rate is the fetches between the two divided by the time between them, so it is never cut through a batch. This replaces scoring by what the Mwmbl server added to the index, which took 35 minutes a combination because submissions reach the server long after the fetches behind them.
 

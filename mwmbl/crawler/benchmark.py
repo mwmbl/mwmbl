@@ -23,7 +23,13 @@ and CRAWL_THREADS set, and to read its Redis.
 Run as `make optimize`, `mwmbl benchmark` or `python -m mwmbl.crawler.benchmark`.
 For the default Compose crawler, set MWMBL_API_KEY and MWMBL_CONTACT_INFO in .env or
 the environment before running the benchmark.
+
+The Compose runner needs nothing but Docker and the standard library of Python 3.9 or later, so
+this file runs on its own, with no checkout or install: deploy/crawler/benchmark.sh fetches it.
 """
+
+# Annotations like `int | None` would otherwise need Python 3.10, and macOS ships 3.9.
+from __future__ import annotations
 
 import argparse
 import csv
@@ -40,10 +46,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Protocol
-
-import psutil
-from dotenv import load_dotenv
-from redis import Redis
 
 DEFAULT_PROCESS_COUNTS = [1, 2, 3, 4, 5]
 DEFAULT_THREAD_COUNTS = [10, 25, 50, 100]
@@ -65,8 +67,6 @@ FETCHES_KEY = "crawl-domain-overlap"
 FETCHES_FIELD = "fetches"
 # What the benchmark overrides, so what restoring the user's crawler has to put back.
 RESTORED_SETTINGS = ("CRAWLER_WORKERS", "CRAWL_THREADS")
-CRAWLER_EXECUTABLES = ("mwmbl-crawl", "mwmbl.crawl")
-STOP_TIMEOUT_SECONDS = 60
 # The crawler is PID 1 in its container and has no SIGTERM handler, so the default ten seconds
 # of grace is always spent waiting for a signal that is ignored. Everything durable is in Redis.
 CONTAINER_STOP_GRACE_SECONDS = 2
@@ -137,7 +137,7 @@ def all_configurations(process_counts: list[int], thread_counts: list[int]) -> l
 
 
 def total_memory_mb() -> float:
-    return psutil.virtual_memory().total / 2**20
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
 
 
 def search(
@@ -199,8 +199,9 @@ class ComposeCrawler:
     the service's `pull_policy: always` would otherwise swap the crawler version under a run.
     """
 
-    def __init__(self, compose_file: Path):
-        self.command = ["docker", "compose", "-f", str(compose_file)]
+    def __init__(self, compose_file: Path, env_file: Path | None = None):
+        env_file_option = [] if env_file is None else ["--env-file", str(env_file)]
+        self.command = ["docker", "compose", "-f", str(compose_file), *env_file_option]
         self.original_env: dict[str, str] = {}
 
     def _run(self, *args: str, env: dict[str, str] | None = None) -> str:
@@ -268,75 +269,6 @@ class ComposeCrawler:
     def restore(self, was_running: bool) -> None:
         if was_running:
             self.start(self.original_env)
-
-
-class ProcessCrawler:
-    """The crawler as a child process of this one, in a process group of its own so that its
-    workers are stopped with it. The environment is the child's alone."""
-
-    def __init__(self, command: list[str]):
-        self.command = command
-        self.process: subprocess.Popen | None = None
-
-    def is_running(self) -> bool:
-        return bool(self._existing_crawlers())
-
-    @staticmethod
-    def _existing_crawlers() -> list[psutil.Process]:
-        def is_crawler(process: psutil.Process) -> bool:
-            arguments = (process.info["cmdline"] or [])[:3]
-            return process.pid != os.getpid() and any(Path(arg).name in CRAWLER_EXECUTABLES for arg in arguments)
-
-        return [process for process in psutil.process_iter(["cmdline"]) if is_crawler(process)]
-
-    def stop_existing(self) -> None:
-        pids = [process.pid for process in self._existing_crawlers()]
-        raise SystemExit(
-            f"A crawler is already running (pid {pids}). Stop it first: this runner does not know how it was "
-            "started, and a second crawler would make every measurement meaningless."
-        )
-
-    def start(self, env: dict[str, str]) -> None:
-        self.process = subprocess.Popen(self.command, env={**os.environ, **env}, start_new_session=True)
-
-    def ensure_running(self) -> None:
-        assert self.process is not None
-        exit_code = self.process.poll()
-        if exit_code is not None:
-            raise RuntimeError(f"the crawler exited with code {exit_code}")
-
-    def fetches(self) -> int:
-        redis = Redis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379"))
-        return int(redis.hget(FETCHES_KEY, FETCHES_FIELD) or 0)
-
-    def _signal_group(self, signal_number: int) -> bool:
-        """Send the signal to the process group, which is the crawler's workers as well as its
-        leader. Signal 0 only asks whether any member is left."""
-        assert self.process is not None
-        try:
-            os.killpg(self.process.pid, signal_number)
-        except ProcessLookupError:
-            return False
-        return True
-
-    def stop(self) -> None:
-        if self.process is None:
-            return
-        # Not only while the leader lives: the workers are not daemons, so they outlast a leader
-        # that was killed, and would go on crawling beside the next configuration.
-        self._signal_group(signal.SIGTERM)
-        deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-        # poll() reaps the leader, which otherwise stays a zombie and keeps the group alive.
-        while self.process.poll() is None or self._signal_group(0):
-            if time.monotonic() > deadline:
-                self._signal_group(signal.SIGKILL)
-                self.process.wait()
-                break
-            time.sleep(0.2)
-        self.process = None
-
-    def restore(self, was_running: bool) -> None:
-        """Nothing to restore: a running crawler is refused up front, not stopped."""
 
 
 class Benchmark:
@@ -575,8 +507,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--env-file",
         type=Path,
         default=None,
-        help="Settings to load into the environment, which the crawler started by --runner process inherits "
-        "(default: .env beside --compose-file). Variables already in the environment win.",
+        help="Settings file. With --runner compose, docker compose reads it instead of the .env beside "
+        "--compose-file. With --runner process it is loaded into the environment the crawler inherits "
+        "(default: .env beside --compose-file), and variables already in the environment win.",
     )
     parser.add_argument("--crawler-command", default="mwmbl-crawl", help="Command for --runner process")
     parser.add_argument("--memory-per-process-mb", type=int, default=DEFAULT_MEMORY_PER_PROCESS_MB)
@@ -588,15 +521,22 @@ def interrupt(signum, frame):
 
 
 def run(args: argparse.Namespace) -> int:
-    env_file = args.env_file or args.compose_file.parent / ".env"
-    load_dotenv(env_file)
     crawler: Crawler
     if args.runner == "compose":
-        compose = ComposeCrawler(args.compose_file)
+        if not args.compose_file.exists():
+            raise SystemExit(
+                f"There is no {args.compose_file} here. Run the benchmark from the directory you start your "
+                "crawler from, or pass --compose-file."
+            )
+        compose = ComposeCrawler(args.compose_file, args.env_file)
         compose.validate()
         crawler = compose
     else:
-        crawler = ProcessCrawler(shlex.split(args.crawler_command))
+        # Imported only here: it needs psutil, redis and python-dotenv, and the compose runner nothing.
+        from mwmbl.crawler.benchmark_process import process_crawler
+
+        env_file = args.env_file or args.compose_file.parent / ".env"
+        crawler = process_crawler(shlex.split(args.crawler_command), env_file)
     benchmark = Benchmark(
         args.processes,
         args.threads,
