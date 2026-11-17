@@ -16,14 +16,20 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail "needs python3 (3.9 or later); install it with your package manager."
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || fail "needs python3 3.9 or later, found $(python3 --version)."
-command -v docker >/dev/null 2>&1 || fail "needs docker, which runs the crawler."
-docker compose version >/dev/null 2>&1 || fail "needs 'docker compose' (the Compose v2 plugin)."
-command -v curl >/dev/null 2>&1 || fail "needs curl."
+# Everything is in a function called on the last line, so a download cut short runs nothing.
+main() {
+    command -v python3 >/dev/null 2>&1 || fail "needs python3 (3.9 or later); install it with your package manager."
+    python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || fail "needs python3 3.9 or later."
+    command -v docker >/dev/null 2>&1 || fail "needs docker, which runs the crawler."
+    docker compose version >/dev/null 2>&1 || fail "needs 'docker compose' (the Compose v2 plugin)."
+    command -v curl >/dev/null 2>&1 || fail "needs curl."
 
-script="$(mktemp "${TMPDIR:-/tmp}/mwmbl-benchmark.XXXXXX")"
-trap 'rm -f "$script"' EXIT INT TERM
-curl -fsSL "$BENCHMARK_URL" -o "$script" || fail "could not download $BENCHMARK_URL"
+    script="$(mktemp "${TMPDIR:-/tmp}/mwmbl-benchmark.XXXXXX")"
+    trap 'rm -f "$script"' EXIT
+    trap 'exit 130' INT TERM
+    curl -fsSL "$BENCHMARK_URL" -o "$script" || fail "could not download $BENCHMARK_URL"
 
-python3 "$script" "$@"
+    python3 "$script" "$@"
+}
+
+main "$@"
