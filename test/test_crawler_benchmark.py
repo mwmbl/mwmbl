@@ -537,6 +537,24 @@ def test_a_process_crawler_gets_its_environment_and_dies_with_its_group():
     crawler.stop()
 
 
+def test_a_process_crawler_can_import_mwmbl_from_the_checkout_without_it_being_installed(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    # -S leaves out site-packages, where an installed mwmbl would be found.
+    crawler = ProcessCrawler([sys.executable, "-S", "-c", "import mwmbl.crawler.benchmark"])
+
+    crawler.start({})
+    assert crawler.process.wait(timeout=30) == 0
+    crawler.stop()
+
+
+def test_the_process_runner_defaults_to_this_python_running_the_crawler_module(tmp_path):
+    crawler = benchmark_process.process_crawler(None, tmp_path / "missing.env")
+
+    assert crawler.command == [sys.executable, "-m", "mwmbl.crawl"]
+    assert benchmark_process.process_crawler(["my-crawler"], tmp_path / "missing.env").command == ["my-crawler"]
+
+
 def test_a_process_crawler_refuses_to_run_beside_another_crawler(monkeypatch):
     crawler = ProcessCrawler(["sleep", "60"])
     monkeypatch.setattr(ProcessCrawler, "_existing_crawlers", staticmethod(lambda: []))

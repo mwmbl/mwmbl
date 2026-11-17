@@ -511,7 +511,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--compose-file. With --runner process it is loaded into the environment the crawler inherits "
         "(default: .env beside --compose-file), and variables already in the environment win.",
     )
-    parser.add_argument("--crawler-command", default="mwmbl-crawl", help="Command for --runner process")
+    parser.add_argument(
+        "--crawler-command",
+        default=None,
+        help="Command for --runner process (default: this Python running `-m mwmbl.crawl` from the checkout)",
+    )
     parser.add_argument("--memory-per-process-mb", type=int, default=DEFAULT_MEMORY_PER_PROCESS_MB)
     parser.add_argument("--no-memory-check", action="store_true", help="Run combinations that look too big for RAM")
 
@@ -533,10 +537,19 @@ def run(args: argparse.Namespace) -> int:
         crawler = compose
     else:
         # Imported only here: it needs psutil, redis and python-dotenv, and the compose runner nothing.
-        from mwmbl.crawler.benchmark_process import process_crawler
+        try:
+            from mwmbl.crawler.benchmark_process import process_crawler
+        except ModuleNotFoundError as error:
+            raise SystemExit(
+                f"--runner process: {error}. From a checkout of mwmbl, run `pip3 install -r "
+                "deploy/crawler/benchmark-requirements.txt`, then `python3 -m mwmbl.crawler.benchmark "
+                "--runner process`. The crawler it starts needs mwmbl installed with its Rust extension; "
+                "`uv run mwmbl benchmark --runner process` does both."
+            ) from error
 
         env_file = args.env_file or args.compose_file.parent / ".env"
-        crawler = process_crawler(shlex.split(args.crawler_command), env_file)
+        command = None if args.crawler_command is None else shlex.split(args.crawler_command)
+        crawler = process_crawler(command, env_file)
     benchmark = Benchmark(
         args.processes,
         args.threads,

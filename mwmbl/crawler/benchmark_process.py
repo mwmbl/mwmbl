@@ -7,6 +7,7 @@ it against their Compose crawler without installing anything.
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from mwmbl.crawler.benchmark import FETCHES_FIELD, FETCHES_KEY
 
 CRAWLER_EXECUTABLES = ("mwmbl-crawl", "mwmbl.crawl")
 STOP_TIMEOUT_SECONDS = 60
+CHECKOUT = Path(__file__).resolve().parents[2]
+# The interpreter the benchmark runs under, so the crawler sees the packages it was installed with.
+DEFAULT_COMMAND = [sys.executable, "-m", "mwmbl.crawl"]
 
 
 class ProcessCrawler:
@@ -47,7 +51,11 @@ class ProcessCrawler:
         )
 
     def start(self, env: dict[str, str]) -> None:
-        self.process = subprocess.Popen(self.command, env={**os.environ, **env}, start_new_session=True)
+        # So `mwmbl` imports whether or not it was pip-installed.
+        python_path = os.pathsep.join(filter(None, [str(CHECKOUT), os.environ.get("PYTHONPATH")]))
+        self.process = subprocess.Popen(
+            self.command, env={**os.environ, "PYTHONPATH": python_path, **env}, start_new_session=True
+        )
 
     def ensure_running(self) -> None:
         assert self.process is not None
@@ -89,8 +97,8 @@ class ProcessCrawler:
         """Nothing to restore: a running crawler is refused up front, not stopped."""
 
 
-def process_crawler(command: list[str], env_file: Path) -> ProcessCrawler:
+def process_crawler(command: list[str] | None, env_file: Path) -> ProcessCrawler:
     """The child inherits this process's environment, so the settings file is loaded into it.
     Variables already in the environment win."""
     load_dotenv(env_file)
-    return ProcessCrawler(command)
+    return ProcessCrawler(DEFAULT_COMMAND if command is None else command)
