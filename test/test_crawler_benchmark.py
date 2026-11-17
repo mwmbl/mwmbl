@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -737,3 +738,22 @@ def test_the_mwmbl_command_runs_the_benchmark_subcommand(monkeypatch):
     assert (received[0].processes, received[0].threads) == ([2], [5])
     with pytest.raises(SystemExit):
         cli.main([])
+
+
+def test_the_shell_script_in_a_checkout_runs_the_benchmark_beside_it_and_does_not_download(tmp_path):
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    docker = stub_bin / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
+    script = Path(benchmark.__file__).parents[2] / "deploy" / "crawler" / "benchmark.sh"
+    environment = {
+        **os.environ,
+        "PATH": f"{stub_bin}:{os.environ['PATH']}",
+        "MWMBL_BENCHMARK_URL": "file:///nonexistent",
+    }
+
+    completed = subprocess.run(["sh", str(script)], cwd=tmp_path, env=environment, capture_output=True, text=True)
+
+    assert "directory you start your crawler from" in completed.stderr
+    assert "could not download" not in completed.stderr

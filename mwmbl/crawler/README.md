@@ -29,7 +29,7 @@ make optimize
 make optimize ARGS='--exhaustive --processes 1,2,4 --threads 25,50,100 --duration 60s'
 ```
 
-It needs only Docker and `python3` 3.9 or later: `benchmark.py` uses nothing but the standard library, so nothing is installed or built, and `make optimize` runs it with the system `python3`. Without a checkout, run `deploy/crawler/benchmark.sh` in the directory the crawler is started from; it downloads `benchmark.py` and runs it, passing on its arguments:
+It needs only Docker and `python3` 3.9 or later: `benchmark.py` uses nothing but the standard library, so nothing is installed or built, and `make optimize` runs it with the system `python3`. Run `deploy/crawler/benchmark.sh` in the directory the crawler is started from: in a checkout it runs the `benchmark.py` beside it, and piped from `curl` it downloads `benchmark.py` from `main` first. Either way it passes on its arguments:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh

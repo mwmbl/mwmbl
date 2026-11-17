@@ -3,6 +3,7 @@
 # Needs only what running the crawler needs, plus python3 (3.9 or later), which Linux and macOS
 # ship. Run it in the directory you start your crawler from:
 #
+#   ./deploy/crawler/benchmark.sh                  (in a checkout: runs the benchmark.py beside it)
 #   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --exhaustive
 #
@@ -22,8 +23,14 @@ main() {
     python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || fail "needs python3 3.9 or later."
     command -v docker >/dev/null 2>&1 || fail "needs docker, which runs the crawler."
     docker compose version >/dev/null 2>&1 || fail "needs 'docker compose' (the Compose v2 plugin)."
-    command -v curl >/dev/null 2>&1 || fail "needs curl."
 
+    # Piped from curl, $0 is the shell and not a file. In a checkout the file beside this one is
+    # the version that goes with it, where the one on main may be older.
+    if [ -f "$0" ] && [ -f "$(dirname -- "$0")/../../mwmbl/crawler/benchmark.py" ]; then
+        exec python3 "$(dirname -- "$0")/../../mwmbl/crawler/benchmark.py" "$@"
+    fi
+
+    command -v curl >/dev/null 2>&1 || fail "needs curl."
     script="$(mktemp "${TMPDIR:-/tmp}/mwmbl-benchmark.XXXXXX")"
     trap 'rm -f "$script"' EXIT
     trap 'exit 130' INT TERM
