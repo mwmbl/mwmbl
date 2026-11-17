@@ -36,14 +36,17 @@ fi
 # The container runs as the image's `mwmbl` user, not one of the --chown presets, so the
 # directory's owner is set by hand once (README.md, first-time setup).
 dokku storage:ensure-directory --chown false "$APP"
-if ! dokku storage:list "$APP" | grep -qF "$STORAGE:/data"; then
+# Captured first: with pipefail, grep -q exiting early could fail the pipeline.
+mounts=$(dokku storage:list "$APP")
+if ! grep -qF "$STORAGE:/data" <<<"$mounts"; then
 	dokku storage:mount "$APP" "$STORAGE:/data"
 fi
 
 dokku domains:set "$APP" "$APP"
 # The image EXPOSEs 8080, which Dokku would otherwise publish as port 8080 on the host.
 # Only set it once: letsencrypt adds https:443:8080 later, and ports:set would drop it.
-if ! dokku ports:report "$APP" --ports-map | grep -qw 'http:80:8080'; then
+ports=$(dokku ports:report "$APP" --ports-map)
+if ! grep -qw 'http:80:8080' <<<"$ports"; then
 	dokku ports:set "$APP" http:80:8080
 fi
 
