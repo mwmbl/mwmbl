@@ -740,11 +740,11 @@ def test_the_mwmbl_command_runs_the_benchmark_subcommand(monkeypatch):
         cli.main([])
 
 
-def test_the_shell_script_in_a_checkout_runs_the_benchmark_beside_it_and_does_not_download(tmp_path):
+def run_the_shell_script(tmp_path, docker_script):
     stub_bin = tmp_path / "bin"
     stub_bin.mkdir()
     docker = stub_bin / "docker"
-    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.write_text(f"#!/bin/sh\n{docker_script}\n")
     docker.chmod(0o755)
     script = Path(benchmark.__file__).parents[2] / "deploy" / "crawler" / "benchmark.sh"
     environment = {
@@ -752,8 +752,33 @@ def test_the_shell_script_in_a_checkout_runs_the_benchmark_beside_it_and_does_no
         "PATH": f"{stub_bin}:{os.environ['PATH']}",
         "MWMBL_BENCHMARK_URL": "file:///nonexistent",
     }
+    return subprocess.run(["sh", str(script)], cwd=tmp_path, env=environment, capture_output=True, text=True)
 
-    completed = subprocess.run(["sh", str(script)], cwd=tmp_path, env=environment, capture_output=True, text=True)
+
+def test_the_shell_script_in_a_checkout_runs_the_benchmark_beside_it_and_does_not_download(tmp_path):
+    completed = run_the_shell_script(tmp_path, "exit 0")
 
     assert "directory you start your crawler from" in completed.stderr
     assert "could not download" not in completed.stderr
+
+
+def test_the_shell_script_tells_a_user_outside_the_docker_group_how_to_join_it(tmp_path):
+    docker_script = (
+        '[ "$1" = info ] && { echo "permission denied while trying to connect to the docker API" >&2; exit 1; }; exit 0'
+    )
+
+    completed = run_the_shell_script(tmp_path, docker_script)
+
+    assert completed.returncode == 1
+    assert "usermod -aG docker" in completed.stderr
+    assert "directory you start your crawler from" not in completed.stderr
+
+
+def test_the_shell_script_says_when_the_docker_daemon_is_not_running(tmp_path):
+    docker_script = '[ "$1" = info ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }; exit 0'
+
+    completed = run_the_shell_script(tmp_path, docker_script)
+
+    assert completed.returncode == 1
+    assert "Is it running?" in completed.stderr
+    assert "Cannot connect to the Docker daemon" in completed.stderr
