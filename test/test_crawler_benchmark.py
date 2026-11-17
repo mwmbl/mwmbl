@@ -573,7 +573,7 @@ def test_the_defaults_are_the_documented_grid_and_timings():
     args = parse()
 
     assert (args.processes, args.threads) == ([1, 2, 3, 4, 5], [10, 25, 50, 100])
-    assert (args.warmup, args.duration, args.runner, args.exhaustive) == (10, 30, "compose", False)
+    assert (args.warmup, args.duration, args.runner, args.exhaustive) == (300, 1800, "compose", False)
     assert args.output.name.startswith("benchmark-results-fetches-") and args.output.suffix == ".csv"
 
 

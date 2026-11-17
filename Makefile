@@ -61,7 +61,7 @@ help:
 	@echo "  coverage-quick Run tests with coverage report (terminal only, faster)"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
-	@echo "  optimize       Find the best CRAWLER_WORKERS and CRAWL_THREADS for this machine (about 10 minutes)"
+	@echo "  optimize       Find the best CRAWLER_WORKERS and CRAWL_THREADS for this machine (hours: run it overnight)"
 	@echo "                 Extra flags: make optimize ARGS='--exhaustive'. 'make crawler' is the same."
 	@echo ""
 	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
@@ -162,7 +162,7 @@ run-background:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
 		uv run python manage.py process_tasks --settings=$(DJANGO_SETTINGS_MODULE)
 
-# Stops your crawler, tries settings on it for a few seconds each, and starts it again as it was.
+# Stops your crawler, tries settings on it for 35 minutes each, and starts it again as it was.
 # .env is read from beside docker-compose.yml, so there is nothing to export first.
 optimize:
 	uv run mwmbl benchmark $(ARGS)

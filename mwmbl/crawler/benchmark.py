@@ -6,8 +6,14 @@ combination that fetched the most pages a minute.
 
 What is measured is the crawler's own count of fetches, `crawl-domain-overlap fetches` in its
 Redis, which every worker adds its batch to as the batch finishes. Nothing is read from the
-Mwmbl server: submissions reach it minutes after the fetches that produced them, so measuring
-what it indexed needs windows of half an hour, where fetch throughput settles in seconds.
+Mwmbl server, so no API key is needed.
+
+It has to run for a long time to mean anything. The crawler starts its workers five seconds
+apart, after downloading the blocklists, and its indexing and sync with the main index only
+begin once there are batches to index, and compete with the workers for CPU and network from
+then on. A run of seconds measures a crawler that is not yet doing what it does for the rest of
+its life. The defaults are a 5 minute warmup and a 30 minute window per configuration, which
+makes a full search a job for an evening, and `--exhaustive` one for overnight.
 
 Batches arrive in bursts, so the window opens at the first batch to finish after warmup and
 closes at the first one to finish after the duration has passed. Both ends are then exact
@@ -47,8 +53,8 @@ from redis import Redis
 
 DEFAULT_PROCESS_COUNTS = [1, 2, 3, 4, 5]
 DEFAULT_THREAD_COUNTS = [10, 25, 50, 100]
-DEFAULT_WARMUP = "10s"
-DEFAULT_DURATION = "30s"
+DEFAULT_WARMUP = "5m"
+DEFAULT_DURATION = "30m"
 
 # How much more a configuration has to fetch than the one before it to be worth climbing past.
 # Below this, two configurations are within the noise of a run this short, and the cheaper wins.
@@ -70,8 +76,10 @@ STOP_TIMEOUT_SECONDS = 60
 # The crawler is PID 1 in its container and has no SIGTERM handler, so the default ten seconds
 # of grace is always spent waiting for a signal that is ignored. Everything durable is in Redis.
 CONTAINER_STOP_GRACE_SECONDS = 2
-PROGRESS_INTERVAL_SECONDS = 10
-POLL_INTERVAL_SECONDS = 1
+PROGRESS_INTERVAL_SECONDS = 60
+# Each poll of the counter is a docker exec, and a window is minutes long, so a second's resolution
+# would be a lot of process spawns for an error of a fraction of a percent.
+POLL_INTERVAL_SECONDS = 5
 # A crawler that has finished no batch in this many durations is not slow, it is stuck.
 GIVE_UP_AFTER_DURATIONS = 6
 
@@ -435,10 +443,14 @@ class Benchmark:
         last_seen = self.crawler.fetches()
         opened: tuple[float, int] | None = None
         window_end = 0.0
+        next_progress_at = 0.0
         while self.clock() < give_up_at:
             self.crawler.ensure_running()
             self.sleep(POLL_INTERVAL_SECONDS)
             now = self.clock()
+            if opened is not None and now >= next_progress_at:
+                print(f"  measuring: {format_duration(round(max(window_end - now, 0)))} left", flush=True)
+                next_progress_at = now + PROGRESS_INTERVAL_SECONDS
             fetches = self.crawler.fetches()
             if fetches == last_seen:
                 continue
@@ -446,7 +458,6 @@ class Benchmark:
             if opened is None:
                 opened = (now, fetches)
                 window_end = now + self.duration_seconds
-                print("  measuring", flush=True)
             elif now >= window_end:
                 opened_at, opened_fetches = opened
                 return (fetches - opened_fetches) / (now - opened_at) * 60
@@ -608,7 +619,9 @@ def run(args: argparse.Namespace) -> int:
         None if args.no_memory_check else args.memory_per_process_mb,
     )
     most = len(all_configurations(args.processes, args.threads))
-    print(f"Up to {most} configurations, each about {format_duration(args.warmup + args.duration)} or more")
+    each = args.warmup + args.duration
+    longest = format_duration(most * each)
+    print(f"Up to {most} configurations of at least {format_duration(each)} each: up to {longest} if all are tried")
 
     signal.signal(signal.SIGTERM, interrupt)
     results = benchmark.run()
