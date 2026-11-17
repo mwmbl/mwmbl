@@ -91,6 +91,7 @@ urlpatterns = [
     path("social/connect/", social_views.connect, name="social_connect"),
     path("social/connect/<int:pk>/disconnect/", social_views.disconnect, name="social_disconnect"),
     path("social/privacy/", social_views.privacy, name="social_privacy"),
+    path("social/search/", social_views.search, name="social_search"),
     # TODO: these are the old APIs, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),
     path("crawler/", crawler.create_router(ranker, version="0.1").urls),

@@ -1,4 +1,5 @@
-"""The pages for Mwmbl's hosted Mwmbl Social instance: server sign-up and its privacy policy.
+"""The pages for Mwmbl's hosted Mwmbl Social instance: server sign-up, its privacy policy, and
+search over the posts it has indexed.
 
 social.mwmbl.org's provider_info points fediverse admins here: its sign_in_url and
 root_redirect at /social/connect/, and its privacy_policy_url at /social/privacy/.
@@ -175,3 +176,23 @@ def disconnect(request, pk: int):
 
 def privacy(request):
     return render(request, "social/privacy.html", {"footer_links": settings.FOOTER_LINKS})
+
+
+def search(request):
+    query = request.GET.get("q", "").strip()
+    posts = []
+    unavailable = False
+    if query:
+        try:
+            posts = social.search_posts(query)
+        except httpx.HTTPError as error:
+            # Not the exception itself: its message carries the URL, and with it the query.
+            logger.warning("Mwmbl Social post search failed with %s", type(error).__name__)
+            unavailable = True
+    context = {
+        "query": query,
+        "posts": posts,
+        "unavailable": unavailable,
+        "footer_links": settings.FOOTER_LINKS,
+    }
+    return render(request, "social/search.html", context, status=503 if unavailable else 200)
