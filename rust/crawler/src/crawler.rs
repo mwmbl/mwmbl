@@ -21,7 +21,7 @@ use crate::{
         API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    domainlinkdb::DomainLinkDatabase,
+    bloomdb::BloomDatabase,
     retrieve::crawl,
     robots::RobotCache,
     url_queue::SharedURLQueue,
@@ -34,7 +34,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
-    domainlinkdb: Arc<DomainLinkDatabase>,
+    domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
 }
 
@@ -44,7 +44,7 @@ impl Crawler {
         let curated_domains = CuratedDomains::new(&params.remote_server);
         let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
-        let domainlinkdb = DomainLinkDatabase::new(&params.home).await?;
+        let domainlinkdb = BloomDatabase::new(&params.home).await?;
 
         Ok(Crawler {
             url_queue,

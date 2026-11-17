@@ -4,6 +4,7 @@ use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 use ordered_float::OrderedFloat;
 
 pub static INDEX_NAME: &str = "crawl-index.tinysearch";
+pub static BLOOM_NAME: &str = "crawl-bloom";
 pub static NUM_PAGES: usize = 100_000;
 pub static DATA_DIR: &str = ".mwmbl";
 
@@ -42,6 +43,8 @@ pub static MAX_DOMAIN_DELAY: Duration = MAX_BLOCK_COOL_OFF;
 
 pub static BLOCK_COOL_OFF: Duration = Duration::from_mins(1);
 
-pub static NUM_DOMAINS_IN_BLOOM_FILTER: usize = 100_000;
+// much bigger than python to because we keep a single of it
+pub static NUM_DOMAINS_IN_BLOOM_FILTER: usize = 10_000_000;
 
 pub static LINK_DOMAIN_DB_SAVE_INTERVAL: Duration = Duration::from_mins(5);
+pub static URL_DB_SAVE_INTERVAL: Duration = Duration::from_mins(5);

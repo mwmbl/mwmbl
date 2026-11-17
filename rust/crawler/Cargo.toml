@@ -10,6 +10,7 @@ servo = ["dep:servo-fetch"]
 [dependencies]
 anyhow = "1.0.104"
 async-trait = "0.1.92"
+chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_complete = "4.6.11"
 dom_query = { version = "0.29.0", features = ["atomic", "hashbrown", "mini_selector"] }

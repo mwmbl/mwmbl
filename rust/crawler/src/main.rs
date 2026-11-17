@@ -13,7 +13,7 @@
 mod constants;
 mod crawler;
 mod curated_domains;
-mod domainlinkdb;
+mod bloomdb;
 mod path_creation;
 mod retrieve;
 mod robots;

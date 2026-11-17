@@ -1,3 +1,4 @@
+use chrono::Utc;
 use dom_query::Document;
 use kreuzberg::{
     ExtractionConfig, OutputFormat, core::mime, extract_bytes,
@@ -30,44 +31,44 @@ use servo_fetch::{FetchOptions, SessionBrokerConfig, VisibilityPolicy, extract::
 #[derive(Debug)]
 pub enum CrawlResults {
     NoDomainError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
     },
     RobotsUnavailableError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         err: anyhow::Error,
     },
     RobotsDeniedError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
     },
     AbortError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         err: anyhow::Error,
     },
     NoResponseTextError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         status: StatusCode,
         resolved_url: Url,
     },
     HtmlParsingError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         resolved_url: Url,
         status: StatusCode,
         err: anyhow::Error,
     },
     ParagraphParsingError {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         status: StatusCode,
         resolved_url: Url,
     },
     CrawlContent {
-        timestamp: Instant,
+        timestamp: chrono::DateTime<Utc>,
         url: Url,
         status: StatusCode,
         resolved_url: Url,
@@ -188,7 +189,7 @@ pub async fn crawl(
     #[cfg(feature = "servo")] user_agent: String,
 ) -> (ClaimedUrl, CrawlResults) {
     let url = claimed_url.url().clone();
-    let timestamp = Instant::now();
+    let timestamp = Utc::now();
     let Some(domain) = url.domain() else {
         return (claimed_url, CrawlResults::NoDomainError { timestamp, url });
     };
@@ -243,7 +244,7 @@ fn sanitize(
     html: &str,
     resolved_url: Url,
     status: StatusCode,
-    timestamp: Instant,
+    timestamp: chrono::DateTime<Utc>,
     url: Url,
 ) -> CrawlResults {
     let read_options = ReadabilityOptions::builder()
