@@ -134,10 +134,11 @@ def parse_duration(text: str) -> int:
 
 
 def format_duration(seconds: int) -> str:
-    for unit_seconds, unit in ((3600, "h"), (60, "m")):
-        if seconds and seconds % unit_seconds == 0:
-            return f"{seconds // unit_seconds}{unit}"
-    return f"{seconds}s"
+    """Like 1h 2m 33s, leaving out the units that are zero: 30m, 1m 29s, 45s."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = [f"{value}{unit}" for value, unit in ((hours, "h"), (minutes, "m"), (seconds, "s")) if value]
+    return " ".join(parts) or "0s"
 
 
 def all_configurations(process_counts: list[int], thread_counts: list[int]) -> list[Configuration]:
