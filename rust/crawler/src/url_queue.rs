@@ -15,7 +15,7 @@ use ordered_float::OrderedFloat;
 use priority_queue::DoublePriorityQueue;
 use rand::{RngExt, seq::IndexedRandom};
 use reqwest::Url;
-use scc::{HashCache, HashMap};
+use scc::HashMap;
 use tokio::{
     spawn,
     sync::{Mutex, OwnedMutexGuard, RwLock},
@@ -41,16 +41,31 @@ type UrlQueue = DoublePriorityQueue<Url, OrderedFloat<f32>>;
 pub struct SharedURLQueue<T: BlacklistProvider, const S: usize = 1000> {
     blacklist_provider: T,
     curated_domains: CuratedDomains,
-    domain_claims: Arc<HashCache<String, Arc<Mutex<()>>>>,
+    domain_claims: Arc<HashMap<String, Arc<Mutex<String>>>>,
     domain_urls: Arc<HashMap<String, UrlQueue>>,
     domain_scores: Arc<[RwLock<DomainQueue>; S]>,
     build_hasher: Arc<RandomState>,
 }
+pub struct ClaimedDomain {
+    domain_lock: OwnedMutexGuard<String>,
+    domain_claims: Weak<HashMap<String, Arc<Mutex<String>>>>,
+}
+
+impl Drop for ClaimedDomain {
+    fn drop(&mut self) {
+        let domain = self.domain_lock.to_owned();
+        if let Some(domain_claims) = self.domain_claims.upgrade(){
+            spawn(async move {
+                domain_claims.remove_if_async(&domain, |v| v.try_lock().is_ok()).await;
+            });
+        }
+        
+    }
+}
 
 pub struct ClaimedUrl {
-    _domain_lock: OwnedMutexGuard<()>,
+    claim: ClaimedDomain,
     url: reqwest::Url,
-    domain_claims: Weak<HashCache<String, Arc<Mutex<()>>>>,
     released: bool,
 }
 
@@ -63,16 +78,16 @@ impl ClaimedUrl {
         task::spawn(async move {
             let mut claimed_url = self;
             if let Some(domain) = claimed_url.url.domain() {
-                let other_claim: Option<(OwnedMutexGuard<()>, String)> =
+                let other_claim: Option<ClaimedDomain> =
                     if let Some(resolved_domain) = resolved_domain
                         && resolved_domain != domain
-                        && let Some(claims) = claimed_url.domain_claims.upgrade()
+                        && let Some(claims) = claimed_url.claim.domain_claims.upgrade()
                     {
                         let res = arc_claim_domain(claims, &resolved_domain).await;
                         if res.is_err() {
                             eprintln!("Error: Cannot lock resolved_domain.");
                         }
-                        res.ok().map(|lock| (lock, resolved_domain))
+                        res.ok()
                     } else {
                         None
                     };
@@ -97,25 +112,28 @@ impl Drop for ClaimedUrl {
 }
 
 async fn arc_claim_domain(
-    domain_claims: Arc<HashCache<String, Arc<Mutex<()>>>>,
+    domain_claims: Arc<HashMap<String, Arc<Mutex<String>>>>,
     domain: &str,
-) -> Result<OwnedMutexGuard<()>, tokio::sync::TryLockError> {
+) -> Result<ClaimedDomain, tokio::sync::TryLockError> {
     let entry = domain_claims.entry_async(domain.to_owned()).await;
-    match entry {
-        scc::hash_cache::Entry::Occupied(occupied_entry) => {
+    let mutex = match entry {
+        scc::hash_map::Entry::Occupied(occupied_entry) => {
             let mutex = occupied_entry.get().clone();
-            mutex.try_lock_owned()
+            mutex.try_lock_owned()?
         }
-        scc::hash_cache::Entry::Vacant(vacant_entry) => {
-            let mutex = Arc::new(Mutex::new(()));
+        scc::hash_map::Entry::Vacant(vacant_entry) => {
+            let mutex = Arc::new(Mutex::new(domain.to_owned()));
             vacant_entry
-                .put_entry(mutex)
-                .1
+                .insert_entry(mutex)
                 .get()
                 .clone()
-                .try_lock_owned()
+                .try_lock_owned()?
         }
-    }
+    };
+    Ok(ClaimedDomain {
+        domain_lock: mutex,
+        domain_claims: Arc::downgrade(&domain_claims),
+    })
 }
 
 impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
@@ -123,7 +141,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         SharedURLQueue {
             blacklist_provider,
             domain_urls: Arc::new(HashMap::default()),
-            domain_claims: Arc::new(HashCache::with_capacity(256, 65536)),
+            domain_claims: Arc::new(HashMap::default()),
             curated_domains,
             domain_scores: Arc::new(std::array::from_fn(|_| RwLock::new(DomainQueue::new()))),
             build_hasher: Arc::new(RandomState::new()),
@@ -133,7 +151,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     pub async fn claim_domain(
         &self,
         domain: &str,
-    ) -> Result<OwnedMutexGuard<()>, tokio::sync::TryLockError> {
+    ) -> Result<ClaimedDomain, tokio::sync::TryLockError> {
         arc_claim_domain(self.domain_claims.clone(), domain).await
     }
 
@@ -174,10 +192,9 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                     && let Ok(domain_lock) = self.claim_domain(random_domain).await
                 {
                     return ClaimedUrl {
-                        _domain_lock: domain_lock,
                         url,
-                        domain_claims: Arc::downgrade(&self.domain_claims),
                         released: false,
+                        claim: domain_lock,
                     };
                 }
             } else if p_url_group
@@ -256,10 +273,9 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         {
             if let Some((url, _)) = urls.pop_max() {
                 return Some(ClaimedUrl {
-                    _domain_lock: domain_lock,
                     url,
-                    domain_claims: Arc::downgrade(&self.domain_claims),
                     released: false,
+                    claim: domain_lock,
                 });
             }
             let _ = urls.remove();
@@ -340,13 +356,16 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         let db = db.clone();
         spawn(async move {
             let lock = match domain_claims.entry_async(domain.clone()).await {
-                scc::hash_cache::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
-                scc::hash_cache::Entry::Vacant(vacant_entry) => {
-                    let mutex = Arc::new(Mutex::new(()));
-                    vacant_entry.put_entry(mutex).1.get().clone()
+                scc::hash_map::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
+                scc::hash_map::Entry::Vacant(vacant_entry) => {
+                    let mutex = Arc::new(Mutex::new(domain.clone()));
+                    vacant_entry.insert_entry(mutex).get().clone()
                 }
             };
-            let lock = lock.lock().await;
+            let lock = ClaimedDomain {
+                domain_lock: lock.lock_owned().await,
+                domain_claims: Arc::downgrade(&domain_claims),
+            };
 
             let scores = urls.iter().map(|url| {
                 let time_since_crawled = url.last_crawled().map_or(MAX_TIME_DELTA, |time| {

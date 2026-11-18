@@ -1,7 +1,7 @@
 use std::{
     cmp::{max, min},
     collections::VecDeque,
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicU64, AtomicUsize, Ordering}},
     time::Duration,
 };
 
@@ -30,18 +30,19 @@ use crate::{
 pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     url_queue: SharedURLQueue<T>,
     // blacklist: T,
-    username: Arc<RwLock<Option<String>>>,
+    //username: Arc<RwLock<Option<String>>>,
     // error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
-    to_submit: Arc<RwLock<VecDeque<CrawlResult>>>,
+    //to_submit: Arc<RwLock<VecDeque<CrawlResult>>>,
+    count: Arc<AtomicUsize>
 }
 
 impl Crawler {
     pub async fn new(params: CrawlerParams) -> anyhow::Result<Crawler> {
-        let username = Arc::new(RwLock::new(None));
+        //let username = Arc::new(RwLock::new(None));
         let curated_domains = CuratedDomains::new(&params.remote_server);
         let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
@@ -50,13 +51,14 @@ impl Crawler {
         Ok(Crawler {
             url_queue,
             // blacklist,
-            username,
+            //username,
             // error_last_reported_at: Arc::new(HashMap::default()),
             robots_cache: RobotCache::new(),
             crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
             params: Arc::new(params),
             domainlinkdb,
-            to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            //to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            count: Arc::new(AtomicUsize::new(0))
         })
     }
 
@@ -69,8 +71,7 @@ impl Crawler {
             .read_timeout(TIMEOUT)
             .user_agent(self.crawl_user_agent())
             .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .pool_idle_timeout(Duration::ZERO)
-            .pool_max_idle_per_host(0)
+            .hickory_dns(true)
             .build()?)
     }
 
@@ -86,7 +87,8 @@ impl Crawler {
             let user_agent = self.crawl_user_agent();
             let mut url_queue = self.url_queue.clone();
             let db = self.domainlinkdb.clone();
-            let to_submit = self.to_submit.clone();
+            //let to_submit = self.to_submit.clone();
+            let count = self.count.clone();
 
             spawn(async move {
                 let url = url_queue.get_url().await;
@@ -122,13 +124,14 @@ impl Crawler {
                 url_queue.record_url_in_database(db, &result).await;
 
                 if matches!(result, CrawlResult::CrawlContent { .. }) {
-                    let mut lock = to_submit.write().await;
+                    //let mut lock = to_submit.write().await;
+                    let count = count.fetch_add(1, Ordering::SeqCst);
                     println!(
                         "speed: {}/s | crawled {}",
-                        ((lock.len() as u128) + 1) / (1 + (start.elapsed_millis() / 1000)),
+                        ((count as u128) + 1) / (1 + (start.elapsed_millis() / 1000)),
                         result.url().as_str()
                     );
-                    lock.push_back(result);
+                    //lock.push_back(result);
                 }
             });
 
