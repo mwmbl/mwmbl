@@ -233,3 +233,6 @@ devdata/moderation_bakeoff/
 vendor/
 # Redis snapshot written by a local redis-server started in the repo
 dump.rdb
+
+# Crawler benchmarks
+benchmark-*.csv
