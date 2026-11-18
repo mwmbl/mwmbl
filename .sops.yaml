@@ -1,0 +1,6 @@
+# Which keys SOPS encrypts new files to. Decrypting needs one of the matching private keys.
+creation_rules:
+  - path_regex: deploy/social/secrets\.enc\.env$
+    # PLACEHOLDER: replace with the operators' age public keys (comma-separated), from
+    # `age-keygen`. Until then, sops refuses to create the file. See deploy/social/README.md.
+    age: age1-PLACEHOLDER-replace-with-the-operators-age-public-keys

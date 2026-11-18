@@ -1,0 +1,56 @@
+# Deploys a published Mwmbl Social image to social.mwmbl.org. Run by hand only: the image is
+# built in the Mwmbl Social repository, so a push here says nothing about it.
+# See deploy/social/README.md.
+
+name: Deploy Mwmbl Social
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of ghcr.io/mwmbl/social to deploy: main, or sha-<commit>"
+        required: true
+        default: main
+
+# Two deploys at once would race to replace the single container.
+concurrency: deploy-social
+
+# The job only pulls a public image and uses the SSH key secret, so it needs no token scopes.
+permissions: {}
+
+jobs:
+  deploy:
+    name: Deploy social.mwmbl.org
+    runs-on: ubuntu-latest
+
+    steps:
+      # Dokku skips a deploy whose image reference hasn't changed, and wouldn't pull a moved
+      # tag such as `main` anyway, so deploy the digest the tag points to now.
+      - name: Resolve the tag to a digest
+        id: image
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! $TAG =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "Not an image tag: $TAG" >&2
+            exit 1
+          fi
+          docker pull "ghcr.io/mwmbl/social:$TAG"
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/mwmbl/social:$TAG")
+          echo "Deploying $TAG as $digest"
+          echo "ref=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Dokku server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan mwmbl.org >> ~/.ssh/known_hosts
+
+      - name: Deploy social.mwmbl.org
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: ssh dokku@mwmbl.org git:from-image social.mwmbl.org "$IMAGE"
