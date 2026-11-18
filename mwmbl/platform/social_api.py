@@ -2,6 +2,9 @@
 
 Registrations: a logged-in user connects a fediverse server to it, then sees and disconnects the
 servers they connected. Mwmbl calls the instance's admin API on their behalf (mwmbl.social).
+
+Search: anyone searches the posts it indexed. Mwmbl asks it at query time and caches the answer
+for minutes only, never copying posts into its own index, so withdrawn consent applies here too.
 """
 
 from dataclasses import dataclass, field
@@ -13,13 +16,19 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.http import HttpResponse
 from django.utils import timezone
-from ninja import Router
+from ninja import Query, Router
 from ninja_jwt.authentication import JWTAuth
 
 from mwmbl import social
 from mwmbl.exceptions import InvalidRequest
 from mwmbl.models import SocialRegistration
-from mwmbl.platform.schemas import SocialError, SocialRegistrationRequest, SocialRegistrationResponse
+from mwmbl.platform.schemas import (
+    SocialError,
+    SocialPostResponse,
+    SocialRegistrationRequest,
+    SocialRegistrationResponse,
+)
+from mwmbl.search_callers import client_network
 
 logger = getLogger(__name__)
 
@@ -221,3 +230,39 @@ def _response(registration: SocialRegistration, live: LiveStatus) -> SocialRegis
         created_at=registration.created_at,
         disconnected_at=registration.disconnected_at,
     )
+
+
+@router.get(
+    "/search",
+    auth=None,
+    response={200: list[SocialPostResponse], frozenset({429, 503}): SocialError},
+    summary="Search fediverse posts",
+    description="Public posts whose authors opted in to search, best first, from Mwmbl Social. Results are "
+    f"cached for {settings.SOCIAL_SEARCH_CACHE_SECONDS // 60} minutes, so a deleted or withdrawn post can show "
+    "for that long. Don't let other search engines index a page showing them, and mark their links "
+    '`rel="ugc nofollow"`. 429 (with `retry_after` and Retry-After) past '
+    f"{settings.SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE} searches a minute from one network; 503 if Mwmbl Social "
+    "didn't answer.",
+)
+def search_posts(
+    request,
+    response: HttpResponse,
+    q: str = Query(max_length=200),
+    limit: int = Query(20, ge=1, le=100),
+):
+    query = q.strip()
+    if not query:
+        return 200, []
+    wait = social.search_wait(client_network(request))
+    if wait is not None:
+        response["Retry-After"] = str(wait)
+        message = "Too many searches. Try again in a minute."
+        return 429, SocialError(code="search_limit", message=message, retry_after=wait)
+    try:
+        posts = social.search_posts(query, limit)
+    except httpx.HTTPError as error:
+        # Not the exception itself: its message carries the URL, and with it the query.
+        logger.warning("Mwmbl Social post search failed with %s", type(error).__name__)
+        message = "Social search is unavailable right now. Try again in a few minutes."
+        return 503, SocialError(code="social_unavailable", message=message)
+    return 200, posts

@@ -1,4 +1,5 @@
-"""Connecting fediverse servers to Mwmbl Social, Mwmbl's hosted FASP at social.mwmbl.org.
+"""Mwmbl Social, Mwmbl's hosted FASP at social.mwmbl.org: connecting fediverse servers to it,
+and searching the posts it has indexed.
 
 Mwmbl calls the instance's admin API server-side, with an admin token, on behalf of a logged-in
 user (see PLAN.md, "Deployment and adoption", in github.com/mwmbl/social). There is no
@@ -7,8 +8,11 @@ proves consent. The rate limits here are what stop anyone filling other servers'
 with pending registrations.
 """
 
+import hashlib
 import re
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import httpx
 from django.conf import settings
@@ -22,6 +26,9 @@ REFUSAL_STATUSES = (400, 409, 502)
 ADDRESS_EXAMPLE = "Enter your server's domain name, for example https://mastodon.example."
 # Every top-level domain starts with a letter, punycode ones (xn--) included.
 TOP_LEVEL_LABEL = re.compile(r"[a-z][a-z0-9-]*")
+# Profile paths of Mastodon and its forks (/users/name, /@name) and Lemmy (/u/name).
+# Only plain usernames: anything else (spaces, bidi overrides) would make a convincing fake.
+PROFILE_PATH = re.compile(r"/(?:users/|u/|@)([A-Za-z0-9_.-]+)/?")
 # Names that only resolve inside a network: mDNS, ICANN's reserved private-use name, a
 # Kubernetes cluster's (svc.cluster.local) and common home and office ones.
 PRIVATE_TOP_LEVEL_LABELS = {"local", "internal", "localhost", "localdomain", "lan", "home", "arpa", "corp", "intranet"}
@@ -68,16 +75,23 @@ def server_url_and_host(entered: str) -> tuple[str, str]:
     return server_url, host
 
 
+def _window_wait(key: str, limit: int, window_seconds: int) -> int | None:
+    """Count one use in the current fixed window: None if it is within `limit`, otherwise the
+    seconds until the window ends."""
+    now = int(time.time())
+    window = now // window_seconds
+    window_key = f"{key}:{window}"
+    cache.add(window_key, 0, timeout=window_seconds)
+    if cache.incr(window_key) <= limit:
+        return None
+    return (window + 1) * window_seconds - now
+
+
 def user_attempt_wait(user_id: int) -> int | None:
     """Count an attempt by this user: None if it is within their daily limit, otherwise the
     seconds until the day's window ends and they may try again."""
-    now = int(time.time())
-    window = now // DAY_SECONDS
-    key = f"social:connect:user:{user_id}:{window}"
-    cache.add(key, 0, timeout=DAY_SECONDS)
-    if cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY:
-        return None
-    return (window + 1) * DAY_SECONDS - now
+    limit = settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY
+    return _window_wait(f"social:connect:user:{user_id}", limit, DAY_SECONDS)
 
 
 def host_attempt_wait(host: str) -> int | None:
@@ -127,3 +141,82 @@ def revoke(registration_id: int) -> None:
     # 404: it is already gone, replaced by a newer registration of the same server.
     if response.status_code != 404:
         response.raise_for_status()
+
+
+@dataclass(frozen=True)
+class SocialPost:
+    """A post as Mwmbl's social search returns it, all plain text. A link is None unless it is
+    http(s): posts and their authors' addresses come from servers we don't control."""
+
+    url: str | None
+    author_uri: str | None
+    author_handle: str | None
+    title: str | None
+    snippet: str
+    published: datetime
+
+
+def search_wait(network: str) -> int | None:
+    """Count a search from this caller's network: None if it is within the per-minute limit,
+    otherwise the seconds until the minute ends."""
+    return _window_wait(f"social:search:rate:{network}", settings.SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE, 60)
+
+
+def search_posts(query: str, limit: int) -> list[SocialPost]:
+    """Mwmbl Social's posts matching `query`, best first, at most `limit` of them.
+
+    Results are cached for SOCIAL_SEARCH_CACHE_SECONDS and never stored anywhere else: Mwmbl
+    Social hides a deleted or withdrawn post at once, and a copy here would outlive that.
+    """
+    key = f"social:search:posts:{limit}:{hashlib.sha256(query.encode()).hexdigest()}"
+    found = cache.get(key)
+    if found is None:
+        response = httpx.get(
+            f"{settings.MWMBL_SOCIAL_URL}/api/v1/search/posts",
+            params={"q": query, "limit": limit},
+            timeout=settings.SOCIAL_SEARCH_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        found = response.json()
+        posts = [_post(item) for item in found]
+        # Only once it has parsed, so an unexpected answer isn't served from the cache for minutes.
+        cache.set(key, found, timeout=settings.SOCIAL_SEARCH_CACHE_SECONDS)
+        return posts
+    return [_post(item) for item in found]
+
+
+def _post(item: dict) -> SocialPost:
+    return SocialPost(
+        url=_http_url(item["uri"]),
+        author_uri=_http_url(item["author_uri"]),
+        author_handle=author_handle(item["author_uri"]),
+        title=item.get("title"),
+        snippet=item["extract"],
+        published=datetime.fromtimestamp(item["published"], tz=UTC),
+    )
+
+
+def _http_url(url: str) -> str | None:
+    # The prefix is checked on the raw string, as a browser reads it: anything else, javascript:
+    # included, must never become a link. It must also parse with a host, unlike https:///x.
+    if not url.startswith(("https://", "http://")):
+        return None
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL:
+        return None
+    return url if parsed.host else None
+
+
+def author_handle(author_uri: str) -> str | None:
+    """The author's handle, @name@host, where their profile address follows a known pattern, and
+    otherwise None. The search API gives only the author's URI."""
+    try:
+        url = httpx.URL(author_uri)
+    except httpx.InvalidURL:
+        return None
+    profile = PROFILE_PATH.fullmatch(url.path)
+    if profile is None or url.scheme not in ("https", "http") or not url.host:
+        return None
+    # The punycode host, so a homograph shows as xn--, not as the host it imitates.
+    return f"@{profile.group(1)}@{url.raw_host.decode('ascii')}"

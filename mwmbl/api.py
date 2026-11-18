@@ -15,7 +15,7 @@ Sub-routers (v2):
   /api/v2/combined-search/ — Mwmbl + EUSP + Wikipedia in one ranked response, authenticated
   /api/v2/membership/      — paid and volunteer memberships and Seed Search usage, authenticated
   /api/v2/notifications/   — the user's undismissed notifications, authenticated
-  /api/v2/social/          — connecting fediverse servers to Mwmbl Social, authenticated
+  /api/v2/social/          — connecting fediverse servers to Mwmbl Social (authenticated), and post search
 
 JWT token endpoints (from NinjaJWTDefaultController) are registered on v1,
 typically at /api/v1/platform/token/pair, /api/v1/platform/token/refresh, etc.
