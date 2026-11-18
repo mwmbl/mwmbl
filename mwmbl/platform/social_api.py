@@ -33,7 +33,8 @@ REFUSALS = {
     409: (
         "already_registered",
         "That server is already connected to Mwmbl Social, or waiting for its admin to approve the connection. "
-        "Its admin can find it under Administration > Fediverse Auxiliary Service Providers.",
+        "Its admin can find it under Administration > Fediverse Auxiliary Service Providers. If nobody there "
+        "connected it, email info@mwmbl.org to have the old registration removed.",
     ),
     502: (
         "server_unreachable",
@@ -157,17 +158,22 @@ def get_registration(request, registration_id: int):
 @router.delete(
     "/registrations/{registration_id}",
     auth=JWTAuth(),
-    response={204: None},
+    response={204: None, 503: SocialError},
     summary="Disconnect a server",
     description="Revokes the server's registration with Mwmbl Social, so it stops answering the server, and "
     "keeps the record as `disconnected`. Disconnecting one that is already disconnected does nothing. Tell the "
     "user to also delete Mwmbl Social from their server's admin panel: Mastodon refuses to connect it again "
-    "until they do. 404 if it doesn't exist or belongs to another user.",
+    "until they do. 404 if it doesn't exist or belongs to another user, 503 if Mwmbl Social didn't answer.",
 )
 def delete_registration(request, registration_id: int):
     registration = _own_registration(request.user, registration_id)
     if registration.disconnected_at is None:
-        social.revoke(registration.registration_id)
+        try:
+            social.revoke(registration.registration_id)
+        except httpx.HTTPError:
+            logger.exception("Could not revoke Mwmbl Social registration %s", registration.registration_id)
+            message = "Mwmbl Social didn't answer, so the server is still connected. Try again in a few minutes."
+            return 503, SocialError(code="social_unavailable", message=message)
         registration.disconnected_at = timezone.now()
         registration.save(update_fields=["disconnected_at"])
     return 204, None

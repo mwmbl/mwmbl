@@ -1,5 +1,4 @@
-"""The Mwmbl Social sign-up endpoints (mwmbl.platform.social_api), with its admin API faked at the
-HTTP boundary by pytest-httpx. The client, addresses and limits are in test_social_client.py."""
+"""The Mwmbl Social sign-up endpoints (mwmbl.platform.social_api), its admin API faked by pytest-httpx."""
 
 import json
 
@@ -216,3 +215,14 @@ def test_disconnecting_revokes_the_registration_once(client, user, httpx_mock, a
     assert len(httpx_mock.get_requests()) == 1
     [row] = client.get(REGISTRATIONS, **auth(user)).json()
     assert row["status"] == "disconnected"
+
+
+def test_a_disconnect_mwmbl_social_does_not_answer_is_not_recorded(client, user, httpx_mock):
+    registration = stored_registration(user)
+    httpx_mock.add_exception(httpx.ConnectError("refused"))
+
+    response = client.delete(f"{REGISTRATIONS}/{registration.id}", **auth(user))
+
+    assert (response.status_code, response.json()["code"]) == (503, "social_unavailable")
+    registration.refresh_from_db()
+    assert registration.disconnected_at is None
