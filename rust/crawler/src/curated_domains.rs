@@ -45,8 +45,7 @@ impl CuratedDomains {
     }
 
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
-        let response = Client::builder()
-            .build()?
+        let response = Client::default()
             .get(self.url.read().await.clone())
             .header("User-Agent", Crawler::api_user_agent(None))
             .timeout(Duration::from_secs(10))

@@ -1,23 +1,15 @@
 use chrono::Utc;
 use dom_query::Document;
-use kreuzberg::{
-    ExtractionConfig, OutputFormat, core::mime, extract_bytes,
-};
+use kreuzberg::{ExtractionConfig, OutputFormat, core::mime, extract_bytes};
 use readabilityrs::ReadabilityOptions;
+use std::collections::HashSet;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
-use std::{
-    collections::HashSet,
-    time::Instant,
-};
 
 #[cfg(feature = "servo")]
 use crate::constants::TIMEOUT;
 use crate::{
-    constants::{
-        MAX_FETCH_SIZE,
-        NUM_EXTRACT_CHARS, NUM_TITLE_CHARS,
-    },
+    constants::{MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS},
     robots::{RobotCache, robot_allowed},
     url_queue::ClaimedUrl,
 };
@@ -29,7 +21,7 @@ use reqwest::{Client, StatusCode, Url};
 use servo_fetch::{FetchOptions, SessionBrokerConfig, VisibilityPolicy, extract::ExtractInput};
 
 #[derive(Debug)]
-pub enum CrawlResults {
+pub enum CrawlResult {
     NoDomainError {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
@@ -61,12 +53,6 @@ pub enum CrawlResults {
         status: StatusCode,
         err: anyhow::Error,
     },
-    ParagraphParsingError {
-        timestamp: chrono::DateTime<Utc>,
-        url: Url,
-        status: StatusCode,
-        resolved_url: Url,
-    },
     CrawlContent {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
@@ -79,36 +65,51 @@ pub enum CrawlResults {
     },
 }
 
-impl CrawlResults {
-    pub fn is_error(&self) -> bool {
-        !matches!(self, CrawlResults::CrawlContent { .. })
-    }
+impl CrawlResult {
     pub fn get_resolved_info(&self) -> (Option<&str>, Option<StatusCode>) {
         match &self {
-            crate::retrieve::CrawlResults::NoDomainError { .. }
-            | crate::retrieve::CrawlResults::RobotsDeniedError { .. }
-            | crate::retrieve::CrawlResults::RobotsUnavailableError { .. }
-            | crate::retrieve::CrawlResults::AbortError { .. } => (None, None),
-            crate::retrieve::CrawlResults::NoResponseTextError {
+            crate::retrieve::CrawlResult::NoDomainError { .. }
+            | crate::retrieve::CrawlResult::RobotsDeniedError { .. }
+            | crate::retrieve::CrawlResult::RobotsUnavailableError { .. }
+            | crate::retrieve::CrawlResult::AbortError { .. } => (None, None),
+            crate::retrieve::CrawlResult::NoResponseTextError {
                 resolved_url,
                 status,
                 ..
             }
-            | crate::retrieve::CrawlResults::HtmlParsingError {
+            | crate::retrieve::CrawlResult::HtmlParsingError {
                 resolved_url,
                 status,
                 ..
             }
-            | crate::retrieve::CrawlResults::ParagraphParsingError {
-                resolved_url,
-                status,
-                ..
-            }
-            | crate::retrieve::CrawlResults::CrawlContent {
+            | crate::retrieve::CrawlResult::CrawlContent {
                 resolved_url,
                 status,
                 ..
             } => (resolved_url.domain(), Some(*status)),
+        }
+    }
+
+    pub fn url(&self) -> &Url {
+        match &self {
+            CrawlResult::NoDomainError { url, .. }
+            | CrawlResult::RobotsUnavailableError { url, .. }
+            | CrawlResult::RobotsDeniedError { url, .. }
+            | CrawlResult::AbortError { url, .. }
+            | CrawlResult::NoResponseTextError { url, .. }
+            | CrawlResult::HtmlParsingError { url, .. }
+            | CrawlResult::CrawlContent { url, .. } => url,
+        }
+    }
+    pub fn timestamp(&self) -> &chrono::DateTime<Utc> {
+        match &self {
+            CrawlResult::NoDomainError { timestamp, .. }
+            | CrawlResult::RobotsUnavailableError { timestamp, .. }
+            | CrawlResult::RobotsDeniedError { timestamp, .. }
+            | CrawlResult::AbortError { timestamp, .. }
+            | CrawlResult::NoResponseTextError { timestamp, .. }
+            | CrawlResult::HtmlParsingError { timestamp, .. }
+            | CrawlResult::CrawlContent { timestamp, .. } => timestamp,
         }
     }
 }
@@ -187,11 +188,11 @@ pub async fn crawl(
     mut robots_cache: RobotCache,
     client: Client,
     #[cfg(feature = "servo")] user_agent: String,
-) -> (ClaimedUrl, CrawlResults) {
+) -> (ClaimedUrl, CrawlResult) {
     let url = claimed_url.url().clone();
     let timestamp = Utc::now();
     let Some(domain) = url.domain() else {
-        return (claimed_url, CrawlResults::NoDomainError { timestamp, url });
+        return (claimed_url, CrawlResult::NoDomainError { timestamp, url });
     };
 
     match robot_allowed(&url, domain, &client, &mut robots_cache).await {
@@ -199,13 +200,13 @@ pub async fn crawl(
         Ok(false) => {
             return (
                 claimed_url,
-                CrawlResults::RobotsDeniedError { timestamp, url },
+                CrawlResult::RobotsDeniedError { timestamp, url },
             );
         }
         Err(err) => {
             return (
                 claimed_url,
-                CrawlResults::RobotsUnavailableError {
+                CrawlResult::RobotsUnavailableError {
                     timestamp,
                     url,
                     err,
@@ -225,7 +226,7 @@ pub async fn crawl(
         Err(err) => {
             return (
                 claimed_url,
-                CrawlResults::AbortError {
+                CrawlResult::AbortError {
                     timestamp,
                     url,
                     err,
@@ -246,7 +247,7 @@ fn sanitize(
     status: StatusCode,
     timestamp: chrono::DateTime<Utc>,
     url: Url,
-) -> CrawlResults {
+) -> CrawlResult {
     let read_options = ReadabilityOptions::builder()
         .sanitize_content(true)
         .clean_whitespace(true)
@@ -262,7 +263,7 @@ fn sanitize(
                     {
                         (html, excerpt, title)
                     } else {
-                        return CrawlResults::HtmlParsingError {
+                        return CrawlResult::HtmlParsingError {
                             timestamp,
                             url,
                             status,
@@ -272,7 +273,7 @@ fn sanitize(
                     }
                 }
                 None => {
-                    return CrawlResults::HtmlParsingError {
+                    return CrawlResult::HtmlParsingError {
                         timestamp,
                         url,
                         status,
@@ -282,7 +283,7 @@ fn sanitize(
                 }
             },
             Err(e) => {
-                return CrawlResults::HtmlParsingError {
+                return CrawlResult::HtmlParsingError {
                     timestamp,
                     url,
                     status,
@@ -300,7 +301,7 @@ fn sanitize(
     new_links.sort();
 
     if article_excerpt.is_empty() {
-        return CrawlResults::NoResponseTextError {
+        return CrawlResult::NoResponseTextError {
             timestamp,
             status,
             url,
@@ -322,7 +323,7 @@ fn sanitize(
     let extract = trim_size(&article_excerpt, NUM_EXTRACT_CHARS);
     let title = trim_size(&article_title, NUM_TITLE_CHARS);
 
-    CrawlResults::CrawlContent {
+    CrawlResult::CrawlContent {
         timestamp,
         url,
         title,

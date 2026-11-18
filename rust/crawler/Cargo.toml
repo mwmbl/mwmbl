@@ -17,6 +17,7 @@ dom_query = { version = "0.29.0", features = ["atomic", "hashbrown", "mini_selec
 fastbloom = { version = "0.17.0", features = ["serde"] }
 futures-util = "0.3.34"
 human_regex = "0.3.1"
+itertools = "0.15.0"
 kreuzberg = { version = "4.10.4", features = ["html", "pdf", "bundled-pdfium"] }
 markdown = "1.0.0"
 mwmbl_core = { version = "0.1.0", path = "../mwmbl_core", features = ["crawler"] }
@@ -34,5 +35,5 @@ stop-words = { version = "0.10.1" }
 strum = "0.28.0"
 strum_macros = "0.28.0"
 texting_robots = "0.2.2"
-tokio = { version = "1.54.1", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full", "tracing"] }
 urlencoding = "2.1.3"

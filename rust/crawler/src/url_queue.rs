@@ -1,9 +1,12 @@
 use std::{
     hash::{BuildHasher, RandomState},
+    iter::zip,
     sync::{Arc, Weak},
     time::Duration,
 };
 
+use chrono::{NaiveTime, Utc};
+use itertools::Itertools;
 use mwmbl_core::{
     blacklist_providers::BlacklistProvider, constants::CORE_DOMAINS,
     hn_top_domains_filtered::DOMAINS,
@@ -14,15 +17,21 @@ use rand::{RngExt, seq::IndexedRandom};
 use reqwest::Url;
 use scc::{HashCache, HashMap};
 use tokio::{
+    spawn,
     sync::{Mutex, OwnedMutexGuard, RwLock},
     task::{self, yield_now},
     time::sleep,
 };
 
 use crate::{
-    bloomdb::BloomDatabase, constants::{
-        DOMAINS_VEC, KNOWN_DOMAINS_RANDOM_WEIGHT, SEED_DOMAIN_RANDOM_WEIGHT, TOP_CURATED_DOMAIN_RANDOM_WEIGHT, TOP_OTHER_DOMAIN_RANDOM_WEIGHT
-    }, curated_domains::CuratedDomains, retrieve::CrawlResults
+    bloomdb::{BloomDatabase, FoundURL, UrlStatus},
+    constants::{
+        DOMAINS_VEC, KNOWN_DOMAINS_RANDOM_WEIGHT, MAX_DOMAINS_PER_QUEUE, MAX_TIME_DELTA,
+        MAX_URL_PER_DOMAINS, SCORE_TIME_CONSTANT, SEED_DOMAIN_RANDOM_WEIGHT,
+        TOP_CURATED_DOMAIN_RANDOM_WEIGHT, TOP_OTHER_DOMAIN_RANDOM_WEIGHT,
+    },
+    curated_domains::CuratedDomains,
+    retrieve::CrawlResult,
 };
 
 type DomainQueue = DoublePriorityQueue<String, OrderedFloat<f32>>;
@@ -39,7 +48,7 @@ pub struct SharedURLQueue<T: BlacklistProvider, const S: usize = 1000> {
 }
 
 pub struct ClaimedUrl {
-    domain_lock: OwnedMutexGuard<()>,
+    _domain_lock: OwnedMutexGuard<()>,
     url: reqwest::Url,
     domain_claims: Weak<HashCache<String, Arc<Mutex<()>>>>,
     released: bool,
@@ -100,7 +109,8 @@ async fn arc_claim_domain(
         scc::hash_cache::Entry::Vacant(vacant_entry) => {
             let mutex = Arc::new(Mutex::new(()));
             vacant_entry
-                .put_entry(mutex).1
+                .put_entry(mutex)
+                .1
                 .get()
                 .clone()
                 .try_lock_owned()
@@ -128,17 +138,15 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     }
 
     pub async fn get_url(&mut self) -> ClaimedUrl {
-        let mut rng = rand::rng();
-
         loop {
             // loop until we can claim a domain, if claim fails we yield to allow other computation to add new domains
             let total_seed = SEED_DOMAIN_RANDOM_WEIGHT + KNOWN_DOMAINS_RANDOM_WEIGHT;
-            let p_seed: usize = rng.random_range(0..total_seed);
+            let p_seed: usize = rand::rng().random_range(0..total_seed);
 
             let total_url_group: usize = TOP_OTHER_DOMAIN_RANDOM_WEIGHT
                 + TOP_CURATED_DOMAIN_RANDOM_WEIGHT
                 + CORE_DOMAINS.len();
-            let p_url_group: usize = rng.random_range(0..total_url_group);
+            let p_url_group: usize = rand::rng().random_range(0..total_url_group);
 
             if p_seed < SEED_DOMAIN_RANDOM_WEIGHT {
                 // SELECT A SEED DOMAIN
@@ -146,13 +154,13 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 let curated_non_static_domains = curated_non_static_domains_ref.read().await;
 
                 let total_seed_condidates = DOMAINS_VEC.len() + curated_non_static_domains.len();
-                let p_seed_condidates: usize = rng.random_range(0..total_seed_condidates);
+                let p_seed_condidates: usize = rand::rng().random_range(0..total_seed_condidates);
 
                 let random_domain = if p_seed_condidates < DOMAINS_VEC.len() {
-                    DOMAINS_VEC.sample(&mut rng, 1).next().cloned()
+                    DOMAINS_VEC.sample(&mut rand::rng(), 1).next().cloned()
                 } else {
                     curated_non_static_domains
-                        .sample(&mut rng, 1)
+                        .sample(&mut rand::rng(), 1)
                         .next()
                         .cloned()
                 };
@@ -166,7 +174,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                     && let Ok(domain_lock) = self.claim_domain(random_domain).await
                 {
                     return ClaimedUrl {
-                        domain_lock,
+                        _domain_lock: domain_lock,
                         url,
                         domain_claims: Arc::downgrade(&self.domain_claims),
                         released: false,
@@ -177,11 +185,11 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
             {
                 // SELECT EITHER A TOP_CURATED_DOMAIN OR A TOP_DOMAIN NON CURATED
                 let select_from_curated = p_url_group >= TOP_OTHER_DOMAIN_RANDOM_WEIGHT;
-                let samples = self.domain_scores.sample(&mut rng, S);
+                let samples = self.domain_scores.sample(&mut rand::rng(), S);
                 let mut domain: Option<String> = None;
                 for queue in samples {
-                    let mut queue = queue.write().await;
-                    let top_domain = if let Some((top_domain, _)) = queue.peek_max() {
+                    let queue_lock = queue.read().await;
+                    let top_domain = if let Some((top_domain, _)) = queue_lock.peek_max() {
                         top_domain.to_owned()
                     } else {
                         continue;
@@ -191,7 +199,8 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                         .is_domain_blacklisted(&top_domain)
                         .await
                     {
-                        queue.pop_max();
+                        drop(queue_lock);
+                        queue.write().await.pop_max();
                         self.domain_urls.remove_async(&top_domain).await;
                         continue;
                     }
@@ -210,7 +219,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 }
             } else {
                 // SELECT A CORE_DOMAINS
-                let domain = CORE_DOMAINS.sample(&mut rng, 1).next().copied();
+                let domain = CORE_DOMAINS.sample(&mut rand::rng(), 1).next().copied();
                 if let Some(domain) = domain
                     && !self.blacklist_provider.is_domain_blacklisted(domain).await
                     && let Some(claimed_url) = self.claim_url(domain).await
@@ -239,47 +248,165 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     }
 
     async fn claim_url(&mut self, domain: &str) -> Option<ClaimedUrl> {
+        if let Some(domain_queue) = self.get_priority_queue(domain) {
+            domain_queue.write().await.remove(domain);
+        }
         if let Ok(domain_lock) = self.claim_domain(domain).await
             && let Some(mut urls) = self.domain_urls.get_async(domain).await
         {
             if let Some((url, _)) = urls.pop_max() {
-                if let Some((_, priority)) = urls.peek_max() {
-                    if let Some(domain_queue) = self.get_priority_queue(domain) {
-                        domain_queue
-                            .write()
-                            .await
-                            .push(domain.to_owned(), *priority);
-                    }
-                } else {
-                    let _ = urls.remove();
-                    if let Some(domain_queue) = self.get_priority_queue(domain) {
-                        domain_queue.write().await.remove(domain);
-                    }
-                }
-
                 return Some(ClaimedUrl {
-                    domain_lock,
+                    _domain_lock: domain_lock,
                     url,
                     domain_claims: Arc::downgrade(&self.domain_claims),
                     released: false,
                 });
             }
             let _ = urls.remove();
-            if let Some(queue) = self.get_priority_queue(domain) {
-                queue.write().await.remove(domain);
-            }
         }
         None
     }
 
     fn get_priority_queue(&self, domain: &str) -> Option<&RwLock<DomainQueue>> {
-        #[allow(clippy::cast_possible_truncation)]
         self.domain_scores
-            .get(self.build_hasher.hash_one(domain) as usize % S)
+            .get(Self::get_priority_queue_index(&self.build_hasher, domain))
     }
 
-    pub fn record_urls_in_database(&self, db: &BloomDatabase, result: &CrawlResults) {
-        todo!()
-    
+    #[allow(clippy::cast_possible_truncation)]
+    fn get_priority_queue_index(build_hasher: &RandomState, domain: &str) -> usize {
+        build_hasher.hash_one(domain) as usize % S
+    }
+
+    pub async fn record_url_in_database(&self, db: Arc<BloomDatabase>, result: &CrawlResult) {
+        let url_status = UrlStatus::from(result);
+        let timestamp = *result.timestamp();
+
+        let mut urls: Vec<Url> = Vec::new();
+        if let CrawlResult::CrawlContent {
+            links, extra_links, ..
+        } = result
+        {
+            urls.append(&mut links.clone());
+            urls.append(&mut extra_links.clone());
+        }
+
+        let mut found_urls: Vec<FoundURL> = vec![FoundURL::new(
+            result.url().clone(),
+            url_status,
+            timestamp,
+            None,
+        )];
+        for url in &urls {
+            if let Some(domain) = url.domain()
+                && !self.blacklist_provider.is_domain_blacklisted(domain).await
+            {
+                found_urls.push(FoundURL::new(url.clone(), UrlStatus::New, timestamp, None));
+            }
+        }
+
+        db.update_found_urls(found_urls.iter_mut());
+
+        for (domain, urls) in found_urls
+            .clone()
+            .into_iter()
+            .into_group_map_by(|v| v.url().domain().map(std::borrow::ToOwned::to_owned))
+        {
+            if let Some(domain) = domain {
+                self.add_domain_urls_later(&domain, &db, urls.clone());
+            }
+        }
+
+        if let Some(domain) = result.url().domain() {
+            db.update_domain_links(
+                domain,
+                found_urls
+                    .into_iter()
+                    .filter_map(|url| url.url().domain().map(std::borrow::ToOwned::to_owned)),
+            );
+        }
+    }
+
+    fn add_domain_urls_later(
+        &self,
+        domain: &str,
+        db: &Arc<BloomDatabase>,
+        urls: Vec<FoundURL>,
+    ) -> task::JoinHandle<()> {
+        let domain = domain.to_owned();
+        let domain_claims = self.domain_claims.clone();
+        let domain_urls = self.domain_urls.clone();
+        let domain_scores = self.domain_scores.clone();
+        let build_hasher = self.build_hasher.clone();
+        let db = db.clone();
+        spawn(async move {
+            let lock = match domain_claims.entry_async(domain.clone()).await {
+                scc::hash_cache::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
+                scc::hash_cache::Entry::Vacant(vacant_entry) => {
+                    let mutex = Arc::new(Mutex::new(()));
+                    vacant_entry.put_entry(mutex).1.get().clone()
+                }
+            };
+            let lock = lock.lock().await;
+
+            let scores = urls.iter().map(|url| {
+                let time_since_crawled = url.last_crawled().map_or(MAX_TIME_DELTA, |time| {
+                    Duration::from_secs(
+                        time.and_time(NaiveTime::default())
+                            .signed_duration_since(Utc::now().naive_utc())
+                            .abs()
+                            .num_seconds()
+                            .cast_unsigned(),
+                    )
+                });
+
+                #[allow(clippy::cast_precision_loss)]
+                let mut url_score = 1.0 / url.url().as_str().len() as f32;
+
+                url_score *= 1.0
+                    - (-time_since_crawled.as_secs_f32() / SCORE_TIME_CONSTANT.as_secs_f32()).exp();
+                url_score
+            });
+            let domain_score = db.get_domain_score(&domain);
+
+            let domain_best = match domain_urls.entry_async(domain.clone()).await {
+                scc::hash_map::Entry::Occupied(mut occupied_entry) => {
+                    for (url, score) in zip(&urls, scores) {
+                        occupied_entry.push(url.url().clone(), OrderedFloat(score));
+                        if occupied_entry.len() > MAX_URL_PER_DOMAINS {
+                            occupied_entry.pop_min();
+                        }
+                    }
+                    occupied_entry
+                        .peek_max()
+                        .map_or(OrderedFloat(-1.0), |v| *v.1)
+                }
+                scc::hash_map::Entry::Vacant(vacant_entry) => {
+                    let mut queue = DoublePriorityQueue::new();
+                    for (url, score) in zip(&urls, scores) {
+                        queue.push(url.url().clone(), OrderedFloat(score));
+                        if queue.len() > MAX_URL_PER_DOMAINS {
+                            queue.pop_min();
+                        }
+                    }
+                    let value = queue.peek_max().map_or(OrderedFloat(-1.0), |v| *v.1);
+                    vacant_entry.insert_entry(queue);
+                    value
+                }
+            };
+
+            if let Some(domain_queue) =
+                domain_scores.get(Self::get_priority_queue_index(&build_hasher, &domain))
+            {
+                let mut lock = domain_queue.write().await;
+                lock.push(domain.clone(), domain_best + domain_score);
+                if lock.len() > MAX_DOMAINS_PER_QUEUE
+                    && let Some((evicted, _)) = lock.pop_min()
+                {
+                    drop(lock);
+                    domain_urls.remove_async(&evicted).await;
+                }
+            }
+            drop(lock);
+        })
     }
 }

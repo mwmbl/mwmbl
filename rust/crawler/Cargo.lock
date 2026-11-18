@@ -1373,6 +1373,7 @@ dependencies = [
  "fastbloom",
  "futures-util",
  "human_regex",
+ "itertools 0.15.0",
  "kreuzberg",
  "markdown",
  "mwmbl_core",
@@ -9448,6 +9449,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 

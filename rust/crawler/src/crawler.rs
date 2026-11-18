@@ -1,13 +1,14 @@
 use std::{
     cmp::{max, min},
+    collections::VecDeque,
     sync::Arc,
     time::Duration,
 };
 
+use kreuzberg::utils::timing::Instant;
 use mwmbl_core::blacklist_providers::BlacklistProvider;
 use rand::RngExt;
 use reqwest::redirect::Policy;
-use scc::HashMap;
 use tokio::{
     spawn,
     sync::{RwLock, Semaphore},
@@ -17,25 +18,25 @@ use tokio::{
 
 use crate::{
     CrawlerParams,
-    constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT,
-    },
-    curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     bloomdb::BloomDatabase,
-    retrieve::crawl,
+    constants::{API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT},
+    curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
+    retrieve::{CrawlResult, crawl},
     robots::RobotCache,
     url_queue::SharedURLQueue,
 };
 
+#[derive(Clone)]
 pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     url_queue: SharedURLQueue<T>,
-    blacklist: T,
+    // blacklist: T,
     username: Arc<RwLock<Option<String>>>,
-    error_last_reported_at: Arc<HashMap<String, f32>>,
+    // error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
+    to_submit: Arc<RwLock<VecDeque<CrawlResult>>>,
 }
 
 impl Crawler {
@@ -48,13 +49,14 @@ impl Crawler {
 
         Ok(Crawler {
             url_queue,
-            blacklist,
+            // blacklist,
             username,
-            error_last_reported_at: Arc::new(HashMap::default()),
+            // error_last_reported_at: Arc::new(HashMap::default()),
             robots_cache: RobotCache::new(),
             crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
             params: Arc::new(params),
             domainlinkdb,
+            to_submit: Arc::new(RwLock::new(VecDeque::new())),
         })
     }
 
@@ -67,22 +69,28 @@ impl Crawler {
             .read_timeout(TIMEOUT)
             .user_agent(self.crawl_user_agent())
             .redirect(Policy::limited(MAX_REDIRECTS + 1))
+            .pool_idle_timeout(Duration::ZERO)
+            .pool_max_idle_per_host(0)
             .build()?)
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut rng = rand::rng();
         let client = self.get_client()?;
+        let start = Instant::now();
+        
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
-            let url = self.url_queue.get_url().await;
             let mut cache = self.robots_cache.clone();
             let crawl_client = client.clone();
             #[cfg(feature = "servo")]
             let user_agent = self.crawl_user_agent();
+            let mut url_queue = self.url_queue.clone();
+            let db = self.domainlinkdb.clone();
+            let to_submit = self.to_submit.clone();
 
             spawn(async move {
+                let url = url_queue.get_url().await;
                 let permit = permit;
 
                 let (url, result) = crawl(
@@ -112,15 +120,24 @@ impl Crawler {
                     url.release_after_delay(resolved_domain, time);
                 }
 
-                todo!()
-                // TODO record_urls_in_database
+                url_queue.record_url_in_database(db, &result).await;
+
+                if matches!(result, CrawlResult::CrawlContent { .. }) {
+                    let mut lock = to_submit.write().await;
+                    println!(
+                        "speed: {}/s | crawled {}",
+                        ((lock.len() as u128) + 1) / (1 + (start.elapsed_millis() / 1000)),
+                        result.url().as_str()
+                    );
+                    lock.push_back(result);
+                }
             });
 
             if self.params.crawl_delay_seconds > 0.0 {
-                sleep(Duration::from_secs_f32(rng.random_range(
+                let random_time = rand::rng().random_range(
                     0.9 * self.params.crawl_delay_seconds..1.1 * self.params.crawl_delay_seconds,
-                )))
-                .await;
+                );
+                sleep(Duration::from_secs_f32(random_time)).await;
             }
         }
     }

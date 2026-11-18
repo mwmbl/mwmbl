@@ -10,10 +10,10 @@
     clippy::todo,
     clippy::pedantic
 )]
+mod bloomdb;
 mod constants;
 mod crawler;
 mod curated_domains;
-mod bloomdb;
 mod path_creation;
 mod retrieve;
 mod robots;
@@ -39,7 +39,7 @@ struct Cli {
     #[command(flatten)]
     crawler_params: CrawlerParams,
     /// number of workers
-    #[arg(env = "CRAWL_THREADS", long, default_value = "2")]
+    #[arg(env = "CRAWL_THREADS", long, default_value = "32")]
     crawler_workers: usize,
 }
 
@@ -79,7 +79,7 @@ pub struct CrawlerParams {
     )]
     remote_server: String,
     /// maximum amount of simultaneous crawling task that can run at any point.
-    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "100")]
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "200")]
     max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]

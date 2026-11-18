@@ -1,25 +1,29 @@
 use std::{
-    cmp::max, collections::{HashMap, HashSet}, fs, io::Write, path::{Path, PathBuf}, sync::{Arc, LazyLock, atomic::AtomicBool}, usize, vec
+    cmp::max,
+    collections::HashSet,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock, atomic::AtomicBool},
 };
 
 use anyhow::Context;
-use chrono::{DateTime, Datelike, Months, NaiveDate, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, Months, NaiveDate, TimeZone, Utc};
 use fastbloom::AtomicBloomFilter;
-use futures_util::future::join_all;
-use kreuzberg::utils::timing::Instant;
-use mwmbl_core::{blacklist_providers::BlacklistProvider, hn_top_domains_filtered::DOMAINS};
+use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 use reqwest::Url;
-use strum::{EnumCount, IntoEnumIterator};
+use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     spawn,
-    task::JoinHandle,
     time::sleep,
 };
 
 use crate::{
-    constants::{DOMAINS_VEC, LINK_DOMAIN_DB_SAVE_INTERVAL, NUM_DOMAINS_IN_BLOOM_FILTER}, path_creation::bloom_path, url_queue::SharedURLQueue,
+    constants::{DOMAINS_VEC, LINK_DOMAIN_DB_SAVE_INTERVAL, NUM_DOMAINS_IN_BLOOM_FILTER},
+    path_creation::bloom_path,
+    retrieve::CrawlResult,
 };
 
 #[derive(EnumIter, Display, strum_macros::EnumCount, Hash, PartialEq, Eq, Clone)]
@@ -49,7 +53,7 @@ impl DomainGroups {
     }
 }
 
-#[derive(EnumIter, Display, strum_macros::EnumCount, Hash, PartialEq, Eq, Clone)]
+#[derive(EnumIter, Display, strum_macros::EnumCount, Hash, PartialEq, Eq, Clone, Debug)]
 pub enum UrlStatus {
     New,
     Queued,
@@ -63,19 +67,72 @@ pub enum UrlStatus {
 
 impl UrlStatus {
     pub fn crawled(&self) -> bool {
-        match self {
-            UrlStatus::New | UrlStatus::Queued | UrlStatus::Assigned => false,
-            _ => true
+        !matches!(
+            self,
+            UrlStatus::New | UrlStatus::Queued | UrlStatus::Assigned
+        )
+    }
+}
+
+impl From<&CrawlResult> for UrlStatus {
+    fn from(result: &CrawlResult) -> Self {
+        match result {
+            CrawlResult::NoDomainError { .. } | CrawlResult::AbortError { .. } => {
+                UrlStatus::ErrorOther
+            }
+            CrawlResult::RobotsUnavailableError { .. } => UrlStatus::ErrorTimeout,
+            CrawlResult::RobotsDeniedError { .. } => UrlStatus::ErrorRobotsDenied,
+            CrawlResult::CrawlContent { .. } => UrlStatus::Crawled,
+            | CrawlResult::NoResponseTextError { status, .. }
+            | CrawlResult::HtmlParsingError { status, .. } => {
+                if status.as_u16() == 404 {
+                    UrlStatus::Error404
+                } else {
+                    UrlStatus::ErrorOther
+                }
+            }
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FoundURL {
     url: Url,
     status: UrlStatus,
     timestamp: chrono::DateTime<Utc>,
-    last_crawled: Option<NaiveDate>
+    last_crawled: Option<NaiveDate>,
+}
+
+impl FoundURL {
+    pub fn new(
+        url: Url,
+        status: UrlStatus,
+        timestamp: chrono::DateTime<Utc>,
+        last_crawled: Option<NaiveDate>,
+    ) -> Self {
+        Self {
+            url,
+            status,
+            timestamp,
+            last_crawled,
+        }
+    }
+
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
+    pub fn status(&self) -> &UrlStatus {
+        &self.status
+    }
+
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+
+    pub fn last_crawled(&self) -> Option<NaiveDate> {
+        self.last_crawled
+    }
 }
 
 // replace both URLDatabase and DomainLinkDatabase
@@ -104,8 +161,8 @@ impl BloomDatabase {
         let bloom: AtomicBloomFilter = if let Ok(bloom) = postcard::from_bytes(&buffer) {
             bloom
         } else {
-            let bloom: AtomicBloomFilter = AtomicBloomFilter::with_false_pos(1e-6)
-                .expected_items(NUM_DOMAINS_IN_BLOOM_FILTER);
+            let bloom: AtomicBloomFilter =
+                AtomicBloomFilter::with_false_pos(1e-6).expected_items(NUM_DOMAINS_IN_BLOOM_FILTER);
             file.rewind().await?;
             file.write_all(&postcard::to_stdvec(&bloom)?).await?;
             bloom
@@ -123,34 +180,30 @@ impl BloomDatabase {
             loop {
                 sleep(LINK_DOMAIN_DB_SAVE_INTERVAL).await;
                 if let Some(db) = weak.upgrade() {
-                    let mut tasks: Vec<JoinHandle<()>> = Vec::with_capacity(DomainGroups::COUNT);
                     let db = db.clone();
 
-                    tasks.push(spawn(async move {
-                        if !db.changed.load(std::sync::atomic::Ordering::Relaxed) {
+                    if !db.changed.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    let bloompath = bloom_path(&db.home);
+
+                    if let Ok(mut file) = tokio::fs::File::options()
+                        .write(true)
+                        .create(false)
+                        .open(bloompath)
+                        .await
+                        && let Ok(vec) = postcard::to_stdvec(&db.bloom)
+                    {
+                        if file.write_all(&vec).await.is_err() {
+                            eprintln!("Cannot write to bloom file");
                             return;
                         }
-                        let bloompath = bloom_path(&db.home);
+                    } else {
+                        eprintln!("Cannot open bloom file");
+                        return;
+                    }
 
-                        if let Ok(mut file) = tokio::fs::File::options()
-                            .write(true)
-                            .create(false)
-                            .open(bloompath)
-                            .await
-                            && let Ok(vec) = postcard::to_stdvec(&db.bloom)
-                        {
-                            if file.write_all(&vec).await.is_err() {
-                                eprintln!("Cannot write to bloom file");
-                                return;
-                            }
-                        } else {
-                            eprintln!("Cannot open bloom file");
-                            return;
-                        }
-
-                        db.changed.store(false, std::sync::atomic::Ordering::SeqCst);
-                        }));
-                    join_all(tasks).await;
+                    db.changed.store(false, std::sync::atomic::Ordering::SeqCst);
                 } else {
                     break;
                 }
@@ -166,9 +219,9 @@ impl BloomDatabase {
             .sum()
     }
 
-    pub fn update_domain_links<'a, I>(&self, source: &str, target: I)
+    pub fn update_domain_links<I>(&self, source: &str, target: I)
     where
-        I: IntoIterator<Item = &'a str>,
+        I: IntoIterator<Item = String>,
     {
         let group: DomainGroups = match source {
             "github.com" => DomainGroups::Github,
@@ -189,10 +242,11 @@ impl BloomDatabase {
 
         let mut any_change = false;
         for v in target {
-            any_change |= !self.bloom.insert(&Self::format_group_links(&group, v));
+            any_change |= !self.bloom.insert(&Self::format_group_links(&group, &v));
         }
         if any_change {
-            self.changed.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.changed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -200,38 +254,41 @@ impl BloomDatabase {
         format!("{group}::{domain}")
     }
 
-
     pub fn update_found_urls<'a, I>(&self, found_urls: I)
     where
         I: IntoIterator<Item = &'a mut FoundURL>,
     {
         let times = Self::db_times();
-        found_urls.into_iter().for_each(
-            |url| {
-                if url.status.crawled() {
-                    url.last_crawled = Some(url.timestamp.date_naive());
-                }
-                for time in times{
-                    if self.bloom.contains(&Self::format_url_time(time, &url.url)) {
-                        url.last_crawled = Some(max(time, url.last_crawled.unwrap_or(NaiveDate::default())));
-                    }
+        found_urls.into_iter().for_each(|url| {
+            if url.status.crawled() {
+                url.last_crawled = Some(url.timestamp.date_naive());
+            }
+            for time in times {
+                if self.bloom.contains(&Self::format_url_time(time, &url.url)) {
+                    url.last_crawled =
+                        Some(max(time, url.last_crawled.unwrap_or(NaiveDate::default())));
                 }
             }
-        );
+        });
     }
 
     fn format_url_time(time: NaiveDate, url: &Url) -> String {
-        format!("{}-{}::{}", time.year() , time.month(), url.as_str())
+        format!("{}-{}::{}", time.year(), time.month(), url.as_str())
     }
 
     fn db_times() -> [NaiveDate; 3] {
         let time = Utc::now().date_naive();
-        if let Some(first) = time.with_day(0) &&
-        let Some(second) = first.checked_sub_months(Months::new(1)) &&
-        let Some(third) = second.checked_sub_months(Months::new(1)) {
+        if let Some(first) = time.with_day(0)
+            && let Some(second) = first.checked_sub_months(Months::new(1))
+            && let Some(third) = second.checked_sub_months(Months::new(1))
+        {
             [first, second, third]
         } else {
-            [NaiveDate::default(), NaiveDate::default(), NaiveDate::default()]
+            [
+                NaiveDate::default(),
+                NaiveDate::default(),
+                NaiveDate::default(),
+            ]
         }
     }
 }

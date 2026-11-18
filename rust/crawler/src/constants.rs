@@ -15,8 +15,8 @@ pub static ROBOTS_USER_AGENT: &str = "mwmbl-crawler";
 
 pub static TOP_CURATED_DOMAIN_RANDOM_WEIGHT: usize = 50;
 pub static TOP_OTHER_DOMAIN_RANDOM_WEIGHT: usize = 100;
-pub static NUM_PRIOTITY_QUEUES: usize = 1000;
-pub static MAX_OTHER_DOMAINS: usize = 10000;
+pub static MAX_DOMAINS_PER_QUEUE: usize = 20;
+pub static MAX_URL_PER_DOMAINS: usize = 100;
 
 pub static SEED_DOMAIN_RANDOM_WEIGHT: usize = 1;
 pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
@@ -48,3 +48,6 @@ pub static NUM_DOMAINS_IN_BLOOM_FILTER: usize = 10_000_000;
 
 pub static LINK_DOMAIN_DB_SAVE_INTERVAL: Duration = Duration::from_mins(5);
 pub static URL_DB_SAVE_INTERVAL: Duration = Duration::from_mins(5);
+
+pub static MAX_TIME_DELTA: Duration = Duration::from_hours(24 * 100_000);
+pub static SCORE_TIME_CONSTANT: Duration = Duration::from_hours(24 * 30 * 10);
