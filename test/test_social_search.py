@@ -71,6 +71,8 @@ def test_anyone_can_search_and_gets_typed_posts(client, db, httpx_mock):
         ("https://misskey.example/users/9abc/", "@9abc@misskey.example"),
         ("https://other.example/profile/carol", None),
         ("javascript://x/@alice", None),
+        ("https://evil.example/u/Mwmbl%20Official", None),
+        ("https://xn--mastdon-djg.social/@alice", "@alice@xn--mastdon-djg.social"),
     ],
 )
 def test_the_author_has_a_handle_where_the_address_shows_one(author_uri, handle):
@@ -80,7 +82,7 @@ def test_the_author_has_a_handle_where_the_address_shows_one(author_uri, handle)
 def test_only_http_addresses_are_returned_and_text_is_passed_on_as_text(client, db, httpx_mock):
     hostile = {
         "uri": "javascript:alert(1)",
-        "author_uri": "data:text/html,<script>",
+        "author_uri": "https:///users/alice",
         "title": '<img src=x onerror="alert(3)">',
         "extract": "<script>alert(4)</script>",
         "published": 1763337600,

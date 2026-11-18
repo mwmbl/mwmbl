@@ -27,7 +27,8 @@ ADDRESS_EXAMPLE = "Enter your server's domain name, for example https://mastodon
 # Every top-level domain starts with a letter, punycode ones (xn--) included.
 TOP_LEVEL_LABEL = re.compile(r"[a-z][a-z0-9-]*")
 # Profile paths of Mastodon and its forks (/users/name, /@name) and Lemmy (/u/name).
-PROFILE_PATH = re.compile(r"/(?:users/|u/|@)([^/@]+)/?")
+# Only plain usernames: anything else (spaces, bidi overrides) would make a convincing fake.
+PROFILE_PATH = re.compile(r"/(?:users/|u/|@)([A-Za-z0-9_.-]+)/?")
 # Names that only resolve inside a network: mDNS, ICANN's reserved private-use name, a
 # Kubernetes cluster's (svc.cluster.local) and common home and office ones.
 PRIVATE_TOP_LEVEL_LABELS = {"local", "internal", "localhost", "localdomain", "lan", "home", "arpa", "corp", "intranet"}
@@ -74,16 +75,23 @@ def server_url_and_host(entered: str) -> tuple[str, str]:
     return server_url, host
 
 
+def _window_wait(key: str, limit: int, window_seconds: int) -> int | None:
+    """Count one use in the current fixed window: None if it is within `limit`, otherwise the
+    seconds until the window ends."""
+    now = int(time.time())
+    window = now // window_seconds
+    window_key = f"{key}:{window}"
+    cache.add(window_key, 0, timeout=window_seconds)
+    if cache.incr(window_key) <= limit:
+        return None
+    return (window + 1) * window_seconds - now
+
+
 def user_attempt_wait(user_id: int) -> int | None:
     """Count an attempt by this user: None if it is within their daily limit, otherwise the
     seconds until the day's window ends and they may try again."""
-    now = int(time.time())
-    window = now // DAY_SECONDS
-    key = f"social:connect:user:{user_id}:{window}"
-    cache.add(key, 0, timeout=DAY_SECONDS)
-    if cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY:
-        return None
-    return (window + 1) * DAY_SECONDS - now
+    limit = settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY
+    return _window_wait(f"social:connect:user:{user_id}", limit, DAY_SECONDS)
 
 
 def host_attempt_wait(host: str) -> int | None:
@@ -151,13 +159,7 @@ class SocialPost:
 def search_wait(network: str) -> int | None:
     """Count a search from this caller's network: None if it is within the per-minute limit,
     otherwise the seconds until the minute ends."""
-    now = int(time.time())
-    window = now // 60
-    key = f"social:search:rate:{network}:{window}"
-    cache.add(key, 0, timeout=60)
-    if cache.incr(key) <= settings.SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE:
-        return None
-    return (window + 1) * 60 - now
+    return _window_wait(f"social:search:rate:{network}", settings.SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE, 60)
 
 
 def search_posts(query: str, limit: int) -> list[SocialPost]:
@@ -176,7 +178,10 @@ def search_posts(query: str, limit: int) -> list[SocialPost]:
         )
         response.raise_for_status()
         found = response.json()
+        posts = [_post(item) for item in found]
+        # Only once it has parsed, so an unexpected answer isn't served from the cache for minutes.
         cache.set(key, found, timeout=settings.SOCIAL_SEARCH_CACHE_SECONDS)
+        return posts
     return [_post(item) for item in found]
 
 
@@ -192,9 +197,15 @@ def _post(item: dict) -> SocialPost:
 
 
 def _http_url(url: str) -> str | None:
-    # Checked on the raw string, as a browser reads it: anything else, javascript: included,
-    # must never become a link.
-    return url if url.startswith(("https://", "http://")) else None
+    # The prefix is checked on the raw string, as a browser reads it: anything else, javascript:
+    # included, must never become a link. It must also parse with a host, unlike https:///x.
+    if not url.startswith(("https://", "http://")):
+        return None
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL:
+        return None
+    return url if parsed.host else None
 
 
 def author_handle(author_uri: str) -> str | None:
@@ -207,4 +218,5 @@ def author_handle(author_uri: str) -> str | None:
     profile = PROFILE_PATH.fullmatch(url.path)
     if profile is None or url.scheme not in ("https", "http") or not url.host:
         return None
-    return f"@{profile.group(1)}@{url.host}"
+    # The punycode host, so a homograph shows as xn--, not as the host it imitates.
+    return f"@{profile.group(1)}@{url.raw_host.decode('ascii')}"

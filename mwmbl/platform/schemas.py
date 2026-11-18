@@ -699,7 +699,8 @@ class SocialPostResponse(Schema):
     url: Optional[str] = Field(description="The original post. Always http(s); null if the server sent anything else.")
     author_uri: Optional[str] = Field(description="The author's profile. Always http(s), or null.")
     author_handle: Optional[str] = Field(
-        description="`@name@host`, where the profile address shows it; otherwise null.",
+        description="`@name@host`, read from the profile address where it follows Mastodon's or Lemmy's pattern, "
+        "otherwise null. Not checked with the server, so it can differ from the author's real handle.",
         example="@alice@mastodon.example",
     )
     title: Optional[str] = Field(description="The post's title, for Lemmy posts and others that have one.")
