@@ -520,7 +520,7 @@ WIDGET_SPEC_FETCHES_PER_SECOND = 20  # upstream calls per spec, whoever asks: bo
 WIDGET_LOCK_SECONDS = 10  # how long one request may hold a cache miss before another may fetch
 
 # Mwmbl Social: fediverse server admins connect their server to Mwmbl's hosted instance,
-# social.mwmbl.org (mwmbl.social). The instance's URL and an admin API
+# social.mwmbl.org, through /api/v2/social/ (mwmbl.social). The instance's URL and an admin API
 # token, one of its admin_tokens, are set per environment: settings_prod reads them from
 # the environment.
 #
