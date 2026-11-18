@@ -57,14 +57,15 @@ account search includes the search term).
 ## Who sees it
 
 Indexed posts and accounts are public already. They are shown to connected servers in answer to
-account searches and follow recommendations, through Mwmbl Social's search API, and, once that is
-built, in Mwmbl search. Mwmbl will not copy them into its own web index, so removals here apply
-everywhere.
+account searches and follow recommendations, through Mwmbl Social's search API, and in
+**[Mwmbl's social search, https://mwmbl.org/social/search/]**. Mwmbl will not copy them into its
+own web index, so removals here apply everywhere.
 
 ## How things are removed
 
 - Deleting a post, making it non-public, or turning off *discoverable* or *indexable* removes it.
-  When a connected server tells us, that happens straight away. Everything indexed is also
+  When a connected server tells us, that happens straight away, though Mwmbl's social search can
+  show a result it fetched shortly before for up to five more minutes. Everything indexed is also
   checked again at least once a week, which catches the rest.
 - Unfollowing `@mwmbl-social@social.mwmbl.org` removes posts indexed because you followed it.
 - To have a post, an account or a whole domain removed for good, email

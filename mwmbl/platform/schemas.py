@@ -678,10 +678,30 @@ class SocialRegistrationResponse(Schema):
 
 class SocialError(Schema):
     code: Literal[
-        "invalid_address", "already_registered", "user_limit", "host_limit", "server_unreachable", "social_unavailable"
+        "invalid_address",
+        "already_registered",
+        "user_limit",
+        "host_limit",
+        "server_unreachable",
+        "social_unavailable",
+        "search_limit",
     ] = Field(
         description="`server_unreachable`: the server couldn't be reached, isn't FASP-enabled, or refused. "
         "`social_unavailable`: Mwmbl Social didn't answer, so the registration may still have gone through."
     )
     message: str = Field(description="Plain text to show the user.")
     retry_after: Optional[int] = Field(None, description="For 429s: seconds until the user may try again.")
+
+
+class SocialPostResponse(Schema):
+    """Every field is plain text from servers Mwmbl doesn't control: escape it, never render it as HTML."""
+
+    url: Optional[str] = Field(description="The original post. Always http(s); null if the server sent anything else.")
+    author_uri: Optional[str] = Field(description="The author's profile. Always http(s), or null.")
+    author_handle: Optional[str] = Field(
+        description="`@name@host`, where the profile address shows it; otherwise null.",
+        example="@alice@mastodon.example",
+    )
+    title: Optional[str] = Field(description="The post's title, for Lemmy posts and others that have one.")
+    snippet: str = Field(description="Up to about 300 characters of the post, with any content warning and hashtags.")
+    published: datetime

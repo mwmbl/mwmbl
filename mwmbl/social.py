@@ -137,29 +137,41 @@ def revoke(registration_id: int) -> None:
 
 @dataclass(frozen=True)
 class SocialPost:
-    """A post as the social search page shows it. A link is None unless it is http(s): posts and
-    their authors' addresses come from servers we don't control."""
+    """A post as Mwmbl's social search returns it, all plain text. A link is None unless it is
+    http(s): posts and their authors' addresses come from servers we don't control."""
 
     url: str | None
-    author_url: str | None
-    author: str
+    author_uri: str | None
+    author_handle: str | None
     title: str | None
-    extract: str
+    snippet: str
     published: datetime
 
 
-def search_posts(query: str) -> list[SocialPost]:
-    """Mwmbl Social's posts matching `query`, best first.
+def search_wait(network: str) -> int | None:
+    """Count a search from this caller's network: None if it is within the per-minute limit,
+    otherwise the seconds until the minute ends."""
+    now = int(time.time())
+    window = now // 60
+    key = f"social:search:rate:{network}:{window}"
+    cache.add(key, 0, timeout=60)
+    if cache.incr(key) <= settings.SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE:
+        return None
+    return (window + 1) * 60 - now
+
+
+def search_posts(query: str, limit: int) -> list[SocialPost]:
+    """Mwmbl Social's posts matching `query`, best first, at most `limit` of them.
 
     Results are cached for SOCIAL_SEARCH_CACHE_SECONDS and never stored anywhere else: Mwmbl
     Social hides a deleted or withdrawn post at once, and a copy here would outlive that.
     """
-    key = f"social:search:posts:{hashlib.sha256(query.encode()).hexdigest()}"
+    key = f"social:search:posts:{limit}:{hashlib.sha256(query.encode()).hexdigest()}"
     found = cache.get(key)
     if found is None:
         response = httpx.get(
             f"{settings.MWMBL_SOCIAL_URL}/api/v1/search/posts",
-            params={"q": query},
+            params={"q": query, "limit": limit},
             timeout=settings.SOCIAL_SEARCH_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -171,10 +183,10 @@ def search_posts(query: str) -> list[SocialPost]:
 def _post(item: dict) -> SocialPost:
     return SocialPost(
         url=_http_url(item["uri"]),
-        author_url=_http_url(item["author_uri"]),
-        author=author_name(item["author_uri"]),
+        author_uri=_http_url(item["author_uri"]),
+        author_handle=author_handle(item["author_uri"]),
         title=item.get("title"),
-        extract=item["extract"],
+        snippet=item["extract"],
         published=datetime.fromtimestamp(item["published"], tz=UTC),
     )
 
@@ -185,14 +197,14 @@ def _http_url(url: str) -> str | None:
     return url if url.startswith(("https://", "http://")) else None
 
 
-def author_name(author_uri: str) -> str:
+def author_handle(author_uri: str) -> str | None:
     """The author's handle, @name@host, where their profile address follows a known pattern, and
-    otherwise the address without its scheme. The search API gives only the author's URI."""
+    otherwise None. The search API gives only the author's URI."""
     try:
         url = httpx.URL(author_uri)
     except httpx.InvalidURL:
-        return author_uri
+        return None
     profile = PROFILE_PATH.fullmatch(url.path)
-    if profile is None or not url.host:
-        return author_uri.removeprefix("https://").removeprefix("http://")
+    if profile is None or url.scheme not in ("https", "http") or not url.host:
+        return None
     return f"@{profile.group(1)}@{url.host}"

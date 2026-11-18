@@ -533,10 +533,11 @@ SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS = 60 * 60
 SOCIAL_REGISTER_TIMEOUT_SECONDS = 30
 SOCIAL_API_TIMEOUT_SECONDS = 5
 
-# The social search page, /social/search/, asks Mwmbl Social at query time and never copies its
+# Social search, /api/v2/social/search, asks Mwmbl Social at query time and never copies its
 # posts into Mwmbl's index. A cached result can show a post its author has since deleted or
 # withdrawn from search, which Mwmbl Social itself hides at once, so the TTL is how much later
 # than promised a withdrawal takes effect here. Five minutes keeps that short, and well inside
 # the "promptly" the privacy policy promises, while repeated and popular queries skip the call.
 SOCIAL_SEARCH_CACHE_SECONDS = 5 * 60
 SOCIAL_SEARCH_TIMEOUT_SECONDS = 3
+SOCIAL_SEARCH_RATE_LIMIT_PER_MINUTE = 30  # per caller network, as for widgets
