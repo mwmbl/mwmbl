@@ -83,7 +83,7 @@ impl From<&CrawlResult> for UrlStatus {
             CrawlResult::RobotsUnavailableError { .. } => UrlStatus::ErrorTimeout,
             CrawlResult::RobotsDeniedError { .. } => UrlStatus::ErrorRobotsDenied,
             CrawlResult::CrawlContent { .. } => UrlStatus::Crawled,
-            | CrawlResult::NoResponseTextError { status, .. }
+            CrawlResult::NoResponseTextError { status, .. }
             | CrawlResult::HtmlParsingError { status, .. } => {
                 if status.as_u16() == 404 {
                     UrlStatus::Error404

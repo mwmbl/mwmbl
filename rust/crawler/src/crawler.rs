@@ -77,7 +77,6 @@ impl Crawler {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         let client = self.get_client()?;
         let start = Instant::now();
-        
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
