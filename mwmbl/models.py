@@ -699,8 +699,8 @@ class SocialRegistration(models.Model):
     """A fediverse server a user connected to Mwmbl Social, Mwmbl's hosted FASP (mwmbl.social).
 
     Mwmbl Social keeps the registration itself, and its live status. This records who asked for
-    it, so only they can see and disconnect it, and the approval link, which the server sends
-    only once and Mwmbl Social does not keep.
+    it, so that other users can't see or disconnect it, and the approval link, which the server
+    sends only once and Mwmbl Social does not keep.
     """
 
     user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="social_registrations")

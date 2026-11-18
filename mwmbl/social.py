@@ -22,6 +22,11 @@ REFUSAL_STATUSES = (400, 409, 502)
 ADDRESS_EXAMPLE = "Enter your server's domain name, for example https://mastodon.example."
 # Every top-level domain starts with a letter, punycode ones (xn--) included.
 TOP_LEVEL_LABEL = re.compile(r"[a-z][a-z0-9-]*")
+# Names that only resolve inside a network: mDNS, ICANN's reserved private-use name, a
+# Kubernetes cluster's (svc.cluster.local) and common home and office ones.
+PRIVATE_TOP_LEVEL_LABELS = {"local", "internal", "localhost", "localdomain", "lan", "home", "arpa", "corp", "intranet"}
+# SocialRegistration.server_url's max_length.
+MAX_SERVER_URL_LENGTH = 200
 
 
 class RegistrationRefused(Exception):
@@ -53,8 +58,14 @@ def server_url_and_host(entered: str) -> tuple[str, str]:
     *_, top_level_label = hostname.split(".")
     if "." not in hostname or not TOP_LEVEL_LABEL.fullmatch(top_level_label):
         raise ValueError(ADDRESS_EXAMPLE)
+    if top_level_label in PRIVATE_TOP_LEVEL_LABELS:
+        raise ValueError(ADDRESS_EXAMPLE)
     host = hostname if url.port is None else f"{hostname}:{url.port}"
-    return f"https://{host}", host
+    server_url = f"https://{host}"
+    # Checked here, not on what was entered, because punycode makes a host longer.
+    if len(server_url) > MAX_SERVER_URL_LENGTH:
+        raise ValueError(ADDRESS_EXAMPLE)
+    return server_url, host
 
 
 def user_attempt_wait(user_id: int) -> int | None:
