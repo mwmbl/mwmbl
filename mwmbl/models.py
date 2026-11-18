@@ -693,3 +693,25 @@ class BlockedUrl(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class SocialRegistration(models.Model):
+    """A fediverse server a user connected to Mwmbl Social, Mwmbl's hosted FASP (mwmbl.social).
+
+    Mwmbl Social keeps the registration itself, and its live status. This records who asked for
+    it, so only they can see and disconnect it, and the approval link, which the server sends
+    only once and Mwmbl Social does not keep.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE, related_name="social_registrations")
+    # What the user entered, normalised to https://host[:port].
+    server_url = models.URLField()
+    # Mwmbl Social's id for it, which it never reuses.
+    registration_id = models.BigIntegerField(unique=True)
+    # The server's FASP base URL, e.g. https://mastodon.example/api/fasp.
+    base_url = models.URLField(max_length=1000)
+    fingerprint = models.CharField(max_length=200)
+    # Empty when the server sent a link that is not https, which the page must not link to.
+    approval_url = models.URLField(max_length=2000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
