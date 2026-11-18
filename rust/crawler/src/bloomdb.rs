@@ -21,7 +21,7 @@ use tokio::{
 };
 
 use crate::{
-    constants::{DOMAINS_VEC, LINK_DOMAIN_DB_SAVE_INTERVAL, NUM_DOMAINS_IN_BLOOM_FILTER},
+    constants::{DOMAINS_VEC, BLOOM_DB_SAVE_INTERVAL, NUM_DOMAINS_IN_BLOOM_FILTER},
     path_creation::bloom_path,
     retrieve::CrawlResult,
 };
@@ -178,7 +178,7 @@ impl BloomDatabase {
 
         spawn(async move {
             loop {
-                sleep(LINK_DOMAIN_DB_SAVE_INTERVAL).await;
+                sleep(BLOOM_DB_SAVE_INTERVAL).await;
                 if let Some(db) = weak.upgrade() {
                     let db = db.clone();
 
