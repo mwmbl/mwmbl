@@ -8,6 +8,7 @@ with pending registrations.
 """
 
 import re
+import time
 
 import httpx
 from django.conf import settings
@@ -56,16 +57,27 @@ def server_url_and_host(entered: str) -> tuple[str, str]:
     return f"https://{host}", host
 
 
-def take_user_attempt(user_id: int) -> bool:
-    """Count an attempt by this user, and say whether it is within their daily limit."""
-    key = f"social:connect:user:{user_id}"
+def user_attempt_wait(user_id: int) -> int | None:
+    """Count an attempt by this user: None if it is within their daily limit, otherwise the
+    seconds until the day's window ends and they may try again."""
+    now = int(time.time())
+    window = now // DAY_SECONDS
+    key = f"social:connect:user:{user_id}:{window}"
     cache.add(key, 0, timeout=DAY_SECONDS)
-    return cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY
+    if cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY:
+        return None
+    return (window + 1) * DAY_SECONDS - now
 
 
-def take_host_attempt(host: str) -> bool:
-    """Whether nobody has tried to connect this host recently, marking that someone now has."""
-    return cache.add(f"social:connect:host:{host}", 1, timeout=settings.SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS)
+def host_attempt_wait(host: str) -> int | None:
+    """Mark that someone is trying to connect this host: None if nobody has recently, otherwise
+    the seconds until it may be tried again."""
+    now = int(time.time())
+    key = f"social:connect:host:{host}"
+    window_seconds = settings.SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS
+    if cache.add(key, now, timeout=window_seconds):
+        return None
+    return max(cache.get(key, now) + window_seconds - now, 1)
 
 
 def _registrations_url() -> str:
