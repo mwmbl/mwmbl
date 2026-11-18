@@ -1,7 +1,10 @@
 use std::{
     cmp::{max, min},
     collections::VecDeque,
-    sync::{Arc, atomic::{AtomicU64, AtomicUsize, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -37,7 +40,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
     //to_submit: Arc<RwLock<VecDeque<CrawlResult>>>,
-    count: Arc<AtomicUsize>
+    count: Arc<AtomicUsize>,
 }
 
 impl Crawler {
@@ -57,8 +60,8 @@ impl Crawler {
             crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
             params: Arc::new(params),
             domainlinkdb,
+            count: Arc::new(AtomicUsize::new(0)),
             //to_submit: Arc::new(RwLock::new(VecDeque::new())),
-            count: Arc::new(AtomicUsize::new(0))
         })
     }
 
@@ -81,7 +84,7 @@ impl Crawler {
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
-            let mut cache = self.robots_cache.clone();
+            let cache = self.robots_cache.clone();
             let crawl_client = client.clone();
             #[cfg(feature = "servo")]
             let user_agent = self.crawl_user_agent();
@@ -102,8 +105,6 @@ impl Crawler {
                     user_agent,
                 )
                 .await;
-
-                drop(permit);
 
                 let (resolved_domain, status) = result.get_resolved_info();
 

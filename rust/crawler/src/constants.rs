@@ -22,7 +22,7 @@ pub static SEED_DOMAIN_RANDOM_WEIGHT: usize = 1;
 pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
 
 pub static MAX_REDIRECTS: usize = 5;
-pub static TIMEOUT: Duration = Duration::from_secs(3);
+pub static TIMEOUT: Duration = Duration::from_secs(30);
 pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
 pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {

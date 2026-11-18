@@ -8,15 +8,16 @@ use std::{
 };
 
 use anyhow::bail;
+use priority_queue::DoublePriorityQueue;
 use reqwest::{Client, StatusCode, Url};
-use scc::HashCache;
+use scc::{HashCache, HashMap};
 use texting_robots::Robot;
-use tokio::time::Instant;
+use tokio::{sync::RwLock, time::Instant};
 
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, ROBOTS_CACHE_ERROR_TTL_SECONDS,
-        ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
+        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_DOMAIN_DELAY,
+        ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
     },
     retrieve::fetch,
 };
@@ -52,7 +53,7 @@ impl CachedRobotFile {
         None
     }
     pub fn delay(&self, status: Option<StatusCode>) -> Duration {
-        if status.is_some_and(|status| status.is_success()) {
+        if status.is_some_and(|status| !status.is_success()) {
             let value = self.error_count.fetch_add(1, Ordering::Relaxed);
             return min(BLOCK_COOL_OFF * (1 << value), MAX_BLOCK_COOL_OFF);
         }
@@ -66,7 +67,7 @@ impl CachedRobotFile {
         ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
     pub fn is_valid(&self) -> bool {
-        self.robot_fetched.duration_since(Instant::now()) < self.cache_ttl
+        Instant::now().duration_since(self.robot_fetched) < self.cache_ttl
     }
 }
 
@@ -80,30 +81,56 @@ fn get_robot_url(url: &Url) -> Url {
 
 #[derive(Clone)]
 pub struct RobotCache {
-    cache: Arc<HashCache<String, CachedRobotFile>>,
+    cache: Arc<HashMap<String, CachedRobotFile>>,
+    removal: Arc<RwLock<DoublePriorityQueue<String, Instant>>>,
 }
 
 impl RobotCache {
     #[must_use]
     pub fn new() -> Self {
         RobotCache {
-            cache: Arc::new(HashCache::new()),
+            cache: Arc::new(HashMap::default()),
+            removal: Arc::new(RwLock::new(DoublePriorityQueue::new())),
         }
     }
 
-    pub async fn can_fetch(&mut self, domain: &str, url: &Url) -> Option<bool> {
+    async fn evict(&self) {
+        let mut should_try = false;
+        // don't ask for write lock if not necessary
+        let lock = self.removal.read().await;
+        if let Some((_, ttl)) = lock.peek_min() {
+            should_try = ttl > &mut Instant::now();
+        }
+        drop(lock);
+        if !should_try {
+            return;
+        }
+        let mut lock = self.removal.write().await;
+        let mut to_remove = Vec::new();
+        while let Some((key, _)) = lock.pop_min_if(|_, ttl| ttl > &mut Instant::now()) {
+            to_remove.push(key);
+        }
+        drop(lock);
+        for key in to_remove {
+            self.cache.remove_if_async(&key, |v| !v.is_valid()).await;
+        }
+    }
+
+    pub async fn can_fetch(&self, domain: &str, url: &Url) -> Option<bool> {
+        self.evict().await;
         if let Some(occupied_entry) = self.cache.get_async(domain).await {
             return if occupied_entry.get().is_valid() {
+                occupied_entry.get().can_fetch(url)
+            } else {
                 let _ = occupied_entry.remove();
                 None
-            } else {
-                occupied_entry.get().can_fetch(url)
             };
         }
         None
     }
 
-    pub async fn domain_delay(&mut self, status: Option<StatusCode>, domain: &str) -> Duration {
+    pub async fn domain_delay(&self, status: Option<StatusCode>, domain: &str) -> Duration {
+        self.evict().await;
         if let Some(occupied_entry) = self.cache.get_async(domain).await {
             let delay = occupied_entry.delay(status);
             if !occupied_entry.get().is_valid() {
@@ -115,7 +142,11 @@ impl RobotCache {
     }
 
     pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
-        let _ = self.cache.put_async(domain.to_owned(), file).await;
+        self.evict().await;
+        let mut lock = self.removal.write().await;
+        lock.push(domain.to_owned(), file.robot_fetched + file.cache_ttl);
+        drop(lock);
+        let _ = self.cache.insert_async(domain.to_owned(), file).await;
     }
 }
 
@@ -131,7 +162,9 @@ pub async fn robot_allowed(
         return Ok(can_fetch);
     }
 
-    if let Ok((data, status, _)) = fetch(client, &robot_url).await
+    let v = fetch(client, &robot_url).await;
+
+    if let Ok((data, status, _)) = v
         && status.is_success()
     {
         let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&data));

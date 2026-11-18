@@ -79,7 +79,7 @@ pub struct CrawlerParams {
     )]
     remote_server: String,
     /// maximum amount of simultaneous crawling task that can run at any point.
-    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "20000")]
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "32")]
     max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
