@@ -1,5 +1,5 @@
-"""Connecting fediverse servers to Mwmbl Social (mwmbl.social, mwmbl.platform.social_api), with its
-admin API faked at the HTTP boundary by pytest-httpx."""
+"""The Mwmbl Social sign-up endpoints (mwmbl.platform.social_api), with its admin API faked at the
+HTTP boundary by pytest-httpx. The client, addresses and limits are in test_social_client.py."""
 
 import json
 
@@ -59,41 +59,6 @@ def stored_registration(user, **fields) -> SocialRegistration:
     return SocialRegistration.objects.create(user=user, **(values | fields))
 
 
-@pytest.mark.parametrize(
-    "entered, expected",
-    [
-        ("mastodon.example", ("https://mastodon.example", "mastodon.example")),
-        ("https://Mastodon.Example/about", ("https://mastodon.example", "mastodon.example")),
-        ("https://m.example:8443", ("https://m.example:8443", "m.example:8443")),
-        # Other spellings of one server get the same host, so they share its rate limit.
-        ("https://m.example:443/", ("https://m.example", "m.example")),
-        ("m.example.", ("https://m.example", "m.example")),
-        ("münchen.social", ("https://xn--mnchen-3ya.social", "xn--mnchen-3ya.social")),
-    ],
-)
-def test_a_server_address_is_normalised_to_https_and_its_host(entered, expected):
-    assert social.server_url_and_host(entered) == expected
-
-
-@pytest.mark.parametrize(
-    "entered",
-    [
-        "http://mastodon.example",
-        "https://",
-        "https://me:pw@mastodon.example",
-        # Mwmbl Social would fetch these from inside our network.
-        "https://127.0.0.1",
-        "https://0x7f.1",
-        "https://[::1]",
-        "localhost",
-        "https://2130706433",
-    ],
-)
-def test_unusable_server_addresses_are_refused(entered):
-    with pytest.raises(ValueError):
-        social.server_url_and_host(entered)
-
-
 @pytest.mark.parametrize("method", ["get", "post"])
 def test_registrations_need_a_login(client, db, method):
     assert getattr(client, method)(REGISTRATIONS).status_code == 401
@@ -118,9 +83,7 @@ def test_connecting_registers_the_server(client, user, httpx_mock):
         "disconnected_at": None,
     }
     assert (registration.user, registration.registration_id) == (user, 4)
-    sent = httpx_mock.get_request(method="POST")
-    assert sent.headers["Authorization"] == "Bearer test-admin-token"
-    assert json.loads(sent.content) == {"server_url": "https://mastodon.example"}
+    assert json.loads(httpx_mock.get_request().content) == {"server_url": "https://mastodon.example"}
 
 
 def test_an_approval_link_that_is_not_https_is_not_kept(client, user, httpx_mock):
@@ -193,14 +156,6 @@ def test_each_server_gets_one_attempt_an_hour_whoever_makes_it(client, user, htt
     assert response.status_code == 429
     assert response.json()["code"] == "host_limit"
     assert 0 < response.json()["retry_after"] <= 60 * 60
-
-
-def test_the_limits_hold_on_redis(redis_cache, settings):
-    settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY = 2
-
-    assert [social.user_attempt_wait(1) is None for _ in range(3)] == [True, True, False]
-    assert [social.host_attempt_wait("mastodon.example") is None for _ in range(2)] == [True, False]
-    assert 0 < redis_cache.ttl(cache.make_key("social:connect:host:mastodon.example")) <= 60 * 60
 
 
 @pytest.mark.parametrize(
