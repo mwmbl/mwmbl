@@ -46,6 +46,10 @@ def test_a_server_address_is_normalised_to_https_and_its_host(entered, expected)
         "https://[::1]",
         "localhost",
         "https://2130706433",
+        "mwmbl-social.default.svc.cluster.local",
+        "https://postgres.internal:5432",
+        # Too long for SocialRegistration.server_url once in punycode.
+        "münchen." * 14 + "social",
     ],
 )
 def test_unusable_server_addresses_are_refused(entered):
