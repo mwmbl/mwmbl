@@ -147,6 +147,8 @@ exclude_also = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# Volunteers run the benchmark with whatever python3 their system has, macOS's 3.9 included.
+per-file-target-version = { "mwmbl/crawler/benchmark.py" = "py39" }
 extend-exclude = ["devdata", "front-end", "test_env"]
 
 [tool.ruff.lint]
