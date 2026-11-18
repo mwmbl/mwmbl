@@ -1,21 +1,37 @@
-"""Find the crawler configuration that earns this machine the highest index score.
+"""Find the crawler configuration that fetches the most pages on this machine.
 
-Runs every combination of process count and thread count, one at a time: stop the crawler,
-start it with that combination, let it warm up, then measure for a fixed time. The winner is
-the combination that got the most results into the Mwmbl index.
+Tries every combination of process count and thread count one at a time: stop the crawler, start it
+with that combination, let it warm up, then measure for a fixed time. The winner is the
+combination that fetched the most pages a minute, and the cheaper one when two tie.
 
-What is measured is how many results the crawler's device submitted between the end of warmup
-and the end of the measurement, as counted by the server from `GET /api/v1/crawler/device-results`.
-Each submission adds the number of URLs it put in the index that were not there already, so this
-is exactly what the crawler contributed in the window. The devices page's "last 24 hours" figure
-is a rolling window shared by every configuration that ran in it, so it is not used.
+What is measured is the crawler's own count of fetches, `crawl-domain-overlap fetches` in its
+Redis, which every worker adds its batch to as the batch finishes. Nothing is read from the
+Mwmbl server, so no API key is needed.
+
+It has to run for a long time to mean anything. The crawler starts its workers five seconds
+apart, after downloading the blocklists, and its indexing and sync with the main index only
+begin once there are batches to index, and compete with the workers for CPU and network from
+then on. A run of seconds measures a crawler that is not yet doing what it does for the rest of
+its life. The defaults are a 5 minute warmup and a 30 minute window per configuration, which
+makes trying all twenty default combinations a job for overnight.
+
+Batches arrive in bursts, so the window opens at the first batch to finish after warmup and
+closes at the first one to finish after the duration has passed. Both ends are then exact
+counts of whole batches, not a fixed time that cuts through them.
 
 Nothing here says "Python": it needs only a way to start and stop the crawler with CRAWLER_WORKERS
-and CRAWL_THREADS set, and the server's API. It authenticates with the crawler's MWMBL_API_KEY,
-which must be set in this environment as for the crawler.
+and CRAWL_THREADS set, and to read its Redis.
 
-Run as `mwmbl benchmark` or `python -m mwmbl.crawler.benchmark`.
+Run as `make optimize`, `mwmbl benchmark` or `python -m mwmbl.crawler.benchmark`.
+For the default Compose crawler, set MWMBL_API_KEY and MWMBL_CONTACT_INFO in .env or
+the environment before running the benchmark.
+
+The Compose runner needs nothing but Docker and the standard library of Python 3.9 or later, so
+this file runs on its own, with no checkout or install: deploy/crawler/benchmark.sh fetches it.
 """
+
+# Annotations like `int | None` would otherwise need Python 3.10, and macOS ships 3.9.
+from __future__ import annotations
 
 import argparse
 import csv
@@ -33,12 +49,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
-import psutil
-import requests
-
-from mwmbl.crawler.device import get_device_name
-from mwmbl.crawler.env_vars import MWMBL_API_KEY, MWMBL_DEVICE_NAME, MWMBL_REMOTE_SERVER
-
 DEFAULT_PROCESS_COUNTS = [1, 2, 3, 4, 5]
 DEFAULT_THREAD_COUNTS = [10, 25, 50, 100]
 DEFAULT_WARMUP = "5m"
@@ -50,29 +60,34 @@ STATUS_SKIPPED = "SKIPPED"
 STATUS_INTERRUPTED = "INTERRUPTED"
 
 COMPOSE_SERVICE = "mwmbl-crawler"
+REDIS_SERVICE = "redis_crawler"
+FETCHES_KEY = "crawl-domain-overlap"
+FETCHES_FIELD = "fetches"
 # What the benchmark overrides, so what restoring the user's crawler has to put back.
-RESTORED_SETTINGS = ("CRAWLER_WORKERS", "CRAWL_THREADS", "MWMBL_DEVICE_NAME")
-CRAWLER_EXECUTABLES = ("mwmbl-crawl", "mwmbl.crawl")
-STOP_TIMEOUT_SECONDS = 60
+RESTORED_SETTINGS = ("CRAWLER_WORKERS", "CRAWL_THREADS")
+# The crawler is PID 1 in its container and has no SIGTERM handler, so the default ten seconds
+# of grace is always spent waiting for a signal that is ignored. Everything durable is in Redis.
+CONTAINER_STOP_GRACE_SECONDS = 2
 PROGRESS_INTERVAL_SECONDS = 60
-READ_ATTEMPTS = 3
-READ_RETRY_SECONDS = 10
+# Each poll of the counter is a docker exec, and a window is minutes long, so a second's resolution
+# would be a lot of process spawns for an error of a fraction of a percent.
+POLL_INTERVAL_SECONDS = 5
+# A crawler that has finished no batch in this many durations is not slow, it is stuck.
+GIVE_UP_AFTER_DURATIONS = 6
 
 # Rough, and only used to skip combinations that would obviously exhaust memory: the indexing
 # process and Redis, then each crawl worker. Memory scales with processes, not threads. The
-# index score still decides the winner of every combination that is run.
+# throughput still decides the winner of every combination that is run.
 BASE_MEMORY_MB = 600
 DEFAULT_MEMORY_PER_PROCESS_MB = 400
 
 CSV_COLUMNS = [
     "timestamp",
-    "hostname",
-    "crawler_version",
     "processes",
     "threads",
     "warmup_seconds",
     "duration_seconds",
-    "index_score",
+    "fetches_per_minute",
     "status",
     "error",
 ]
@@ -91,22 +106,9 @@ class Configuration:
 class Result:
     configuration: Configuration
     status: str
-    index_score: int | None = None
-    crawler_version: str = "unknown"
+    fetches_per_minute: float | None = None
     error: str = ""
     finished_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class NothingSubmitted(RuntimeError):
-    """The server saw nothing from the device: a setup mistake, not a bad configuration."""
-
-
-@dataclass
-class DeviceReading:
-    known: bool
-    results_since: int
-    server_time: float
-    crawler_version: str
 
 
 def parse_counts(text: str) -> list[int]:
@@ -124,10 +126,11 @@ def parse_duration(text: str) -> int:
 
 
 def format_duration(seconds: int) -> str:
-    for unit_seconds, unit in ((3600, "h"), (60, "m")):
-        if seconds and seconds % unit_seconds == 0:
-            return f"{seconds // unit_seconds}{unit}"
-    return f"{seconds}s"
+    """Like 1h 2m 33s, leaving out the units that are zero: 30m, 1m 29s, 45s."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = [f"{value}{unit}" for value, unit in ((hours, "h"), (minutes, "m"), (seconds, "s")) if value]
+    return " ".join(parts) or "0s"
 
 
 def all_configurations(process_counts: list[int], thread_counts: list[int]) -> list[Configuration]:
@@ -135,7 +138,7 @@ def all_configurations(process_counts: list[int], thread_counts: list[int]) -> l
 
 
 def total_memory_mb() -> float:
-    return psutil.virtual_memory().total / 2**20
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
 
 
 class Crawler(Protocol):
@@ -146,6 +149,10 @@ class Crawler(Protocol):
     def start(self, env: dict[str, str]) -> None: ...
 
     def ensure_running(self) -> None: ...
+
+    def fetches(self) -> int:
+        """How many URLs the crawler has finished fetching, in total, as of its last finished batch."""
+        ...
 
     def stop(self) -> None: ...
 
@@ -161,8 +168,9 @@ class ComposeCrawler:
     the service's `pull_policy: always` would otherwise swap the crawler version under a run.
     """
 
-    def __init__(self, compose_file: Path):
-        self.command = ["docker", "compose", "-f", str(compose_file)]
+    def __init__(self, compose_file: Path, env_file: Path | None = None):
+        env_file_option = [] if env_file is None else ["--env-file", str(env_file)]
+        self.command = ["docker", "compose", "-f", str(compose_file), *env_file_option]
         self.original_env: dict[str, str] = {}
 
     def _run(self, *args: str, env: dict[str, str] | None = None) -> str:
@@ -177,6 +185,26 @@ class ComposeCrawler:
 
     def is_running(self) -> bool:
         return bool(self._run("ps", "--status", "running", "-q", COMPOSE_SERVICE).strip())
+
+    def validate(self) -> None:
+        config = json.loads(self._run("config", "--format", "json", COMPOSE_SERVICE))
+        environment = config["services"][COMPOSE_SERVICE].get("environment", {})
+        problems = []
+        api_key = environment.get("MWMBL_API_KEY")
+        if (
+            environment.get("CRAWL_SUBMIT_MODE") != "off"
+            and "MWMBL_API_KEY" in environment
+            and (not api_key or api_key.strip() in ("", "CREATE_ME"))
+        ):
+            problems.append("MWMBL_API_KEY")
+        contact = environment.get("MWMBL_CONTACT_INFO")
+        if "MWMBL_CONTACT_INFO" in environment and (not contact or contact.strip() in ("", "CHANGE_ME@example.com")):
+            problems.append("MWMBL_CONTACT_INFO")
+        if problems:
+            raise SystemExit(
+                f"Set {', '.join(problems)} in your environment or .env before benchmarking the crawler. "
+                "Use --env-file to select another settings file."
+            )
 
     def stop_existing(self) -> None:
         """Stop the user's crawler, first noting the settings it runs with: they may have come from
@@ -197,124 +225,27 @@ class ComposeCrawler:
 
     def ensure_running(self) -> None:
         if not self.is_running():
-            raise RuntimeError("the crawler container stopped")
+            logs = shlex.join([*self.command, "logs", "--tail", "100", COMPOSE_SERVICE])
+            raise RuntimeError(f"the crawler container stopped; inspect its logs with: {logs}")
+
+    def fetches(self) -> int:
+        counted = self._run("exec", "-T", REDIS_SERVICE, "redis-cli", "HGET", FETCHES_KEY, FETCHES_FIELD)
+        return int(counted.strip() or 0)
 
     def stop(self) -> None:
-        self._run("stop", COMPOSE_SERVICE)
+        self._run("stop", "--timeout", str(CONTAINER_STOP_GRACE_SECONDS), COMPOSE_SERVICE)
 
     def restore(self, was_running: bool) -> None:
         if was_running:
             self.start(self.original_env)
 
 
-class ProcessCrawler:
-    """The crawler as a child process of this one, in a process group of its own so that its
-    workers are stopped with it. The environment is the child's alone."""
-
-    def __init__(self, command: list[str]):
-        self.command = command
-        self.process: subprocess.Popen | None = None
-
-    def is_running(self) -> bool:
-        return bool(self._existing_crawlers())
-
-    @staticmethod
-    def _existing_crawlers() -> list[psutil.Process]:
-        def is_crawler(process: psutil.Process) -> bool:
-            arguments = (process.info["cmdline"] or [])[:3]
-            return process.pid != os.getpid() and any(Path(arg).name in CRAWLER_EXECUTABLES for arg in arguments)
-
-        return [process for process in psutil.process_iter(["cmdline"]) if is_crawler(process)]
-
-    def stop_existing(self) -> None:
-        pids = [process.pid for process in self._existing_crawlers()]
-        raise SystemExit(
-            f"A crawler is already running (pid {pids}). Stop it first: this runner does not know how it was "
-            "started, and a second crawler would make every measurement meaningless."
-        )
-
-    def start(self, env: dict[str, str]) -> None:
-        self.process = subprocess.Popen(self.command, env={**os.environ, **env}, start_new_session=True)
-
-    def ensure_running(self) -> None:
-        assert self.process is not None
-        exit_code = self.process.poll()
-        if exit_code is not None:
-            raise RuntimeError(f"the crawler exited with code {exit_code}")
-
-    def _signal_group(self, signal_number: int) -> bool:
-        """Send the signal to the process group, which is the crawler's workers as well as its
-        leader. Signal 0 only asks whether any member is left."""
-        assert self.process is not None
-        try:
-            os.killpg(self.process.pid, signal_number)
-        except ProcessLookupError:
-            return False
-        return True
-
-    def stop(self) -> None:
-        if self.process is None:
-            return
-        # Not only while the leader lives: the workers are not daemons, so they outlast a leader
-        # that was killed, and would go on crawling beside the next configuration.
-        self._signal_group(signal.SIGTERM)
-        deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-        # poll() reaps the leader, which otherwise stays a zombie and keeps the group alive.
-        while self.process.poll() is None or self._signal_group(0):
-            if time.monotonic() > deadline:
-                self._signal_group(signal.SIGKILL)
-                self.process.wait()
-                break
-            time.sleep(0.2)
-        self.process = None
-
-    def restore(self, was_running: bool) -> None:
-        """Nothing to restore: a running crawler is refused up front, not stopped."""
-
-
-class DeviceScores:
-    """Reads a device's results from the server with the crawler's own API key, so no login is needed.
-
-    The server does the counting and gives its own clock, so a window is bounded by two server
-    times and is not affected by this machine's clock being wrong.
-    """
-
-    def __init__(self, server: str, api_key: str, device_name: str):
-        self.url = f"{server}/api/v1/crawler/device-results"
-        self.headers = {"X-API-Key": api_key, "User-Agent": "mwmbl-benchmark"}
-        self.device_name = device_name
-
-    def read(self, since: float | None = None) -> DeviceReading:
-        params = (
-            {"device_name": self.device_name} if since is None else {"device_name": self.device_name, "since": since}
-        )
-        # Retried because a timeout at the end of a 30 minute measurement would otherwise throw
-        # the measurement away, with the crawler already stopped; a read can safely be repeated.
-        for attempt in range(1, READ_ATTEMPTS + 1):
-            try:
-                response = requests.get(self.url, params=params, headers=self.headers, timeout=30)
-                response.raise_for_status()
-                break
-            except requests.RequestException:
-                if attempt == READ_ATTEMPTS:
-                    raise
-                time.sleep(READ_RETRY_SECONDS)
-        body = response.json()
-        return DeviceReading(
-            body["known"], body["results_since"], body["server_time"], body.get("crawler_version") or "unknown"
-        )
-
-    def check_access(self) -> None:
-        self.read()
-
-
 class Benchmark:
     def __init__(
         self,
-        configurations: list[Configuration],
+        process_counts: list[int],
+        thread_counts: list[int],
         crawler: Crawler,
-        scores: DeviceScores,
-        device_name: str,
         warmup_seconds: int,
         duration_seconds: int,
         csv_path: Path,
@@ -322,10 +253,9 @@ class Benchmark:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ):
-        self.configurations = configurations
+        self.process_counts = process_counts
+        self.thread_counts = thread_counts
         self.crawler = crawler
-        self.scores = scores
-        self.device_name = device_name
         self.warmup_seconds = warmup_seconds
         self.duration_seconds = duration_seconds
         self.csv_path = csv_path
@@ -334,31 +264,27 @@ class Benchmark:
         self.clock = clock
 
     def run(self) -> list[Result]:
-        # Before anything is stopped, so that an unwritable CSV path or a wrong key is found out
-        # now and not after the first 35 minutes with the user's crawler down.
+        # Before anything is stopped, so that an unwritable CSV path is found out now and not
+        # after the user's crawler is down.
         self.csv_path.touch()
-        self.scores.check_access()
         was_running = self.crawler.is_running()
 
         results: list[Result] = []
         try:
             if was_running:
                 self.crawler.stop_existing()
-            for number, configuration in enumerate(self.configurations, start=1):
-                print(f"\n[{number}/{len(self.configurations)}] {describe(configuration)}", flush=True)
+            plan = all_configurations(self.process_counts, self.thread_counts)
+            for number, configuration in enumerate(plan, start=1):
+                print(f"\n[{number}] {describe(configuration)}", flush=True)
                 try:
                     result = self.measure(configuration)
                 except KeyboardInterrupt:
                     print("  interrupted", flush=True)
                     self.record(results, Result(configuration, STATUS_INTERRUPTED, error="interrupted"))
                     break
-                except NothingSubmitted as error:
-                    # The same setup error would cost every remaining configuration its full duration.
-                    print(f"  FAILED: {error}\n  Stopping: the other configurations would fail the same way.")
-                    self.record(results, Result(configuration, STATUS_FAILED, error=str(error)))
-                    break
                 self.record(results, result)
-                print(f"  {result.status}: {result.index_score if result.index_score is not None else result.error}")
+                shown = f"{result.fetches_per_minute:.0f} fetches/min" if result.fetches_per_minute else result.error
+                print(f"  {result.status}: {shown}")
         finally:
             try:
                 self.crawler.stop()
@@ -370,7 +296,7 @@ class Benchmark:
 
     def record(self, results: list[Result], result: Result) -> None:
         results.append(result)
-        append_csv(self.csv_path, self.device_name, self.warmup_seconds, self.duration_seconds, result)
+        append_csv(self.csv_path, self.warmup_seconds, self.duration_seconds, result)
 
     def measure(self, configuration: Configuration) -> Result:
         if self.memory_per_process_mb is not None:
@@ -382,26 +308,50 @@ class Benchmark:
 
         try:
             self.crawler.stop()
-            self.crawler.start(
-                {**configuration.env(), "MWMBL_DEVICE_NAME": self.device_name},
-            )
+            self.crawler.start(configuration.env())
             self.wait(self.warmup_seconds, "warming up")
-            window_start = self.scores.read().server_time
-            self.wait(self.duration_seconds, "measuring")
-            final = self.scores.read(since=window_start)
-            if not final.known or final.results_since == 0:
-                raise NothingSubmitted(
-                    f"the server saw nothing from device {self.device_name!r} in the measurement window. Check that "
-                    "MWMBL_REMOTE_SERVER, MWMBL_API_KEY and CRAWL_SUBMIT_MODE are the same here as for the crawler."
-                )
-            return Result(configuration, STATUS_OK, final.results_since, final.crawler_version)
-        except NothingSubmitted:
-            raise
-        except (RuntimeError, requests.RequestException, subprocess.CalledProcessError, OSError) as error:
+            rate = self.measure_rate()
+            return Result(configuration, STATUS_OK, rate)
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as error:
             # One configuration failing must not cost the results of the rest.
             return Result(configuration, STATUS_FAILED, error=f"{type(error).__name__}: {error}")
         finally:
             self.crawler.stop()
+
+    def measure_rate(self) -> float:
+        """Fetches a minute between two batches finishing, at least the duration apart.
+
+        The counter only moves when a batch finishes, so a window of fixed length would start
+        and end part way through batches and miscount them by up to a batch each end, which for
+        one process is most of what it fetched. The count and the time between two changes of
+        the counter are both exact, to the poll interval.
+        """
+        started_at = self.clock()
+        give_up_at = started_at + GIVE_UP_AFTER_DURATIONS * self.duration_seconds
+        last_seen = self.crawler.fetches()
+        opened: tuple[float, int] | None = None
+        window_end = 0.0
+        next_progress_at = 0.0
+        while self.clock() < give_up_at:
+            self.crawler.ensure_running()
+            self.sleep(POLL_INTERVAL_SECONDS)
+            now = self.clock()
+            if opened is not None and now >= next_progress_at:
+                print(f"  measuring: {format_duration(round(max(window_end - now, 0)))} left", flush=True)
+                next_progress_at = now + PROGRESS_INTERVAL_SECONDS
+            fetches = self.crawler.fetches()
+            if fetches == last_seen:
+                continue
+            last_seen = fetches
+            if opened is None:
+                opened = (now, fetches)
+                window_end = now + self.duration_seconds
+            elif now >= window_end:
+                opened_at, opened_fetches = opened
+                return (fetches - opened_fetches) / (now - opened_at) * 60
+        raise RuntimeError(
+            f"no window of {format_duration(self.duration_seconds)} closed in time: batches are too slow"
+        )
 
     def wait(self, seconds: int, label: str) -> None:
         deadline = self.clock() + seconds
@@ -419,7 +369,7 @@ def describe(configuration: Configuration) -> str:
     return f"CRAWLER_WORKERS={configuration.processes} CRAWL_THREADS={configuration.threads}"
 
 
-def append_csv(path: Path, device_name: str, warmup_seconds: int, duration_seconds: int, result: Result) -> None:
+def append_csv(path: Path, warmup_seconds: int, duration_seconds: int, result: Result) -> None:
     """One row as soon as it is known, so an interrupted or crashed run loses nothing."""
     is_new = not path.exists() or path.stat().st_size == 0
     with path.open("a", newline="") as file:
@@ -429,13 +379,11 @@ def append_csv(path: Path, device_name: str, warmup_seconds: int, duration_secon
         writer.writerow(
             {
                 "timestamp": result.finished_at.isoformat(timespec="seconds"),
-                "hostname": device_name,
-                "crawler_version": result.crawler_version,
                 "processes": result.configuration.processes,
                 "threads": result.configuration.threads,
                 "warmup_seconds": warmup_seconds,
                 "duration_seconds": duration_seconds,
-                "index_score": "" if result.index_score is None else result.index_score,
+                "fetches_per_minute": "" if result.fetches_per_minute is None else round(result.fetches_per_minute, 1),
                 "status": result.status,
                 "error": result.error,
             }
@@ -443,29 +391,28 @@ def append_csv(path: Path, device_name: str, warmup_seconds: int, duration_secon
 
 
 def rank(results: list[Result]) -> list[Result]:
-    """Best score first, then the cheaper configuration when scores tie, then those with no score."""
+    """Best rate first, then the cheaper configuration when rates tie, then those with no rate."""
 
     def key(result: Result):
-        has_score = result.status == STATUS_OK
-        score = result.index_score or 0 if has_score else 0
-        return (not has_score, -score, result.configuration.processes, result.configuration.threads)
+        has_rate = result.status == STATUS_OK
+        rate = result.fetches_per_minute or 0 if has_rate else 0
+        return (not has_rate, -rate, result.configuration.processes, result.configuration.threads)
 
     return sorted(results, key=key)
 
 
-def format_report(results: list[Result], device_name: str, duration_seconds: int) -> str:
-    lines = ["Mwmbl Crawler Benchmark", f"Device: {device_name}", f"Configurations: {len(results)}", ""]
-    header = f"{'Rank':<6}{'Processes':<11}{'Threads':<9}{'Index Score':<13}{'Duration':<10}Status"
+def format_report(results: list[Result]) -> str:
+    lines = ["Mwmbl Crawler Benchmark", f"Configurations: {len(results)}", ""]
+    header = f"{'Rank':<6}{'Processes':<11}{'Threads':<9}{'Fetches/min':<13}Status"
     lines += [header, "-" * len(header)]
     ranked = rank(results)
     for position, result in enumerate(ranked, start=1):
-        has_score = result.status == STATUS_OK
-        shown_rank = str(position) if has_score else "-"
-        score = result.index_score if has_score else "-"
-        duration = format_duration(duration_seconds) if has_score else "-"
+        has_rate = result.status == STATUS_OK
+        shown_rank = str(position) if has_rate else "-"
+        rate = f"{result.fetches_per_minute:.0f}" if has_rate else "-"
         lines.append(
             f"{shown_rank:<6}{result.configuration.processes:<11}{result.configuration.threads:<9}"
-            f"{score!s:<13}{duration:<10}{result.status}"
+            f"{rate:<13}{result.status}"
         )
     for result in ranked:
         if result.error and result.status != STATUS_INTERRUPTED:
@@ -482,13 +429,13 @@ def format_report(results: list[Result], device_name: str, duration_seconds: int
             f"CRAWLER_WORKERS={winner.configuration.processes}",
             f"CRAWL_THREADS={winner.configuration.threads}",
             "",
-            f"Index score: {winner.index_score}",
+            f"Fetches per minute: {winner.fetches_per_minute:.0f}",
         ]
     lines += [
         "",
-        "Index score is the number of new URLs the server added to the index from this device's",
-        "submissions during the measurement window. It is one run per configuration, so close scores",
-        "are within noise, and the order the configurations ran in is not randomised.",
+        "Fetches per minute is the URLs the crawler finished fetching, whatever came back. It is one",
+        "short run per configuration, so rates within about 10% are within noise, and more threads",
+        "always fetch more up to what the machine and the sites crawled can bear.",
     ]
     return "\n".join(lines)
 
@@ -497,12 +444,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--processes", type=parse_counts, default=DEFAULT_PROCESS_COUNTS, metavar="N,N,...")
     parser.add_argument("--threads", type=parse_counts, default=DEFAULT_THREAD_COUNTS, metavar="N,N,...")
     parser.add_argument("--warmup", type=parse_duration, default=parse_duration(DEFAULT_WARMUP), metavar="DURATION")
-    parser.add_argument("--duration", type=parse_duration, default=parse_duration(DEFAULT_DURATION), metavar="DURATION")
+    parser.add_argument(
+        "--duration",
+        type=parse_duration,
+        default=parse_duration(DEFAULT_DURATION),
+        metavar="DURATION",
+        help="At least this long between the batch that opens the measurement and the one that closes it",
+    )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(f"benchmark-results-{datetime.now(timezone.utc).date().isoformat()}.csv"),
-        help="CSV to append results to (default: benchmark-results-<today>.csv)",
+        default=Path(f"benchmark-results-fetches-{datetime.now(timezone.utc).date().isoformat()}.csv"),
+        help="CSV to append results to (default: benchmark-results-fetches-<today>.csv)",
     )
     parser.add_argument(
         "--runner",
@@ -512,26 +465,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "process: start --crawler-command as a child process; refuses to run while another crawler is.",
     )
     parser.add_argument("--compose-file", type=Path, default=Path("docker-compose.yml"))
-    parser.add_argument("--crawler-command", default="mwmbl-crawl", help="Command for --runner process")
     parser.add_argument(
-        "--device-name",
+        "--env-file",
+        type=Path,
         default=None,
-        help="Name the crawler reports, which is how its results are found. Default: MWMBL_DEVICE_NAME, "
-        "else the name in ~/.mwmbl/device-name (created if missing). With --runner compose the crawler "
-        "is started with this name.",
+        help="Settings file. With --runner compose, docker compose reads it instead of the .env beside "
+        "--compose-file. With --runner process it is loaded into the environment the crawler inherits "
+        "(default: .env beside --compose-file), and variables already in the environment win.",
+    )
+    parser.add_argument(
+        "--crawler-command",
+        default=None,
+        help="Command for --runner process (default: this Python running `-m mwmbl.crawl` from the checkout)",
     )
     parser.add_argument("--memory-per-process-mb", type=int, default=DEFAULT_MEMORY_PER_PROCESS_MB)
     parser.add_argument("--no-memory-check", action="store_true", help="Run combinations that look too big for RAM")
-
-
-def device_name_for(args: argparse.Namespace) -> str:
-    if args.device_name:
-        return args.device_name
-    if MWMBL_DEVICE_NAME:
-        return MWMBL_DEVICE_NAME
-    data_path = Path.home() / ".mwmbl"
-    data_path.mkdir(exist_ok=True)
-    return get_device_name(data_path)
 
 
 def interrupt(signum, frame):
@@ -539,33 +487,51 @@ def interrupt(signum, frame):
 
 
 def run(args: argparse.Namespace) -> int:
-    if not MWMBL_API_KEY.strip():
-        raise SystemExit("MWMBL_API_KEY must be set: it is how the benchmark reads this device's results.")
     crawler: Crawler
     if args.runner == "compose":
-        crawler = ComposeCrawler(args.compose_file)
+        if not args.compose_file.exists():
+            raise SystemExit(
+                f"There is no {args.compose_file} here. Run the benchmark from the directory you start your "
+                "crawler from, or pass --compose-file."
+            )
+        compose = ComposeCrawler(args.compose_file, args.env_file)
+        compose.validate()
+        crawler = compose
     else:
-        crawler = ProcessCrawler(shlex.split(args.crawler_command))
-    configurations = all_configurations(args.processes, args.threads)
-    device_name = device_name_for(args)
+        # Imported only here: it needs psutil, redis and python-dotenv, and the compose runner nothing.
+        try:
+            from mwmbl.crawler.benchmark_process import process_crawler
+        except ModuleNotFoundError as error:
+            raise SystemExit(
+                f"--runner process: {error}. From a checkout of mwmbl, run `pip3 install -r "
+                "deploy/crawler/benchmark-requirements.txt`, then `python3 -m mwmbl.crawler.benchmark "
+                "--runner process`. The crawler it starts needs mwmbl installed with its Rust extension; "
+                "`uv run mwmbl benchmark --runner process` does both."
+            ) from error
+
+        env_file = args.env_file or args.compose_file.parent / ".env"
+        command = None if args.crawler_command is None else shlex.split(args.crawler_command)
+        crawler = process_crawler(command, env_file)
     benchmark = Benchmark(
-        configurations,
+        args.processes,
+        args.threads,
         crawler,
-        DeviceScores(MWMBL_REMOTE_SERVER, MWMBL_API_KEY, device_name),
-        device_name,
         args.warmup,
         args.duration,
         args.output,
         None if args.no_memory_check else args.memory_per_process_mb,
     )
-    total_seconds = len(configurations) * (args.warmup + args.duration)
-    print(f"{len(configurations)} configurations on device {device_name}, about {format_duration(total_seconds)}")
+    total = len(all_configurations(args.processes, args.threads))
+    each = args.warmup + args.duration
+    print(
+        f"{total} configurations of at least {format_duration(each)} each: about {format_duration(total * each)} in all"
+    )
 
     signal.signal(signal.SIGTERM, interrupt)
     results = benchmark.run()
-    print("\n" + format_report(results, device_name, args.duration))
+    print("\n" + format_report(results))
     print(f"\nResults appended to {args.output}")
-    return 0
+    return 0 if any(result.status == STATUS_OK for result in results) else 1
 
 
 def main(argv: list[str] | None = None) -> int:

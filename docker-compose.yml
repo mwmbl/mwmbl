@@ -23,7 +23,7 @@ services:
       - CRAWLER_WORKERS=${CRAWLER_WORKERS:-2}
       - CRAWL_THREADS=${CRAWL_THREADS:-20}
       - CRAWL_DELAY_SECONDS=${CRAWL_DELAY_SECONDS:-0.0}
-      # Empty: a random name is generated and kept in the data volume. `mwmbl benchmark` sets it.
+      # Empty: a random name is generated and kept in the data volume. Set it to name your crawler.
       - MWMBL_DEVICE_NAME=${MWMBL_DEVICE_NAME:-}
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis_crawler:6379

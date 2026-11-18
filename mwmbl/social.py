@@ -10,6 +10,7 @@ with pending registrations.
 
 import hashlib
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -27,6 +28,11 @@ ADDRESS_EXAMPLE = "Enter your server's domain name, for example https://mastodon
 TOP_LEVEL_LABEL = re.compile(r"[a-z][a-z0-9-]*")
 # Profile paths of Mastodon and its forks (/users/name, /@name) and Lemmy (/u/name).
 PROFILE_PATH = re.compile(r"/(?:users/|u/|@)([^/@]+)/?")
+# Names that only resolve inside a network: mDNS, ICANN's reserved private-use name, a
+# Kubernetes cluster's (svc.cluster.local) and common home and office ones.
+PRIVATE_TOP_LEVEL_LABELS = {"local", "internal", "localhost", "localdomain", "lan", "home", "arpa", "corp", "intranet"}
+# SocialRegistration.server_url's max_length.
+MAX_SERVER_URL_LENGTH = 200
 
 
 class RegistrationRefused(Exception):
@@ -58,20 +64,37 @@ def server_url_and_host(entered: str) -> tuple[str, str]:
     *_, top_level_label = hostname.split(".")
     if "." not in hostname or not TOP_LEVEL_LABEL.fullmatch(top_level_label):
         raise ValueError(ADDRESS_EXAMPLE)
+    if top_level_label in PRIVATE_TOP_LEVEL_LABELS:
+        raise ValueError(ADDRESS_EXAMPLE)
     host = hostname if url.port is None else f"{hostname}:{url.port}"
-    return f"https://{host}", host
+    server_url = f"https://{host}"
+    # Checked here, not on what was entered, because punycode makes a host longer.
+    if len(server_url) > MAX_SERVER_URL_LENGTH:
+        raise ValueError(ADDRESS_EXAMPLE)
+    return server_url, host
 
 
-def take_user_attempt(user_id: int) -> bool:
-    """Count an attempt by this user, and say whether it is within their daily limit."""
-    key = f"social:connect:user:{user_id}"
+def user_attempt_wait(user_id: int) -> int | None:
+    """Count an attempt by this user: None if it is within their daily limit, otherwise the
+    seconds until the day's window ends and they may try again."""
+    now = int(time.time())
+    window = now // DAY_SECONDS
+    key = f"social:connect:user:{user_id}:{window}"
     cache.add(key, 0, timeout=DAY_SECONDS)
-    return cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY
+    if cache.incr(key) <= settings.SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY:
+        return None
+    return (window + 1) * DAY_SECONDS - now
 
 
-def take_host_attempt(host: str) -> bool:
-    """Whether nobody has tried to connect this host recently, marking that someone now has."""
-    return cache.add(f"social:connect:host:{host}", 1, timeout=settings.SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS)
+def host_attempt_wait(host: str) -> int | None:
+    """Mark that someone is trying to connect this host: None if nobody has recently, otherwise
+    the seconds until it may be tried again."""
+    now = int(time.time())
+    key = f"social:connect:host:{host}"
+    window_seconds = settings.SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS
+    if cache.add(key, now, timeout=window_seconds):
+        return None
+    return max(cache.get(key, now) + window_seconds - now, 1)
 
 
 def _registrations_url() -> str:

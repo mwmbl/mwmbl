@@ -1,0 +1,5 @@
+# Only for `--runner process` of the benchmark (pip3 install -r deploy/crawler/benchmark-requirements.txt).
+# The default compose runner needs none of this.
+psutil>=6.0.0
+redis>=5.0.1
+python-dotenv>=1.0.0

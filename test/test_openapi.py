@@ -216,6 +216,8 @@ def test_v2_openapi_spec_generation():
         "/api/v2/membership/tiers",
         "/api/v2/notifications/",
         "/api/v2/notifications/{notification_id}/dismiss",
+        "/api/v2/social/registrations",
+        "/api/v2/social/registrations/{registration_id}",
     }
 
 

@@ -643,3 +643,45 @@ class ModerationQueue(Schema):
 
     items: list[QueueItemSchema]
     count: int
+
+
+class SocialRegistrationRequest(Schema):
+    server_url: str = Field(
+        max_length=200,
+        description="The fediverse server's address. A bare domain means https; anything but https is refused.",
+        example="mastodon.example",
+    )
+
+
+SocialRegistrationStatus = Literal["pending", "active", "revoked", "disconnected", "replaced", "unavailable"]
+
+
+class SocialRegistrationResponse(Schema):
+    id: int
+    server_url: str = Field(description="The address entered, normalised to https://host[:port].")
+    base_url: str = Field(description="The server's FASP base URL.", example="https://mastodon.example/api/fasp")
+    status: SocialRegistrationStatus = Field(
+        description="Mwmbl Social's live status: `pending` (waiting for the server admin's approval), `active`, "
+        "or `revoked`. Mwmbl's own: `disconnected` (the user disconnected it), `replaced` (Mwmbl Social no "
+        "longer has it, as when the server was registered again), or `unavailable` (Mwmbl Social didn't answer, "
+        "so the status is unknown)."
+    )
+    capabilities: list[str] = Field(description="The capabilities the server admin enabled, empty unless active.")
+    fingerprint: str = Field(description="The key fingerprint the admin should see on their approval page.")
+    approval_url: Optional[str] = Field(
+        description="Where the server's admin approves Mwmbl Social. Always https; null if the server sent "
+        "anything else. Plain text from the remote server: escape it."
+    )
+    created_at: datetime
+    disconnected_at: Optional[datetime]
+
+
+class SocialError(Schema):
+    code: Literal[
+        "invalid_address", "already_registered", "user_limit", "host_limit", "server_unreachable", "social_unavailable"
+    ] = Field(
+        description="`server_unreachable`: the server couldn't be reached, isn't FASP-enabled, or refused. "
+        "`social_unavailable`: Mwmbl Social didn't answer, so the registration may still have gone through."
+    )
+    message: str = Field(description="Plain text to show the user.")
+    retry_after: Optional[int] = Field(None, description="For 429s: seconds until the user may try again.")
