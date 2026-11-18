@@ -7,8 +7,6 @@ use std::{
     },
     time::Duration,
 };
-
-use kreuzberg::utils::timing::Instant;
 use mwmbl_core::blacklist_providers::BlacklistProvider;
 use rand::RngExt;
 use reqwest::redirect::Policy;
@@ -16,7 +14,7 @@ use tokio::{
     spawn,
     sync::{RwLock, Semaphore},
     task::yield_now,
-    time::sleep,
+    time::{Instant, sleep},
 };
 
 use crate::{
@@ -106,6 +104,8 @@ impl Crawler {
                 )
                 .await;
 
+                drop(permit);
+
                 let (resolved_domain, status) = result.get_resolved_info();
 
                 if let Some(domain) = url.url().domain() {
@@ -129,7 +129,7 @@ impl Crawler {
                     let count = count.fetch_add(1, Ordering::SeqCst);
                     println!(
                         "speed: {}/s | crawled {}",
-                        ((count as u128) + 1) / (1 + (start.elapsed_millis() / 1000)),
+                        ((count as u64) + 1) / (1 + start.elapsed().as_secs()),
                         result.url().as_str()
                     );
                     //lock.push_back(result);

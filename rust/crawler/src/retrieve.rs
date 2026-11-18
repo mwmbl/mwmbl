@@ -1,15 +1,17 @@
 use chrono::Utc;
 use dom_query::Document;
+use itertools::Itertools;
 use kreuzberg::{ExtractionConfig, OutputFormat, core::mime, extract_bytes};
+use rand::{RngExt, seq::IndexedRandom};
 use readabilityrs::ReadabilityOptions;
-use std::collections::HashSet;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
+use std::{cmp::min, collections::HashSet};
 
 #[cfg(feature = "servo")]
 use crate::constants::TIMEOUT;
 use crate::{
-    constants::{MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS},
+    constants::{MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, NUM_URLS_TAKENS},
     robots::{RobotCache, robot_allowed},
     url_queue::ClaimedUrl,
 };
@@ -295,10 +297,9 @@ fn sanitize(
 
     let new_links = extract_links_from_html(&article_html, &resolved_url);
     let extra_links = extract_links_from_html(html, &resolved_url);
-    let mut extra_links: Vec<Url> = (&extra_links - &new_links).into_iter().take(50).collect();
-    extra_links.sort();
-    let mut new_links: Vec<Url> = new_links.into_iter().take(50).collect();
-    new_links.sort();
+
+    let extra_links = select_links(&extra_links - &new_links);
+    let new_links = select_links(new_links);
 
     if article_excerpt.is_empty() {
         return CrawlResult::NoResponseTextError {
@@ -338,6 +339,28 @@ fn sanitize(
 fn trim_size(string: &str, size: usize) -> String {
     string.chars().take(size - 1).collect::<String>() + "…"
 }
+
+fn select_links(links: HashSet<Url>) -> Vec<Url> {
+    let map = links.into_iter()
+        .into_group_map_by(|v| v.domain().map(std::borrow::ToOwned::to_owned));
+    let map_len = map.len();
+    let mut links: Vec<(usize, Url)> = map
+        .into_values()
+        .flat_map(|v| {
+            v.sample(&mut rand::rng(), NUM_URLS_TAKENS)
+                .cloned()
+                .enumerate()
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    links.sort_by_key(|v| v.0);
+    links
+        .into_iter()
+        .map(|v| v.1)
+        .take(min(map_len, NUM_URLS_TAKENS))
+        .collect()
+}
+
 
 // From internal servo_fetch code.
 fn extract_links_from_html(html: &str, base: &Url) -> HashSet<Url> {
