@@ -123,9 +123,13 @@ pub async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, Statu
     let mut stream = r.bytes_stream();
 
     let mut data: Vec<u8> = Vec::new();
+    let mut held = crate::memstats::Gauge::new(&crate::memstats::FETCH_BYTES, 0);
 
     while let Some(item) = stream.next().await {
-        data.extend(item?);
+        let item = item?;
+        crate::memstats::inc(&crate::memstats::FETCH_BYTES, item.len() as i64);
+        held = crate::memstats::Gauge::adopt(held, item.len() as i64);
+        data.extend(item);
         if data.len() > MAX_FETCH_SIZE {
             break;
         }
@@ -215,6 +219,7 @@ pub async fn crawl(
         }
     }
 
+    crate::memstats::inc(&crate::memstats::PAGE_FETCHES, 1);
     let res = cfg_select! {
         feature = "servo" => fetch_servo(&client, &mut robots_cache, &url, &user_agent),
         _ => fetch_default(&client, &mut robots_cache, &url)

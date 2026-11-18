@@ -46,6 +46,13 @@ pub struct SharedURLQueue<T: BlacklistProvider, const S: usize = 1000> {
     domain_scores: Arc<[RwLock<DomainQueue>; S]>,
     build_hasher: Arc<RandomState>,
 }
+pub struct QueueSizes {
+    pub domain_urls: usize,
+    pub domain_urls_total_urls: usize,
+    pub domain_scores: usize,
+    pub domain_claims: usize,
+}
+
 pub struct ClaimedDomain {
     domain_lock: OwnedMutexGuard<String>,
     domain_claims: Weak<HashMap<String, Arc<Mutex<String>>>>,
@@ -76,6 +83,8 @@ impl ClaimedUrl {
     pub fn release_after_delay(self, resolved_domain: Option<&str>, delay: Duration) {
         let resolved_domain = resolved_domain.map(std::borrow::ToOwned::to_owned).clone();
         task::spawn(async move {
+            let _release_gauge =
+                crate::memstats::Gauge::new(&crate::memstats::RELEASE_PENDING, 1);
             let mut claimed_url = self;
             if let Some(domain) = claimed_url.url.domain() {
                 let other_claim: Option<ClaimedDomain> =
@@ -145,6 +154,26 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
             curated_domains,
             domain_scores: Arc::new(std::array::from_fn(|_| RwLock::new(DomainQueue::new()))),
             build_hasher: Arc::new(RandomState::new()),
+        }
+    }
+
+    pub async fn debug_sizes(&self) -> QueueSizes {
+        let mut total_urls = 0usize;
+        self.domain_urls
+            .iter_async(|_, v| {
+                total_urls += v.len();
+                true
+            })
+            .await;
+        let mut domain_scores = 0usize;
+        for q in self.domain_scores.iter() {
+            domain_scores += q.read().await.len();
+        }
+        QueueSizes {
+            domain_urls: self.domain_urls.len(),
+            domain_urls_total_urls: total_urls,
+            domain_scores,
+            domain_claims: self.domain_claims.len(),
         }
     }
 
@@ -354,6 +383,11 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         let domain_scores = self.domain_scores.clone();
         let build_hasher = self.build_hasher.clone();
         let db = db.clone();
+        let pending_gauge = crate::memstats::Gauge::new(&crate::memstats::ADD_URLS_PENDING, 1);
+        let pending_urls_gauge = crate::memstats::Gauge::new(
+            &crate::memstats::ADD_URLS_PENDING_URLS,
+            urls.len() as i64,
+        );
         spawn(async move {
             let lock = match domain_claims.entry_async(domain.clone()).await {
                 scc::hash_map::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
@@ -366,6 +400,8 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 domain_lock: lock.lock_owned().await,
                 domain_claims: Arc::downgrade(&domain_claims),
             };
+            drop(pending_gauge);
+            drop(pending_urls_gauge);
 
             let scores = urls.iter().map(|url| {
                 let time_since_crawled = url.last_crawled().map_or(MAX_TIME_DELTA, |time| {

@@ -6,6 +6,8 @@ edition = "2024"
 [features]
 default = []
 servo = ["dep:servo-fetch"]
+# Memory analysis: jemalloc allocator with heap profiling, plus a periodic stats reporter.
+memprof = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -35,5 +37,7 @@ stop-words = { version = "0.10.1" }
 strum = "0.28.0"
 strum_macros = "0.28.0"
 texting_robots = "0.2.2"
+tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 tokio = { version = "1.54.1", features = ["full", "tracing"] }
 urlencoding = "2.1.3"

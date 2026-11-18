@@ -14,10 +14,15 @@ mod bloomdb;
 mod constants;
 mod crawler;
 mod curated_domains;
+mod memstats;
 mod path_creation;
 mod retrieve;
 mod robots;
 mod url_queue;
+
+#[cfg(feature = "memprof")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use std::path::PathBuf;
 

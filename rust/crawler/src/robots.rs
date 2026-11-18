@@ -114,6 +114,10 @@ impl RobotCache {
         ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
 
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
     pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
         let _ = self.cache.put_async(domain.to_owned(), file).await;
     }
@@ -131,6 +135,7 @@ pub async fn robot_allowed(
         return Ok(can_fetch);
     }
 
+    crate::memstats::inc(&crate::memstats::ROBOTS_FETCHES, 1);
     if let Ok((data, status, _)) = fetch(client, &robot_url).await
         && status.is_success()
     {

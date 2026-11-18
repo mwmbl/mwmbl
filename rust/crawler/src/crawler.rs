@@ -17,7 +17,7 @@ use tokio::{
 };
 
 use crate::{
-    CrawlerParams,
+    CrawlerParams, memstats,
     bloomdb::BloomDatabase,
     constants::{API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT},
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
@@ -78,6 +78,7 @@ impl Crawler {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         let client = self.get_client()?;
         let start = Instant::now();
+        self.spawn_mem_reporter();
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
@@ -91,9 +92,13 @@ impl Crawler {
             let count = self.count.clone();
 
             spawn(async move {
+                let _task_gauge = memstats::Gauge::new(&memstats::CRAWL_TASKS, 1);
+                let get_url_gauge = memstats::Gauge::new(&memstats::IN_GET_URL, 1);
                 let url = url_queue.get_url().await;
+                drop(get_url_gauge);
                 let permit = permit;
 
+                let crawl_gauge = memstats::Gauge::new(&memstats::IN_CRAWL, 1);
                 let (url, result) = crawl(
                     url,
                     cache.clone(),
@@ -102,6 +107,7 @@ impl Crawler {
                     user_agent,
                 )
                 .await;
+                drop(crawl_gauge);
 
                 drop(permit);
 
@@ -169,6 +175,77 @@ impl Crawler {
             Err(err) => eprintln!("can't join handle: {err}"),
         }
         Ok(())
+    }
+
+    fn spawn_mem_reporter(&self) {
+        let url_queue = self.url_queue.clone();
+        let robots_cache = self.robots_cache.clone();
+        let semaphore = self.crawl_semaphore.clone();
+        let max_tasks = self.params.max_crawl_task;
+        let count = self.count.clone();
+        let interval: u64 = std::env::var("MEMSTATS_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+        #[cfg(feature = "memprof")]
+        let dump_dir = std::env::var("MEMPROF_DUMP_DIR").ok();
+        #[cfg(feature = "memprof")]
+        let dump_every: u64 = std::env::var("MEMPROF_DUMP_EVERY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(6);
+        spawn(async move {
+            let start = Instant::now();
+            let mut tick: u64 = 0;
+            loop {
+                sleep(Duration::from_secs(interval)).await;
+                tick += 1;
+                let q = url_queue.debug_sizes().await;
+                let metrics = tokio::runtime::Handle::current().metrics();
+                #[cfg(feature = "memprof")]
+                let (alloc, resident) = memstats::jemalloc::allocated_resident();
+                #[cfg(not(feature = "memprof"))]
+                let (alloc, resident) = (0usize, 0usize);
+                let mb = |b: u64| b / (1024 * 1024);
+                eprintln!(
+                    "[memstats] t={}s rss={}MB jemalloc_alloc={}MB jemalloc_resident={}MB \
+                     tokio_alive={} crawl_tasks={} in_get_url={} in_crawl={} permits_used={} \
+                     fetch_bytes={}MB release_pending={} add_urls_pending={} add_urls_pending_urls={} \
+                     domain_urls={} domain_urls_total_urls={} domain_scores={} domain_claims={} \
+                     robots_cache={} robots_fetches={} page_fetches={} crawled={}",
+                    start.elapsed_millis() / 1000,
+                    mb(memstats::rss_bytes()),
+                    mb(alloc as u64),
+                    mb(resident as u64),
+                    metrics.num_alive_tasks(),
+                    memstats::get(&memstats::CRAWL_TASKS),
+                    memstats::get(&memstats::IN_GET_URL),
+                    memstats::get(&memstats::IN_CRAWL),
+                    max_tasks - semaphore.available_permits(),
+                    memstats::get(&memstats::FETCH_BYTES) / (1024 * 1024),
+                    memstats::get(&memstats::RELEASE_PENDING),
+                    memstats::get(&memstats::ADD_URLS_PENDING),
+                    memstats::get(&memstats::ADD_URLS_PENDING_URLS),
+                    q.domain_urls,
+                    q.domain_urls_total_urls,
+                    q.domain_scores,
+                    q.domain_claims,
+                    robots_cache.len(),
+                    memstats::get(&memstats::ROBOTS_FETCHES),
+                    memstats::get(&memstats::PAGE_FETCHES),
+                    count.load(Ordering::Relaxed),
+                );
+                #[cfg(feature = "memprof")]
+                if let Some(dir) = &dump_dir
+                    && tick % dump_every == 0
+                {
+                    memstats::jemalloc::dump_profile(&format!(
+                        "{dir}/heap.{:06}.heap",
+                        start.elapsed_millis() / 1000
+                    ));
+                }
+            }
+        });
     }
 
     fn crawl_user_agent(&self) -> String {
