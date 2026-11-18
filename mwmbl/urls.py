@@ -22,7 +22,6 @@ from django.urls import include, path, re_path
 from django.views.generic import RedirectView
 
 import mwmbl.crawler.app as crawler
-from mwmbl import social_views
 from mwmbl.admin_views import (
     blacklist_status_view,
     index_count_view,
@@ -87,10 +86,6 @@ urlpatterns = [
     path("app/flags/curation", CurationFlagListView.as_view(), name="flag_curation_list"),
     path("app/flags/curation/<int:flag_curation_id>/update", flag_curation_update, name="flag_curation_update"),
     path("app/domains/<str:domain>/", domain_view, name="domain"),
-    # Mwmbl Social's hosted instance links here, so these paths must not change: see deploy/social.
-    path("social/connect/", social_views.connect, name="social_connect"),
-    path("social/connect/<int:pk>/disconnect/", social_views.disconnect, name="social_disconnect"),
-    path("social/privacy/", social_views.privacy, name="social_privacy"),
     # TODO: these are the old APIs, deprecated and to be removed once all clients have moved over
     path("search/", search.create_router(ranker, "0.1").urls),
     path("crawler/", crawler.create_router(ranker, version="0.1").urls),
