@@ -55,16 +55,19 @@ pub enum CrawlResult {
         status: StatusCode,
         err: anyhow::Error,
     },
-    CrawlContent {
-        timestamp: chrono::DateTime<Utc>,
-        url: Url,
-        status: StatusCode,
-        resolved_url: Url,
-        title: String,
-        extract: String,
-        links: Vec<Url>,
-        extra_links: Vec<Url>,
-    },
+    CrawlContent(SuccesfullCrawlResult),
+}
+
+#[derive(Debug)]
+pub struct SuccesfullCrawlResult {
+    pub timestamp: chrono::DateTime<Utc>,
+    pub url: Url,
+    pub status: StatusCode,
+    pub resolved_url: Url,
+    pub title: String,
+    pub extract: String,
+    pub links: Vec<Url>,
+    pub extra_links: Vec<Url>,
 }
 
 impl CrawlResult {
@@ -83,12 +86,10 @@ impl CrawlResult {
                 resolved_url,
                 status,
                 ..
-            }
-            | crate::retrieve::CrawlResult::CrawlContent {
-                resolved_url,
-                status,
-                ..
             } => (resolved_url.domain(), Some(*status)),
+            crate::retrieve::CrawlResult::CrawlContent(v) => {
+                (v.resolved_url.domain(), Some(v.status))
+            }
         }
     }
 
@@ -99,8 +100,8 @@ impl CrawlResult {
             | CrawlResult::RobotsDeniedError { url, .. }
             | CrawlResult::AbortError { url, .. }
             | CrawlResult::NoResponseTextError { url, .. }
-            | CrawlResult::HtmlParsingError { url, .. }
-            | CrawlResult::CrawlContent { url, .. } => url,
+            | CrawlResult::HtmlParsingError { url, .. } => url,
+            CrawlResult::CrawlContent(v) => &v.url,
         }
     }
     pub fn timestamp(&self) -> &chrono::DateTime<Utc> {
@@ -110,8 +111,8 @@ impl CrawlResult {
             | CrawlResult::RobotsDeniedError { timestamp, .. }
             | CrawlResult::AbortError { timestamp, .. }
             | CrawlResult::NoResponseTextError { timestamp, .. }
-            | CrawlResult::HtmlParsingError { timestamp, .. }
-            | CrawlResult::CrawlContent { timestamp, .. } => timestamp,
+            | CrawlResult::HtmlParsingError { timestamp, .. } => timestamp,
+            CrawlResult::CrawlContent(v) => &v.timestamp,
         }
     }
 }
@@ -324,7 +325,7 @@ fn sanitize(
     let extract = trim_size(&article_excerpt, NUM_EXTRACT_CHARS);
     let title = trim_size(&article_title, NUM_TITLE_CHARS);
 
-    CrawlResult::CrawlContent {
+    CrawlResult::CrawlContent(SuccesfullCrawlResult {
         timestamp,
         url,
         title,
@@ -333,7 +334,7 @@ fn sanitize(
         links: new_links,
         extra_links,
         resolved_url,
-    }
+    })
 }
 
 fn trim_size(string: &str, size: usize) -> String {
@@ -341,7 +342,8 @@ fn trim_size(string: &str, size: usize) -> String {
 }
 
 fn select_links(links: HashSet<Url>) -> Vec<Url> {
-    let map = links.into_iter()
+    let map = links
+        .into_iter()
         .into_group_map_by(|v| v.domain().map(std::borrow::ToOwned::to_owned));
     let map_len = map.len();
     let mut links: Vec<(usize, Url)> = map
@@ -360,7 +362,6 @@ fn select_links(links: HashSet<Url>) -> Vec<Url> {
         .take(min(map_len, NUM_URLS_TAKENS))
         .collect()
 }
-
 
 // From internal servo_fetch code.
 fn extract_links_from_html(html: &str, base: &Url) -> HashSet<Url> {

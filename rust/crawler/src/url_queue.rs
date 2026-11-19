@@ -325,12 +325,9 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
         let timestamp = *result.timestamp();
 
         let mut urls: Vec<Url> = Vec::new();
-        if let CrawlResult::CrawlContent {
-            links, extra_links, ..
-        } = result
-        {
-            urls.append(&mut links.clone());
-            urls.append(&mut extra_links.clone());
+        if let CrawlResult::CrawlContent(v) = result {
+            urls.append(&mut v.links.clone());
+            urls.append(&mut v.extra_links.clone());
         }
 
         let mut found_urls: Vec<FoundURL> = vec![FoundURL::new(

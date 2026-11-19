@@ -1,8 +1,8 @@
+use once_cell::sync::Lazy;
 /// Domain scoring using the HN top domains list.
 /// The DOMAINS data is loaded from a JSON file embedded at compile time.
 /// Replicates get_domain_score from mwmbl/tinysearchengine/rank.py.
 use std::collections::HashMap;
-use once_cell::sync::Lazy;
 use url::Url;
 
 static DOMAINS_JSON: &str = include_str!("../data/hn_top_domains_filtered.json");
@@ -11,13 +11,11 @@ static DOMAINS: Lazy<HashMap<String, f64>> = Lazy::new(|| {
     serde_json::from_str(DOMAINS_JSON).expect("Failed to parse hn_top_domains_filtered.json")
 });
 
-static DOMAIN_MAX_SCORE: Lazy<f64> = Lazy::new(|| {
-    DOMAINS.values().cloned().fold(f64::NEG_INFINITY, f64::max)
-});
+static DOMAIN_MAX_SCORE: Lazy<f64> =
+    Lazy::new(|| DOMAINS.values().cloned().fold(f64::NEG_INFINITY, f64::max));
 
-static DOMAIN_MIN_SCORE: Lazy<f64> = Lazy::new(|| {
-    DOMAINS.values().cloned().fold(f64::INFINITY, f64::min)
-});
+static DOMAIN_MIN_SCORE: Lazy<f64> =
+    Lazy::new(|| DOMAINS.values().cloned().fold(f64::INFINITY, f64::min));
 
 /// Extract the netloc (host) from a URL string.
 pub fn get_netloc(url: &str) -> String {
@@ -53,8 +51,14 @@ mod tests {
 
     #[test]
     fn test_get_netloc() {
-        assert_eq!(get_netloc("https://paulgraham.com/articles.html"), "paulgraham.com");
-        assert_eq!(get_netloc("https://blog.rust-lang.org/"), "blog.rust-lang.org");
+        assert_eq!(
+            get_netloc("https://paulgraham.com/articles.html"),
+            "paulgraham.com"
+        );
+        assert_eq!(
+            get_netloc("https://blog.rust-lang.org/"),
+            "blog.rust-lang.org"
+        );
         assert_eq!(get_netloc("not-a-url"), "");
     }
 
@@ -76,6 +80,10 @@ mod tests {
     fn test_domain_score_top_domain_near_one() {
         // The top domain should have score close to 1.0
         let score = get_domain_score("https://blog.samaltman.com/");
-        assert!(score > 0.99, "Top domain should have score near 1.0, got {}", score);
+        assert!(
+            score > 0.99,
+            "Top domain should have score near 1.0, got {}",
+            score
+        );
     }
 }

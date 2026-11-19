@@ -1,3 +1,7 @@
+use chrono::Timelike;
+use mwmbl_core::{blacklist_providers::BlacklistProvider, indexer::Document};
+use rand::RngExt;
+use reqwest::redirect::Policy;
 use std::{
     cmp::{max, min},
     collections::VecDeque,
@@ -5,11 +9,8 @@ use std::{
         Arc,
         atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, UNIX_EPOCH},
 };
-use mwmbl_core::blacklist_providers::BlacklistProvider;
-use rand::RngExt;
-use reqwest::redirect::Policy;
 use tokio::{
     spawn,
     sync::{RwLock, Semaphore},
@@ -20,9 +21,11 @@ use tokio::{
 use crate::{
     CrawlerParams,
     bloomdb::BloomDatabase,
-    constants::{API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, TIMEOUT},
+    constants::{
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, SUMBIT_BATCH_SIZE, TIMEOUT,
+    },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    retrieve::{CrawlResult, crawl},
+    retrieve::{CrawlResult, SuccesfullCrawlResult, crawl},
     robots::RobotCache,
     url_queue::SharedURLQueue,
 };
@@ -37,7 +40,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
-    //to_submit: Arc<RwLock<VecDeque<CrawlResult>>>,
+    to_submit: Arc<RwLock<VecDeque<SuccesfullCrawlResult>>>,
     count: Arc<AtomicUsize>,
 }
 
@@ -59,7 +62,7 @@ impl Crawler {
             params: Arc::new(params),
             domainlinkdb,
             count: Arc::new(AtomicUsize::new(0)),
-            //to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            to_submit: Arc::new(RwLock::new(VecDeque::new())),
         })
     }
 
@@ -88,7 +91,7 @@ impl Crawler {
             let user_agent = self.crawl_user_agent();
             let mut url_queue = self.url_queue.clone();
             let db = self.domainlinkdb.clone();
-            //let to_submit = self.to_submit.clone();
+            let to_submit = self.to_submit.clone();
             let count = self.count.clone();
 
             spawn(async move {
@@ -124,15 +127,15 @@ impl Crawler {
 
                 url_queue.record_url_in_database(db, &result).await;
 
-                if matches!(result, CrawlResult::CrawlContent { .. }) {
-                    //let mut lock = to_submit.write().await;
+                if let CrawlResult::CrawlContent(result) = result {
+                    let mut lock = to_submit.write().await;
                     let count = count.fetch_add(1, Ordering::SeqCst);
                     println!(
                         "speed: {}/s | crawled {}",
                         ((count as u64) + 1) / (1 + start.elapsed().as_secs()),
-                        result.url().as_str()
+                        result.url.as_str()
                     );
-                    //lock.push_back(result);
+                    lock.push_back(result);
                 }
             });
 
@@ -186,6 +189,29 @@ impl Crawler {
             format!("+{PROJECT_URL}")
         };
         format!("{API_PRODUCT} ({identity})")
+    }
+
+    pub async fn index(&self) {
+        let mut lock = self.to_submit.write().await;
+        let mut docs: Vec<Document> = Vec::new();
+        if lock.len() >= SUMBIT_BATCH_SIZE {
+            for _ in 0..SUMBIT_BATCH_SIZE {
+                if let Some(res) = lock.pop_front() {
+                    docs.push(Document::new(
+                        res.title,
+                        res.url.to_string(),
+                        res.extract,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(res.timestamp.timestamp()),
+                        None,
+                    ));
+                }
+            }
+        }
+        drop(lock);
     }
 
     pub async fn fetch_username(_username: &mut Arc<RwLock<Option<String>>>) -> Option<String> {

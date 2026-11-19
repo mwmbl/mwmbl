@@ -162,7 +162,7 @@ impl BlacklistProvider for RemoteBlacklistProvider {
             return domains.contains(domain);
         }
         eprintln!("Warning: Remote Blacklist was used but never loaded!");
-        return false;
+        false
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         if self.domains.is_none() {

@@ -1,13 +1,13 @@
+use mwmbl_core::wiki::get_wiki_score;
+use regex::Regex;
 /// Feature extraction for learning-to-rank.
 /// Ports get_features, get_match_features, and score_match from
 /// mwmbl/tinysearchengine/rank.py.
 use std::collections::HashMap;
 use url::Url;
-use regex::Regex;
 
-use crate::text::build_query_regex;
 use crate::domain::get_domain_score;
-use crate::wiki::get_wiki_score;
+use crate::text::build_query_regex;
 
 const MATCH_EXPONENT: f64 = 2.0;
 
@@ -142,7 +142,6 @@ fn get_match_features_with_regex(
     result_string: &str,
     re: &Regex,
 ) -> MatchFeatures {
-
     let mut last_match_char: usize = 1;
     let mut match_length: usize = 0;
     let mut seen_matches: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -197,12 +196,12 @@ fn parse_url(url: &str) -> ParsedUrl {
 /// Append 6 zero-valued match features when there are no query terms (empty regex).
 fn push_zero_part_features(features: &mut Vec<f32>, total_possible_match_length: usize) {
     let ms = score_match(1, 0, total_possible_match_length);
-    features.push(1.0_f32);                          // last_match_char
-    features.push(0.0_f32);                          // match_length
+    features.push(1.0_f32); // last_match_char
+    features.push(0.0_f32); // match_length
     features.push(total_possible_match_length as f32); // total_possible_match_length
-    features.push(ms as f32);                        // match_score
-    features.push(0.0_f32);                          // match_terms
-    features.push(0.0_f32);                          // match_term_proportion
+    features.push(ms as f32); // match_score
+    features.push(0.0_f32); // match_terms
+    features.push(0.0_f32); // match_term_proportion
 }
 
 /// Append 6 match-related features for one text part to the feature vector.
@@ -215,7 +214,11 @@ fn push_part_features_with_regex(
     num_terms: usize,
 ) {
     let mf = get_match_features_with_regex(total_possible_match_length, text, re);
-    let ms = score_match(mf.last_match_char, mf.match_length, mf.total_possible_match_length);
+    let ms = score_match(
+        mf.last_match_char,
+        mf.match_length,
+        mf.total_possible_match_length,
+    );
     let denom = num_terms.max(1) as f64;
 
     features.push(mf.last_match_char as f32);
@@ -236,7 +239,11 @@ fn push_part_features(
     is_url: bool,
 ) {
     let mf = get_match_features(terms, text, is_complete, is_url);
-    let ms = score_match(mf.last_match_char, mf.match_length, mf.total_possible_match_length);
+    let ms = score_match(
+        mf.last_match_char,
+        mf.match_length,
+        mf.total_possible_match_length,
+    );
     let num_terms = terms.len().max(1) as f64;
 
     features.push(mf.last_match_char as f32);
@@ -267,8 +274,16 @@ pub fn get_features(
     // re_text: case-insensitive, no word boundaries (for title, extract, domain_tokenized, query, whole)
     // re_url:  case-insensitive, with \b word boundaries (for domain, path)
     let re_text = build_query_regex(terms, is_complete, false);
-    let re_url  = build_query_regex(terms, is_complete, true);
-    get_features_with_regex(terms, title, url, extract, score, re_text.as_ref(), re_url.as_ref())
+    let re_url = build_query_regex(terms, is_complete, true);
+    get_features_with_regex(
+        terms,
+        title,
+        url,
+        extract,
+        score,
+        re_text.as_ref(),
+        re_url.as_ref(),
+    )
 }
 
 /// Like `get_features` but accepts pre-compiled regexes to avoid recompilation
@@ -302,7 +317,13 @@ pub fn get_features_with_regex(
     macro_rules! push_text {
         ($text:expr) => {
             match re_text {
-                Some(re) => push_part_features_with_regex(&mut features, total_possible_match_length, $text, re, num_terms),
+                Some(re) => push_part_features_with_regex(
+                    &mut features,
+                    total_possible_match_length,
+                    $text,
+                    re,
+                    num_terms,
+                ),
                 None => push_zero_part_features(&mut features, total_possible_match_length),
             }
         };
@@ -310,7 +331,13 @@ pub fn get_features_with_regex(
     macro_rules! push_url {
         ($text:expr) => {
             match re_url {
-                Some(re) => push_part_features_with_regex(&mut features, total_possible_match_length, $text, re, num_terms),
+                Some(re) => push_part_features_with_regex(
+                    &mut features,
+                    total_possible_match_length,
+                    $text,
+                    re,
+                    num_terms,
+                ),
                 None => push_zero_part_features(&mut features, total_possible_match_length),
             }
         };
@@ -318,9 +345,9 @@ pub fn get_features_with_regex(
 
     push_text!(title);
     push_text!(extract);
-    push_url!(domain);    // domain as URL (word boundaries)
-    push_text!(domain);   // domain tokenized (no word boundaries)
-    push_url!(path);      // path as URL (word boundaries)
+    push_url!(domain); // domain as URL (word boundaries)
+    push_text!(domain); // domain tokenized (no word boundaries)
+    push_url!(path); // path as URL (word boundaries)
     push_text!(query_str);
     push_text!(&whole);
 
@@ -331,10 +358,16 @@ pub fn get_features_with_regex(
 
     // match_terms = max over title, extract, domain, domain_tokenized, path
     // These are at indices: 4, 10, 16, 22, 28 (match_terms_* for each part)
-    let match_terms_max = [features[4], features[10], features[16], features[22], features[28]]
-        .iter()
-        .cloned()
-        .fold(f32::NEG_INFINITY, f32::max);
+    let match_terms_max = [
+        features[4],
+        features[10],
+        features[16],
+        features[22],
+        features[28],
+    ]
+    .iter()
+    .cloned()
+    .fold(f32::NEG_INFINITY, f32::max);
 
     features.push(num_terms_f);
     features.push(num_chars);
@@ -428,14 +461,7 @@ mod tests {
     #[test]
     fn test_features_no_nan() {
         let terms = vec!["test"];
-        let features = get_features(
-            &terms,
-            "",
-            "https://example.com/",
-            "",
-            0.0,
-            true,
-        );
+        let features = get_features(&terms, "", "https://example.com/", "", 0.0, true);
         for (i, &f) in features.iter().enumerate() {
             assert!(!f.is_nan(), "Feature {} ({}) is NaN", i, FEATURE_NAMES[i]);
         }

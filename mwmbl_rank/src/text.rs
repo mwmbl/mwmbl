@@ -13,7 +13,9 @@ pub fn clean_unicode(s: &str) -> String {
 /// Replicates mwmbl/tokenizer.py::tokenize.
 pub fn tokenize(input: &str) -> Vec<String> {
     let cleaned = clean_unicode(input);
-    let mut tokens: Vec<String> = cleaned.to_lowercase().split_whitespace()
+    let mut tokens: Vec<String> = cleaned
+        .to_lowercase()
+        .split_whitespace()
         .map(|s| s.to_string())
         .collect();
 
