@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::LazyLock};
 use ordered_float::OrderedFloat;
 
 /// The same table `mwmbl_rank` ranks with, so the two can't drift apart.
-static DOMAINS_JSON: &str = include_str!("../../../mwmbl_rank/data/hn_top_domains_filtered.json");
+static DOMAINS_JSON: &str = include_str!("../data/hn_top_domains_filtered.json");
 
 /// Domain to score, from the top Hacker News domains.
 #[allow(clippy::expect_used)] // Checked in at build time and covered by a test, so it can't fail at run time.

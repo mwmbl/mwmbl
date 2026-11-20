@@ -8,10 +8,9 @@ pub fn tokenize(input_text: &str) -> Vec<String> {
         .split_whitespace()
         .map(std::borrow::ToOwned::to_owned)
         .collect();
-    if input_text.ends_with("…") {
+    if input_text.ends_with("…") && tokens.len() >= 2 {
         // Discard the last two tokens since there will likely be a word cut in two
-        tokens.pop();
-        tokens.pop();
+        tokens.truncate(tokens.len()-2);
     }
     tokens
 }
@@ -29,5 +28,5 @@ pub fn get_bigrams(num_bigrams: usize, tokens: &[String]) -> Vec<String> {
 
 #[must_use]
 pub fn clean_unicode(input_text: &str) -> String {
-    input_text.escape_unicode().to_string()
+    input_text.chars().collect()
 }

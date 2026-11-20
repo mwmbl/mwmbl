@@ -2,17 +2,17 @@
 ///
 /// Exposes RustXGBPipeline to Python via PyO3.
 /// Build with: maturin develop  (or maturin build --release)
-mod domain;
-mod features;
 mod index;
 mod pipeline;
-mod text;
+mod features;
 
-use mwmbl_core::wiki;
+use mwmbl_core::{indexer::Document, rank::{get_features_regex_unchecked, get_query_regex}, wiki};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use regex::regex;
 
 use pipeline::{extract_features_batch, num_features, DocumentRecord, StaanRank, XGBPipeline};
+use url::Url;
 
 /// Convert a Python dict (passed as a Bound<PyAny>) to a DocumentRecord.
 fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
@@ -60,10 +60,7 @@ fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
 
     Ok(DocumentRecord {
         query,
-        url,
-        title,
-        extract,
-        score,
+        doc: Document::new(title, url, extract, Some(score), None, None, None, None, None),
         staan_rank,
         from_staan,
     })
@@ -269,7 +266,28 @@ fn get_features_py(
     is_complete: bool,
 ) -> Vec<f32> {
     let term_refs: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
-    features::get_features(&term_refs, title, url, extract, score, is_complete)
+    let doc = Document::new(title.to_owned(), url.to_owned(), extract.to_owned(), Some(score), None, None, None, None, None);
+    let (url_path, url_domain, url_query) = match Url::parse(url) {
+        Ok(url) => (
+            url.path().to_owned(),
+            url.domain().unwrap_or("").to_owned(),
+            url.query().unwrap_or("").to_owned(),
+        ),
+        Err(_) => ("".to_owned(), "".to_owned(), "".to_owned()),
+    };
+    let re_text = get_query_regex(&term_refs, true, false).unwrap_or(regex!("").clone());
+    let re_url = get_query_regex(&term_refs, true, true).unwrap_or(regex!("").clone());
+            
+    let features = get_features_regex_unchecked(
+        &term_refs,
+        &doc,
+        &url_path,
+        &url_domain,
+        &url_query,
+        &re_text,
+        &re_url,
+    );
+    features::features_vec(features).into_iter().collect()
 }
 
 /// The normalised Wikipedia page view score of a URL, in [0, 1]: 0 for a page not in the stats.

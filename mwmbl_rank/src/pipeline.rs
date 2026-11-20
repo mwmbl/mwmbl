@@ -1,3 +1,10 @@
+use mwmbl_core::{
+    indexer::Document,
+    rank::{get_features_regex_unchecked, get_query_regex},
+    tokenizer::tokenize,
+};
+use regex::regex;
+use url::Url;
 /// XGBoost pipeline: feature extraction + threshold binarisation + XGBoost classifier.
 /// Replicates make_pipeline(FeatureExtractor(), ThresholdPredictor(0.0, XGBClassifier(...)))
 /// from mwmbl/rankeval/ltr/evaluate.py.
@@ -6,10 +13,8 @@
 use xgb::{parameters, Booster, DMatrix};
 
 use crate::features::{
-    get_features_with_regex, MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX,
-    PROVIDER_FEATURE_NAMES,
+    features_vec, MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES,
 };
-use crate::text::{build_query_regex, tokenize};
 
 /// What Staan said about a record's URL for its query.
 ///
@@ -40,10 +45,7 @@ impl StaanRank {
 #[derive(Debug, Clone)]
 pub struct DocumentRecord {
     pub query: String,
-    pub url: String,
-    pub title: String,
-    pub extract: String,
-    pub score: f32,
+    pub doc: Document,
     /// Only read by a pipeline with provider features.
     pub staan_rank: StaanRank,
     /// This record is Staan's own result, so it is exempt from the majority-terms filter:
@@ -73,8 +75,8 @@ const PROVIDER_FEATURES_ATTRIBUTE: &str = "mwmbl_provider_features";
 /// Per-query cached data: tokenized terms + pre-compiled regexes.
 struct QueryCache {
     terms: Vec<String>,
-    re_text: Option<regex::Regex>,
-    re_url: Option<regex::Regex>,
+    re_text: regex::Regex,
+    re_url: regex::Regex,
 }
 
 pub fn extract_features_batch(records: &[DocumentRecord], provider_features: bool) -> Vec<f32> {
@@ -90,26 +92,35 @@ pub fn extract_features_batch(records: &[DocumentRecord], provider_features: boo
         let entry = query_cache.entry(rec.query.as_str()).or_insert_with(|| {
             let terms = tokenize(&rec.query.to_lowercase());
             let term_refs: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
-            let re_text = build_query_regex(&term_refs, true, false);
-            let re_url = build_query_regex(&term_refs, true, true);
+            let re_text = get_query_regex(&term_refs, true, false).unwrap_or(regex!("").clone());
+            let re_url = get_query_regex(&term_refs, true, true).unwrap_or(regex!("").clone());
             QueryCache {
                 terms,
                 re_text,
                 re_url,
             }
         });
+        
+        let (url_path, url_domain, url_query) = match Url::parse(rec.doc.url()) {
+            Ok(url) => (
+                url.path().to_owned(),
+                url.domain().unwrap_or("").to_owned(),
+                url.query().unwrap_or("").to_owned(),
+            ),
+            Err(_) => ("".to_owned(), "".to_owned(), "".to_owned()),
+        };
 
         let terms: Vec<&str> = entry.terms.iter().map(|s| s.as_str()).collect();
-        let row = get_features_with_regex(
+        let row = get_features_regex_unchecked(
             &terms,
-            &rec.title,
-            &rec.url,
-            &rec.extract,
-            rec.score,
-            entry.re_text.as_ref(),
-            entry.re_url.as_ref(),
+            &rec.doc,
+            &url_path,
+            &url_domain,
+            &url_query,
+            &entry.re_text,
+            &entry.re_url,
         );
-        flat.extend_from_slice(&row);
+        flat.extend_from_slice(&features_vec(row));
         if provider_features {
             flat.extend_from_slice(&rec.staan_rank.features());
         }
@@ -448,10 +459,17 @@ mod tests {
         (0..n)
             .map(|i| DocumentRecord {
                 query: "rust programming".to_string(),
-                url: format!("https://example{}.com/page", i),
-                title: format!("Rust Programming Example {}", i),
-                extract: "A great systems language".to_string(),
-                score: i as f32 * 0.1,
+                doc: Document::new(
+                    format!("Rust Programming Example {}", i),
+                    format!("https://example{}.com/page", i),
+                    "A great systems language".to_string(),
+                    Some(i as f32 * 0.1),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
                 staan_rank: StaanRank::NotAsked,
                 from_staan: false,
             })
@@ -461,10 +479,17 @@ mod tests {
     fn record(url: &str, title: &str, staan_rank: StaanRank, from_staan: bool) -> DocumentRecord {
         DocumentRecord {
             query: "rust programming".to_string(),
-            url: url.to_string(),
-            title: title.to_string(),
-            extract: String::new(),
-            score: 1.0,
+            doc: Document::new(
+                title.to_string(),
+                url.to_string(),
+                String::new(),
+                Some(1.0),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
             staan_rank,
             from_staan,
         }
@@ -623,20 +648,34 @@ mod tests {
             // Matches both query terms ("rust programming") -> kept.
             DocumentRecord {
                 query: "rust programming".to_string(),
-                url: "https://example.com/rust".to_string(),
-                title: "Rust Programming".to_string(),
-                extract: "rust programming language".to_string(),
-                score: 1.0,
+                doc: Document::new(
+                    "Rust Programming".to_string(),
+                    "https://example.com/rust".to_string(),
+                    "rust programming language".to_string(),
+                    Some(1.0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
                 staan_rank: StaanRank::NotAsked,
                 from_staan: false,
             },
             // Matches no query terms -> filtered to 0.0.
             DocumentRecord {
                 query: "rust programming".to_string(),
-                url: "https://example.com/cooking".to_string(),
-                title: "Cooking Recipes".to_string(),
-                extract: "how to bake bread".to_string(),
-                score: 1.0,
+                doc: Document::new(
+                    "Cooking Recipes".to_string(),
+                    "https://example.com/cooking".to_string(),
+                    "how to bake bread".to_string(),
+                    Some(1.0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
                 staan_rank: StaanRank::NotAsked,
                 from_staan: false,
             },

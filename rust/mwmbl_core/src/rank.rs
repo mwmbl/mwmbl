@@ -4,7 +4,8 @@ use std::{
 };
 
 use anyhow::bail;
-use regex::{Regex, RegexBuilder};
+use itertools::Either;
+use regex::{Regex, RegexBuilder, regex};
 use reqwest::Url;
 
 use crate::{
@@ -80,7 +81,8 @@ fn score_result(terms: &[String], result: &Document, is_complete: bool) {
     // return 0.0
 }
 
-struct MatchFeatures {
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MatchFeatures {
     last_match_char: f32,
     match_length: f32,
     total_possible_match_length: f32,
@@ -89,7 +91,8 @@ struct MatchFeatures {
     match_term_proportion: f32,
 }
 
-struct Features {
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Features {
     title: MatchFeatures,
     extract: MatchFeatures,
     domain: MatchFeatures,
@@ -107,38 +110,64 @@ struct Features {
     match_terms: f32,
 }
 
-#[allow(clippy::cast_precision_loss,clippy::cast_possible_truncation)]
-fn get_features(
-    terms: &[String],
+pub fn get_features(terms: &[&str], doc: &Document, is_complete: bool) -> anyhow::Result<Features> {
+    let re_text = get_query_regex(&terms, is_complete, false)?;
+    let re_url = get_query_regex(&terms, is_complete, true)?;
+    get_features_regex(terms, doc, &re_text, &re_url)
+}
+
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+pub fn get_features_regex(
+    terms: &[&str],
     doc: &Document,
-    is_complete: bool,
+    re_text: &Regex,
+    re_url: &Regex,
 ) -> anyhow::Result<Features> {
     if terms.is_empty() {
         bail!("terms must containt at least 1 element");
     }
     let parsed_url = Url::parse(doc.url())?;
-    let query = parsed_url.query().unwrap_or("");
-    let Some(domain_str) = parsed_url.domain() else {
+    let Some(domain) = parsed_url.domain() else {
         bail!("Url must have a domain");
     };
+    Ok(get_features_regex_unchecked(
+        terms,
+        doc,
+        parsed_url.path(),
+        domain,
+        parsed_url.query().unwrap_or(""),
+        re_text,
+        re_url,
+    ))
+}
 
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+pub fn get_features_regex_unchecked(
+    terms: &[&str],
+    doc: &Document,
+    url_path: &str,
+    url_domain: &str,
+    url_query: &str,
+    re_text: &Regex,
+    re_url: &Regex,
+) -> Features {
     let whole = doc.title().to_owned()
         + " "
         + doc.extract()
         + " "
-        + domain_str
+        + url_domain
         + " "
-        + parsed_url.path()
+        + url_path
         + " "
-        + query;
+        + url_query;
 
-    let title = get_match_features(terms, doc.title(), is_complete, false)?;
-    let extract = get_match_features(terms, doc.extract(), is_complete, false)?;
-    let domain = get_match_features(terms, domain_str, is_complete, true)?;
-    let domain_tokenized = get_match_features(terms, domain_str, is_complete, false)?;
-    let path = get_match_features(terms, parsed_url.path(), is_complete, true)?;
-    let query = get_match_features(terms, query, is_complete, false)?;
-    let whole = get_match_features(terms, &whole, is_complete, false)?;
+    let title = get_match_features_regex(terms, doc.title(), re_text);
+    let extract = get_match_features_regex(terms, doc.extract(), re_text);
+    let domain = get_match_features_regex(terms, url_domain, &re_url);
+    let domain_tokenized = get_match_features_regex(terms, url_domain, re_text);
+    let path = get_match_features_regex(terms, url_path, re_url);
+    let query = get_match_features_regex(terms, url_query, re_text);
+    let whole = get_match_features_regex(terms, &whole, re_text);
 
     let match_terms = max(
         ordered_float::OrderedFloat(title.match_terms),
@@ -153,7 +182,7 @@ fn get_features(
     let match_terms = max(match_terms, ordered_float::OrderedFloat(query.match_terms));
     let match_terms = max(match_terms, ordered_float::OrderedFloat(whole.match_terms));
 
-    Ok(Features {
+    Features {
         title,
         extract,
         domain,
@@ -163,17 +192,17 @@ fn get_features(
         whole,
         num_terms: terms.len() as f32,
         num_chars: terms.iter().map(|v| v.len() as f32).sum::<f32>() + terms.len() as f32 - 1.0,
-        domain_score: get_domain_score(domain_str),
-        path_length: parsed_url.path().len() as f32,
-        domain_length: domain_str.len() as f32,
+        domain_score: get_domain_score(url_domain),
+        path_length: url_path.len() as f32,
+        domain_length: url_domain.len() as f32,
         wiki_score: get_wiki_score(doc.url()) as f32,
         item_score: doc.score().unwrap_or(0.0),
         match_terms: *match_terms,
-    })
+    }
 }
 
-#[allow(clippy::cast_precision_loss,clippy::cast_possible_truncation)]
-fn get_domain_score(domain: &str) -> f32 {
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+pub fn get_domain_score(domain: &str) -> f32 {
     let Some(score) = DOMAINS.get(domain) else {
         return 0.0;
     };
@@ -181,9 +210,9 @@ fn get_domain_score(domain: &str) -> f32 {
         / (*DOMAIN_MAX_SCORE as f32 - *DOMAIN_MIN_SCORE as f32)
 }
 
-#[allow(clippy::cast_precision_loss,clippy::cast_possible_truncation)]
-fn get_match_features(
-    terms: &[String],
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+pub fn get_match_features(
+    terms: &[&str],
     result_string: &str,
     is_complete: bool,
     is_url: bool,
@@ -191,6 +220,15 @@ fn get_match_features(
     let Ok(query_regex) = get_query_regex(terms, is_complete, is_url) else {
         bail!("cannot build regex");
     };
+    Ok(get_match_features_regex(terms, result_string, &query_regex))
+}
+
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+pub fn get_match_features_regex(
+    terms: &[&str],
+    result_string: &str,
+    query_regex: &Regex,
+) -> MatchFeatures {
     let matches = query_regex.find_iter(result_string);
 
     let mut last_match_char: f32 = 1.0;
@@ -213,22 +251,22 @@ fn get_match_features(
     }
 
     let total_possible_match_length = terms.iter().map(|v| v.len() as f32).sum();
-    let match_score = MATCH_EXPONENT.powf(match_length - total_possible_match_length)
-        / last_match_char;
+    let match_score =
+        MATCH_EXPONENT.powf(match_length - total_possible_match_length) / last_match_char;
     let match_terms = seen_matches.len() as f32;
     let match_term_proportion = match_terms / terms.len() as f32;
-    Ok(MatchFeatures {
+    MatchFeatures {
         last_match_char,
         match_length,
         total_possible_match_length,
         match_score,
         match_terms,
         match_term_proportion,
-    })
+    }
 }
 
-fn get_query_regex(
-    terms: &[String],
+pub fn get_query_regex(
+    terms: &[&str],
     is_complete: bool,
     use_word_boundaries: bool,
 ) -> Result<Regex, regex::Error> {
@@ -236,7 +274,7 @@ fn get_query_regex(
         return Regex::new("");
     }
 
-    let word_sep = if use_word_boundaries { r"\b" } else { "" };
+    let word_sep = if use_word_boundaries {  r"\b" } else { "" };
 
     let term_patterns: Vec<String> = if is_complete {
         terms
@@ -248,7 +286,7 @@ fn get_query_regex(
             .iter()
             .rev()
             .take(terms.len() - 1)
-            .map(|term| format!("{word_sep}{}{word_sep}", regex::escape(term)))
+            .map(|term| format!("{word_sep}{}", regex::escape(term)))
             .rev()
             .collect();
         v.push(format!(
@@ -258,6 +296,6 @@ fn get_query_regex(
         v
     };
     RegexBuilder::new(&term_patterns.join("|"))
-        .case_insensitive(false)
+        .case_insensitive(true)
         .build()
 }

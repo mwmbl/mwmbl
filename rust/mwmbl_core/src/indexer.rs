@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// The state of the document in the index. A value of None indicates an organic search result
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum DocumentState {
     SyncedWithMainIndex = -2,
     DELETED = -1,
@@ -38,14 +38,14 @@ pub enum DocumentState {
     FromWikiApproved = 10,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum DocumentSource {
     WIKIPEDIA = 1,
     STAAN = 2,
     StaanIndexed = 3,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Document {
     title: String,
     url: String,
