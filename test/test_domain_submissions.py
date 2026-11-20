@@ -126,6 +126,41 @@ def test_api_finds_submission_whatever_the_case(client, access_token):
 
 
 @pytest.mark.django_db
+def test_api_filters_domain_submissions_for_domain_by_status(client, user):
+    DomainSubmission.objects.create(name="idolbronze.com", submitted_by=user, status="PENDING")
+    approved = DomainSubmission.objects.create(name="idolbronze.com", submitted_by=user, status="APPROVED")
+
+    response = client.get("/api/v1/platform/domain-submissions/domains/idolbronze.com?status=APPROVED")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [approved.id]
+
+
+@pytest.mark.django_db
+def test_api_ignores_unknown_status_filter_for_domain(client, user):
+    DomainSubmission.objects.create(name="idolbronze.com", submitted_by=user, status="PENDING")
+    DomainSubmission.objects.create(name="idolbronze.com", submitted_by=user, status="APPROVED")
+
+    response = client.get("/api/v1/platform/domain-submissions/domains/idolbronze.com?status=NOT-A-STATUS")
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 2
+
+
+@pytest.mark.django_db
+def test_api_filters_all_domain_submissions_by_status(client, user):
+    DomainSubmission.objects.create(name="a.com", submitted_by=user, status="PENDING")
+    rejected = DomainSubmission.objects.create(name="b.com", submitted_by=user, status="REJECTED")
+
+    response = client.get("/api/v1/platform/domain-submissions?status=REJECTED")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [rejected.id]
+
+
+@pytest.mark.django_db
 def test_api_rejects_invalid_domain(client, access_token):
     response = client.post(
         "/api/v1/platform/domain-submissions/?domain=not-a-domain",
