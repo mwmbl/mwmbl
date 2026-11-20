@@ -518,3 +518,17 @@ WIDGET_MAX_RESPONSE_BYTES = 64 * 1024
 WIDGET_RATE_LIMIT_PER_MINUTE = 30  # per caller address
 WIDGET_SPEC_FETCHES_PER_SECOND = 20  # upstream calls per spec, whoever asks: bounds cache-busting inputs
 WIDGET_LOCK_SECONDS = 10  # how long one request may hold a cache miss before another may fetch
+
+# Mwmbl Social: fediverse server admins connect their server to Mwmbl's hosted instance,
+# social.mwmbl.org (mwmbl.social). The instance's URL and an admin API
+# token, one of its admin_tokens, are set per environment: settings_prod reads them from
+# the environment.
+#
+# Registering a server leaves a pending provider in its admin panel, and Mastodon refuses
+# another registration for the same server until its admin deletes that one. So nobody may
+# fill other people's panels: each user gets a few attempts a day, and each server one an hour.
+SOCIAL_CONNECT_ATTEMPTS_PER_USER_PER_DAY = 5
+SOCIAL_CONNECT_SECONDS_BETWEEN_HOST_ATTEMPTS = 60 * 60
+# Registering takes Mwmbl Social up to three requests to the server, so it is given longer.
+SOCIAL_REGISTER_TIMEOUT_SECONDS = 30
+SOCIAL_API_TIMEOUT_SECONDS = 5

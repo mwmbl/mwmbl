@@ -41,3 +41,6 @@ REQUEST_CACHE_PATH = "/tmp/test_request_cache"
 # against. In dev mode django-vite points at the dev server instead of reading the manifest, which
 # lets views that render the base template be tested.
 DJANGO_VITE_DEV_MODE = True
+
+MWMBL_SOCIAL_URL = "https://social.test"
+MWMBL_SOCIAL_ADMIN_TOKEN = "test-admin-token"
