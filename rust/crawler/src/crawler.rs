@@ -27,7 +27,7 @@ use crate::{
     bloomdb::BloomDatabase,
     constants::{
         API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, READ_TIMEOUT, SEND_TIMEOUT,
-        SUMBIT_BATCH_SIZE,
+        SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     path_creation::{get_device_name, index_path},
@@ -185,8 +185,8 @@ impl Crawler {
         println!("Sending results.");
         let mut lock = self.to_submit.write().await;
         let mut docs: Vec<Document> = Vec::new();
-        if lock.len() >= SUMBIT_BATCH_SIZE {
-            for _ in 0..SUMBIT_BATCH_SIZE {
+        if lock.len() >= SUBMIT_BATCH_SIZE {
+            for _ in 0..SUBMIT_BATCH_SIZE {
                 if let Some(res) = lock.pop_front() {
                     docs.push(Document::new(
                         res.title,
@@ -224,7 +224,7 @@ impl Crawler {
         let mut terms: Vec<String> = Vec::new();
         let result_items: Vec<SendResult> = term_new_doc_count
             .into_iter()
-            .take(SUMBIT_BATCH_SIZE)
+            .take(SUBMIT_TOP_N)
             .filter_map(|(term, _)| {
                 let Ok(docs) = index.retrieve::<Document>(term) else {
                     return None;
