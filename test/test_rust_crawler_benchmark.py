@@ -105,7 +105,8 @@ def test_a_failing_configuration_does_not_lose_the_others(tmp_path):
 
 def test_a_crash_late_in_the_window_fails_the_configuration(tmp_path):
     clock = Clock()
-    crawler = FakeCrawler(clock, die_at=600)
+    # The window runs from 60s to 660s: this dies during its last poll.
+    crawler = FakeCrawler(clock, die_at=658)
     (result,) = run_benchmark(tmp_path, crawler, clock, counts(threads=[1], tasks=[64]))
     assert result.status == "FAILED"
     assert "exited" in result.error
@@ -186,11 +187,12 @@ def test_refuses_placeholder_settings():
 
 FAKE_CRAWLER = """
 import os, sys, time
+print("CrawlerParams { api_key: " + repr(os.environ.get("MWMBL_API_KEY")) + " }", flush=True)
 print("Sending results.", flush=True)
 for i in range(int(os.environ["CRAWL_THREADS"])):
     print(f"speed: 1/s | queue https://example.org/{i} | crawled 0", flush=True)
 if os.environ.get("CRASH"):
-    print("thread 'main' panicked", flush=True)
+    print("thread 'main' panicked with key " + os.environ.get("MWMBL_API_KEY", ""), flush=True)
     sys.exit(3)
 time.sleep(60)
 """
@@ -223,15 +225,25 @@ def test_rust_crawler_counts_page_lines_and_stops():
 
 def test_rust_crawler_reports_a_crash_with_its_output():
     crawler = RustCrawler([sys.executable, "-c", FAKE_CRAWLER])
-    crawler.start({"CRAWL_THREADS": "1", "CRASH": "1"})
+    crawler.start({"CRAWL_THREADS": "1", "CRASH": "1", "MWMBL_API_KEY": "secret-key"})
+    process = crawler.process
+    assert process is not None
     try:
-        crawler.process.wait(timeout=10)
+        process.wait(timeout=10)
         with pytest.raises(RuntimeError, match="code 3") as raised:
             crawler.ensure_running()
     finally:
         crawler.stop()
     assert "panicked" in str(raised.value)
     assert "example.org" not in str(raised.value)
+    assert "secret-key" not in str(raised.value)
+    assert "CrawlerParams" not in str(raised.value)
+    assert "<redacted>" in str(raised.value)
+
+
+def test_refuses_an_empty_window(tmp_path):
+    with pytest.raises(SystemExit):
+        benchmark_rust.main(["--duration", "0s", "--env-file", str(tmp_path / ".env")])
 
 
 def test_cli_refuses_to_run_without_a_built_crawler(tmp_path, monkeypatch):

@@ -17,6 +17,10 @@ fixed-length window miscounts by at most one page at each end. The Python benchm
 its window to whole batches because its counter only moves when a batch finishes. This one doesn't
 need to, so its windows can be shorter.
 
+The crawler submits what it crawls to Mwmbl under your API key throughout, as it does in normal
+running, so a benchmark is also a crawl. Stopping it between configurations throws away the
+results it hadn't sent yet.
+
 Pages it couldn't fetch (robots.txt denials, errors, timeouts) print nothing, so they aren't
 counted. The Python benchmark counts every fetch whatever came back, so the two numbers can't be
 compared directly.
@@ -84,6 +88,13 @@ STOP_TIMEOUT_SECONDS = 10
 POLL_INTERVAL_SECONDS = 5
 # Lines kept from the crawler's output to explain a crash. Page lines are left out: they hold only URLs.
 OUTPUT_TAIL_LINES = 20
+# The crawler prints its CrawlerParams with Debug at startup, which includes the API key. Crash
+# output goes to the terminal, the report and the CSV, so that line is dropped and the key is
+# redacted from anything else.
+PARAMS_LINE_PREFIX = b"CrawlerParams"
+SECRET_SETTINGS = ("MWMBL_API_KEY",)
+REDACTED = "<redacted>"
+CRAWLER_PROCESS_NAME = "crawler_rs"
 PLACEHOLDERS = {"MWMBL_API_KEY": ("", "CREATE_ME"), "MWMBL_CONTACT_INFO": ("", "CHANGE_ME@example.com")}
 
 CSV_COLUMNS = [
@@ -144,6 +155,7 @@ class RustCrawler:
         self.reader: threading.Thread | None = None
         self.lock = threading.Lock()
         self.count = 0
+        self.secrets: list[str] = []
         self.tail: collections.deque[str] = collections.deque(maxlen=OUTPUT_TAIL_LINES)
 
     def already_running(self) -> list[str]:
@@ -151,16 +163,20 @@ class RustCrawler:
         machine and write the same index in ~/.mwmbl, so any measurement would be meaningless."""
         if shutil.which("pgrep") is None:
             return []
-        found = subprocess.run(["pgrep", "-x", Path(self.command[0]).name], capture_output=True, text=True)
+        # The binary's own name, not the command's: a command like `cargo run` or `python3 ...` would
+        # match unrelated processes, the benchmark itself included.
+        found = subprocess.run(["pgrep", "-x", CRAWLER_PROCESS_NAME], capture_output=True, text=True)
         return found.stdout.split()
 
     def start(self, env: dict[str, str]) -> None:
         with self.lock:
             self.count = 0
             self.tail.clear()
+        child_env = {**os.environ, **env}
+        self.secrets = [value for name in SECRET_SETTINGS if (value := child_env.get(name, "").strip())]
         self.process = subprocess.Popen(
             self.command,
-            env={**os.environ, **env},
+            env=child_env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -177,8 +193,13 @@ class RustCrawler:
             with self.lock:
                 if line.startswith(PAGE_LINE_PREFIX):
                     self.count += 1
-                else:
-                    self.tail.append(line.decode(errors="replace").rstrip())
+                elif not line.startswith(PARAMS_LINE_PREFIX):
+                    self.tail.append(self._redact(line.decode(errors="replace").rstrip()))
+
+    def _redact(self, text: str) -> str:
+        for secret in self.secrets:
+            text = text.replace(secret, REDACTED)
+        return text
 
     def pages(self) -> int:
         with self.lock:
@@ -214,6 +235,8 @@ class RustCrawler:
             self.process.wait()
         if self.reader is not None:
             self.reader.join(timeout=STOP_TIMEOUT_SECONDS)
+        if self.process.stdout is not None:
+            self.process.stdout.close()
         self.process = None
         self.reader = None
 
@@ -372,6 +395,13 @@ def load_env_file(path: Path) -> dict[str, str]:
     return loaded
 
 
+def parse_positive_duration(text: str) -> int:
+    seconds = parse_duration(text)
+    if seconds == 0:
+        raise argparse.ArgumentTypeError("the measurement window can't be empty")
+    return seconds
+
+
 def check_settings(env: dict[str, str]) -> None:
     unset = [name for name, placeholders in PLACEHOLDERS.items() if env.get(name, "").strip() in placeholders]
     if unset:
@@ -392,7 +422,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             help=f"{knob} values to try (default: {','.join(map(str, DEFAULT_COUNTS[knob]))})",
         )
     parser.add_argument("--warmup", type=parse_duration, default=parse_duration(DEFAULT_WARMUP), metavar="DURATION")
-    parser.add_argument("--duration", type=parse_duration, default=parse_duration(DEFAULT_DURATION), metavar="DURATION")
+    parser.add_argument(
+        "--duration", type=parse_positive_duration, default=parse_duration(DEFAULT_DURATION), metavar="DURATION"
+    )
     parser.add_argument(
         "--output",
         type=Path,

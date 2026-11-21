@@ -173,6 +173,7 @@ optimize:
 crawler: optimize
 
 # The same for the Rust crawler, which it runs as a child process from rust/crawler/target/release.
+# The system python3 for the same reason: it needs only the standard library.
 optimize-rust:
 	python3 -m mwmbl.crawler.benchmark_rust $(ARGS)
 
