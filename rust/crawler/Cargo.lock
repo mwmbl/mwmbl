@@ -4956,6 +4956,7 @@ dependencies = [
  "ordered-float",
  "phf 0.14.0",
  "regex",
+ "regex-syntax",
  "reqwest 0.13.5",
  "serde",
  "serde_json",

@@ -19,5 +19,6 @@ pub mod hn_top_domains_filtered;
 pub mod index;
 pub mod indexer;
 pub mod rank;
+pub mod term_matcher;
 pub mod tokenizer;
 pub mod wiki;

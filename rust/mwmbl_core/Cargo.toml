@@ -10,6 +10,7 @@ zstd = "0.13"
 anyhow = { version = "1.0.104" }
 phf = { version = "0.14.0", features = ["macros"] }
 regex = { version = "1.13.1" }
+regex-syntax = "0.8.11"
 reqwest = { version = "0.13.5", features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.54.1", features = ["full"] }
