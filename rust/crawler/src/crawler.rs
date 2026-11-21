@@ -89,26 +89,7 @@ impl Crawler {
         let client = self.get_client()?;
         let start = Instant::now();
 
-        let clone = self.clone();
-        let semaphore = self.submit_semaphore.clone();
-        spawn(async move {
-            let semaphore = semaphore;
-            loop {
-                let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                    eprintln!("Could not aquire permit for indexing");
-                    continue;
-                };
-                let clone = clone.clone();
-                spawn(async move {
-                    let res = clone.index().await;
-                    if res.is_err() || res.is_ok_and(|completed| !completed) {
-                        let random_time = rand::rng().random_range(5..=10);
-                        sleep(Duration::from_secs(random_time)).await;
-                    }
-                    drop(permit);
-                });
-            }
-        });
+        self.index();
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
@@ -195,21 +176,35 @@ impl Crawler {
         format!("{API_PRODUCT} ({identity})")
     }
 
-    pub async fn index(&self) -> anyhow::Result<bool> {
-        println!("Sending results.");
-        let mut lock = self.to_submit.write().await;
-        let mut docs: Vec<Document> = Vec::new();
-        if lock.len() >= SUBMIT_BATCH_SIZE {
-            for _ in 0..SUBMIT_BATCH_SIZE {
-                if let Some(doc) = lock.pop_front() {
-                    docs.push(doc);
+    pub fn index(&self) {
+        let clone = self.clone();
+        let semaphore = self.submit_semaphore.clone();
+        let to_submit = self.to_submit.clone();
+        spawn(async move {
+            loop {
+                let mut lock = to_submit.write().await;
+                if lock.len() >= SUBMIT_BATCH_SIZE {
+                    let docs: Vec<Document> = lock
+                        .drain(0..SUBMIT_BATCH_SIZE).collect();
+                    drop(lock);
+
+                    let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                        eprintln!("Could not aquire permit for indexing");
+                        continue;
+                    };
+                    let clone = clone.clone();
+                    spawn(async move {
+                        println!("Sending results.");
+                        let _ = clone.index_batch(docs).await;
+                        drop(permit);
+                    });
+                } else {
+                    drop(lock);
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
             }
-        } else {
-            return Ok(false);
-        }
-        drop(lock);
-        self.index_batch(docs).await.map(|()| true)
+        });
     }
 
     async fn index_batch(&self, docs: Vec<Document>) -> anyhow::Result<()> {
