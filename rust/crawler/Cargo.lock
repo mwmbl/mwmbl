@@ -4955,6 +4955,7 @@ dependencies = [
  "murmurhash32",
  "ordered-float",
  "phf 0.14.0",
+ "rayon",
  "regex",
  "regex-syntax",
  "reqwest 0.13.5",
