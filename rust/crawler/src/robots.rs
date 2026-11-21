@@ -24,8 +24,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct CachedRobotFile {
-    cache_ttl: Duration,
-    robot_fetched: Instant,
+    cache_ttl: Instant,
     robot: Option<Arc<Robot>>,
     error_count: Arc<AtomicU64>,
 }
@@ -40,8 +39,7 @@ impl CachedRobotFile {
             None
         };
         Self {
-            cache_ttl,
-            robot_fetched: Instant::now(),
+            cache_ttl: Instant::now() + cache_ttl,
             robot,
             error_count: Arc::new(0.into()),
         }
@@ -67,7 +65,7 @@ impl CachedRobotFile {
         ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
     pub fn is_valid(&self) -> bool {
-        Instant::now().duration_since(self.robot_fetched) < self.cache_ttl
+        self.cache_ttl <= Instant::now()
     }
 }
 
@@ -99,7 +97,7 @@ impl RobotCache {
         // don't ask for write lock if not necessary
         let lock = self.removal.read().await;
         if let Some((_, ttl)) = lock.peek_min() {
-            should_try = ttl > &mut Instant::now();
+            should_try = ttl <= &mut Instant::now();
         }
         drop(lock);
         if !should_try {
@@ -107,7 +105,7 @@ impl RobotCache {
         }
         let mut lock = self.removal.write().await;
         let mut to_remove = Vec::new();
-        while let Some((key, _)) = lock.pop_min_if(|_, ttl| ttl > &mut Instant::now()) {
+        while let Some((key, _)) = lock.pop_min_if(|_, ttl| ttl <= &mut Instant::now()) {
             to_remove.push(key);
         }
         drop(lock);
@@ -144,7 +142,7 @@ impl RobotCache {
     pub async fn put(&mut self, domain: &str, file: CachedRobotFile) {
         self.evict().await;
         let mut lock = self.removal.write().await;
-        lock.push(domain.to_owned(), file.robot_fetched + file.cache_ttl);
+        lock.push(domain.to_owned(), file.cache_ttl);
         drop(lock);
         let _ = self.cache.insert_async(domain.to_owned(), file).await;
     }
