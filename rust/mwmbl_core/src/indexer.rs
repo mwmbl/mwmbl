@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cmp::max,
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -639,6 +640,9 @@ impl DocumentState {
     }
 }
 
+/// Ranks and deduplicates a page's documents. Everything up to the end works on borrowed
+/// documents, so each document that is kept is cloned once, and only a document merged
+/// from several copies is built anew.
 fn combine_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
@@ -650,10 +654,10 @@ where
     J: IntoIterator<Item = &'a Document>,
 {
     let sorted = sort_documents(existing_documents, documents, ranker);
-    let mut values: Vec<(usize, Document)> = sorted
+    let mut values: Vec<(usize, Cow<'a, Document>)> = sorted
         .into_iter()
         .enumerate()
-        .map(|(order, doc)| (doc.url.clone(), (order, doc)))
+        .map(|(order, doc)| (doc.url.as_str(), (order, Cow::Borrowed(doc))))
         .into_group_map()
         .into_values()
         .filter_map(merge_user_ids_last_crawled)
@@ -665,41 +669,45 @@ where
     values.sort_by_key(|v| v.0);
     values
         .into_iter()
-        .map(|mut v| {
+        .map(|(_, doc)| {
+            let mut doc = doc.into_owned();
             if mark_synced {
-                v.1.state = Some(DocumentState::SyncedWithMainIndex);
+                doc.state = Some(DocumentState::SyncedWithMainIndex);
             }
-            v.1
+            doc
         })
         .collect()
 }
 
-fn merge_user_ids_last_crawled(mut docs: Vec<(usize, Document)>) -> Option<(usize, Document)> {
-    if let Some((idx, mut best_doc)) = docs.first().cloned() {
-        docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
-        if docs.len() > 1 {
-            let mut user_ids: Vec<i32> = Vec::new();
-            for (_, doc) in docs {
-                best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
-                if let Some(existing) = doc.user_ids {
-                    for id in existing {
-                        user_ids.retain(|v| *v != id);
-                        user_ids.push(id);
-                    }
-                }
-            }
-            best_doc.user_ids = Some(user_ids);
-        }
-        return Some((idx, best_doc));
+/// The first document, with the history of all of them: the latest crawl, and every
+/// user id, latest crawl last. A document with no other copies is returned as it is.
+fn merge_user_ids_last_crawled(
+    mut docs: Vec<(usize, Cow<'_, Document>)>,
+) -> Option<(usize, Cow<'_, Document>)> {
+    if docs.len() <= 1 {
+        return docs.pop();
     }
-    None
+    let (idx, mut best_doc) = docs
+        .first()
+        .map(|(idx, doc)| (*idx, Document::clone(doc)))?;
+    docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
+    let mut user_ids: Vec<i32> = Vec::new();
+    for (_, doc) in &docs {
+        best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
+        for &id in doc.user_ids.iter().flatten() {
+            user_ids.retain(|v| *v != id);
+            user_ids.push(id);
+        }
+    }
+    best_doc.user_ids = Some(user_ids);
+    Some((idx, Cow::Owned(best_doc)))
 }
 
 fn sort_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
     ranker: &R,
-) -> Vec<Document>
+) -> Vec<&'a Document>
 where
     I: IntoIterator<Item = &'a Document>,
     J: IntoIterator<Item = &'a Document>,
@@ -734,15 +742,8 @@ where
 
     let mut sorted_documents: Vec<_> = other_documents
         .into_iter()
-        .cloned()
-        .chain(existing_other.into_iter().cloned())
-        .filter_map(|doc| {
-            if let Some(term) = &doc.term {
-                Some((term.to_owned(), doc))
-            } else {
-                None
-            }
-        })
+        .chain(existing_other)
+        .filter_map(|doc| Some((doc.term.as_deref()?, doc)))
         .into_group_map()
         .into_iter()
         .flat_map(|(term, docs)| {
@@ -756,8 +757,66 @@ where
 
     curated
         .into_iter()
-        .cloned()
-        .chain(widgets.into_iter().cloned())
+        .chain(widgets)
         .chain(sorted_documents.into_iter().map(|v| v.1))
         .collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::{Document, DocumentState, combine_documents};
+    use crate::rank::HeuristicRanker;
+
+    fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
+        Document::new(
+            title.to_owned(),
+            url.to_owned(),
+            "rust is a language".to_owned(),
+            None,
+            Some("rust".to_owned()),
+            None,
+            Some(vec![user_id]),
+            Some(last_crawled),
+            None,
+        )
+    }
+
+    #[test]
+    fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
+        let existing = [
+            document("Rust", "https://rust-lang.org/", 10, 1),
+            document("Other", "https://other.example/rust", 5, 4),
+        ];
+        let incoming = [
+            document("Rust", "https://rust-lang.org/", 20, 2),
+            document("Rust", "https://copy.example/rust", 30, 3),
+        ];
+
+        let combined = combine_documents(
+            &existing,
+            &incoming,
+            true,
+            &HeuristicRanker::new(f32::NEG_INFINITY),
+        );
+
+        let urls: Vec<&str> = combined.iter().map(Document::url).collect();
+        assert_eq!(urls.len(), 2, "{urls:?}");
+        assert!(urls.contains(&"https://other.example/rust"), "{urls:?}");
+        // Which URL keeps the title depends on hash order, but either way it carries the
+        // history of all three copies, oldest crawl first.
+        let rust = combined.iter().find(|doc| doc.title() == "Rust").unwrap();
+        assert_eq!(rust.last_crawled(), Some(30));
+        assert_eq!(rust.user_ids(), Some(&vec![1, 2, 3]));
+        assert!(
+            combined
+                .iter()
+                .all(|doc| matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)))
+        );
+        let other = combined.iter().find(|doc| doc.title() == "Other").unwrap();
+        assert_eq!(
+            (other.last_crawled(), other.user_ids()),
+            (Some(5), Some(&vec![4]))
+        );
+    }
 }

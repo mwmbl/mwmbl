@@ -152,6 +152,27 @@ fn packing_keeps_the_longest_prefix_that_fits() {
 }
 
 #[test]
+fn packing_any_prefix_stores_all_of_it_that_fits() {
+    let documents: Vec<Value> = (0..60u64)
+        .map(|i| {
+            let extract: String = (0..20)
+                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
+                .collect();
+            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
+        })
+        .collect();
+    let (_, fits) = pack_page(PAGE_SIZE, &documents).unwrap();
+    assert!(fits > 1 && fits < documents.len(), "stored {fits}");
+
+    // Up to `fits` the whole list is stored (the common case, a single compression), and
+    // past it the search finds the same prefix as before.
+    for count in 0..=documents.len() {
+        let (_, num_stored) = pack_page(PAGE_SIZE, &documents[..count]).unwrap();
+        assert_eq!(num_stored, count.min(fits), "packing {count} documents");
+    }
+}
+
+#[test]
 fn an_empty_list_packs_to_an_empty_page() {
     let (page, num_stored) = pack_page::<Value>(PAGE_SIZE, &[]).unwrap();
 

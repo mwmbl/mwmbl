@@ -95,9 +95,9 @@ thread_local! {
     #[allow(clippy::expect_used)] static DECOMPRESSOR: RefCell<Decompressor<'static>> =
         RefCell::new(Decompressor::new().expect("Could not create a zstd decompression context"));
 
-    /// And one compression context, for the same reason. Packing a page compresses about
-    /// a dozen prefixes of the documents to find the ones that fit, so building a context
-    /// per compression cost more than the compression did.
+    /// And one compression context, for the same reason. Packing a full page compresses
+    /// about a dozen prefixes of the documents to find the ones that fit, so building a
+    /// context per compression cost more than the compression did.
     #[allow(clippy::expect_used)] static COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
         Compressor::new(COMPRESSION_LEVEL).expect("Could not create a zstd compression context"));
 }
@@ -147,19 +147,16 @@ fn decode_page<T: for<'a> Deserialize<'a>>(
     // unreadable. Invalid UTF-8 fails here too, as the decode in Python did.
     let items_t: Vec<T> =
         serde_json::from_slice(&contents).map_err(|e| PageIoError::Unreadable(e.to_string()))?;
-    let items_values: Vec<Value> =
-        serde_json::from_slice(&contents).map_err(|e| PageIoError::Unreadable(e.to_string()))?;
     match term {
+        // Writers read the whole page, so only parse it a second time to filter by term.
         None => Ok(items_t),
-        Some(term) => Ok(zip(items_t, items_values)
-            .filter_map(|(item_t, item)| {
-                if has_term(&item, term) {
-                    Some(item_t)
-                } else {
-                    None
-                }
-            })
-            .collect()),
+        Some(term) => {
+            let items_values: Vec<Value> = serde_json::from_slice(&contents)
+                .map_err(|e| PageIoError::Unreadable(e.to_string()))?;
+            Ok(zip(items_t, items_values)
+                .filter_map(|(item_t, item)| has_term(&item, term).then_some(item_t))
+                .collect())
+        }
     }
 }
 
@@ -196,8 +193,8 @@ fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageI
 /// The padded page bytes, and how many of `items` actually fit on them.
 ///
 /// A page holds a fixed number of bytes, and how many documents that is depends on how
-/// well they compress, so the largest prefix that fits is found by binary search over the
-/// compressed size. The tail that does not fit is dropped, which is why callers pass their
+/// well they compress. When they do not all fit, the largest prefix that does is found by
+/// binary search over the compressed size. The tail that does not fit is dropped, which is why callers pass their
 /// documents best-first.
 pub fn pack_page<T: Serialize>(
     page_size: usize,
@@ -213,8 +210,12 @@ pub fn pack_page<T: Serialize>(
             ));
         }
     }
-    // One compression context for the whole search: the binary search compresses a dozen
-    // prefixes, and building a context each time would cost more than the compression.
+    // Nearly every page (99% when indexing a crawl) holds all of its documents, so try that
+    // first: one compression instead of a binary search's handful.
+    let all = compress_prefix(&serialised, items.len())?;
+    if all.len() <= page_size {
+        return Ok(pad_page(all, items.len(), page_size));
+    }
     let mut low = 0;
     let mut high = items.len();
     let mut best = (0, compress_prefix(&serialised, 0)?);
@@ -232,15 +233,19 @@ pub fn pack_page<T: Serialize>(
         }
     }
 
-    let (num_stored, mut page) = best;
+    let (num_stored, page) = best;
     if page.len() > page_size {
         return Err(PageIoError::Unreadable(format!(
             "Data is too big ({}) for page size ({page_size})",
             page.len()
         )));
     }
+    Ok(pad_page(page, num_stored, page_size))
+}
+
+fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>, usize) {
     page.resize(page_size, 0);
-    Ok((page, num_stored))
+    (page, num_stored)
 }
 
 /// Read the page at `offset`, returning its document tuples as lists.
