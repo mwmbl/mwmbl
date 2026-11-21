@@ -57,4 +57,5 @@ pub static NUM_URLS_TAKENS: usize = 50;
 
 pub static SUBMIT_BATCH_SIZE: usize = 100;
 pub static SUBMIT_TOP_N: usize = 100;
+pub static MAX_SUBMIT_QUEUE_SIZE: usize = 2000;
 pub static DEVICE_NAME_FILE: &str = "device-name";

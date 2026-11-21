@@ -26,12 +26,11 @@ use crate::{
     batch::{PostResultsResponse, SendResult, SendResults},
     bloomdb::BloomDatabase,
     constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, PROJECT_URL, READ_TIMEOUT, SEND_TIMEOUT,
-        SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     path_creation::{get_device_name, index_path},
-    retrieve::{CrawlResult, SuccesfullCrawlResult, crawl},
+    retrieve::{CrawlResult, crawl},
     robots::RobotCache,
     url_queue::SharedURLQueue,
 };
@@ -46,7 +45,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
-    to_submit: Arc<RwLock<VecDeque<SuccesfullCrawlResult>>>,
+    to_submit: Arc<RwLock<VecDeque<Document>>>,
     count: Arc<AtomicUsize>,
 }
 
@@ -152,7 +151,10 @@ impl Crawler {
                         result.url.as_str(),
                         lock.len()
                     );
-                    lock.push_back(result);
+                    lock.push_back(result.to_document());
+                    if lock.len() > MAX_SUBMIT_QUEUE_SIZE {
+                        lock.pop_front();
+                    }
                 }
             });
 
@@ -187,18 +189,8 @@ impl Crawler {
         let mut docs: Vec<Document> = Vec::new();
         if lock.len() >= SUBMIT_BATCH_SIZE {
             for _ in 0..SUBMIT_BATCH_SIZE {
-                if let Some(res) = lock.pop_front() {
-                    docs.push(Document::new(
-                        res.title,
-                        res.url.to_string(),
-                        res.extract,
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(res.timestamp.timestamp()),
-                        None,
-                    ));
+                if let Some(doc) = lock.pop_front() {
+                    docs.push(doc);
                 }
             }
         } else {

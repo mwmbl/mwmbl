@@ -7,6 +7,7 @@ use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
 use std::{cmp::min, collections::HashSet};
+use tokio::task::spawn_blocking;
 
 #[cfg(feature = "servo")]
 use crate::constants::READ_TIMEOUT;
@@ -20,7 +21,7 @@ use futures_util::StreamExt;
 use readabilityrs::Readability;
 use reqwest::{Client, StatusCode, Url};
 #[cfg(feature = "servo")]
-use servo_fetch::{FetchOptions, SessionBrokerConfig, VisibilityPolicy, extract::ExtractInput};
+use servo_fetch::{FetchOptions, VisibilityPolicy};
 
 #[derive(Debug)]
 pub enum CrawlResult {
@@ -68,6 +69,22 @@ pub struct SuccesfullCrawlResult {
     pub extract: String,
     pub links: Vec<Url>,
     pub extra_links: Vec<Url>,
+}
+
+impl SuccesfullCrawlResult {
+    pub fn to_document(self) -> mwmbl_core::indexer::Document {
+        mwmbl_core::indexer::Document::new(
+            self.title,
+            self.url.to_string(),
+            self.extract,
+            None,
+            None,
+            None,
+            None,
+            Some(self.timestamp.timestamp()),
+            None,
+        )
+    }
 }
 
 impl CrawlResult {
@@ -238,10 +255,25 @@ pub async fn crawl(
         }
     };
 
-    (
-        claimed_url,
-        sanitize(&html, resolved_url, status, timestamp, url),
-    )
+    let owned_url = url.to_owned();
+    let crawl_result =
+        match spawn_blocking(move || sanitize(&html, resolved_url, status, timestamp, owned_url))
+            .await
+        {
+            Ok(r) => r,
+            Err(err) => {
+                return (
+                    claimed_url,
+                    CrawlResult::AbortError {
+                        timestamp,
+                        url,
+                        err: err.into(),
+                    },
+                );
+            }
+        };
+
+    (claimed_url, crawl_result)
 }
 
 fn sanitize(

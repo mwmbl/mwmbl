@@ -35,9 +35,12 @@ use crate::{constants::NUM_PAGES, crawler::Crawler, path_creation::index_path};
 struct Cli {
     #[command(flatten)]
     crawler_params: CrawlerParams,
-    /// number of workers
+    /// number of async workers
     #[arg(env = "CRAWL_THREADS", long, default_value = "32")]
     crawler_workers: usize,
+    /// number of blocking workers (mainly used for html parsing)
+    #[arg(env = "PARSING_THREADS", long, default_value = "8")]
+    parsing_workers: usize,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -76,7 +79,7 @@ pub struct CrawlerParams {
     )]
     remote_server: String,
     /// maximum amount of simultaneous crawling task that can run at any point.
-    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "32")]
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "64")]
     max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
@@ -100,6 +103,7 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(args.crawler_workers)
         .enable_all()
+        .max_blocking_threads(args.parsing_workers)
         .build()?
         .block_on(async move { tokio_main(args).await })
 }
