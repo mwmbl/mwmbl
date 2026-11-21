@@ -12,6 +12,7 @@ use std::{
 use anyhow::{Context, bail};
 use file_guard::Lock;
 use itertools::Itertools;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -343,43 +344,48 @@ impl TinyIndex {
         murmurhash32::murmurhash3_with_seed::<0>(key.as_bytes()) as usize % self.metadata.num_pages
     }
 
-    fn store_pages<I, J>(
+    /// Merges each page's new documents into it and writes it back. Each page has its own
+    /// lock and is read and written independently, so the pages are done in parallel.
+    fn store_pages(
         &self,
-        page_documents: I,
+        page_documents: HashMap<usize, Vec<Document>>,
         mark_synced: bool,
-    ) -> anyhow::Result<Vec<StoredPage>>
-    where
-        I: IntoIterator<Item = (usize, J)>,
-        J: IntoIterator<Item = Document>,
-        for<'a> &'a J: IntoIterator<Item = &'a Document>,
-    {
-        let mut stored = Vec::new();
+    ) -> anyhow::Result<Vec<StoredPage>> {
+        let stored: Vec<Option<StoredPage>> = page_documents
+            .into_par_iter()
+            .map(|(page, docs)| self.store_page(page, &docs, mark_synced))
+            .collect::<anyhow::Result<_>>()?;
+        Ok(stored.into_iter().flatten().collect())
+    }
 
-        for (page, docs) in page_documents {
-            if let Ok(lock) = self.lock_page(page) {
-                let existing_documents: Vec<Document> = TinyIndex::get_page(&lock, None)?;
-                let stored_copy = find_stored_copies(&docs, &existing_documents);
-                let mut combined_documents = combine_documents(
-                    &existing_documents,
-                    &docs,
-                    mark_synced,
-                    &HeuristicRanker::new(f32::NEG_INFINITY),
-                );
-                let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
-                    eprintln!("Skipping index page {page}");
-                    continue;
-                };
-                combined_documents.truncate(num_stored);
-                stored.push(StoredPage {
-                    stored: combined_documents,
-                    existing: existing_documents,
-                    stored_copies: stored_copy,
-                });
-            } else {
-                eprintln!("Skipping index page {page}");
-            }
-        }
-        Ok(stored)
+    fn store_page(
+        &self,
+        page: usize,
+        docs: &[Document],
+        mark_synced: bool,
+    ) -> anyhow::Result<Option<StoredPage>> {
+        let Ok(lock) = self.lock_page(page) else {
+            eprintln!("Skipping index page {page}");
+            return Ok(None);
+        };
+        let existing_documents: Vec<Document> = TinyIndex::get_page(&lock, None)?;
+        let stored_copy = find_stored_copies(docs, &existing_documents);
+        let mut combined_documents = combine_documents(
+            &existing_documents,
+            docs,
+            mark_synced,
+            &HeuristicRanker::new(f32::NEG_INFINITY),
+        );
+        let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
+            eprintln!("Skipping index page {page}");
+            return Ok(None);
+        };
+        combined_documents.truncate(num_stored);
+        Ok(Some(StoredPage {
+            stored: combined_documents,
+            existing: existing_documents,
+            stored_copies: stored_copy,
+        }))
     }
 
     pub async fn index_documents<I, T: BlacklistProvider>(
