@@ -19,12 +19,12 @@ use crate::{
 };
 
 pub trait Ranker {
-    fn order_results(
+    fn order_results<'a>(
         &self,
         terms: &[&str],
-        results: &[Document],
+        results: &[&'a Document],
         is_complete: bool,
-    ) -> Vec<Document>;
+    ) -> Vec<&'a Document>;
 }
 
 pub struct HeuristicRanker {
@@ -39,30 +39,24 @@ impl HeuristicRanker {
 }
 
 impl Ranker for HeuristicRanker {
-    fn order_results(
+    fn order_results<'a>(
         &self,
         terms: &[&str],
-        results: &[Document],
+        results: &[&'a Document],
         is_complete: bool,
-    ) -> Vec<Document> {
+    ) -> Vec<&'a Document> {
         if results.is_empty() {
             return Vec::new();
         }
         let matchers = QueryMatchers::new(terms, is_complete);
         let mut results_and_scores: Vec<(f32, &Document)> = results
             .iter()
-            .map(|doc| (score_result(&matchers, doc), doc))
+            .map(|&doc| (score_result(&matchers, doc), doc))
             .collect();
         results_and_scores.sort_by_key(|v| ordered_float::OrderedFloat(v.0));
         results_and_scores
             .into_iter()
-            .filter_map(|(score, doc)| {
-                if score > self.score_threshold {
-                    Some(doc.clone())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(score, doc)| (score > self.score_threshold).then_some(doc))
             .collect()
     }
 }
