@@ -12,7 +12,7 @@ use std::sync::{LazyLock, OnceLock};
 use regex::Regex;
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
 
-use crate::rank::{get_query_regex, query_pattern_terms};
+use crate::rank::{get_query_regex};
 
 /// One match of a term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +28,7 @@ pub struct TermMatch {
 
 pub struct TermMatcher {
     terms: Vec<String>,
-    /// For each term the regex tries, in order (see [`query_pattern_terms`]), the characters
+    /// For each term the regex tries, in order, the characters
     /// that match each of its characters.
     patterns: Vec<Vec<CaseFolded>>,
     /// For each byte, whether a match can start with it, to skip most positions quickly.
@@ -42,9 +42,8 @@ pub struct TermMatcher {
 impl TermMatcher {
     #[must_use]
     pub fn new(terms: &[&str], is_complete: bool, use_word_boundaries: bool) -> Self {
-        let patterns = query_pattern_terms(terms, is_complete);
-        let needs_regex = patterns.is_empty() || patterns.iter().any(|pattern| pattern.is_empty());
-        let patterns: Vec<Vec<CaseFolded>> = patterns
+        let needs_regex = terms.is_empty() || terms.iter().any(|pattern| pattern.is_empty());
+        let patterns: Vec<Vec<CaseFolded>> = terms
             .iter()
             .map(|pattern| pattern.chars().map(CaseFolded::new).collect())
             .collect();

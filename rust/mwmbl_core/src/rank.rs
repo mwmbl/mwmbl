@@ -1,5 +1,5 @@
 use std::{
-    cmp::max,
+    cmp::{Reverse, max},
     collections::{HashMap, HashSet},
     convert::Infallible,
 };
@@ -53,7 +53,7 @@ impl Ranker for HeuristicRanker {
             .iter()
             .map(|&doc| (score_result(&matchers, doc), doc))
             .collect();
-        results_and_scores.sort_by_key(|v| ordered_float::OrderedFloat(v.0));
+        results_and_scores.sort_by_key(|v| Reverse(ordered_float::OrderedFloat(v.0)));
         results_and_scores
             .into_iter()
             .filter_map(|(score, doc)| (score > self.score_threshold).then_some(doc))
@@ -399,24 +399,11 @@ pub fn get_query_regex(
 
     let word_sep = if use_word_boundaries { r"\b" } else { "" };
     let trailing_sep = if is_complete { word_sep } else { "" };
-    let term_patterns: Vec<String> = query_pattern_terms(terms, is_complete)
+    let term_patterns: Vec<String> = terms
         .iter()
         .map(|term| format!("{word_sep}{}{trailing_sep}", regex::escape(term)))
         .collect();
     RegexBuilder::new(&term_patterns.join("|"))
         .case_insensitive(true)
         .build()
-}
-
-/// The terms that [`get_query_regex`] tries, in order. Each has `\b` before it when using word
-/// boundaries, and after it as well when the query is complete.
-///
-/// For an incomplete query this is every term after the first, then the last term again, so the
-/// first term is never matched. That differs from the Python version, which keeps every term and
-/// only leaves out the `\b` after the last one.
-pub(crate) fn query_pattern_terms<'a>(terms: &[&'a str], is_complete: bool) -> Vec<&'a str> {
-    if is_complete {
-        return terms.to_vec();
-    }
-    terms.iter().skip(1).chain(terms.last()).copied().collect()
 }
