@@ -23,7 +23,8 @@ pub static SEED_DOMAIN_RANDOM_WEIGHT: usize = 1;
 pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
 
 pub static MAX_REDIRECTS: usize = 5;
-pub static TIMEOUT: Duration = Duration::from_secs(30);
+pub static READ_TIMEOUT: Duration = Duration::from_secs(30);
+pub static SEND_TIMEOUT: Duration = Duration::from_mins(2);
 pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
 pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
@@ -55,3 +56,4 @@ pub static SCORE_TIME_CONSTANT: Duration = Duration::from_hours(24 * 30 * 10);
 pub static NUM_URLS_TAKENS: usize = 50;
 
 pub static SUMBIT_BATCH_SIZE: usize = 100;
+pub static DEVICE_NAME_FILE: &str = "device-name";

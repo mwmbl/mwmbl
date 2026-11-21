@@ -4,22 +4,23 @@ use std::{
 };
 
 use anyhow::bail;
-use itertools::Either;
-use regex::{Regex, RegexBuilder, regex};
+use regex::{Regex, RegexBuilder};
 use reqwest::Url;
 
 use crate::{
-    constants::MATCH_EXPONENT,
+    constants::{
+        DOMAIN_SCORE_SMOOTHING, MATCH_EXPONENT, MATCH_SCORE_THRESHOLD, SCORE_LENGTH_PENALTY,
+    },
     hn_top_domains_filtered::{DOMAIN_MAX_SCORE, DOMAIN_MIN_SCORE, DOMAINS},
-    indexer::Document,
+    indexer::{Document, DocumentState},
     wiki::get_wiki_score,
 };
 
 pub trait Ranker {
     fn order_results(
         &self,
-        terms: Vec<String>,
-        pages: Vec<Document>,
+        terms: &[&str],
+        results: &[Document],
         is_complete: bool,
     ) -> Vec<Document>;
 }
@@ -38,32 +39,44 @@ impl HeuristicRanker {
 impl Ranker for HeuristicRanker {
     fn order_results(
         &self,
-        terms: Vec<String>,
-        results: Vec<Document>,
+        terms: &[&str],
+        results: &[Document],
         is_complete: bool,
     ) -> Vec<Document> {
         if results.is_empty() {
             return Vec::new();
         }
-        todo!();
-        // let results_and_scores = results.into_iter().map(||);
-
-        Vec::new()
+        let mut results_and_scores: Vec<(f32, &Document)> = results
+            .iter()
+            .map(|doc| (score_result(terms, doc, is_complete), doc))
+            .collect();
+        results_and_scores.sort_by_key(|v| ordered_float::OrderedFloat(v.0));
+        results_and_scores
+            .into_iter()
+            .filter_map(|(score, doc)| {
+                if score > self.score_threshold {
+                    Some(doc.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
-fn score_result(terms: &[String], result: &Document, is_complete: bool) {
-    todo!();
-    // let features = get_features(terms, &result, is_complete);
+#[allow(clippy::cast_precision_loss)]
+fn score_result(terms: &[&str], result: &Document, is_complete: bool) -> f32 {
+    let Ok(features) = get_features(terms, result, is_complete) else {
+        eprintln!("Cannot score result");
+        return 0.0;
+    };
 
-    // length_penalty = math.e ** (-LENGTH_PENALTY * len(result.url))
-    // match_score = (
-    //     4 * features["match_score_title"]
-    //     + features["match_score_extract"]
-    //     + 2 * features["match_score_domain"]
-    //     + 2 * features["match_score_domain_tokenized"]
-    //     + features["match_score_path"]
-    // )
+    let length_penalty = (-SCORE_LENGTH_PENALTY * result.url().len() as f32).exp();
+    let match_score = 4.0 * features.title.match_score
+        + features.extract.match_score
+        + 2.0 * features.domain.match_score
+        + 2.0 * features.domain_tokenized.match_score
+        + features.path.match_score;
 
     // Documents a person or an external source deliberately attached to a query are exempt
     // from the majority-terms rule: they are here because someone said they belong here, not
@@ -71,14 +84,22 @@ fn score_result(terms: &[String], result: &Document, is_complete: bool) {
     // state meant exactly that (FROM_USER, FROM_GOOGLE, FROM_WIKI). The negative states are
     // later bookkeeping - SYNCED_WITH_MAIN_INDEX marks a crawler's local mirror of the main
     // index - and nobody curated those, so they get the rule like anything else.
-    // is_curated = result.state is not None and result.state > 0
-    // if features["match_terms"] <= len(terms) / 2 and not is_curated:
-    //     return 0.0
+    let is_curated = result.state().is_some_and(|s| {
+        !matches!(
+            s,
+            DocumentState::DELETED | DocumentState::SyncedWithMainIndex
+        )
+    });
+    if features.match_terms <= (terms.len() as f32 / 2.0) && !is_curated {
+        return 0.0;
+    }
 
-    // if match_score > MATCH_SCORE_THRESHOLD:
-    //     return match_score * length_penalty * (features["domain_score"] + DOMAIN_SCORE_SMOOTHING) / 10
+    if match_score > MATCH_SCORE_THRESHOLD {
+        return match_score * length_penalty * (features.domain_score + DOMAIN_SCORE_SMOOTHING)
+            / 10.0;
+    }
 
-    // return 0.0
+    0.0
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -111,8 +132,8 @@ pub struct Features {
 }
 
 pub fn get_features(terms: &[&str], doc: &Document, is_complete: bool) -> anyhow::Result<Features> {
-    let re_text = get_query_regex(&terms, is_complete, false)?;
-    let re_url = get_query_regex(&terms, is_complete, true)?;
+    let re_text = get_query_regex(terms, is_complete, false)?;
+    let re_url = get_query_regex(terms, is_complete, true)?;
     get_features_regex(terms, doc, &re_text, &re_url)
 }
 
@@ -142,6 +163,7 @@ pub fn get_features_regex(
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+#[must_use]
 pub fn get_features_regex_unchecked(
     terms: &[&str],
     doc: &Document,
@@ -163,7 +185,7 @@ pub fn get_features_regex_unchecked(
 
     let title = get_match_features_regex(terms, doc.title(), re_text);
     let extract = get_match_features_regex(terms, doc.extract(), re_text);
-    let domain = get_match_features_regex(terms, url_domain, &re_url);
+    let domain = get_match_features_regex(terms, url_domain, re_url);
     let domain_tokenized = get_match_features_regex(terms, url_domain, re_text);
     let path = get_match_features_regex(terms, url_path, re_url);
     let query = get_match_features_regex(terms, url_query, re_text);
@@ -224,6 +246,7 @@ pub fn get_match_features(
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+#[must_use]
 pub fn get_match_features_regex(
     terms: &[&str],
     result_string: &str,
@@ -274,7 +297,7 @@ pub fn get_query_regex(
         return Regex::new("");
     }
 
-    let word_sep = if use_word_boundaries {  r"\b" } else { "" };
+    let word_sep = if use_word_boundaries { r"\b" } else { "" };
 
     let term_patterns: Vec<String> = if is_complete {
         terms

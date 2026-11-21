@@ -42,6 +42,8 @@ pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "kusowanka.com",
     // The site owner asked to be removed from the index (issue #559).
     "lain.ovh",
+    // Crawling this domain can lead to abuse reports
+    "www.inb.gov.br"
 };
 
 pub static CORE_DOMAINS: [&str; 9] = [
@@ -67,3 +69,7 @@ pub static NUM_FIRST_TOKENS: usize = 10;
 pub static DOCUMENT_STATE_CURATED_THRESHOLD: u8 = 7;
 
 pub static MATCH_EXPONENT: f32 = 2.0;
+
+pub static SCORE_LENGTH_PENALTY: f32 = 0.04;
+pub static MATCH_SCORE_THRESHOLD: f32 = 0.0;
+pub static DOMAIN_SCORE_SMOOTHING: f32 = 0.1;

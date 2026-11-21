@@ -10,13 +10,13 @@ use std::{
 use anyhow::bail;
 use priority_queue::DoublePriorityQueue;
 use reqwest::{Client, StatusCode, Url};
-use scc::{HashCache, HashMap};
+use scc::HashMap;
 use texting_robots::Robot;
 use tokio::{sync::RwLock, time::Instant};
 
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, MAX_DOMAIN_DELAY,
+        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF,
         ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
     },
     retrieve::fetch,

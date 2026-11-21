@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
-use chrono::{DateTime, Datelike, Months, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Months, NaiveDate, Utc};
 use fastbloom::AtomicBloomFilter;
 use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 use reqwest::Url;

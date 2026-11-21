@@ -2,14 +2,14 @@ use chrono::Utc;
 use dom_query::Document;
 use itertools::Itertools;
 use kreuzberg::{ExtractionConfig, OutputFormat, core::mime, extract_bytes};
-use rand::{RngExt, seq::IndexedRandom};
+use rand::seq::IndexedRandom;
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
 use std::{cmp::min, collections::HashSet};
 
 #[cfg(feature = "servo")]
-use crate::constants::TIMEOUT;
+use crate::constants::READ_TIMEOUT;
 use crate::{
     constants::{MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, NUM_URLS_TAKENS},
     robots::{RobotCache, robot_allowed},
@@ -169,7 +169,7 @@ async fn fetch_servo(
     user_agent: &str,
 ) -> anyhow::Result<(String, StatusCode, Url)> {
     let options = &FetchOptions::new(url.as_str())
-        .timeout(TIMEOUT)
+        .timeout(READ_TIMEOUT)
         .user_agent(user_agent)
         .visibility(VisibilityPolicy::moderate());
 

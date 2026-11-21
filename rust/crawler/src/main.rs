@@ -10,6 +10,7 @@
     clippy::todo,
     clippy::pedantic
 )]
+mod batch;
 mod bloomdb;
 mod constants;
 mod crawler;
@@ -32,10 +33,6 @@ use crate::{constants::NUM_PAGES, crawler::Crawler, path_creation::index_path};
 #[command(bin_name = "crawler")]
 #[command(version, about = "mwmbl crawler, rust implementation", long_about = None)]
 struct Cli {
-    /// Crawl one batch, index it and exit, failing on the first error instead of
-    /// restarting. Intended for smoke tests, not for crawling.
-    #[arg(long)]
-    once: bool,
     #[command(flatten)]
     crawler_params: CrawlerParams,
     /// number of workers
@@ -111,10 +108,6 @@ async fn tokio_main(args: Cli) -> anyhow::Result<()> {
     create_index(&index_path(&args.crawler_params.home), NUM_PAGES, false)?;
 
     let mut crawler = Crawler::new(args.crawler_params).await?;
-    if args.once {
-        crawler.run_once().await?;
-    } else {
-        crawler.run().await?;
-    }
+    crawler.run().await?;
     Ok(())
 }

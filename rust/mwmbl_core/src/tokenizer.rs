@@ -10,7 +10,7 @@ pub fn tokenize(input_text: &str) -> Vec<String> {
         .collect();
     if input_text.ends_with("…") && tokens.len() >= 2 {
         // Discard the last two tokens since there will likely be a word cut in two
-        tokens.truncate(tokens.len()-2);
+        tokens.truncate(tokens.len() - 2);
     }
     tokens
 }

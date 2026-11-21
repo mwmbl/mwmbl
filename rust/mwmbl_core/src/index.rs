@@ -287,19 +287,25 @@ pub fn tokenize_document(url: &str, title: &str, extract: &str) -> Vec<String> {
         NUM_FIRST_TOKENS,
         &title_tokens
             .iter()
-            .take(NUM_FIRST_TOKENS).cloned()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
             .collect::<Vec<_>>(),
     )
     .into_iter()
     .chain(get_bigrams(
         NUM_FIRST_TOKENS,
-        &url_tokens.iter().take(NUM_FIRST_TOKENS).cloned().collect::<Vec<_>>(),
+        &url_tokens
+            .iter()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
+            .collect::<Vec<_>>(),
     ))
     .chain(get_bigrams(
         NUM_FIRST_TOKENS,
         &extract_tokens
             .iter()
-            .take(NUM_FIRST_TOKENS).cloned()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
             .collect::<Vec<_>>(),
     ))
     .chain(title_tokens)

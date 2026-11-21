@@ -11,6 +11,7 @@
     clippy::pedantic
 )]
 #![allow(clippy::missing_errors_doc)]
+pub mod agreement;
 pub mod blacklist;
 pub mod blacklist_providers;
 pub mod constants;

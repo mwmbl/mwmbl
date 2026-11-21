@@ -1,7 +1,6 @@
 use std::{
     hash::{BuildHasher, RandomState},
-    iter::zip,
-    sync::{Arc, Weak, atomic::AtomicUsize},
+    sync::{Arc, Weak},
     time::Duration,
 };
 
@@ -231,10 +230,8 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 let select_from_curated = p_url_group >= TOP_OTHER_DOMAIN_RANDOM_WEIGHT;
                 let samples = self.domain_scores.sample(&mut rand::rng(), S);
                 let mut domain: Option<String> = None;
-                let mut count = 0;
                 for queue in samples {
                     let queue_lock = queue.read().await;
-                    count = queue_lock.len();
                     let top_domain = if let Some((top_domain, _)) = queue_lock.peek_max() {
                         top_domain.to_owned()
                     } else {
@@ -261,7 +258,6 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                 if let Some(domain) = domain
                     && let Some(claimed_url) = self.claim_url(&domain).await
                 {
-                    println!("{} | {count}", claimed_url.claim.domain_lock.1.len());
                     return claimed_url;
                 }
             } else {
