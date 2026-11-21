@@ -26,7 +26,8 @@ use crate::{
     batch::{PostResultsResponse, SendResult, SendResults},
     bloomdb::BloomDatabase,
     constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL,
+        READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     path_creation::{get_device_name, index_path},
@@ -40,11 +41,11 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     url_queue: SharedURLQueue<T>,
     blacklist: T,
     username: Arc<RwLock<Option<String>>>,
-    // error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
+    submit_semaphore: Arc<Semaphore>,
     to_submit: Arc<RwLock<VecDeque<Document>>>,
     count: Arc<AtomicUsize>,
 }
@@ -61,9 +62,9 @@ impl Crawler {
             url_queue,
             blacklist,
             username,
-            // error_last_reported_at: Arc::new(HashMap::default()),
             robots_cache: RobotCache::new(),
             crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
+            submit_semaphore: Arc::new(Semaphore::new(params.max_submit_task)),
             params: Arc::new(params),
             domainlinkdb,
             count: Arc::new(AtomicUsize::new(0)),
@@ -89,12 +90,23 @@ impl Crawler {
         let start = Instant::now();
 
         let clone = self.clone();
+        let semaphore = self.submit_semaphore.clone();
         spawn(async move {
+            let semaphore = semaphore;
             loop {
-                let res = clone.index().await;
-                if res.is_err() || res.is_ok_and(|completed| !completed) {
-                    sleep(Duration::from_secs(10)).await;
-                }
+                let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                    eprintln!("Could not aquire permit for indexing");
+                    continue;
+                };
+                let clone = clone.clone();
+                spawn(async move {
+                    let res = clone.index().await;
+                    if res.is_err() || res.is_ok_and(|completed| !completed) {
+                        let random_time = rand::rng().random_range(5..=10);
+                        sleep(Duration::from_secs(random_time)).await;
+                    }
+                    drop(permit);
+                });
             }
         });
 
@@ -205,10 +217,8 @@ impl Crawler {
         let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
         let indexed_documents = index.index_documents(docs, &self.blacklist).await?;
 
-        let mut term_new_doc_count: Vec<(&String, &usize)> = indexed_documents
-            .new_page_doc_counts()
-            .iter()
-            .collect();
+        let mut term_new_doc_count: Vec<(&String, &usize)> =
+            indexed_documents.new_page_doc_counts().iter().collect();
         term_new_doc_count.sort_by_key(|v| v.1);
 
         let device_name = get_device_name(&self.params.home, self.params.device_name.clone());

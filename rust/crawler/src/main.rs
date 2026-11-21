@@ -78,6 +78,9 @@ pub struct CrawlerParams {
         default_value = "https://api.mwmbl.org"
     )]
     remote_server: String,
+    /// maximum amount of simultaneous indexing task that can run at any point.
+    #[arg(env = "SUBMIT_MAX_TASKS", long, default_value = "16")]
+    max_submit_task: usize,
     /// maximum amount of simultaneous crawling task that can run at any point.
     #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "64")]
     max_crawl_task: usize,
@@ -98,7 +101,7 @@ enum CrawlSubmitMode {
 
 fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    println!("{:?}", args.crawler_params);
+    println!("{:?}", args);
 
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(args.crawler_workers)
