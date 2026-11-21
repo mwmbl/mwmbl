@@ -44,7 +44,7 @@ SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
 .PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core coverage coverage-python coverage-rust \
-        coverage-quick run run-background optimize crawler \
+        coverage-quick run run-background optimize crawler optimize-rust \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
@@ -63,6 +63,8 @@ help:
 	@echo "  run-background Start the background task processor"
 	@echo "  optimize       Find the best CRAWLER_WORKERS and CRAWL_THREADS for this machine (hours: run it overnight)"
 	@echo "                 Extra flags: make optimize ARGS='--processes 1,2 --threads 25,50'. 'make crawler' is the same."
+	@echo "  optimize-rust  Find the best CRAWL_THREADS, PARSING_THREADS and CRAWL_MAX_TASKS for the Rust crawler"
+	@echo "                 Build it first: cargo build --release --manifest-path rust/crawler/Cargo.toml"
 	@echo ""
 	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
 	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
@@ -169,6 +171,10 @@ optimize:
 	python3 -m mwmbl.crawler.benchmark $(ARGS)
 
 crawler: optimize
+
+# The same for the Rust crawler, which it runs as a child process from rust/crawler/target/release.
+optimize-rust:
+	python3 -m mwmbl.crawler.benchmark_rust $(ARGS)
 
 # ---------------------------------------------------------------------------
 # Checks

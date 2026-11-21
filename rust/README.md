@@ -8,3 +8,8 @@
 
 `make rust-core` formats, lints and tests them. CI requires clippy to be clean for
 `mwmbl_core`'s default features only; the crawler code only has to build and pass its tests.
+
+`make optimize-rust` (`python3 -m mwmbl.crawler.benchmark_rust`) finds the best `CRAWL_THREADS`,
+`PARSING_THREADS` and `CRAWL_MAX_TASKS` for the crawler on a machine. It works like the Python
+crawler's `make optimize`, but runs the release build as a child process and counts the pages
+the crawler prints as it crawls them. See the module docstring for what it measures.
