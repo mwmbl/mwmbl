@@ -153,7 +153,7 @@ fn packing_keeps_the_longest_prefix_that_fits() {
 
 #[test]
 fn an_empty_list_packs_to_an_empty_page() {
-    let (page, num_stored) = pack_page(PAGE_SIZE, &[]).unwrap();
+    let (page, num_stored) = pack_page::<Value>(PAGE_SIZE, &[]).unwrap();
 
     assert_eq!(num_stored, 0);
     assert_eq!(page.len(), PAGE_SIZE);
@@ -212,7 +212,7 @@ fn a_frame_claiming_too_much_content_is_refused_before_decompressing() {
     let scratch = ScratchFile::with_pages(1);
     scratch.file.write_all_at(&page, 0).unwrap();
 
-    let result = read_index_page(scratch.fd(), 0, page_size, None);
+    let result = read_index_page::<Value>(scratch.fd(), 0, page_size, None);
 
     let Err(PageIoError::Unreadable(message)) = result else {
         panic!("expected Unreadable, got {result:?}");
@@ -240,7 +240,7 @@ fn a_failed_read_is_an_io_error() {
     // Reading a directory fails with EISDIR: a real syscall failure, not a bad page.
     let directory = File::open(std::env::temp_dir()).unwrap();
 
-    let result = read_index_page(directory.as_raw_fd(), 0, PAGE_SIZE, None);
+    let result = read_index_page::<Value>(directory.as_raw_fd(), 0, PAGE_SIZE, None);
 
     assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
 }

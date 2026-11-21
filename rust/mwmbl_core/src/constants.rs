@@ -1,15 +1,33 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Duration};
 
 use phf::phf_set;
 use regex::Regex;
 
-pub static PAGE_SIZE: usize = 4096;
-pub static METADATA_SIZE: usize = 4096;
+// to avoid some rust analyzer bugs
+// pub static PAGE_SIZE: usize = 4096;
+macro_rules! PAGE_SIZE {
+    // `()` indicates that the macro takes no argument.
+    () => {
+        4096 //
+    };
+}
+pub(crate) use PAGE_SIZE;
+
+// to avoid some rust analyzer bugs
+// pub static METADATA_SIZE: usize = 4096;
+macro_rules! METADATA_SIZE {
+    // `()` indicates that the macro takes no argument.
+    () => {
+        4096 //
+    };
+}
+pub(crate) use METADATA_SIZE;
+
 pub static INDEX_VERSION: i32 = 1;
 pub static METADATA_CONSTANT: &[u8; 17] = b"mwmbl-tiny-search";
 pub static ITEM_FACTORY: &str = "Document";
 
-pub static BLACKLIST_REFRESH_CHECK_SECONDS: u64 = 300;
+pub static BLACKLIST_REFRESH_CHECK: Duration = Duration::from_mins(5);
 
 pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "web.archive.org",
@@ -24,9 +42,11 @@ pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "kusowanka.com",
     // The site owner asked to be removed from the index (issue #559).
     "lain.ovh",
+    // Crawling this domain can lead to abuse reports
+    "www.inb.gov.br"
 };
 
-pub static CORE_DOMAINS: phf::Set<&'static str> = phf_set! {
+pub static CORE_DOMAINS: [&str; 9] = [
     "github.com",
     "en.wikipedia.org",
     "stackoverflow.com",
@@ -36,7 +56,7 @@ pub static CORE_DOMAINS: phf::Set<&'static str> = phf_set! {
     "arxiv.org",
     "www.python.org",
     "news.ycombinator.com",
-};
+];
 
 #[allow(clippy::unwrap_used)]
 pub static DOMAIN_BLACKLIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -44,3 +64,12 @@ pub static DOMAIN_BLACKLIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 #[allow(clippy::unwrap_used)]
 pub static NUMBERS_ONLY_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+$").unwrap());
+
+pub static NUM_FIRST_TOKENS: usize = 10;
+pub static DOCUMENT_STATE_CURATED_THRESHOLD: u8 = 7;
+
+pub static MATCH_EXPONENT: f32 = 2.0;
+
+pub static SCORE_LENGTH_PENALTY: f32 = 0.04;
+pub static MATCH_SCORE_THRESHOLD: f32 = 0.0;
+pub static DOMAIN_SCORE_SMOOTHING: f32 = 0.1;

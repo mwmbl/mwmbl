@@ -12,14 +12,15 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-const WIKI_STATS: &str = "../mwmbl/resources/wiki_stats.json";
+const WIKI_STATS: &str = "../../mwmbl/resources/wiki_stats.json";
 
 fn main() {
     println!("cargo:rerun-if-changed={WIKI_STATS}");
     println!("cargo:rerun-if-changed=build.rs");
 
     let json = fs::read_to_string(WIKI_STATS).expect("Failed to read wiki_stats.json");
-    let counts: HashMap<String, f64> = serde_json::from_str(&json).expect("Failed to parse wiki_stats.json");
+    let counts: HashMap<String, f64> =
+        serde_json::from_str(&json).expect("Failed to parse wiki_stats.json");
     let max = counts.values().cloned().fold(0.0, f64::max);
     assert!(max > 0.0, "wiki_stats.json has no positive counts");
 
@@ -32,7 +33,9 @@ fn main() {
     let mut offset = 0u32;
     out.extend_from_slice(&offset.to_le_bytes());
     for (key, _) in &entries {
-        offset = offset.checked_add(u32::try_from(key.len()).unwrap()).unwrap();
+        offset = offset
+            .checked_add(u32::try_from(key.len()).unwrap())
+            .unwrap();
         out.extend_from_slice(&offset.to_le_bytes());
     }
     for (_, score) in &entries {
