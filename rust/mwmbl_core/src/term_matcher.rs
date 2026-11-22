@@ -12,7 +12,7 @@ use std::sync::{LazyLock, OnceLock};
 use regex::Regex;
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
 
-use crate::rank::{get_query_regex};
+use crate::rank::get_query_regex;
 
 /// One match of a term.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

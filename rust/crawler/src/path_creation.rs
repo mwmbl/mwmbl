@@ -51,8 +51,9 @@ pub fn get_device_name(home: &Path, device_name: Option<String>) -> String {
 
     let buf = format!("crawler-{}", rand::rng().next_u64());
     if let Ok(mut f) = File::create(path)
-        && f.write_all(buf.as_bytes()).is_err() {
-            println!("Could not save device name");
-        }
+        && f.write_all(buf.as_bytes()).is_err()
+    {
+        println!("Could not save device name");
+    }
     buf
 }

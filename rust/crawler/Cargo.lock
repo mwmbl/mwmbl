@@ -4951,6 +4951,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "file-guard",
+ "futures-util",
  "itertools 0.15.0",
  "murmurhash32",
  "ordered-float",

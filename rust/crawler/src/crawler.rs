@@ -7,7 +7,7 @@ use rand::RngExt;
 use reqwest::{header, redirect::Policy};
 use serde_json::Value;
 use std::{
-    cmp::{max, min},
+    cmp::{Reverse, max, min},
     collections::{HashMap, VecDeque},
     sync::{
         Arc,
@@ -48,6 +48,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     submit_semaphore: Arc<Semaphore>,
     to_submit: Arc<RwLock<VecDeque<Document>>>,
     count: Arc<AtomicUsize>,
+    index: TinyIndex,
 }
 
 impl Crawler {
@@ -57,6 +58,8 @@ impl Crawler {
         let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
         let domainlinkdb = BloomDatabase::new(&params.home).await?;
+        let index_path = index_path(&params.home);
+        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
 
         Ok(Crawler {
             url_queue,
@@ -69,6 +72,7 @@ impl Crawler {
             domainlinkdb,
             count: Arc::new(AtomicUsize::new(0)),
             to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            index,
         })
     }
 
@@ -141,8 +145,8 @@ impl Crawler {
                     println!(
                         "speed: {}/s | queue {} | crawled {}",
                         ((count as u64) + 1) / (1 + start.elapsed().as_secs()),
+                        lock.len(),
                         result.url.as_str(),
-                        lock.len()
                     );
                     lock.push_back(result.to_document());
                     if lock.len() > MAX_SUBMIT_QUEUE_SIZE {
@@ -184,8 +188,7 @@ impl Crawler {
             loop {
                 let mut lock = to_submit.write().await;
                 if lock.len() >= SUBMIT_BATCH_SIZE {
-                    let docs: Vec<Document> = lock
-                        .drain(0..SUBMIT_BATCH_SIZE).collect();
+                    let docs: Vec<Document> = lock.drain(0..SUBMIT_BATCH_SIZE).collect();
                     drop(lock);
 
                     let Ok(permit) = semaphore.clone().acquire_owned().await else {
@@ -195,53 +198,49 @@ impl Crawler {
                     let clone = clone.clone();
                     spawn(async move {
                         println!("Sending results.");
-                        let _ = clone.index_batch(docs).await;
+                        if let Err(err) = clone.index_batch(docs).await {
+                            eprintln!("Error during indexing : {err}");
+                        }
                         drop(permit);
                     });
                 } else {
                     drop(lock);
                     sleep(Duration::from_secs(1)).await;
-                    continue;
                 }
             }
         });
     }
 
     async fn index_batch(&self, docs: Vec<Document>) -> anyhow::Result<()> {
-        let index_path = index_path(&self.params.home);
-        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
-        let indexed_documents = index.index_documents(docs, &self.blacklist).await?;
+        let indexed_documents = self.index.index_documents(docs, &self.blacklist).await?;
 
         let mut term_new_doc_count: Vec<(&String, &usize)> =
             indexed_documents.new_page_doc_counts().iter().collect();
-        term_new_doc_count.sort_by_key(|v| v.1);
+        term_new_doc_count.sort_by_key(|v| Reverse(v.1));
 
         let device_name = get_device_name(&self.params.home, self.params.device_name.clone());
 
         let mut terms: Vec<String> = Vec::new();
-        let result_items: Vec<SendResult> = term_new_doc_count
-            .into_iter()
-            .take(SUBMIT_TOP_N)
-            .filter_map(|(term, _)| {
-                let Ok(docs) = index.retrieve::<Document>(term) else {
-                    return None;
-                };
-                let result_items: Vec<SendResult> = docs
-                    .into_iter()
-                    .filter_map(|doc| {
-                        if matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)) {
-                            None
-                        } else {
-                            Some(SendResult::new(&doc))
-                        }
-                    })
-                    .collect();
+        let mut result_items: Vec<SendResult> = Vec::new();
 
-                terms.push(term.to_owned());
-                Some(result_items)
-            })
-            .flatten()
-            .collect();
+        for (term, _) in term_new_doc_count.into_iter().take(SUBMIT_TOP_N) {
+            let Ok(docs) = self.index.retrieve::<Document>(term).await else {
+                continue;
+            };
+            let mut items: Vec<SendResult> = docs
+                .into_iter()
+                .filter_map(|doc| {
+                    if matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)) {
+                        None
+                    } else {
+                        Some(SendResult::new(&doc))
+                    }
+                })
+                .collect();
+
+            terms.push(term.to_owned());
+            result_items.append(&mut items);
+        }
 
         let client = self.get_send_client().await?;
         let results = SendResults::new(
@@ -262,6 +261,9 @@ impl Crawler {
         let Ok(response) = response else {
             bail!("Error in sending result");
         };
+        if response.status() == 426 {
+            bail!("The server requires a newer crawler!");
+        }
         let Ok(response) = response.error_for_status() else {
             bail!("Error in sending result");
         };
@@ -273,14 +275,14 @@ impl Crawler {
         };
 
         for term in terms {
-            let page_index = index.get_key_page_index(&term);
+            let page_index = self.index.get_key_page_index(&term);
             let new_term_remote_items: Vec<Document> = new_items
                 .iter()
                 .filter(|doc| doc.term() == Some(&term))
                 .cloned()
                 .collect();
             let pagedocs = HashMap::from([(page_index, new_term_remote_items)]);
-            index.index_pages(pagedocs, true)?;
+            self.index.index_pages(pagedocs, true).await?;
         }
         println!("Results sendt.");
         Ok(())

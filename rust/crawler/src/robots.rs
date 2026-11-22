@@ -16,8 +16,8 @@ use tokio::{sync::RwLock, time::Instant};
 
 use crate::{
     constants::{
-        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF,
-        ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
+        BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF, ROBOTS_CACHE_ERROR_TTL_SECONDS,
+        ROBOTS_CACHE_TTL_SECONDS, ROBOTS_USER_AGENT,
     },
     retrieve::fetch,
 };
@@ -53,7 +53,7 @@ impl CachedRobotFile {
     pub fn delay(&self, status: Option<StatusCode>) -> Duration {
         if status.is_some_and(|status| !status.is_success()) {
             let value = self.error_count.fetch_add(1, Ordering::Relaxed);
-            return min(BLOCK_COOL_OFF * (1 << value), MAX_BLOCK_COOL_OFF);
+            return min(BLOCK_COOL_OFF * (1 << value.min(31)), MAX_BLOCK_COOL_OFF);
         }
         self.error_count.store(0, Ordering::Relaxed);
 
@@ -65,7 +65,7 @@ impl CachedRobotFile {
         ROBOTS_CACHE_ERROR_TTL_SECONDS
     }
     pub fn is_valid(&self) -> bool {
-        self.cache_ttl <= Instant::now()
+        self.cache_ttl > Instant::now()
     }
 }
 
@@ -163,7 +163,7 @@ pub async fn robot_allowed(
     let v = fetch(client, &robot_url).await;
 
     if let Ok((data, status, _)) = v
-        && status.is_success()
+        && (status.is_success() || (status.is_client_error() && status.as_u16() != 429))
     {
         let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&data));
         let allowed = robot.can_fetch(url).unwrap_or_default();

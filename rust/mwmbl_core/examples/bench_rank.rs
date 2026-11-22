@@ -31,7 +31,11 @@ fn main() -> anyhow::Result<()> {
     }
     check_features_match_regex(&pages)?;
 
-    let samples: Vec<&Document> = pages.iter().step_by(37).filter_map(|docs| docs.first()).collect();
+    let samples: Vec<&Document> = pages
+        .iter()
+        .step_by(37)
+        .filter_map(|docs| docs.first())
+        .collect();
     let index = TinyIndex::from_file(Path::new(&path), IndexMode::WRITE)?;
     let blacklist = BuiltInRulesBlacklistProvider::new();
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;

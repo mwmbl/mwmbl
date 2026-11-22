@@ -103,6 +103,7 @@ pub struct FoundURL {
     last_crawled: Option<NaiveDate>,
 }
 
+#[allow(dead_code)]
 impl FoundURL {
     pub fn new(
         url: Url,
@@ -183,7 +184,7 @@ impl BloomDatabase {
                     let db = db.clone();
 
                     if !db.changed.load(std::sync::atomic::Ordering::Relaxed) {
-                        return;
+                        continue;
                     }
                     let bloompath = bloom_path(&db.home);
 
@@ -196,11 +197,11 @@ impl BloomDatabase {
                     {
                         if file.write_all(&vec).await.is_err() {
                             eprintln!("Cannot write to bloom file");
-                            return;
+                            continue;
                         }
                     } else {
                         eprintln!("Cannot open bloom file");
-                        return;
+                        continue;
                     }
 
                     db.changed.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -259,6 +260,7 @@ impl BloomDatabase {
         I: IntoIterator<Item = &'a mut FoundURL>,
     {
         let times = Self::db_times();
+        let mut any_change = false;
         found_urls.into_iter().for_each(|url| {
             if url.status.crawled() {
                 url.last_crawled = Some(url.timestamp.date_naive());
@@ -269,7 +271,14 @@ impl BloomDatabase {
                         Some(max(time, url.last_crawled.unwrap_or(NaiveDate::default())));
                 }
             }
+            any_change |= !self
+                .bloom
+                .insert(&Self::format_url_time(times[0], &url.url));
         });
+        if any_change {
+            self.changed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     fn format_url_time(time: NaiveDate, url: &Url) -> String {
@@ -278,7 +287,7 @@ impl BloomDatabase {
 
     fn db_times() -> [NaiveDate; 3] {
         let time = Utc::now().date_naive();
-        if let Some(first) = time.with_day(0)
+        if let Some(first) = time.with_day(1)
             && let Some(second) = first.checked_sub_months(Months::new(1))
             && let Some(third) = second.checked_sub_months(Months::new(1))
         {

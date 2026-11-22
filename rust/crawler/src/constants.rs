@@ -1,4 +1,4 @@
-use std::{sync::LazyLock, time::Duration};
+use std::{cmp::Reverse, sync::LazyLock, time::Duration};
 
 use mwmbl_core::hn_top_domains_filtered::DOMAINS;
 use ordered_float::OrderedFloat;
@@ -29,7 +29,7 @@ pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
 pub static DOMAINS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
     let mut v: Vec<_> = DOMAINS.iter().collect();
-    v.sort_by_key(|(_, v)| OrderedFloat::from(**v));
+    v.sort_by_key(|(_, v)| Reverse(OrderedFloat::from(**v)));
     v.into_iter().map(|(k, _)| k.to_owned()).collect()
 });
 

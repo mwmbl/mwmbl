@@ -6,7 +6,7 @@ use rand::seq::IndexedRandom;
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
-use std::{cmp::min, collections::HashSet};
+use std::{cmp::max, collections::HashSet};
 use tokio::task::spawn_blocking;
 
 #[cfg(feature = "servo")]
@@ -32,7 +32,7 @@ pub enum CrawlResult {
     RobotsUnavailableError {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     RobotsDeniedError {
         timestamp: chrono::DateTime<Utc>,
@@ -41,7 +41,7 @@ pub enum CrawlResult {
     AbortError {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     NoResponseTextError {
         timestamp: chrono::DateTime<Utc>,
@@ -54,7 +54,7 @@ pub enum CrawlResult {
         url: Url,
         resolved_url: Url,
         status: StatusCode,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     CrawlContent(SuccesfullCrawlResult),
 }
@@ -72,11 +72,11 @@ pub struct SuccesfullCrawlResult {
 }
 
 impl SuccesfullCrawlResult {
-    pub fn to_document(self) -> mwmbl_core::indexer::Document {
+    pub fn to_document(&self) -> mwmbl_core::indexer::Document {
         mwmbl_core::indexer::Document::new(
-            self.title,
+            self.title.clone(),
             self.url.to_string(),
-            self.extract,
+            self.extract.clone(),
             None,
             None,
             None,
@@ -167,7 +167,11 @@ async fn fetch_default(
         let mime = mime::detect_mime_type_from_bytes(&data)?;
 
         if mime == "text/html" {
-            return Ok((String::from_utf8(data)?, status, resolved_url));
+            return Ok((
+                String::from_utf8_lossy(&data).into_owned(),
+                status,
+                resolved_url,
+            ));
         }
         let mut config = ExtractionConfig::default();
         config.output_format = OutputFormat::Html;
@@ -229,7 +233,7 @@ pub async fn crawl(
                 CrawlResult::RobotsUnavailableError {
                     timestamp,
                     url,
-                    err,
+                    _err: err,
                 },
             );
         }
@@ -249,13 +253,13 @@ pub async fn crawl(
                 CrawlResult::AbortError {
                     timestamp,
                     url,
-                    err,
+                    _err: err,
                 },
             );
         }
     };
 
-    let owned_url = url.to_owned();
+    let owned_url = url.clone();
     let crawl_result =
         match spawn_blocking(move || sanitize(&html, resolved_url, status, timestamp, owned_url))
             .await
@@ -267,7 +271,7 @@ pub async fn crawl(
                     CrawlResult::AbortError {
                         timestamp,
                         url,
-                        err: err.into(),
+                        _err: err.into(),
                     },
                 );
             }
@@ -302,7 +306,7 @@ fn sanitize(
                             timestamp,
                             url,
                             status,
-                            err: Error::msg("Article missing information"),
+                            _err: Error::msg("Article missing information"),
                             resolved_url,
                         };
                     }
@@ -312,7 +316,7 @@ fn sanitize(
                         timestamp,
                         url,
                         status,
-                        err: Error::msg("Cannot parse article"),
+                        _err: Error::msg("Cannot parse article"),
                         resolved_url,
                     };
                 }
@@ -322,7 +326,7 @@ fn sanitize(
                     timestamp,
                     url,
                     status,
-                    err: e.into(),
+                    _err: e.into(),
                     resolved_url,
                 };
             }
@@ -370,7 +374,11 @@ fn sanitize(
 }
 
 fn trim_size(string: &str, size: usize) -> String {
-    string.chars().take(size - 1).collect::<String>() + "…"
+    if string.len() > size {
+        string.chars().take(size - 1).collect::<String>() + "…"
+    } else {
+        string.to_owned()
+    }
 }
 
 fn select_links(links: HashSet<Url>) -> Vec<Url> {
@@ -391,7 +399,7 @@ fn select_links(links: HashSet<Url>) -> Vec<Url> {
     links
         .into_iter()
         .map(|v| v.1)
-        .take(min(map_len, NUM_URLS_TAKENS))
+        .take(max(map_len, NUM_URLS_TAKENS))
         .collect()
 }
 
