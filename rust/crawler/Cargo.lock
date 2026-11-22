@@ -1053,15 +1053,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap_complete"
-version = "4.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
-dependencies = [
- "clap",
-]
-
-[[package]]
 name = "clap_derive"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1368,14 +1359,11 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
- "clap_complete",
  "dom_query 0.29.0",
  "fastbloom",
  "futures-util",
- "human_regex",
  "itertools 0.15.0",
  "kreuzberg",
- "markdown",
  "mwmbl_core",
  "ordered-float",
  "postcard",
@@ -1387,7 +1375,6 @@ dependencies = [
  "serde",
  "serde_json",
  "servo-fetch",
- "stop-words",
  "strum",
  "strum_macros",
  "texting_robots",
@@ -3218,15 +3205,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
-name = "human_regex"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f82c4f7b5457dba1ff7c79b28d297b740287925e43930199442280518363736"
-dependencies = [
- "regex",
-]
-
-[[package]]
 name = "humantime"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4471,15 +4449,6 @@ dependencies = [
  "proc-macro2",
  "syn 2.0.119",
  "synstructure 0.13.2",
-]
-
-[[package]]
-name = "markdown"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5cab8f2cadc416a82d2e783a1946388b31654d391d1c7d92cc1f03e295b1deb"
-dependencies = [
- "unicode-id",
 ]
 
 [[package]]
@@ -8924,15 +8893,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "stop-words"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ed527ae13a020ac2404e32746ecee62d632aafe64f8e0df2bb3545ae96f6d1"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "strck"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9954,12 +9914,6 @@ checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 dependencies = [
  "smallvec",
 ]
-
-[[package]]
-name = "unicode-id"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65dd75ab2d9d379dbe86d4059e91d8b5a6e7054865eaba1ddbfc7a817ff96392"
 
 [[package]]
 name = "unicode-ident"

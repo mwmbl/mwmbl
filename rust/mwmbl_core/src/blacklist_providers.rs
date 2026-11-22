@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, future, sync::Arc, time::Duration};
 
 use anyhow::{self, Ok};
 use reqwest::Client;
@@ -35,28 +35,28 @@ impl BuiltInRulesBlacklistProvider {
 }
 
 impl BlacklistProvider for BuiltInRulesBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+    fn is_domain_blacklisted(&self, domain: &str) -> impl Future<Output = bool> {
         if EXCLUDED_DOMAINS.contains(domain) {
-            return true;
+            return future::ready(true);
         }
 
         if DOMAIN_BLACKLIST_REGEX.is_match(domain) {
-            return true;
+            return future::ready(true);
         }
 
         if DOMAINS.contains_key(domain) {
-            return false;
+            return future::ready(false);
         }
 
         let domain_parts: Vec<&str> = domain.splitn(3, '.').collect();
         if let Some(first) = domain_parts.first() {
-            return domain_parts.len() > 2 && NUMBERS_ONLY_REGEX.is_match(first);
+            return future::ready(domain_parts.len() > 2 && NUMBERS_ONLY_REGEX.is_match(first));
         }
-        false
+        future::ready(false)
     }
 
-    async fn refresh(&mut self) -> anyhow::Result<()> {
-        Ok(())
+    fn refresh(&mut self) -> impl Future<Output = anyhow::Result<()>> {
+        future::ready(Ok(()))
     }
 }
 
@@ -73,11 +73,11 @@ impl StaticBlacklistProvider {
 }
 
 impl BlacklistProvider for StaticBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
-        self.domains.contains(domain)
+    fn is_domain_blacklisted(&self, domain: &str) -> impl Future<Output = bool> {
+        future::ready(self.domains.contains(domain))
     }
-    async fn refresh(&mut self) -> anyhow::Result<()> {
-        Ok(())
+    fn refresh(&mut self) -> impl Future<Output = anyhow::Result<()>> {
+        future::ready(Ok(()))
     }
 }
 
@@ -157,12 +157,12 @@ impl RemoteBlacklistProvider {
 }
 
 impl BlacklistProvider for RemoteBlacklistProvider {
-    async fn is_domain_blacklisted(&self, domain: &str) -> bool {
+    fn is_domain_blacklisted(&self, domain: &str) -> impl Future<Output = bool> {
         if let Some(domains) = &self.domains {
-            return domains.contains(domain);
+            return future::ready(domains.contains(domain));
         }
         eprintln!("Warning: Remote Blacklist was used but never loaded!");
-        false
+        future::ready(false)
     }
     async fn refresh(&mut self) -> anyhow::Result<()> {
         if self.domains.is_none() {
