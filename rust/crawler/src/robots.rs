@@ -165,7 +165,11 @@ pub async fn robot_allowed(
     if let Ok((data, status, _)) = v
         && (status.is_success() || (status.is_client_error() && status.as_u16() != 429))
     {
-        let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&data));
+        let robot =  if status.is_client_error() && status.as_u16() != 429 {
+            CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&[])) // default to allow all if robots is 4xx
+        } else {
+            CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(&data))
+        };
         let allowed = robot.can_fetch(url).unwrap_or_default();
         robots_cache.put(domain, robot).await;
         return Ok(allowed);
