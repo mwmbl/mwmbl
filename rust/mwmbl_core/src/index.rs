@@ -160,11 +160,16 @@ fn decode_page<T: for<'a> Deserialize<'a>>(
     }
 }
 
-/// Whether a document tuple belongs to this term: its own, or no term at all. Filtering
-/// here rather than in Python means a page's documents that another term put there are
-/// never built into Python objects.
+/// Whether a document belongs to this term: its own, or no term at all. Filtering here
+/// rather than in Python means a page's documents that another term put there are never
+/// built into Python objects. Python writes a document as a tuple and the crawler as an
+/// object, so the term is looked up either way.
 fn has_term(item: &Value, term: &str) -> bool {
-    match item.get(TERM_INDEX) {
+    let item_term = match item {
+        Value::Object(fields) => fields.get("term"),
+        _ => item.get(TERM_INDEX),
+    };
+    match item_term {
         None | Some(Value::Null) => true,
         Some(Value::String(item_term)) => item_term == term,
         Some(_) => false,

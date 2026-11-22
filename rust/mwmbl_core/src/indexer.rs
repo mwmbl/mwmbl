@@ -65,6 +65,17 @@ macro_rules! integer_enum {
     };
 }
 
+/// A state or source this build does not know, as an older crawler sees one added since,
+/// reads as None rather than failing the page or the whole API response it is in.
+fn known_or_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: TryFrom<i64>,
+{
+    let value: Option<i64> = Option::deserialize(deserializer)?;
+    Ok(value.and_then(|value| T::try_from(value).ok()))
+}
+
 integer_enum!(
     /// The state of the document in the index. A value of None indicates an organic search result
     DocumentState {
@@ -109,13 +120,13 @@ pub struct Document {
     score: Option<f32>,
     #[serde(default)]
     term: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "known_or_none")]
     state: Option<DocumentState>,
     #[serde(default)]
     user_ids: Option<Vec<i32>>,
     #[serde(default)]
     last_crawled: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "known_or_none")]
     source: Option<DocumentSource>,
 }
 
@@ -881,6 +892,13 @@ mod tests {
             (doc.last_crawled(), doc.source()),
             (Some(1_795_000_000), None)
         );
+    }
+
+    #[test]
+    fn a_state_or_source_added_since_reads_as_none() {
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", null, "rust", 99, null, null, 99]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!((doc.state(), doc.source()), (None, None));
     }
 
     fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
