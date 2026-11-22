@@ -40,6 +40,16 @@ filter of URLs seen and domain links (`crawl-bloom`) and the device name.
 - Pages that answer outside 2xx are not indexed and their links are not followed, so error
   pages and bot challenges stay out of the index.
 
+## Your network
+
+The crawler only fetches public internet addresses, so a crawled link cannot reach your
+router, other machines on your network or a cloud metadata endpoint. A URL or redirect whose
+host is an IP address is refused, and so is a hostname that resolves to a private, loopback,
+link-local, shared (100.64.0.0/10), multicast or reserved address, IPv4 or IPv6. The check is
+made when the name is resolved, so it covers robots.txt and every redirect, and the address
+checked is the one connected to. The API in `MWMBL_REMOTE_SERVER` is exempt. The optional
+`servo` build renders pages with its own networking, which this check does not cover.
+
 ## What it submits
 
 Every 100 pages crawled, the crawler indexes them locally, and for the 100 terms with the most

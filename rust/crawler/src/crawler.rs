@@ -4,7 +4,7 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::{header, redirect::Policy};
+use reqwest::header;
 use serde_json::Value;
 use std::{
     cmp::{Reverse, max, min},
@@ -26,13 +26,14 @@ use crate::{
     batch::{PostResultsResponse, SendResult, SendResults},
     bloomdb::BloomDatabase,
     constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL,
-        READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT,
+        SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     path_creation::{get_device_name, healthcheck, index_path},
     retrieve::{CrawlResult, crawl},
     robots::RobotCache,
+    ssrf::{PublicAddressResolver, redirect_policy},
     url_queue::SharedURLQueue,
 };
 
@@ -84,8 +85,8 @@ impl Crawler {
             .zstd(true)
             .read_timeout(READ_TIMEOUT)
             .user_agent(self.crawl_user_agent())
-            .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .hickory_dns(true)
+            .redirect(redirect_policy())
+            .dns_resolver(PublicAddressResolver::system()?)
             .build()?)
     }
 

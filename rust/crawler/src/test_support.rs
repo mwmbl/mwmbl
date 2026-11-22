@@ -17,6 +17,7 @@ pub struct Route {
     status: u16,
     content_type: &'static str,
     body: String,
+    location: Option<String>,
 }
 
 pub fn html(status: u16, body: &str) -> Route {
@@ -24,6 +25,7 @@ pub fn html(status: u16, body: &str) -> Route {
         status,
         content_type: "text/html",
         body: body.to_owned(),
+        location: None,
     }
 }
 
@@ -32,6 +34,16 @@ pub fn text(status: u16, body: &str) -> Route {
         status,
         content_type: "text/plain",
         body: body.to_owned(),
+        location: None,
+    }
+}
+
+pub fn redirect(location: &str) -> Route {
+    Route {
+        status: 302,
+        content_type: "text/plain",
+        body: String::new(),
+        location: Some(location.to_owned()),
     }
 }
 
@@ -67,8 +79,13 @@ impl TestServer {
                     recorded.lock().unwrap().push(path.clone());
                     let not_found = text(404, "not found");
                     let route = routes.get(&path).unwrap_or(&not_found);
+                    let location = route
+                        .location
+                        .as_ref()
+                        .map(|location| format!("Location: {location}\r\n"))
+                        .unwrap_or_default();
                     let response = format!(
-                        "HTTP/1.1 {} X\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        "HTTP/1.1 {} X\r\nContent-Type: {}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                         route.status,
                         route.content_type,
                         route.body.len(),
