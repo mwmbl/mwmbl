@@ -1,11 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use mwmbl_core::{rank::Features, wiki::get_wiki_score};
-use regex::Regex;
-/// Feature extraction for learning-to-rank.
-/// Ports get_features, get_match_features, and score_match from
-/// mwmbl/tinysearchengine/rank.py.
-use std::collections::HashMap;
-use url::Url;
+use mwmbl_core::rank::Features;
 
 /// The canonical feature names in the order they appear in the feature vector.
 /// This order MUST match what the Python FeatureExtractor produces so that
@@ -83,6 +77,7 @@ pub const MATCH_TERMS_INDEX: usize = NUM_FEATURES - 1;
 /// features (Combined Search's). Standard search never sees these columns.
 pub const PROVIDER_FEATURE_NAMES: &[&str] = &["in_staan", "staan_rank"];
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub(crate) struct MyFeatures(Features);
 
@@ -90,5 +85,5 @@ unsafe impl Pod for MyFeatures {}
 unsafe impl Zeroable for MyFeatures {}
 
 pub(crate) fn features_vec(p: Features) -> [f32; 50] {
-    bytemuck::cast::<MyFeatures,[f32; 50]>(MyFeatures(p))
+    bytemuck::cast::<MyFeatures, [f32; 50]>(MyFeatures(p))
 }
