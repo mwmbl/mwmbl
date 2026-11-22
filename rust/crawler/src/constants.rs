@@ -25,6 +25,8 @@ pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
 
 pub static MAX_REDIRECTS: usize = 5;
 pub static READ_TIMEOUT: Duration = Duration::from_secs(30);
+// Matches the Python crawler: long enough for an external updater to replace this crawler.
+pub static UPGRADE_REQUIRED_WAIT: Duration = Duration::from_hours(1);
 pub static SEND_TIMEOUT: Duration = Duration::from_mins(2);
 pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 

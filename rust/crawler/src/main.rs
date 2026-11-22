@@ -21,6 +21,7 @@ mod curated_domains;
 mod path_creation;
 mod retrieve;
 mod robots;
+mod ssrf;
 #[cfg(test)]
 mod test_support;
 mod url_queue;

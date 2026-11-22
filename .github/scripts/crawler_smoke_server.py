@@ -56,7 +56,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         problems = check_results(body)
-        terms = [result["term"] for result in body["results"] if result.get("term")]
+        # .get, so a batch without results is reported as malformed rather than raising
+        # before the exit code is set, which would leave the workflow to time out instead.
+        results = body.get("results", [])
+        terms = [result["term"] for result in results if result.get("term")]
         new_item = {
             "title": "Smoke test",
             "url": "https://example.com/smoke",
@@ -69,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
             "source": None,
         }
         self._send_json({"status": "ok", "url": None, "new_items": [new_item]})
-        print(f"Received {len(body['results'])} results from crawler {body.get('crawler_version')}", flush=True)
+        print(f"Received {len(results)} results from crawler {body.get('crawler_version')}", flush=True)
         for problem in problems:
             print(f"::error::Malformed results: {problem}", flush=True)
         self.server.exit_code = 1 if problems else 0

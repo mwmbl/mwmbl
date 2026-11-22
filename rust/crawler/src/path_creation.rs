@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::path::{Path, PathBuf};
 
 use rand::Rng;
 use tokio::{
@@ -67,15 +64,34 @@ pub async fn get_device_name(home: &Path, device_name: Option<String>) -> String
 pub async fn healthcheck(home: &Path) -> anyhow::Result<()> {
     let mut path = data_path(home);
     path.push(HEALTH_FILE_NAME);
-    let file = File::create(&path).await?;
-    file.set_modified(SystemTime::now()).await?;
+    // Writing to the file is what updates its modification time.
+    tokio::fs::write(&path, b"ok").await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{data_path, get_device_name, index_path};
-    use crate::test_support::scratch_home;
+    use std::time::{Duration, SystemTime};
+
+    use super::{data_path, get_device_name, healthcheck, index_path};
+    use crate::{constants::HEALTH_FILE_NAME, test_support::scratch_home};
+
+    #[tokio::test]
+    async fn a_stale_health_file_is_brought_up_to_date() {
+        let home = scratch_home("health");
+        std::fs::create_dir_all(data_path(&home)).unwrap();
+        let path = data_path(&home).join(HEALTH_FILE_NAME);
+        let an_hour_ago = SystemTime::now() - Duration::from_hours(1);
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_modified(an_hour_ago)
+            .unwrap();
+
+        healthcheck(&home).await.unwrap();
+
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(modified.elapsed().unwrap() < Duration::from_mins(1));
+    }
 
     #[tokio::test]
     async fn a_chosen_name_is_used_as_it_is_and_nothing_is_stored() {

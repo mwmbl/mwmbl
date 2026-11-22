@@ -30,4 +30,6 @@ WORKDIR /home/mwmbl
 
 CMD ["/usr/local/bin/mwmbl-crawl"]
 
-HEALTHCHECK CMD find .mwmbl/indexing.health -mmin -10 -type f -print | grep . && exit 0 || exit 1
+# The crawler touches the health file whenever it crawls a page or submits a batch. The start
+# period covers the first crawl, and a stale health file left in the volume by an earlier run.
+HEALTHCHECK --start-period=10m CMD find .mwmbl/indexing.health -mmin -10 -type f -print | grep . && exit 0 || exit 1

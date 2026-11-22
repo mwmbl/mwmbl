@@ -60,10 +60,6 @@ EXTERNAL_CACHE_INDEX_NAME = "external-cache.tinysearch"
 # fewer per page, so a provider more verbose than Wikipedia costs more than its share.
 EXTERNAL_CACHE_NUM_PAGES = 3_750_000
 
-URLS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "urls-{year}-{month}.bloom")
-URLS_BLOOM_FILTER_FALLBACK_PATH = str(Path(DATA_PATH) / "urls.bloom")
-NUM_URLS_IN_BLOOM_FILTER = 200_000_000
-
 DOMAIN_LINKS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "links_{domain_group}.bloom")
 NUM_DOMAINS_IN_BLOOM_FILTER = 100_000_000
 

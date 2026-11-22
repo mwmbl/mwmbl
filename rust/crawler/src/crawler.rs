@@ -4,7 +4,7 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::{header, redirect::Policy};
+use reqwest::header;
 use serde_json::Value;
 use std::{
     cmp::{Reverse, max, min},
@@ -18,7 +18,7 @@ use std::{
 use tokio::{
     spawn,
     sync::{RwLock, Semaphore},
-    time::{Instant, sleep},
+    time::{Instant, sleep, sleep_until},
 };
 
 use crate::{
@@ -26,13 +26,14 @@ use crate::{
     batch::{PostResultsResponse, SendResult, SendResults},
     bloomdb::BloomDatabase,
     constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL,
-        READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT,
+        SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N, UPGRADE_REQUIRED_WAIT,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
     path_creation::{get_device_name, healthcheck, index_path},
     retrieve::{CrawlResult, crawl},
     robots::RobotCache,
+    ssrf::{PublicAddressResolver, redirect_policy},
     url_queue::SharedURLQueue,
 };
 
@@ -47,8 +48,41 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     crawl_semaphore: Arc<Semaphore>,
     submit_semaphore: Arc<Semaphore>,
     to_submit: Arc<RwLock<VecDeque<Document>>>,
+    submit_paused_until: Arc<RwLock<Option<Instant>>>,
     count: Arc<AtomicUsize>,
     index: TinyIndex,
+}
+
+#[derive(Debug)]
+enum Submission {
+    Accepted(PostResultsResponse),
+    /// The server's explanation of why it wants a newer crawler.
+    UpgradeRequired(String),
+}
+
+async fn post_results(
+    client: &reqwest::Client,
+    remote_server: &str,
+    results: &SendResults,
+) -> anyhow::Result<Submission> {
+    let Ok(response) = client
+        .post(format!("{remote_server}/api/v1/crawler/results"))
+        .json(results)
+        .send()
+        .await
+    else {
+        bail!("Error in sending result");
+    };
+    if response.status() == 426 {
+        return Ok(Submission::UpgradeRequired(response.text().await?));
+    }
+    let Ok(response) = response.error_for_status() else {
+        bail!("Error in sending result");
+    };
+    let Ok(response) = response.json::<PostResultsResponse>().await else {
+        bail!("Error in parsing PostResultsResponse");
+    };
+    Ok(Submission::Accepted(response))
 }
 
 impl Crawler {
@@ -72,6 +106,7 @@ impl Crawler {
             domainlinkdb,
             count: Arc::new(AtomicUsize::new(0)),
             to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            submit_paused_until: Arc::new(RwLock::new(None)),
             index,
         })
     }
@@ -84,8 +119,8 @@ impl Crawler {
             .zstd(true)
             .read_timeout(READ_TIMEOUT)
             .user_agent(self.crawl_user_agent())
-            .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .hickory_dns(true)
+            .redirect(redirect_policy())
+            .dns_resolver(PublicAddressResolver::system()?)
             .build()?)
     }
 
@@ -105,6 +140,7 @@ impl Crawler {
             let db = self.domainlinkdb.clone();
             let to_submit = self.to_submit.clone();
             let count = self.count.clone();
+            let params = self.params.clone();
 
             spawn(async move {
                 let url = url_queue.get_url().await;
@@ -152,6 +188,12 @@ impl Crawler {
                     if lock.len() > MAX_SUBMIT_QUEUE_SIZE {
                         lock.pop_front();
                     }
+                    drop(lock);
+                    // Crawling counts as alive, not just submitting: with a long crawl delay a
+                    // batch takes longer to fill than the health check's window.
+                    if healthcheck(&params.home).await.is_err() {
+                        eprintln!("Failed to update healthfile");
+                    }
                 }
             });
 
@@ -184,8 +226,18 @@ impl Crawler {
         let clone = self.clone();
         let semaphore = self.submit_semaphore.clone();
         let to_submit = self.to_submit.clone();
+        let submit_paused_until = self.submit_paused_until.clone();
         spawn(async move {
             loop {
+                // Documents keep queueing (up to MAX_SUBMIT_QUEUE_SIZE) while paused, so the
+                // newest are sent once the pause is over rather than drained into rejections.
+                let paused_until = *submit_paused_until.read().await;
+                if let Some(paused_until) = paused_until
+                    && paused_until > Instant::now()
+                {
+                    sleep_until(paused_until).await;
+                    continue;
+                }
                 let mut lock = to_submit.write().await;
                 if lock.len() >= SUBMIT_BATCH_SIZE {
                     let docs: Vec<Document> = lock.drain(0..SUBMIT_BATCH_SIZE).collect();
@@ -249,26 +301,20 @@ impl Crawler {
             Some(device_name.clone()),
             Some(true),
         );
-        let response = client
-            .post(format!(
-                "{}/api/v1/crawler/results",
-                self.params.remote_server
-            ))
-            .json(&results)
-            .send()
-            .await;
-
-        let Ok(response) = response else {
-            bail!("Error in sending result");
-        };
-        if response.status() == 426 {
-            bail!("The server requires a newer crawler!");
-        }
-        let Ok(response) = response.error_for_status() else {
-            bail!("Error in sending result");
-        };
-        let Ok(response) = response.json::<PostResultsResponse>().await else {
-            bail!("Error in parsing PostResultsResponse");
+        let response = match post_results(&client, &self.params.remote_server, &results).await? {
+            Submission::Accepted(response) => response,
+            Submission::UpgradeRequired(message) => {
+                // Waiting gives an external updater (compose timer, systemd timer) time to
+                // replace this crawler, where retrying every batch would hammer the server.
+                eprintln!(
+                    "The server requires a newer crawler: {message} Pausing submission for {} \
+                     seconds instead of sending results the server would reject.",
+                    UPGRADE_REQUIRED_WAIT.as_secs()
+                );
+                *self.submit_paused_until.write().await =
+                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
+                return Ok(());
+            }
         };
         let Some(new_items) = response.new_items() else {
             bail!("Missing new_items from reponse");
@@ -350,7 +396,31 @@ impl Crawler {
 
 #[cfg(test)]
 mod tests {
-    use super::Crawler;
+    use super::{Crawler, Submission, post_results};
+    use crate::{
+        batch::SendResults,
+        test_support::{TestServer, client, text},
+    };
+
+    #[tokio::test]
+    async fn an_upgrade_required_response_is_reported_with_the_servers_message() {
+        let server = TestServer::start(vec![(
+            "/api/v1/crawler/results",
+            text(426, "Crawler 2.0.0 is too old, please upgrade."),
+        )])
+        .await;
+        let remote_server = server.url("").as_str().trim_end_matches('/').to_owned();
+        let results = SendResults::new(Vec::new(), None, None, Some(true));
+
+        let submission = post_results(&client(), &remote_server, &results)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(&submission, Submission::UpgradeRequired(message) if message == "Crawler 2.0.0 is too old, please upgrade."),
+            "{submission:?}"
+        );
+    }
 
     #[test]
     fn the_api_user_agent_names_the_version_and_the_url_encoded_username() {
