@@ -5,6 +5,7 @@ use ordered_float::OrderedFloat;
 
 pub static INDEX_NAME: &str = "crawl-index.tinysearch";
 pub static BLOOM_NAME: &str = "crawl-bloom";
+pub static HEALTH_FILE_NAME: &str = "indexing.health";
 pub static NUM_PAGES: usize = 100_000;
 pub static DATA_DIR: &str = ".mwmbl";
 
