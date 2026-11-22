@@ -5,10 +5,7 @@
 //! all covered. reqwest never asks the resolver about IP literals, so the redirect policy
 //! refuses those, and `crawl` refuses them as the first URL.
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::Arc,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use hickory_resolver::{
     TokioResolver,
@@ -74,18 +71,43 @@ pub fn is_public(ip: IpAddr) -> bool {
     }
 }
 
-/// Resolves with `inner`, and fails the lookup if any address it returns is not public.
-pub struct PublicAddressResolver {
-    inner: Arc<dyn Resolve>,
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Looks up the addresses of a hostname. The future is `'static` because reqwest's resolver
+/// futures are.
+pub trait LookupIps: Send + Sync + 'static {
+    fn lookup_ips(
+        &self,
+        host: &str,
+    ) -> impl Future<Output = Result<Vec<IpAddr>, BoxError>> + Send + 'static;
 }
 
-impl PublicAddressResolver {
-    pub fn new(inner: Arc<dyn Resolve>) -> PublicAddressResolver {
+impl LookupIps for TokioResolver {
+    fn lookup_ips(
+        &self,
+        host: &str,
+    ) -> impl Future<Output = Result<Vec<IpAddr>, BoxError>> + Send + 'static {
+        // Cheap: the clone shares the original's cache and connection pools.
+        let resolver = self.clone();
+        let host = host.to_owned();
+        async move { Ok(resolver.lookup_ip(host).await?.iter().collect()) }
+    }
+}
+
+/// Resolves with `inner`, and fails the lookup if any address it returns is not public.
+pub struct PublicAddressResolver<L> {
+    inner: L,
+}
+
+impl<L: LookupIps> PublicAddressResolver<L> {
+    pub fn new(inner: L) -> PublicAddressResolver<L> {
         PublicAddressResolver { inner }
     }
+}
 
+impl PublicAddressResolver<TokioResolver> {
     /// The system's resolver, as reqwest's own `hickory-dns` resolver configures it.
-    pub fn system() -> anyhow::Result<PublicAddressResolver> {
+    pub fn system() -> anyhow::Result<PublicAddressResolver<TokioResolver>> {
         let mut builder = TokioResolver::builder_tokio().unwrap_or_else(|_| {
             TokioResolver::builder_with_config(
                 ResolverConfig::udp_and_tcp(&GOOGLE),
@@ -93,39 +115,22 @@ impl PublicAddressResolver {
             )
         });
         builder.options_mut().ip_strategy = LookupIpStrategy::Ipv6AndIpv4;
-        let resolver = builder.build()?;
-        Ok(PublicAddressResolver::new(Arc::new(HickoryResolver(
-            resolver,
-        ))))
+        Ok(PublicAddressResolver::new(builder.build()?))
     }
 }
 
-impl Resolve for PublicAddressResolver {
+impl<L: LookupIps> Resolve for PublicAddressResolver<L> {
     fn resolve(&self, name: Name) -> Resolving {
-        let host = name.as_str().to_owned();
-        let lookup = self.inner.resolve(name);
+        let lookup = self.inner.lookup_ips(name.as_str());
+        // reqwest's `Resolving` is a boxed future, so this one box is unavoidable.
         Box::pin(async move {
-            let addrs: Vec<SocketAddr> = lookup.await?.collect();
-            if let Some(blocked) = addrs.iter().find(|addr| !is_public(addr.ip())) {
+            let ips = lookup.await?;
+            if let Some(blocked) = ips.iter().find(|ip| !is_public(**ip)) {
                 return Err(
-                    format!("{host} resolves to non-public address {}", blocked.ip()).into(),
+                    format!("{} resolves to non-public address {blocked}", name.as_str()).into(),
                 );
             }
-            let addrs: Addrs = Box::new(addrs.into_iter());
-            Ok(addrs)
-        })
-    }
-}
-
-struct HickoryResolver(TokioResolver);
-
-impl Resolve for HickoryResolver {
-    fn resolve(&self, name: Name) -> Resolving {
-        let resolver = self.0.clone();
-        Box::pin(async move {
-            let lookup = resolver.lookup_ip(name.as_str()).await?;
-            let addrs: Vec<SocketAddr> = lookup.iter().map(|ip| SocketAddr::new(ip, 0)).collect();
-            let addrs: Addrs = Box::new(addrs.into_iter());
+            let addrs: Addrs = Box::new(ips.into_iter().map(|ip| SocketAddr::new(ip, 0)));
             Ok(addrs)
         })
     }
@@ -151,14 +156,14 @@ pub fn redirect_policy() -> Policy {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr, sync::Arc};
+    use std::{future::Future, net::IpAddr, str::FromStr};
 
     use reqwest::{
         Client,
-        dns::{Addrs, Name, Resolve, Resolving},
+        dns::{Name, Resolve},
     };
 
-    use super::{PublicAddressResolver, is_public, redirect_policy};
+    use super::{BoxError, LookupIps, PublicAddressResolver, is_public, redirect_policy};
     use crate::{
         retrieve::fetch,
         test_support::{TestServer, html, redirect},
@@ -234,12 +239,12 @@ mod tests {
     /// Stands in for DNS: every name resolves to 127.0.0.1.
     struct Loopback;
 
-    impl Resolve for Loopback {
-        fn resolve(&self, _name: Name) -> Resolving {
-            Box::pin(async {
-                let addrs: Addrs = Box::new(std::iter::once(([127, 0, 0, 1], 0).into()));
-                Ok(addrs)
-            })
+    impl LookupIps for Loopback {
+        fn lookup_ips(
+            &self,
+            _host: &str,
+        ) -> impl Future<Output = Result<Vec<IpAddr>, BoxError>> + Send + 'static {
+            std::future::ready(Ok(vec![[127, 0, 0, 1].into()]))
         }
     }
 
@@ -248,7 +253,7 @@ mod tests {
         let server = TestServer::start(vec![("/", html(200, "secret"))]).await;
         let client = Client::builder()
             .no_proxy()
-            .dns_resolver(PublicAddressResolver::new(Arc::new(Loopback)))
+            .dns_resolver(PublicAddressResolver::new(Loopback))
             .build()
             .unwrap();
 
@@ -258,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_resolver_passes_through_public_addresses() {
-        let resolver = PublicAddressResolver::new(Arc::new(Public));
+        let resolver = PublicAddressResolver::new(Public);
         let addrs: Vec<_> = resolver
             .resolve(Name::from_str("example.com").unwrap())
             .await
@@ -269,12 +274,12 @@ mod tests {
 
     struct Public;
 
-    impl Resolve for Public {
-        fn resolve(&self, _name: Name) -> Resolving {
-            Box::pin(async {
-                let addrs: Addrs = Box::new(std::iter::once(([93, 184, 216, 34], 0).into()));
-                Ok(addrs)
-            })
+    impl LookupIps for Public {
+        fn lookup_ips(
+            &self,
+            _host: &str,
+        ) -> impl Future<Output = Result<Vec<IpAddr>, BoxError>> + Send + 'static {
+            std::future::ready(Ok(vec![[93, 184, 216, 34].into()]))
         }
     }
 

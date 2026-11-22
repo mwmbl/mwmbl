@@ -143,7 +143,6 @@ impl Crawler {
             let db = self.domainlinkdb.clone();
             let to_submit = self.to_submit.clone();
             let count = self.count.clone();
-            let params = self.params.clone();
 
             spawn(async move {
                 let url = url_queue.get_url().await;
@@ -192,11 +191,6 @@ impl Crawler {
                         lock.pop_front();
                     }
                     drop(lock);
-                    // Crawling counts as alive, not just submitting: with a long crawl delay a
-                    // batch takes longer to fill than the health check's window.
-                    if healthcheck(&params.home).await.is_err() {
-                        eprintln!("Failed to update healthfile");
-                    }
                 }
             });
 
@@ -310,14 +304,13 @@ impl Crawler {
             Submission::UpgradeRequired(message) => {
                 // Waiting gives an external updater (compose timer, systemd timer) time to
                 // replace this crawler, where retrying every batch would hammer the server.
-                eprintln!(
+                *self.submit_paused_until.write().await =
+                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
+                bail!(
                     "The server requires a newer crawler: {message} Pausing submission for {} \
                      seconds instead of sending results the server would reject.",
                     UPGRADE_REQUIRED_WAIT.as_secs()
                 );
-                *self.submit_paused_until.write().await =
-                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
-                return Ok(());
             }
         };
         let Some(new_items) = response.new_items() else {
