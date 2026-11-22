@@ -152,8 +152,29 @@ fn packing_keeps_the_longest_prefix_that_fits() {
 }
 
 #[test]
+fn packing_any_prefix_stores_all_of_it_that_fits() {
+    let documents: Vec<Value> = (0..60u64)
+        .map(|i| {
+            let extract: String = (0..20)
+                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
+                .collect();
+            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
+        })
+        .collect();
+    let (_, fits) = pack_page(PAGE_SIZE, &documents).unwrap();
+    assert!(fits > 1 && fits < documents.len(), "stored {fits}");
+
+    // Up to `fits` the whole list is stored (the common case, a single compression), and
+    // past it the search finds the same prefix as before.
+    for count in 0..=documents.len() {
+        let (_, num_stored) = pack_page(PAGE_SIZE, &documents[..count]).unwrap();
+        assert_eq!(num_stored, count.min(fits), "packing {count} documents");
+    }
+}
+
+#[test]
 fn an_empty_list_packs_to_an_empty_page() {
-    let (page, num_stored) = pack_page(PAGE_SIZE, &[]).unwrap();
+    let (page, num_stored) = pack_page::<Value>(PAGE_SIZE, &[]).unwrap();
 
     assert_eq!(num_stored, 0);
     assert_eq!(page.len(), PAGE_SIZE);
@@ -212,7 +233,7 @@ fn a_frame_claiming_too_much_content_is_refused_before_decompressing() {
     let scratch = ScratchFile::with_pages(1);
     scratch.file.write_all_at(&page, 0).unwrap();
 
-    let result = read_index_page(scratch.fd(), 0, page_size, None);
+    let result = read_index_page::<Value>(scratch.fd(), 0, page_size, None);
 
     let Err(PageIoError::Unreadable(message)) = result else {
         panic!("expected Unreadable, got {result:?}");
@@ -240,7 +261,7 @@ fn a_failed_read_is_an_io_error() {
     // Reading a directory fails with EISDIR: a real syscall failure, not a bad page.
     let directory = File::open(std::env::temp_dir()).unwrap();
 
-    let result = read_index_page(directory.as_raw_fd(), 0, PAGE_SIZE, None);
+    let result = read_index_page::<Value>(directory.as_raw_fd(), 0, PAGE_SIZE, None);
 
     assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
 }

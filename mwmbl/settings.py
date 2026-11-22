@@ -47,7 +47,7 @@ EXCLUDED_DOMAINS = {
     # The site owner asked to be removed from the index (issue #559).
     "lain.ovh",
     # Crawling this domain can lead to abuse reports
-    "www.inb.gov.br"
+    "www.inb.gov.br",
 }
 # `booru.org` is a free hosting platform for imageboards; every subdomain we've found ranking
 # (nyou/hypno/inflate/futaba/captions.booru.org) hosts adult/fetish content, so block the whole domain.

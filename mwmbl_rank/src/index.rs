@@ -187,7 +187,7 @@ pub fn pack_index_page(
     items: &Bound<'_, PyList>,
 ) -> PyResult<(Py<PyBytes>, usize)> {
     let values = py_items_to_values(items)?;
-    let (page, num_stored) = py
-        .allow_threads(|| index::pack_page(page_size, &values).map_err(PyPageIoError))?;
+    let (page, num_stored) =
+        py.allow_threads(|| index::pack_page(page_size, &values).map_err(PyPageIoError))?;
     Ok((PyBytes::new_bound(py, &page).unbind(), num_stored))
 }

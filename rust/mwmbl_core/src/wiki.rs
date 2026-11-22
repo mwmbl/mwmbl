@@ -1,10 +1,11 @@
 /// Wikipedia score lookup.
-/// Replicates get_wiki_score from mwmbl/tinysearchengine/rank.py.
+/// Replicates `get_wiki_score` from mwmbl/tinysearchengine/rank.py.
 ///
-/// The scores are a sorted table that build.rs generates from wiki_stats.json; see there for
-/// the layout and why it is not a HashMap.
+/// The scores are a sorted table that build.rs generates from `wiki_stats.json`; see there for
+/// the layout and why it is not a `HashMap`.
 static WIKI_TABLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin"));
 
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 fn read_u32(at: usize) -> usize {
     u32::from_le_bytes(WIKI_TABLE[at..at + 4].try_into().unwrap()) as usize
 }
@@ -13,12 +14,14 @@ fn len() -> usize {
     read_u32(0)
 }
 
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 fn key(i: usize) -> &'static [u8] {
     let n = len();
     let keys_start = 4 + (n + 1) * 4 + n * 8;
     &WIKI_TABLE[keys_start + read_u32(4 + i * 4)..keys_start + read_u32(4 + (i + 1) * 4)]
 }
 
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 fn score(i: usize) -> f64 {
     let at = 4 + (len() + 1) * 4 + i * 8;
     f64::from_le_bytes(WIKI_TABLE[at..at + 8].try_into().unwrap())
@@ -41,6 +44,7 @@ fn lookup(title: &str) -> f64 {
 
 /// Get a normalised wiki score for the given URL.
 /// Extracts the last path segment as the Wikipedia article title.
+#[must_use]
 pub fn get_wiki_score(url: &str) -> f64 {
     let title = url.split('/').next_back().unwrap_or("");
     if title.is_empty() {
@@ -70,7 +74,11 @@ mod tests {
     #[test]
     fn test_wiki_max_score_normalised() {
         let max = (0..len()).map(score).fold(f64::NEG_INFINITY, f64::max);
-        assert!((max - 1.0).abs() < 1e-9, "Max wiki score should be 1.0, got {}", max);
+        assert!(
+            (max - 1.0).abs() < 1e-9,
+            "Max wiki score should be 1.0, got {}",
+            max
+        );
     }
 
     #[test]

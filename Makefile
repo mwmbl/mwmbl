@@ -117,7 +117,7 @@ rust-core:
 	cargo fmt --manifest-path rust/crawler/Cargo.toml --check
 	cargo clippy --manifest-path rust/mwmbl_core/Cargo.toml --all-targets --locked -- -D warnings
 	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
-	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked --features crawler
+	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
 	cargo test --manifest-path rust/crawler/Cargo.toml --locked
 
 coverage: coverage-python coverage-rust

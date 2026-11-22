@@ -12,16 +12,22 @@
 //! metadata and the page locks, and turns the tuples that come back into Documents.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
+use std::iter::zip;
 use std::mem::ManuallyDrop;
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::FromRawFd;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zstd::bulk::{Compressor, Decompressor};
 use zstd::zstd_safe;
+
+use crate::constants::NUM_FIRST_TOKENS;
+use crate::tokenizer::{get_bigrams, tokenize};
 
 /// Where `term` sits in `Document.as_tuple()`. `as_tuple` truncates trailing Nones, so a
 /// document with no term may have nothing at that position at all.
@@ -89,9 +95,9 @@ thread_local! {
     #[allow(clippy::expect_used)] static DECOMPRESSOR: RefCell<Decompressor<'static>> =
         RefCell::new(Decompressor::new().expect("Could not create a zstd decompression context"));
 
-    /// And one compression context, for the same reason. Packing a page compresses about
-    /// a dozen prefixes of the documents to find the ones that fit, so building a context
-    /// per compression cost more than the compression did.
+    /// And one compression context, for the same reason. Packing a full page compresses
+    /// about a dozen prefixes of the documents to find the ones that fit, so building a
+    /// context per compression cost more than the compression did.
     #[allow(clippy::expect_used)] static COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
         Compressor::new(COMPRESSION_LEVEL).expect("Could not create a zstd compression context"));
 }
@@ -132,18 +138,25 @@ fn zstd_error(code: usize) -> PageIoError {
     PageIoError::Unreadable(zstd_safe::get_error_name(code).to_string())
 }
 
-fn decode_page(page: &[u8], term: Option<&str>) -> Result<Vec<Value>, PageIoError> {
+fn decode_page<T: for<'a> Deserialize<'a>>(
+    page: &[u8],
+    term: Option<&str>,
+) -> Result<Vec<T>, PageIoError> {
     let contents = decompress_page(page)?;
     // Damage that gets past zstd lands on the parse instead, and it is the same kind of
     // unreadable. Invalid UTF-8 fails here too, as the decode in Python did.
-    let items: Vec<Value> =
+    let items_t: Vec<T> =
         serde_json::from_slice(&contents).map_err(|e| PageIoError::Unreadable(e.to_string()))?;
     match term {
-        None => Ok(items),
-        Some(term) => Ok(items
-            .into_iter()
-            .filter(|item| has_term(item, term))
-            .collect()),
+        // Writers read the whole page, so only parse it a second time to filter by term.
+        None => Ok(items_t),
+        Some(term) => {
+            let items_values: Vec<Value> = serde_json::from_slice(&contents)
+                .map_err(|e| PageIoError::Unreadable(e.to_string()))?;
+            Ok(zip(items_t, items_values)
+                .filter_map(|(item_t, item)| has_term(&item, term).then_some(item_t))
+                .collect())
+        }
     }
 }
 
@@ -180,13 +193,29 @@ fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageI
 /// The padded page bytes, and how many of `items` actually fit on them.
 ///
 /// A page holds a fixed number of bytes, and how many documents that is depends on how
-/// well they compress, so the largest prefix that fits is found by binary search over the
-/// compressed size. The tail that does not fit is dropped, which is why callers pass their
+/// well they compress. When they do not all fit, the largest prefix that does is found by
+/// binary search over the compressed size. The tail that does not fit is dropped, which is why callers pass their
 /// documents best-first.
-pub fn pack_page(page_size: usize, items: &[Value]) -> Result<(Vec<u8>, usize), PageIoError> {
-    let serialised: Vec<String> = items.iter().map(std::string::ToString::to_string).collect();
-    // One compression context for the whole search: the binary search compresses a dozen
-    // prefixes, and building a context each time would cost more than the compression.
+pub fn pack_page<T: Serialize>(
+    page_size: usize,
+    items: &[T],
+) -> Result<(Vec<u8>, usize), PageIoError> {
+    let mut serialised: Vec<String> = Vec::new();
+    for item in items {
+        if let Ok(item_serialised) = serde_json::to_string(item) {
+            serialised.push(item_serialised);
+        } else {
+            return Err(PageIoError::Unreadable(
+                "Failed to serialize data".to_owned(),
+            ));
+        }
+    }
+    // Nearly every page (99% when indexing a crawl) holds all of its documents, so try that
+    // first: one compression instead of a binary search's handful.
+    let all = compress_prefix(&serialised, items.len())?;
+    if all.len() <= page_size {
+        return Ok(pad_page(all, items.len(), page_size));
+    }
     let mut low = 0;
     let mut high = items.len();
     let mut best = (0, compress_prefix(&serialised, 0)?);
@@ -204,15 +233,19 @@ pub fn pack_page(page_size: usize, items: &[Value]) -> Result<(Vec<u8>, usize), 
         }
     }
 
-    let (num_stored, mut page) = best;
+    let (num_stored, page) = best;
     if page.len() > page_size {
         return Err(PageIoError::Unreadable(format!(
             "Data is too big ({}) for page size ({page_size})",
             page.len()
         )));
     }
+    Ok(pad_page(page, num_stored, page_size))
+}
+
+fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>, usize) {
     page.resize(page_size, 0);
-    Ok((page, num_stored))
+    (page, num_stored)
 }
 
 /// Read the page at `offset`, returning its document tuples as lists.
@@ -222,22 +255,22 @@ pub fn pack_page(page_size: usize, items: &[Value]) -> Result<(Vec<u8>, usize), 
 /// is corrupt or was caught half-written; it deliberately does not fall back to an empty
 /// page, because a writer that merged onto one would store its result over everything that
 /// was there.
-pub fn read_index_page(
+pub fn read_index_page<T: for<'a> Deserialize<'a>>(
     fd: i32,
     offset: u64,
     page_size: usize,
     term: Option<&String>,
-) -> Result<Vec<Value>, PageIoError> {
+) -> Result<Vec<T>, PageIoError> {
     let page = read_page_bytes(fd, offset, page_size)?;
     decode_page(&page, term.map(std::string::String::as_str))
 }
 
 /// Write `values` over the page at `offset`, returning how many of them fitted.
-pub fn write_index_page(
+pub fn write_index_page<T: Serialize>(
     fd: i32,
     offset: u64,
     page_size: usize,
-    values: &[Value],
+    values: &[T],
 ) -> Result<usize, PageIoError> {
     let (page, num_stored) = pack_page(page_size, values)?;
     let file = borrow_file(fd);
@@ -248,4 +281,54 @@ pub fn write_index_page(
     // device, which is an OSError as it has always been.
     file.write_all_at(&page, offset).map_err(PageIoError::Io)?;
     Ok(num_stored)
+}
+
+#[must_use]
+pub fn tokenize_document(url: &str, title: &str, extract: &str) -> Vec<String> {
+    let title_tokens = tokenize(title);
+    let url_tokens = tokenize(&prepare_url_for_tokenizing(url));
+    let extract_tokens = tokenize(extract);
+    get_bigrams(
+        NUM_FIRST_TOKENS,
+        &title_tokens
+            .iter()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .chain(get_bigrams(
+        NUM_FIRST_TOKENS,
+        &url_tokens
+            .iter()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
+            .collect::<Vec<_>>(),
+    ))
+    .chain(get_bigrams(
+        NUM_FIRST_TOKENS,
+        &extract_tokens
+            .iter()
+            .take(NUM_FIRST_TOKENS)
+            .cloned()
+            .collect::<Vec<_>>(),
+    ))
+    .chain(title_tokens)
+    .chain(url_tokens)
+    .chain(extract_tokens)
+    .collect::<HashSet<String>>()
+    .into_iter()
+    .collect()
+}
+
+#[must_use]
+pub fn prepare_url_for_tokenizing(url: &str) -> String {
+    let url = url
+        .strip_prefix("https://")
+        .unwrap_or(url)
+        .strip_prefix("http://")
+        .unwrap_or(url);
+    url.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .collect()
 }

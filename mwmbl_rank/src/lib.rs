@@ -1,43 +1,54 @@
+mod features;
 /// mwmbl_rank: Rust extension module for Mwmbl learning-to-rank.
 ///
 /// Exposes RustXGBPipeline to Python via PyO3.
 /// Build with: maturin develop  (or maturin build --release)
-mod domain;
-mod features;
 mod index;
 mod pipeline;
-mod text;
-mod wiki;
 
-use pyo3::prelude::*;
+use mwmbl_core::{
+    indexer::Document,
+    rank::{get_features_regex_unchecked, get_query_regex},
+    wiki,
+};
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use regex::regex;
 
 use pipeline::{extract_features_batch, num_features, DocumentRecord, StaanRank, XGBPipeline};
+use url::Url;
 
 /// Convert a Python dict (passed as a Bound<PyAny>) to a DocumentRecord.
 fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
-    let query: String = obj.get_item("query")
+    let query: String = obj
+        .get_item("query")
         .map_err(|_| PyValueError::new_err("Record missing 'query' key"))?
         .extract()?;
-    let url: String = obj.get_item("url")
+    let url: String = obj
+        .get_item("url")
         .map_err(|_| PyValueError::new_err("Record missing 'url' key"))?
         .extract()?;
-    let title: String = obj.get_item("title")
+    let title: String = obj
+        .get_item("title")
         .map(|v| v.extract::<String>().unwrap_or_default())
         .unwrap_or_default();
-    let extract: String = obj.get_item("extract")
+    let extract: String = obj
+        .get_item("extract")
         .map(|v| v.extract::<String>().unwrap_or_default())
         .unwrap_or_default();
-    let score: f32 = obj.get_item("score")
+    let score: f32 = obj
+        .get_item("score")
         .map(|v| v.extract::<f64>().unwrap_or(0.0) as f32)
         .unwrap_or(0.0);
 
     // Optional, and only read by a pipeline with provider features. A missing or NaN rank
     // (as pandas writes None) means Staan did not return the URL.
-    let staan_asked: bool = obj.get_item("staan_asked")
+    let staan_asked: bool = obj
+        .get_item("staan_asked")
         .map(|v| v.extract::<bool>().unwrap_or(false))
         .unwrap_or(false);
-    let rank: Option<f64> = obj.get_item("staan_rank")
+    let rank: Option<f64> = obj
+        .get_item("staan_rank")
         .map(|v| v.extract::<Option<f64>>().unwrap_or(None))
         .unwrap_or(None)
         .filter(|rank| !rank.is_nan());
@@ -46,11 +57,27 @@ fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
         (true, None) => StaanRank::NotReturned,
         (true, Some(rank)) => StaanRank::Rank(rank as u32),
     };
-    let from_staan: bool = obj.get_item("from_staan")
+    let from_staan: bool = obj
+        .get_item("from_staan")
         .map(|v| v.extract::<bool>().unwrap_or(false))
         .unwrap_or(false);
 
-    Ok(DocumentRecord { query, url, title, extract, score, staan_rank, from_staan })
+    Ok(DocumentRecord {
+        query,
+        doc: Document::new(
+            title,
+            url,
+            extract,
+            Some(score),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        staan_rank,
+        from_staan,
+    })
 }
 
 /// Python-visible XGBoost pipeline class.
@@ -93,7 +120,8 @@ impl PyXGBPipeline {
     ///     provider_features: append Staan's ranking to the features (default False)
     #[new]
     #[pyo3(signature = (threshold=0.0, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100, max_depth=None, min_child_weight=None, gamma=None, subsample=None, provider_features=false))]
-    #[allow(clippy::too_many_arguments)] fn new(
+    #[allow(clippy::too_many_arguments)]
+    fn new(
         threshold: f32,
         scale_pos_weight: f32,
         reg_lambda: f32,
@@ -106,8 +134,15 @@ impl PyXGBPipeline {
     ) -> Self {
         PyXGBPipeline {
             inner: XGBPipeline::with_params(
-                threshold, scale_pos_weight, reg_lambda, num_rounds,
-                max_depth, min_child_weight, gamma, subsample, provider_features,
+                threshold,
+                scale_pos_weight,
+                reg_lambda,
+                num_rounds,
+                max_depth,
+                min_child_weight,
+                gamma,
+                subsample,
+                provider_features,
             ),
         }
     }
@@ -129,7 +164,8 @@ impl PyXGBPipeline {
         sample_weight: Option<Vec<f32>>,
     ) -> PyResult<PyObject> {
         let doc_records = self.extract_records(records)?;
-        self.inner.fit(&doc_records, &labels, sample_weight.as_deref())
+        self.inner
+            .fit(&doc_records, &labels, sample_weight.as_deref())
             .map_err(PyValueError::new_err)?;
         // Return self as a Python object for sklearn-style chaining
         Ok(py.None())
@@ -143,20 +179,19 @@ impl PyXGBPipeline {
     /// Returns list of float probabilities in [0, 1].
     fn predict(&self, records: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
         let doc_records = self.extract_records(records)?;
-        self.inner.predict(&doc_records)
+        self.inner
+            .predict(&doc_records)
             .map_err(PyValueError::new_err)
     }
 
     /// Save the trained model to disk (XGBoost binary format).
     fn save_model(&self, path: &str) -> PyResult<()> {
-        self.inner.save_model(path)
-            .map_err(PyValueError::new_err)
+        self.inner.save_model(path).map_err(PyValueError::new_err)
     }
 
     /// Load a model from disk (XGBoost binary format). Sets provider_features from the model.
     fn load_model(&mut self, path: &str) -> PyResult<()> {
-        self.inner.load_model(path)
-            .map_err(PyValueError::new_err)
+        self.inner.load_model(path).map_err(PyValueError::new_err)
     }
 
     /// Whether this pipeline appends Staan's ranking to the features.
@@ -172,13 +207,20 @@ impl PyXGBPipeline {
     /// reimplementing the extraction in Python.
     #[staticmethod]
     #[pyo3(signature = (records, provider_features=false))]
-    fn extract_features(records: &Bound<'_, PyAny>, provider_features: bool) -> PyResult<Vec<Vec<f32>>> {
+    fn extract_features(
+        records: &Bound<'_, PyAny>,
+        provider_features: bool,
+    ) -> PyResult<Vec<Vec<f32>>> {
         let list: Vec<Bound<'_, PyAny>> = records.extract()?;
-        let doc_records = list.iter()
+        let doc_records = list
+            .iter()
             .map(|item| py_dict_to_record(item))
             .collect::<PyResult<Vec<DocumentRecord>>>()?;
         let flat = extract_features_batch(&doc_records, provider_features);
-        Ok(flat.chunks(num_features(provider_features)).map(|row| row.to_vec()).collect())
+        Ok(flat
+            .chunks(num_features(provider_features))
+            .map(|row| row.to_vec())
+            .collect())
     }
 
     /// Return the feature names in the canonical order.
@@ -212,9 +254,7 @@ impl PyXGBPipeline {
 impl PyXGBPipeline {
     fn extract_records(&self, records: &Bound<'_, PyAny>) -> PyResult<Vec<DocumentRecord>> {
         let list: Vec<Bound<'_, PyAny>> = records.extract()?;
-        list.iter()
-            .map(|item| py_dict_to_record(item))
-            .collect()
+        list.iter().map(|item| py_dict_to_record(item)).collect()
     }
 }
 
@@ -237,10 +277,41 @@ fn get_features_py(
     url: &str,
     extract: &str,
     score: f32,
-    is_complete: bool,
+    _is_complete: bool,
 ) -> Vec<f32> {
     let term_refs: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
-    features::get_features(&term_refs, title, url, extract, score, is_complete)
+    let doc = Document::new(
+        title.to_owned(),
+        url.to_owned(),
+        extract.to_owned(),
+        Some(score),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (url_path, url_domain, url_query) = match Url::parse(url) {
+        Ok(url) => (
+            url.path().to_owned(),
+            url.domain().unwrap_or("").to_owned(),
+            url.query().unwrap_or("").to_owned(),
+        ),
+        Err(_) => ("".to_owned(), "".to_owned(), "".to_owned()),
+    };
+    let re_text = get_query_regex(&term_refs, true, false).unwrap_or(regex!("").clone());
+    let re_url = get_query_regex(&term_refs, true, true).unwrap_or(regex!("").clone());
+
+    let features = get_features_regex_unchecked(
+        &term_refs,
+        &doc,
+        &url_path,
+        &url_domain,
+        &url_query,
+        &re_text,
+        &re_url,
+    );
+    features::features_vec(features).into_iter().collect()
 }
 
 /// The normalised Wikipedia page view score of a URL, in [0, 1]: 0 for a page not in the stats.
@@ -261,6 +332,9 @@ fn mwmbl_rank(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PageError", m.py().get_type_bound::<index::PageError>())?;
     m.add("NUM_FEATURES", features::NUM_FEATURES)?;
     m.add("FEATURE_NAMES", features::FEATURE_NAMES.to_vec())?;
-    m.add("PROVIDER_FEATURE_NAMES", features::PROVIDER_FEATURE_NAMES.to_vec())?;
+    m.add(
+        "PROVIDER_FEATURE_NAMES",
+        features::PROVIDER_FEATURE_NAMES.to_vec(),
+    )?;
     Ok(())
 }
