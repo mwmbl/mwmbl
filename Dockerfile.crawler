@@ -1,64 +1,26 @@
-FROM python:3.11.12-bookworm AS builder
+FROM rust:1.97-bookworm AS builder
 
 WORKDIR /app
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-
-# Install Rust toolchain (required by maturin to compile the mwmbl_rank extension)
-# Install clang/libclang-dev for bindgen (used by xgboost_lib-sys)
-# Install patchelf so maturin can bundle libxgboost.so into the wheel RPATH
-RUN apt-get update && \
-    apt-get install -y clang libclang-dev patchelf curl && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain stable
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Create a /venv directory & environment.
-# This directory will be copied into the final stage of docker build.
-RUN uv venv /venv
-
-# Copy only the necessary files to build/install the python package.
-# mwmbl_rank is needed because maturin compiles the Rust extension.
-COPY pyproject.toml uv.lock /app/
-COPY mwmbl /app/mwmbl
-COPY mwmbl_rank /app/mwmbl_rank
-RUN mkdir -p /app/rust/mwmbl_core
+# Only what the crawler is built from, so nothing else changing invalidates the build cache:
+# its two crates, and the Wikipedia stats mwmbl_core's build script compiles in.
+COPY mwmbl/resources/wiki_stats.json /app/mwmbl/resources/wiki_stats.json
 COPY rust/mwmbl_core /app/rust/mwmbl_core
+COPY rust/crawler /app/rust/crawler
 
-# Working directory is /app
-# Install from uv.lock so the image ships the versions the tests ran against: uv pip
-# install resolves against PyPI and ignores the lockfile (#403). --no-editable puts the
-# package in the venv rather than a link back to /app, which the final stage lacks.
-RUN UV_PROJECT_ENVIRONMENT=/venv uv sync --frozen --no-dev --no-editable
+# --locked builds exactly the Cargo.lock the tests ran against.
+RUN cargo build --release --locked --manifest-path rust/crawler/Cargo.toml
 
-# Copy libxgboost.so (prebuilt by the xgb crate) into the mwmbl_rank package
-# directory and patch the extension's RPATH so it finds the library at runtime.
-RUN SODIR=/venv/lib/python3.11/site-packages/mwmbl_rank && \
-    cp /app/mwmbl_rank/target/release/deps/libxgboost.so "$SODIR/" && \
-    patchelf --set-rpath '$ORIGIN' "$SODIR"/mwmbl_rank.cpython-311-*.so
+# The final stage ships to crawler volunteers, so it carries nothing but the binary and
+# the CA certificates its HTTPS requests are verified against. Same Debian release as the
+# builder, so the binary finds the glibc it was linked against.
+FROM debian:bookworm-slim AS final
 
-# The final stage ships to crawler volunteers, so it runs on the slim base: it needs
-# no compilers, git or headers, only the interpreter and the prebuilt /venv. That is
-# ~330MB less to download than the full python:3.11.12-bookworm image.
-FROM python:3.11.12-slim-bookworm AS final
-
-ENV PYTHONFAULTHANDLER=1 \
-    PYTHONHASHSEED=random \
-    PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-# libgomp1 is the OpenMP runtime that the bundled libxgboost.so links against. The
-# full base image happens to carry it; the slim one does not.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libgomp1 && \
+    apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy only the required /venv directory from the builder image that contains mwmbl and its dependencies
-COPY --from=builder /venv /venv
+COPY --from=builder /app/rust/crawler/target/release/crawler_rs /usr/local/bin/mwmbl-crawl
 
 RUN useradd --uid 1000 --create-home mwmbl && \
     mkdir -p /home/mwmbl/.mwmbl && \
@@ -66,6 +28,4 @@ RUN useradd --uid 1000 --create-home mwmbl && \
 USER mwmbl
 WORKDIR /home/mwmbl
 
-CMD ["/venv/bin/mwmbl-crawl"]
-
-HEALTHCHECK CMD find .mwmbl/indexing.health -mmin -10 -type f -print | grep . && exit 0 || exit 1
+CMD ["/usr/local/bin/mwmbl-crawl"]

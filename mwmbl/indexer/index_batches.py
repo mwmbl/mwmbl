@@ -91,7 +91,7 @@ def index_documents(documents, index_path) -> IndexedDocuments:
     """The common choke point every indexing path (the trusted-crawler POST /results
     endpoint, the standalone crawl tool) goes through, so
     this is where the blacklist is enforced. Crawling/link-discovery also check the
-    blacklist (RedisURLQueue, update_urls.process_link) but only to stop *new* crawling -
+    blacklist (the crawler's URL queue) but only to stop *new* crawling -
     a /results submission can contain a blacklisted domain's pages regardless of whether that domain was ever handed out to be crawled (e.g. a
     browser-extension user organically visiting the site), so indexing needs its own check
     rather than relying on those upstream gates.

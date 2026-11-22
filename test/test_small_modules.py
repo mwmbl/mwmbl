@@ -9,8 +9,6 @@ from types import SimpleNamespace
 import fakeredis
 import pytest
 
-from mwmbl.crawler import domains
-from mwmbl.crawler.domains import DomainLinkDatabase
 from mwmbl.crawler.stats import DATASET_QUERIES_COUNT_KEY, DATASET_RESULTS_COUNT_KEY, StatsManager
 from mwmbl.tinysearchengine.indexer import Document
 from mwmbl.utils import add_term_info, add_term_infos, batch, get_domain
@@ -94,39 +92,3 @@ def test_a_dataset_with_an_unreadable_date_is_counted_today(monkeypatch):
     StatsManager(redis).record_dataset(_dataset("not-a-date", [1]))
 
     assert int(redis.get(DATASET_QUERIES_COUNT_KEY.format(date=date(2030, 1, 1)))) == 3
-
-
-@pytest.fixture
-def bloom_files(settings, tmp_path):
-    settings.DOMAIN_LINKS_BLOOM_FILTER_PATH = str(tmp_path / "links_{domain_group}.bloom")
-    settings.NUM_DOMAINS_IN_BLOOM_FILTER = 1000
-
-
-def test_links_from_a_top_domain_count_towards_the_top_group(bloom_files, monkeypatch):
-    monkeypatch.setattr(domains, "TOP_DOMAINS", {"top.example"})
-    monkeypatch.setattr(domains, "OTHER_DOMAINS", {"other.example"})
-
-    with DomainLinkDatabase() as database:
-        database.update_domain_links("top.example", {"a.example"})
-        database.update_domain_links("other.example", {"b.example"})
-        database.update_domain_links("unknown.example", {"c.example"})
-
-        assert database.get_domain_score("a.example") == 5
-        assert database.get_domain_score("b.example") == 1
-        assert database.get_domain_score("c.example") == 0
-
-
-def test_links_from_a_named_domain_group_count_towards_that_group(bloom_files):
-    with DomainLinkDatabase() as database:
-        database.update_domain_links("github.com", {"a.example"})
-
-        assert database.get_domain_score("a.example") == 10
-
-
-def test_link_filters_persist_between_openings(bloom_files, monkeypatch):
-    monkeypatch.setattr(domains, "TOP_DOMAINS", {"top.example"})
-    with DomainLinkDatabase() as database:
-        database.update_domain_links("top.example", {"a.example"})
-
-    with DomainLinkDatabase() as reopened:
-        assert reopened.get_domain_score("a.example") == 5

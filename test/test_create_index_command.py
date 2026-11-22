@@ -1,12 +1,9 @@
-"""The search index is created explicitly - by manage.py create_index or the crawler - never on startup."""
-
-from pathlib import Path
+"""The search index is created explicitly, by manage.py create_index, never on startup."""
 
 from django.apps import apps
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
-from mwmbl import crawl
 from mwmbl.management.commands.create_index import Command
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
@@ -42,14 +39,3 @@ def test_create_index_command_skips_system_checks(settings, tmp_path, monkeypatc
     Command().run_from_argv(["manage.py", "create_index"])
 
     assert (tmp_path / settings.INDEX_NAME).exists()
-
-
-def test_crawler_main_creates_its_index(settings, tmp_path, monkeypatch):
-    settings.DATA_PATH = str(tmp_path)
-    monkeypatch.setattr("sys.argv", ["mwmbl-crawl"])
-    created_before_run = []
-    monkeypatch.setattr(crawl, "run", lambda: created_before_run.append(Path(tmp_path / settings.INDEX_NAME).exists()))
-
-    crawl.main()
-
-    assert created_before_run == [True]

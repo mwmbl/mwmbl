@@ -5,11 +5,11 @@ name: Crawler smoke
 # and before that the container crash-looped on an import that reached Django too early
 # (#360). Both were only noticed after they had landed on main.
 #
-# The run is bounded so it can go on every pull request: one batch of at most ten URLs,
-# from two domains we chose, submitting nothing to the production index. `--once` makes
-# the crawler do a single crawl and indexing pass and exit with a status - the normal
-# loops catch every exception and restart, so a container that is failing every pass
-# still looks alive.
+# The crawler runs against a stand-in for the Mwmbl API (.github/scripts/crawler_smoke_server.py),
+# so nothing reaches the production index: it crawls the web until it submits its first
+# batch, the stand-in checks the batch and answers with a curated result, and the run passes
+# once the crawler has merged that answer into its index. The crawler never exits by itself,
+# so the run is bounded by time instead.
 #
 # The schedule matters as much as the pull request trigger: the bullseye expiry broke the
 # build with no commit to blame, and only a scheduled run catches that kind of breakage
@@ -35,17 +35,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    services:
-      redis:
-        image: redis:alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -67,34 +56,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Pull requests from a fork get no secrets, so there is no key to submit with and the
-      # run has to skip submission. Everything else - the crawl, the local index, the sync
-      # against the remote index - still runs. With a key we go one step further and post
-      # the results as a dry run, which authenticates and validates them server-side
-      # without indexing anything.
-      - name: Choose a submit mode
-        id: submit
-        env:
-          MWMBL_API_KEY: ${{ secrets.MWMBL_API_KEY }}
+      - name: Crawl until the first batch is submitted and synced
         run: |
-          if [ -n "$MWMBL_API_KEY" ]; then
-            echo "mode=dry-run" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=off" >> "$GITHUB_OUTPUT"
-            echo "::notice::No MWMBL_API_KEY available (expected on pull requests from a fork) - skipping result submission."
-          fi
-
-      - name: Crawl one batch and index it
-        env:
-          MWMBL_API_KEY: ${{ secrets.MWMBL_API_KEY }}
-        run: |
-          docker run --rm --network host \
-            -e MWMBL_API_KEY="$MWMBL_API_KEY" \
+          python3 .github/scripts/crawler_smoke_server.py 8765 > stand-in.log 2>&1 &
+          docker run -d --name crawler --network host \
+            -e MWMBL_API_KEY=smoke \
             -e MWMBL_CONTACT_INFO=ci@mwmbl.org \
-            -e CRAWL_SUBMIT_MODE=${{ steps.submit.outputs.mode }} \
-            -e CRAWL_BATCH_SIZE=10 \
-            -e CRAWL_ALLOWED_DOMAINS=mwmbl.org,en.wikipedia.org \
-            -e CRAWLER_WORKERS=1 \
-            -e REDIS_URL=redis://localhost:6379 \
-            -e PYTHONUNBUFFERED=1 \
-            mwmbl/crawler:smoke /venv/bin/mwmbl-crawl --once
+            -e MWMBL_REMOTE_SERVER=http://127.0.0.1:8765 \
+            mwmbl/crawler:smoke
+          synced=false
+          for _ in $(seq 120); do
+            if docker logs crawler 2>&1 | grep -q "Results sendt"; then
+              synced=true
+              break
+            fi
+            [ "$(docker inspect -f '{{.State.Running}}' crawler)" = true ] || break
+            sleep 5
+          done
+          docker logs crawler 2>&1 | grep -v "^speed:" | tail -50
+          docker rm -f crawler
+          cat stand-in.log
+          if grep -q "::error::" stand-in.log; then
+            exit 1
+          fi
+          if [ "$synced" != true ]; then
+            echo "::error::The crawler did not submit and sync a batch within ten minutes"
+            exit 1
+          fi

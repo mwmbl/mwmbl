@@ -8,3 +8,5 @@ __pycache__
 devdata
 **/*.tinysearch
 
+# Rust build output, which the images build afresh.
+rust/*/target

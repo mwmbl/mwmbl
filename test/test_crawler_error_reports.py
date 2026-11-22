@@ -2,20 +2,18 @@
 Crawler errors reach us: the crawl loops catch and retry every exception, so without a
 report a crawler failing on every pass looks the same as one that has stopped.
 
-Covers the crawler's report_error and POST /api/v1/crawler/errors, which passes reports on
-to Sentry.
+Covers POST /api/v1/crawler/errors, which passes reports on to Sentry.
 """
 
 from unittest.mock import patch
 
 import pytest
-import requests
 import sentry_sdk
 from django.contrib.auth import get_user_model
 from django.test import Client
 from sentry_sdk.transport import Transport
 
-from mwmbl import crawl, crawler_errors
+from mwmbl import crawler_errors
 from mwmbl.crawler.batch import MAX_ERROR_MESSAGE_LENGTH, MAX_ERROR_TAG_LENGTH
 from mwmbl.models import ApiKey, CrawlerError, generate_api_key
 
@@ -169,78 +167,3 @@ def test_a_report_needs_a_crawl_key(scope):
 
     assert response.status_code == 401
     capture_event.assert_not_called()
-
-
-def raise_and_catch(error):
-    try:
-        raise error
-    except Exception as caught:
-        return caught
-
-
-@pytest.fixture
-def reporting(monkeypatch):
-    monkeypatch.setattr(crawl, "_error_last_reported_at", {})
-    monkeypatch.setattr(crawl, "CRAWL_REPORT_ERRORS", True)
-    monkeypatch.setattr(crawl, "CRAWL_SUBMIT_MODE", crawl.SUBMIT_MODE_DRY_RUN)
-    monkeypatch.setattr(crawl, "get_device_name", lambda data_path: "crawler-test")
-    with patch("mwmbl.crawl.requests.post") as post:
-        yield post
-
-
-def test_report_error_posts_the_traceback(reporting):
-    crawl.report_error("indexing", raise_and_catch(ValueError("bad page")))
-
-    report = reporting.call_args.kwargs["json"]
-    assert reporting.call_args.args[0] == f"{crawl.REMOTE_SERVER}/api/v1/crawler/errors"
-    assert report["exception_type"] == "builtins.ValueError"
-    assert report["message"] == "bad page"
-    assert report["frames"][-1]["function"] == "raise_and_catch"
-    assert report["device_name"] == "crawler-test"
-
-
-def test_the_same_error_is_reported_once_an_hour_not_every_retry(reporting):
-    def fail():
-        return raise_and_catch(ValueError("same place"))
-
-    for _ in range(3):
-        crawl.report_error("indexing", fail())
-    crawl.report_error("batch", fail())
-
-    assert reporting.call_count == 2
-
-
-@pytest.mark.parametrize(
-    "setting, value", [("CRAWL_REPORT_ERRORS", False), ("CRAWL_SUBMIT_MODE", crawl.SUBMIT_MODE_OFF)]
-)
-def test_nothing_is_reported_when_turned_off(reporting, monkeypatch, setting, value):
-    monkeypatch.setattr(crawl, setting, value)
-
-    crawl.report_error("indexing", raise_and_catch(ValueError("bad page")))
-
-    reporting.assert_not_called()
-
-
-def test_the_report_does_not_name_the_volunteers_home_directory(reporting, monkeypatch, tmp_path):
-    monkeypatch.setattr(crawl.Path, "home", lambda: tmp_path)
-    error = raise_and_catch(FileNotFoundError(f"No such file: '{tmp_path}/.mwmbl/index'"))
-
-    crawl.report_error("indexing", error)
-
-    report = reporting.call_args.kwargs["json"]
-    assert report["message"] == "No such file: '~/.mwmbl/index'"
-    assert report["frames"][-1]["filename"] == "test_crawler_error_reports.py"
-
-
-def test_a_frame_path_is_relative_to_its_python_path_entry(monkeypatch):
-    monkeypatch.setattr(crawl.sys, "path", ["/home/jane/venv/lib/site-packages", "/home/jane"])
-
-    assert crawl._module_path("/home/jane/venv/lib/site-packages/mwmbl/crawl.py") == "mwmbl/crawl.py"
-
-
-def test_a_failed_report_is_logged_not_raised(reporting, caplog):
-    reporting.side_effect = requests.ConnectionError("server down")
-
-    crawl.report_error("indexing", raise_and_catch(ValueError("bad page")))
-
-    assert "Failed to report error" in caplog.text

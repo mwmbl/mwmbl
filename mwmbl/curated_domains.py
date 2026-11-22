@@ -21,8 +21,8 @@ CURATED_DOMAINS_CACHE_TIMEOUT = 300
 
 
 def get_curated_domains() -> set[str]:
-    # The standalone crawler runs django.setup() against settings_crawler, which has no
-    # database; it fetches the same names over HTTP instead, see crawl.py.
+    # Without a database there is nothing curated. The crawler fetches the same names over
+    # HTTP, from GET /api/v1/crawler/curated-domains.
     if not settings.HAS_DATABASE:
         return set()
 

@@ -33,7 +33,7 @@ repos:
         types: [python]
         pass_filenames: false
 
-      # CI's check that crawler changes raise CRAWLER_VERSION, for the commit about to be
+      # CI's check that crawler changes raise the crawler's version, for the commit about to be
       # made: see mwmbl/crawler/release_check.py. pre-commit passes it the message file.
       - id: crawler-release-check
         name: crawler release check

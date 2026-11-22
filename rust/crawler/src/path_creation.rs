@@ -36,7 +36,10 @@ pub fn bloom_path(home: &Path) -> PathBuf {
 /// and meaningless to anyone but its owner. Set `MWMBL_DEVICE_NAME` to choose your own -
 /// worth doing if you run several crawlers and want to tell them apart in the UI.
 pub fn get_device_name(home: &Path, device_name: Option<String>) -> String {
-    if let Some(device_name) = device_name {
+    // Compose passes MWMBL_DEVICE_NAME through empty when it is unset, and that is unset.
+    if let Some(device_name) = device_name
+        && !device_name.is_empty()
+    {
         return device_name;
     }
     let mut path = data_path(home);
@@ -81,6 +84,7 @@ mod tests {
         let first = get_device_name(&home, None);
         assert!(first.starts_with("crawler-"), "{first}");
         assert_eq!(get_device_name(&home, None), first);
+        assert_eq!(get_device_name(&home, Some(String::new())), first);
         assert!(index_path(&home).starts_with(home.join(".mwmbl")));
     }
 }
