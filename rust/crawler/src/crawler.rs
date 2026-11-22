@@ -140,6 +140,7 @@ impl Crawler {
             let db = self.domainlinkdb.clone();
             let to_submit = self.to_submit.clone();
             let count = self.count.clone();
+            let params = self.params.clone();
 
             spawn(async move {
                 let url = url_queue.get_url().await;
@@ -186,6 +187,12 @@ impl Crawler {
                     lock.push_back(result.to_document());
                     if lock.len() > MAX_SUBMIT_QUEUE_SIZE {
                         lock.pop_front();
+                    }
+                    drop(lock);
+                    // Crawling counts as alive, not just submitting: with a long crawl delay a
+                    // batch takes longer to fill than the health check's window.
+                    if healthcheck(&params.home).await.is_err() {
+                        eprintln!("Failed to update healthfile");
                     }
                 }
             });
