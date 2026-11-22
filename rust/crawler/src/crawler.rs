@@ -30,7 +30,7 @@ use crate::{
         READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    path_creation::{get_device_name, index_path},
+    path_creation::{get_device_name, healthcheck, index_path},
     retrieve::{CrawlResult, crawl},
     robots::RobotCache,
     url_queue::SharedURLQueue,
@@ -218,7 +218,7 @@ impl Crawler {
             indexed_documents.new_page_doc_counts().iter().collect();
         term_new_doc_count.sort_by_key(|v| Reverse(v.1));
 
-        let device_name = get_device_name(&self.params.home, self.params.device_name.clone());
+        let device_name = get_device_name(&self.params.home, self.params.device_name.clone()).await;
 
         let mut terms: Vec<String> = Vec::new();
         let mut result_items: Vec<SendResult> = Vec::new();
@@ -283,6 +283,9 @@ impl Crawler {
                 .collect();
             let pagedocs = HashMap::from([(page_index, new_term_remote_items)]);
             self.index.index_pages(pagedocs, true).await?;
+        }
+        if healthcheck(&self.params.home).await.is_err() {
+            eprintln!("Failed to update healthfile");
         }
         println!("Results sendt.");
         Ok(())
