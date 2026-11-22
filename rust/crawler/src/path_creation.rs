@@ -57,3 +57,30 @@ pub fn get_device_name(home: &Path, device_name: Option<String>) -> String {
     }
     buf
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{data_path, get_device_name, index_path};
+    use crate::test_support::scratch_home;
+
+    #[test]
+    fn a_chosen_name_is_used_as_it_is_and_nothing_is_stored() {
+        let home = scratch_home("chosen-name");
+        assert_eq!(
+            get_device_name(&home, Some("blue-heron".to_owned())),
+            "blue-heron"
+        );
+        assert!(!data_path(&home).exists());
+    }
+
+    #[test]
+    fn a_generated_name_is_kept_across_restarts() {
+        let home = scratch_home("generated-name");
+        std::fs::create_dir_all(data_path(&home)).unwrap();
+
+        let first = get_device_name(&home, None);
+        assert!(first.starts_with("crawler-"), "{first}");
+        assert_eq!(get_device_name(&home, None), first);
+        assert!(index_path(&home).starts_with(home.join(".mwmbl")));
+    }
+}

@@ -34,22 +34,53 @@ use crate::{
     tokenizer::clean_unicode,
 };
 
-/// The state of the document in the index. A value of None indicates an organic search result
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentState {
-    SyncedWithMainIndex = -2,
-    DELETED = -1,
-    FromUser = 2,
-    FromGoogle = 3,
-    FromWiki = 4,
-    OrganicApproved = 7,
-    FromUserApproved = 8,
-    FromGoogleApproved = 9,
-    FromWikiApproved = 10,
+/// Defines an enum the API and the index pages carry as its integer value, as the Python
+/// side writes it. Serde's default for an enum is its variant name, which the server
+/// neither sends nor accepts.
+macro_rules! integer_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident = $value:literal,)+ }) => {
+        $(#[$meta])*
+        #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+        #[serde(try_from = "i64", into = "i64")]
+        pub enum $name {
+            $($variant = $value,)+
+        }
+
+        impl From<$name> for i64 {
+            fn from(value: $name) -> i64 {
+                value as i64
+            }
+        }
+
+        impl TryFrom<i64> for $name {
+            type Error = String;
+
+            fn try_from(value: i64) -> Result<Self, Self::Error> {
+                match value {
+                    $($value => Ok($name::$variant),)+
+                    _ => Err(format!("{value} is not a {}", stringify!($name))),
+                }
+            }
+        }
+    };
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentSource {
+integer_enum!(
+    /// The state of the document in the index. A value of None indicates an organic search result
+    DocumentState {
+        SyncedWithMainIndex = -2,
+        DELETED = -1,
+        FromUser = 2,
+        FromGoogle = 3,
+        FromWiki = 4,
+        OrganicApproved = 7,
+        FromUserApproved = 8,
+        FromGoogleApproved = 9,
+        FromWikiApproved = 10,
+    }
+);
+
+integer_enum!(DocumentSource {
     Wikipedia = 1,
     Staan = 2,
     StaanIndexed = 3,
@@ -65,18 +96,26 @@ pub enum DocumentSource {
     CommonsCcBySa3_0 = 108,
     CommonsCcBySa4_0 = 109,
     CommonsOther = 110,
-}
+});
 
+/// `default` on the optional fields because Python writes a document to a page as a tuple
+/// with its trailing Nones cut off, so a page item has anywhere from three to nine elements.
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Document {
     title: String,
     url: String,
     extract: String,
+    #[serde(default)]
     score: Option<f32>,
+    #[serde(default)]
     term: Option<String>,
+    #[serde(default)]
     state: Option<DocumentState>,
+    #[serde(default)]
     user_ids: Option<Vec<i32>>,
+    #[serde(default)]
     last_crawled: Option<i64>,
+    #[serde(default)]
     source: Option<DocumentSource>,
 }
 
@@ -811,8 +850,38 @@ where
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{Document, DocumentState, combine_documents};
+    use super::{Document, DocumentSource, DocumentState, combine_documents};
     use crate::rank::HeuristicRanker;
+
+    #[test]
+    fn state_and_source_are_their_integer_values_as_the_server_has_them() {
+        // The shape of a document in the server's `new_items`.
+        let json = r#"{"title": "Rust", "url": "https://rust-lang.org/", "extract": "",
+            "score": null, "term": "rust", "state": 7, "user_ids": null,
+            "last_crawled": null, "source": 4}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+
+        let value = serde_json::to_value(&doc).unwrap();
+        assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
+        let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
+        assert!(unknown.to_string().contains("5 is not a DocumentSource"));
+    }
+
+    #[test]
+    fn a_page_tuple_from_python_may_leave_off_its_trailing_nones() {
+        let short: Document =
+            serde_json::from_str(r#"["Rust", "https://rust-lang.org/", "ext"]"#).unwrap();
+        assert_eq!((short.title(), short.state()), ("Rust", None));
+
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", 1.0, "rust", 7, [3], 1795000000]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+        assert_eq!(
+            (doc.last_crawled(), doc.source()),
+            (Some(1_795_000_000), None)
+        );
+    }
 
     fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
         Document::new(

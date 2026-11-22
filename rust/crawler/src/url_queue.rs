@@ -93,6 +93,18 @@ impl ClaimedUrl {
     pub fn url(&self) -> &reqwest::Url {
         &self.url
     }
+
+    /// A URL on a domain claimed by nothing else, already released, for tests that crawl it.
+    #[cfg(test)]
+    pub fn unqueued(url: reqwest::Url) -> ClaimedUrl {
+        let domain = Arc::new(Mutex::new((String::new(), UrlQueue::new(), Instant::now())));
+        let claim = ClaimedDomain::new(Weak::new(), domain.try_lock_owned().unwrap(), true);
+        ClaimedUrl {
+            claim,
+            url,
+            released: true,
+        }
+    }
     pub fn release_after_delay(self, resolved_domain: Option<&str>, delay: Duration) {
         let resolved_domain = resolved_domain.map(std::borrow::ToOwned::to_owned).clone();
         task::spawn(async move {

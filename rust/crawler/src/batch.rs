@@ -62,3 +62,50 @@ impl PostResultsResponse {
         self.new_items.as_ref()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mwmbl_core::indexer::{Document, DocumentState};
+    use serde_json::Value;
+
+    use super::{PostResultsResponse, SendResult, SendResults};
+
+    // The server's side of these is test/test_rust_crawler_contract.py, which checks the
+    // same files against the API's schemas.
+    const REQUEST: &str = include_str!("../fixtures/results_request.json");
+    const RESPONSE: &str = include_str!("../fixtures/results_response.json");
+
+    #[test]
+    fn results_are_sent_in_the_shape_the_server_takes() {
+        let document = Document::new(
+            "Rust ownership explained".to_owned(),
+            "https://example.com/rust".to_owned(),
+            "How ownership and borrowing work in Rust.".to_owned(),
+            Some(1.5),
+            Some("rust".to_owned()),
+            Some(DocumentState::FromUser),
+            Some(vec![3]),
+            Some(1_795_000_000),
+            None,
+        );
+        let results = SendResults::new(
+            vec![SendResult::new(&document)],
+            Some("2.0.0".to_owned()),
+            Some("blue-heron".to_owned()),
+            Some(true),
+        );
+
+        let sent = serde_json::to_value(&results).unwrap();
+        let expected: Value = serde_json::from_str(REQUEST).unwrap();
+        assert_eq!(sent, expected);
+    }
+
+    #[test]
+    fn the_server_response_is_read_with_its_curated_states() {
+        let response: PostResultsResponse = serde_json::from_str(RESPONSE).unwrap();
+        let new_items = response.new_items().unwrap();
+        assert_eq!(new_items.len(), 1);
+        assert_eq!(new_items[0].state(), Some(&DocumentState::OrganicApproved));
+        assert_eq!(new_items[0].user_ids(), Some(&vec![3, 5]));
+    }
+}

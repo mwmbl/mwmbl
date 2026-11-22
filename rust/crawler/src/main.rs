@@ -21,6 +21,8 @@ mod curated_domains;
 mod path_creation;
 mod retrieve;
 mod robots;
+#[cfg(test)]
+mod test_support;
 mod url_queue;
 
 use std::path::PathBuf;

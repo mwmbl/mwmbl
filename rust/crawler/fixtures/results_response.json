@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "url": null,
+  "new_items": [
+    {
+      "title": "Rust ownership explained",
+      "url": "https://example.com/rust",
+      "extract": "How ownership and borrowing work in Rust.",
+      "score": 2.0,
+      "term": "rust",
+      "state": 7,
+      "user_ids": [3, 5],
+      "last_crawled": 1795000000,
+      "source": null
+    }
+  ]
+}

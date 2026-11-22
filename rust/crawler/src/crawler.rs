@@ -344,3 +344,21 @@ impl Crawler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Crawler;
+
+    #[test]
+    fn the_api_user_agent_names_the_version_and_the_url_encoded_username() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(
+            Crawler::api_user_agent(None),
+            format!("mwmbl-crawler/{version} (+https://github.com/mwmbl/mwmbl)")
+        );
+        assert_eq!(
+            Crawler::api_user_agent(Some(&"jo bloggs".to_owned())),
+            format!("mwmbl-crawler/{version} (+https://github.com/mwmbl/mwmbl; user jo%20bloggs)")
+        );
+    }
+}
