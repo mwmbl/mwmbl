@@ -4,7 +4,7 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::header;
+use reqwest::{Client, header};
 use serde_json::Value;
 use std::{
     cmp::{Reverse, max, min},
@@ -128,7 +128,7 @@ impl Crawler {
         let client = self.get_client()?;
         let start = Instant::now();
 
-        self.index();
+        self.index().await?;
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
@@ -222,11 +222,13 @@ impl Crawler {
         format!("{API_PRODUCT} ({identity})")
     }
 
-    pub fn index(&self) {
+    pub async fn index(&self) -> anyhow::Result<()> {
         let clone = self.clone();
         let semaphore = self.submit_semaphore.clone();
         let to_submit = self.to_submit.clone();
         let submit_paused_until = self.submit_paused_until.clone();
+
+        let client = clone.get_send_client().await?;
         spawn(async move {
             loop {
                 // Documents keep queueing (up to MAX_SUBMIT_QUEUE_SIZE) while paused, so the
@@ -248,9 +250,10 @@ impl Crawler {
                         continue;
                     };
                     let clone = clone.clone();
+                    let client = client.clone();
                     spawn(async move {
                         println!("Sending results.");
-                        if let Err(err) = clone.index_batch(docs).await {
+                        if let Err(err) = clone.index_batch(docs, client).await {
                             eprintln!("Error during indexing : {err}");
                         }
                         drop(permit);
@@ -261,9 +264,10 @@ impl Crawler {
                 }
             }
         });
+        Ok(())
     }
 
-    async fn index_batch(&self, docs: Vec<Document>) -> anyhow::Result<()> {
+    async fn index_batch(&self, docs: Vec<Document>, client: Client) -> anyhow::Result<()> {
         let indexed_documents = self.index.index_documents(docs, &self.blacklist).await?;
 
         let mut term_new_doc_count: Vec<(&String, &usize)> =
@@ -294,7 +298,6 @@ impl Crawler {
             result_items.append(&mut items);
         }
 
-        let client = self.get_send_client().await?;
         let results = SendResults::new(
             result_items,
             Some(env!("CARGO_PKG_VERSION").to_owned()),

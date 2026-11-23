@@ -126,8 +126,7 @@ impl RemoteBlacklistProvider {
     }
 
     async fn build_domains(url: String) -> anyhow::Result<HashSet<String>> {
-        let response = Client::builder()
-            .build()?
+        let response = Client::default()
             .get(url)
             .timeout(Duration::from_mins(1))
             .send()
