@@ -66,19 +66,21 @@ async fn post_results(
     remote_server: &str,
     results: &SendResults,
 ) -> anyhow::Result<Submission> {
-    let Ok(response) = client
+    let response = client
         .post(format!("{remote_server}/api/v1/crawler/results"))
         .json(results)
         .send()
-        .await
-    else {
-        bail!("Error in sending result");
+        .await;
+
+    let Ok(response) = response else {
+        bail!("Error in sending result, error {response:#?}");
     };
-    if response.status() == 426 {
+    let code = response.status();
+    if code == 426 {
         return Ok(Submission::UpgradeRequired(response.text().await?));
     }
     let Ok(response) = response.error_for_status() else {
-        bail!("Error in sending result");
+        bail!("Error in sending result, error code: {code}");
     };
     let Ok(response) = response.json::<PostResultsResponse>().await else {
         bail!("Error in parsing PostResultsResponse");

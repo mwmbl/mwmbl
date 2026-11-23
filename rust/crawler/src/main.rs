@@ -42,10 +42,10 @@ struct Cli {
     #[command(flatten)]
     crawler_params: CrawlerParams,
     /// number of async workers
-    #[arg(env = "CRAWL_THREADS", long, default_value = "32")]
+    #[arg(env = "CRAWL_THREADS", long, default_value = "8")]
     crawler_workers: usize,
     /// number of blocking workers (used for html parsing and updating local index)
-    #[arg(env = "BLOCKING_THREADS", long, default_value = "8")]
+    #[arg(env = "BLOCKING_THREADS", long, default_value = "4")]
     blocking_workers: usize,
 }
 
@@ -75,10 +75,10 @@ pub struct CrawlerParams {
     )]
     remote_server: String,
     /// maximum amount of simultaneous indexing task that can run at any point.
-    #[arg(env = "SUBMIT_MAX_TASKS", long, default_value = "16")]
+    #[arg(env = "SUBMIT_MAX_TASKS", long, default_value = "4")]
     max_submit_task: usize,
     /// maximum amount of simultaneous crawling task that can run at any point.
-    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "64")]
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "16")]
     max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
