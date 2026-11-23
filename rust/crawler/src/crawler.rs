@@ -51,6 +51,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     submit_paused_until: Arc<RwLock<Option<Instant>>>,
     count: Arc<AtomicUsize>,
     index: TinyIndex,
+    device_name: String,
 }
 
 #[derive(Debug)]
@@ -94,6 +95,7 @@ impl Crawler {
         let domainlinkdb = BloomDatabase::new(&params.home).await?;
         let index_path = index_path(&params.home);
         let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
+        let device_name = get_device_name(&params.home, params.device_name.clone()).await;
 
         Ok(Crawler {
             url_queue,
@@ -108,6 +110,7 @@ impl Crawler {
             to_submit: Arc::new(RwLock::new(VecDeque::new())),
             submit_paused_until: Arc::new(RwLock::new(None)),
             index,
+            device_name,
         })
     }
 
@@ -274,8 +277,6 @@ impl Crawler {
             indexed_documents.new_page_doc_counts().iter().collect();
         term_new_doc_count.sort_by_key(|v| Reverse(v.1));
 
-        let device_name = get_device_name(&self.params.home, self.params.device_name.clone()).await;
-
         let mut terms: Vec<String> = Vec::new();
         let mut result_items: Vec<SendResult> = Vec::new();
 
@@ -301,7 +302,7 @@ impl Crawler {
         let results = SendResults::new(
             result_items,
             Some(env!("CARGO_PKG_VERSION").to_owned()),
-            Some(device_name.clone()),
+            Some(self.device_name.clone()),
             Some(true),
         );
         let response = match post_results(&client, &self.params.remote_server, &results).await? {
