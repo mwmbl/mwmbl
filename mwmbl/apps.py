@@ -89,11 +89,10 @@ class MwmblConfig(AppConfig):
     verbose_name = "Mwmbl Application"
 
     def ready(self):
-        # The search index is not created here but by `manage.py create_index` (and by the
-        # crawler's main()). Creating it on startup turned a data volume that failed to
-        # mount into a server running happily on an empty index, and made every process
-        # that set Django up - tests, management commands, an import of mwmbl.crawl - write
-        # one. The external cache is disposable, so it is still created and resized here.
+        # The search index is not created here but by `manage.py create_index`. Creating it
+        # on startup turned a data volume that failed to mount into a server running happily
+        # on an empty index, and made every process that set Django up - tests, management
+        # commands - write one. The external cache is disposable, so it is still created and resized here.
         #
         # Note this writes num_pages * 4 KB page by page rather than sparsely, so the first
         # boot after a size change pays for the whole file up front - ~17s for the 15 GB

@@ -182,3 +182,127 @@ pub async fn robot_allowed(
         .await;
     bail!("robots.txt unavailable for {domain}");
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use reqwest::{StatusCode, Url};
+
+    use super::{CachedRobotFile, RobotCache, get_robot_url, robot_allowed};
+    use crate::{
+        constants::{
+            BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF,
+            ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS,
+        },
+        test_support::{TestServer, client, text},
+    };
+
+    const ROBOTS: &str = "User-agent: mwmbl-crawler\nDisallow: /private\nCrawl-delay: 2\n";
+
+    #[test]
+    fn robots_txt_is_at_the_root_of_the_host() {
+        let url = Url::parse("https://example.com:8080/a/b?q=1#frag").unwrap();
+        assert_eq!(
+            get_robot_url(&url).as_str(),
+            "https://example.com:8080/robots.txt"
+        );
+    }
+
+    #[test]
+    fn a_robots_file_allows_or_denies_by_path() {
+        let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(ROBOTS.as_bytes()));
+        let public = Url::parse("https://example.com/public").unwrap();
+        let private = Url::parse("https://example.com/private/page").unwrap();
+        assert_eq!(robot.can_fetch(&public), Some(true));
+        assert_eq!(robot.can_fetch(&private), Some(false));
+        assert_eq!(
+            CachedRobotFile::new(ROBOTS_CACHE_ERROR_TTL_SECONDS, None).can_fetch(&public),
+            None
+        );
+    }
+
+    #[test]
+    fn the_delay_is_the_crawl_delay_asked_for_or_the_default() {
+        let with_delay = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(ROBOTS.as_bytes()));
+        assert_eq!(
+            with_delay.delay(Some(StatusCode::OK)),
+            Duration::from_secs(2)
+        );
+        let without = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(b""));
+        assert_eq!(without.delay(Some(StatusCode::OK)), DEFAULT_DOMAIN_DELAY);
+        // No robots.txt to go by, so the domain waits out the error TTL.
+        let unavailable = CachedRobotFile::new(ROBOTS_CACHE_ERROR_TTL_SECONDS, None);
+        assert_eq!(
+            unavailable.delay(Some(StatusCode::OK)),
+            ROBOTS_CACHE_ERROR_TTL_SECONDS
+        );
+    }
+
+    #[test]
+    fn refusals_double_the_cool_off_up_to_the_maximum_and_a_success_resets_it() {
+        let robot = CachedRobotFile::new(ROBOTS_CACHE_TTL_SECONDS, Some(b""));
+        let refused = Some(StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(robot.delay(refused), BLOCK_COOL_OFF);
+        assert_eq!(robot.delay(refused), BLOCK_COOL_OFF * 2);
+        assert_eq!(robot.delay(refused), BLOCK_COOL_OFF * 4);
+        for _ in 0..40 {
+            robot.delay(refused);
+        }
+        assert_eq!(robot.delay(refused), MAX_BLOCK_COOL_OFF);
+
+        assert_eq!(robot.delay(Some(StatusCode::OK)), DEFAULT_DOMAIN_DELAY);
+        assert_eq!(robot.delay(refused), BLOCK_COOL_OFF);
+    }
+
+    #[tokio::test]
+    async fn robots_txt_is_fetched_once_and_then_served_from_the_cache() {
+        let server = TestServer::start(vec![("/robots.txt", text(200, ROBOTS))]).await;
+        let client = client();
+        let mut cache = RobotCache::new();
+
+        let public = server.url("/public");
+        let private = server.url("/private/page");
+        assert!(
+            robot_allowed(&public, "localhost", &client, &mut cache)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !robot_allowed(&private, "localhost", &client, &mut cache)
+                .await
+                .unwrap()
+        );
+        assert_eq!(server.requests(), vec!["/robots.txt"]);
+        assert_eq!(
+            cache.domain_delay(Some(StatusCode::OK), "localhost").await,
+            Duration::from_secs(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_robots_txt_allows_everything() {
+        let server = TestServer::start(vec![]).await;
+        let mut cache = RobotCache::new();
+        let allowed = robot_allowed(&server.url("/anything"), "localhost", &client(), &mut cache)
+            .await
+            .unwrap();
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn a_robots_txt_that_fails_or_rate_limits_is_unavailable() {
+        for status in [500, 503, 429] {
+            let server = TestServer::start(vec![("/robots.txt", text(status, ""))]).await;
+            let mut cache = RobotCache::new();
+            let result =
+                robot_allowed(&server.url("/page"), "localhost", &client(), &mut cache).await;
+            assert!(result.is_err(), "status {status}");
+            assert_eq!(
+                cache.domain_delay(Some(StatusCode::OK), "localhost").await,
+                ROBOTS_CACHE_ERROR_TTL_SECONDS,
+                "status {status}"
+            );
+        }
+    }
+}

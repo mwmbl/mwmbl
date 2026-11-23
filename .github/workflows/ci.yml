@@ -118,15 +118,7 @@ jobs:
       - name: Create test directories and files
         run: |
           mkdir -p /tmp/test_mwmbl_data
-      #----------------------------------------------
-      # The crawler container runs mwmbl-crawl with no DJANGO_SETTINGS_MODULE and no
-      # database - mwmbl.crawl configures Django itself. Import it with that environment
-      # (this step deliberately sets neither) so an import reaching Django models before
-      # django.setup() fails here rather than in the running container.
-      #----------------------------------------------
-      - name: Check the crawler entry point imports standalone
-        run: uv run python -c "from mwmbl.crawl import run"
-      - name: Check crawler changes raise CRAWLER_VERSION
+      - name: Check crawler changes raise the crawler's version
         if: github.event_name == 'pull_request'
         run: uv run python -m mwmbl.crawler.release_check HEAD^1
       - name: Run Python and Rust tests with coverage

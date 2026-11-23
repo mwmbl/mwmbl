@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "crawler_rs"
-version = "2.0.0"
+version = "2.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1362,6 +1362,7 @@ dependencies = [
  "dom_query 0.29.0",
  "fastbloom",
  "futures-util",
+ "hickory-resolver",
  "itertools 0.15.0",
  "kreuzberg",
  "mwmbl_core",

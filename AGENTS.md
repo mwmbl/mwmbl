@@ -26,16 +26,15 @@ names, which the tests flush. `make test` defaults it to `redis://127.0.0.1:6379
 `make check` and `make test` are the two gates. Both must pass before you open a pull
 request, and `.pre-commit-config.yaml` runs the first of them on every commit.
 
-CI also fails a pull request that changes what the crawler runs without raising
-`CRAWLER_VERSION` (`mwmbl/crawler/release_check.py`). The crawler imports the shared
-settings, so this includes settings only the server reads. When a commit leaves the
-crawler's behaviour unchanged, put `No functional changes to the crawler.` on a line of
-its own in its message instead of raising the version. The commit-msg hook catches a
-commit that needs one or the other.
+CI also fails a pull request that changes the crawler (`rust/crawler`, `rust/mwmbl_core`,
+`Dockerfile.crawler`) without raising the version in `rust/crawler/Cargo.toml`
+(`mwmbl/crawler/release_check.py`). When a commit leaves the crawler's behaviour unchanged,
+put `No functional changes to the crawler.` on a line of its own in its message instead of
+raising the version. The commit-msg hook catches a commit that needs one or the other.
 
 ## Layout
 
-- `mwmbl/` — the Django project. `crawler/` (crawl queue and batches), `indexer/` (the
+- `mwmbl/` — the Django project. `crawler/` (the crawler API and the server's own fetching), `indexer/` (the
   index and its update pipeline), `moderation/`, `platform/`, `evaluation/` and
   `rankeval/` (ranking quality), `api.py` (django-ninja endpoints), `models.py`,
   `settings_*.py` per environment.
@@ -45,6 +44,7 @@ commit that needs one or the other.
   `.claude/hooks/session-start.sh` seeds the library from the `xgboost-cpu` wheel at
   session start. If the build fails with `libxgboost.so: unknown file type`, rerun that
   script rather than working around it by hand.
+- `rust/crawler/` — the crawler volunteers run (Rust). `make rust-core` lints and tests it.
 - `test/` — pytest suite, one file per area.
 - `front-end/` — the JS build; leave it alone unless the change is about the UI.
 - `scripts/`, `analyse/` — one-off analysis and evaluation tools, not application code.

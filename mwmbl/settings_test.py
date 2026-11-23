@@ -27,11 +27,6 @@ CACHES = {
     }
 }
 
-# Test bloom filter paths
-URLS_BLOOM_FILTER_PATH = "/tmp/test_urls-{year}-{month}.bloom"
-URLS_BLOOM_FILTER_FALLBACK_PATH = "/tmp/test_urls.bloom"
-NUM_URLS_IN_BLOOM_FILTER = 1000
-
 DOMAIN_LINKS_BLOOM_FILTER_PATH = "/tmp/test_links_{domain_group}.bloom"
 NUM_DOMAINS_IN_BLOOM_FILTER = 1000
 

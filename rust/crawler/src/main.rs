@@ -21,6 +21,9 @@ mod curated_domains;
 mod path_creation;
 mod retrieve;
 mod robots;
+mod ssrf;
+#[cfg(test)]
+mod test_support;
 mod url_queue;
 
 use std::path::PathBuf;
@@ -39,10 +42,10 @@ struct Cli {
     #[command(flatten)]
     crawler_params: CrawlerParams,
     /// number of async workers
-    #[arg(env = "CRAWL_THREADS", long, default_value = "32")]
+    #[arg(env = "CRAWL_THREADS", long, default_value = "8")]
     crawler_workers: usize,
     /// number of blocking workers (used for html parsing and updating local index)
-    #[arg(env = "BLOCKING_THREADS", long, default_value = "8")]
+    #[arg(env = "BLOCKING_THREADS", long, default_value = "4")]
     blocking_workers: usize,
 }
 
@@ -56,16 +59,15 @@ pub struct CrawlerParams {
     contact_info: String,
     /// Name this crawler reports itself as, so its owner can tell their crawlers apart in the
     /// devices list. Left unset, a random id is generated on first run and kept in the data
-    /// directory - see mwmbl.crawler.device. The machine hostname is deliberately never used.
+    /// directory. The machine hostname is deliberately never used, as hostnames routinely carry
+    /// their owner's real name.
     #[arg(env = "MWMBL_DEVICE_NAME", long, required = false)]
     device_name: Option<String>,
-    /// Whether to send the errors the crawl loops catch to the Mwmbl server, so we can see when
-    /// crawlers are failing. Reports carry the exception and traceback, the crawler version and
-    /// the device name. File paths are sent relative to the Python path, and the home directory
-    /// is replaced with ~ in the message, so a report does not name the volunteer's account.
+    /// Seconds to wait between starting one fetch and the next, with 10% random fuzz. Each
+    /// domain is also limited to the Crawl-delay its robots.txt asks for, or 5 seconds.
     #[arg(env = "CRAWL_DELAY_SECONDS", long, default_value = "0.0")]
     crawl_delay_seconds: f32,
-    /// What to do with results the crawler decides are worth submitting:
+    /// The Mwmbl API the crawler submits results to and reads curated domains from.
     #[arg(
         env = "MWMBL_REMOTE_SERVER",
         long,
@@ -73,10 +75,10 @@ pub struct CrawlerParams {
     )]
     remote_server: String,
     /// maximum amount of simultaneous indexing task that can run at any point.
-    #[arg(env = "SUBMIT_MAX_TASKS", long, default_value = "16")]
+    #[arg(env = "SUBMIT_MAX_TASKS", long, default_value = "4")]
     max_submit_task: usize,
     /// maximum amount of simultaneous crawling task that can run at any point.
-    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "64")]
+    #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "16")]
     max_crawl_task: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]

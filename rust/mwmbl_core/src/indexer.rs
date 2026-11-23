@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     cmp::max,
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -34,22 +33,64 @@ use crate::{
     tokenizer::clean_unicode,
 };
 
-/// The state of the document in the index. A value of None indicates an organic search result
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentState {
-    SyncedWithMainIndex = -2,
-    DELETED = -1,
-    FromUser = 2,
-    FromGoogle = 3,
-    FromWiki = 4,
-    OrganicApproved = 7,
-    FromUserApproved = 8,
-    FromGoogleApproved = 9,
-    FromWikiApproved = 10,
+/// Defines an enum the API and the index pages carry as its integer value, as the Python
+/// side writes it. Serde's default for an enum is its variant name, which the server
+/// neither sends nor accepts.
+macro_rules! integer_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident = $value:literal,)+ }) => {
+        $(#[$meta])*
+        #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+        #[serde(try_from = "i64", into = "i64")]
+        pub enum $name {
+            $($variant = $value,)+
+        }
+
+        impl From<$name> for i64 {
+            fn from(value: $name) -> i64 {
+                value as i64
+            }
+        }
+
+        impl TryFrom<i64> for $name {
+            type Error = String;
+
+            fn try_from(value: i64) -> Result<Self, Self::Error> {
+                match value {
+                    $($value => Ok($name::$variant),)+
+                    _ => Err(format!("{value} is not a {}", stringify!($name))),
+                }
+            }
+        }
+    };
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentSource {
+/// A state or source this build does not know, as an older crawler sees one added since,
+/// reads as None rather than failing the page or the whole API response it is in.
+fn known_or_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: TryFrom<i64>,
+{
+    let value: Option<i64> = Option::deserialize(deserializer)?;
+    Ok(value.and_then(|value| T::try_from(value).ok()))
+}
+
+integer_enum!(
+    /// The state of the document in the index. A value of None indicates an organic search result
+    DocumentState {
+        SyncedWithMainIndex = -2,
+        DELETED = -1,
+        FromUser = 2,
+        FromGoogle = 3,
+        FromWiki = 4,
+        OrganicApproved = 7,
+        FromUserApproved = 8,
+        FromGoogleApproved = 9,
+        FromWikiApproved = 10,
+    }
+);
+
+integer_enum!(DocumentSource {
     Wikipedia = 1,
     Staan = 2,
     StaanIndexed = 3,
@@ -65,18 +106,26 @@ pub enum DocumentSource {
     CommonsCcBySa3_0 = 108,
     CommonsCcBySa4_0 = 109,
     CommonsOther = 110,
-}
+});
 
+/// `default` on the optional fields because Python writes a document to a page as a tuple
+/// with its trailing Nones cut off, so a page item has anywhere from three to nine elements.
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Document {
     title: String,
     url: String,
     extract: String,
+    #[serde(default)]
     score: Option<f32>,
+    #[serde(default)]
     term: Option<String>,
+    #[serde(default, deserialize_with = "known_or_none")]
     state: Option<DocumentState>,
+    #[serde(default)]
     user_ids: Option<Vec<i32>>,
+    #[serde(default)]
     last_crawled: Option<i64>,
+    #[serde(default, deserialize_with = "known_or_none")]
     source: Option<DocumentSource>,
 }
 
@@ -382,19 +431,24 @@ impl TinyIndex {
     async fn store_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> Vec<StoredPage> {
         let stored: Vec<_> = join_all(
             page_documents
                 .into_par_iter()
                 .map(|(page, docs)| (page, docs, self.clone()))
-                .map(|(page, docs, index)| async move {
-                    spawn_blocking(move || {
-                        Handle::current().block_on(async move {
-                            index.store_page(page, &docs, mark_synced).await
+                .map(|(page, docs, index)| {
+                    let mark_term_synced = mark_term_synced.map(std::borrow::ToOwned::to_owned);
+                    async move {
+                        spawn_blocking(move || {
+                            Handle::current().block_on(async move {
+                                index
+                                    .store_page(page, &docs, mark_term_synced.as_ref())
+                                    .await
+                            })
                         })
-                    })
-                    .await
+                        .await
+                    }
                 })
                 .collect::<Vec<_>>(),
         )
@@ -406,7 +460,7 @@ impl TinyIndex {
         &self,
         page: usize,
         docs: &[Document],
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> Option<StoredPage> {
         let Ok(lock) = self.lock_page_write(page).await else {
             eprintln!("Skipping index page {page}");
@@ -420,7 +474,7 @@ impl TinyIndex {
         let mut combined_documents = combine_documents(
             &existing_documents,
             docs,
-            mark_synced,
+            mark_term_synced,
             &HeuristicRanker::new(f32::NEG_INFINITY),
         );
         let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
@@ -474,7 +528,7 @@ impl TinyIndex {
         let mut held_urls: HashSet<String> = HashSet::new();
         let mut copies: HashMap<String, Vec<Document>> = HashMap::new();
 
-        for page in self.store_pages(page_documents, false).await {
+        for page in self.store_pages(page_documents, None).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -546,11 +600,11 @@ impl TinyIndex {
     pub async fn index_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> anyhow::Result<HashMap<String, usize>> {
         let mut new_page_doc_counts: HashMap<String, usize> = HashMap::new();
 
-        for page in self.store_pages(page_documents, mark_synced).await {
+        for page in self.store_pages(page_documents, mark_term_synced).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -692,7 +746,7 @@ impl DocumentState {
 fn combine_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
-    mark_synced: bool,
+    mark_term_synced: Option<&String>,
     ranker: &R,
 ) -> Vec<Document>
 where
@@ -700,10 +754,11 @@ where
     J: IntoIterator<Item = &'a Document>,
 {
     let sorted = sort_documents(existing_documents, documents, ranker);
-    let mut values: Vec<(usize, Cow<'a, Document>)> = sorted
+    let mut values: Vec<(usize, Document)> = sorted
         .into_iter()
+        .cloned()
         .enumerate()
-        .map(|(order, doc)| (doc.url.as_str(), (order, Cow::Borrowed(doc))))
+        .map(|(order, doc)| (doc.url.clone(), (order, doc)))
         .into_group_map()
         .into_values()
         .filter_map(merge_user_ids_last_crawled)
@@ -715,9 +770,12 @@ where
     values.sort_by_key(|v| v.0);
     values
         .into_iter()
-        .map(|(_, doc)| {
-            let mut doc = doc.into_owned();
-            if mark_synced {
+        .map(|v| {
+            let mut doc = v.1;
+            if mark_term_synced.is_some()
+                && doc.state.is_none()
+                && doc.term.as_ref() == mark_term_synced
+            {
                 doc.state = Some(DocumentState::SyncedWithMainIndex);
             }
             doc
@@ -727,18 +785,16 @@ where
 
 /// The first document, with the history of all of them: the latest crawl, and every
 /// user id, latest crawl last. A document with no other copies is returned as it is.
-fn merge_user_ids_last_crawled(
-    mut docs: Vec<(usize, Cow<'_, Document>)>,
-) -> Option<(usize, Cow<'_, Document>)> {
+fn merge_user_ids_last_crawled(mut docs: Vec<(usize, Document)>) -> Option<(usize, Document)> {
     if docs.len() <= 1 {
         return docs.pop();
     }
     let (idx, mut best_doc) = docs
         .first()
-        .map(|(idx, doc)| (*idx, Document::clone(doc)))?;
+        .map(|(idx, best_doc)| (*idx, best_doc.to_owned()))?;
     docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
     let mut user_ids: Vec<i32> = Vec::new();
-    for (_, doc) in &docs {
+    for (_, doc) in docs {
         best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
         for &id in doc.user_ids.iter().flatten() {
             user_ids.retain(|v| *v != id);
@@ -746,7 +802,7 @@ fn merge_user_ids_last_crawled(
         }
     }
     best_doc.user_ids = Some(user_ids);
-    Some((idx, Cow::Owned(best_doc)))
+    Some((idx, best_doc))
 }
 
 fn sort_documents<'a, I, J, R: Ranker>(
@@ -811,8 +867,45 @@ where
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{Document, DocumentState, combine_documents};
+    use super::{Document, DocumentSource, DocumentState, combine_documents};
     use crate::rank::HeuristicRanker;
+
+    #[test]
+    fn state_and_source_are_their_integer_values_as_the_server_has_them() {
+        // The shape of a document in the server's `new_items`.
+        let json = r#"{"title": "Rust", "url": "https://rust-lang.org/", "extract": "",
+            "score": null, "term": "rust", "state": 7, "user_ids": null,
+            "last_crawled": null, "source": 4}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+
+        let value = serde_json::to_value(&doc).unwrap();
+        assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
+        let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
+        assert!(unknown.to_string().contains("5 is not a DocumentSource"));
+    }
+
+    #[test]
+    fn a_page_tuple_from_python_may_leave_off_its_trailing_nones() {
+        let short: Document =
+            serde_json::from_str(r#"["Rust", "https://rust-lang.org/", "ext"]"#).unwrap();
+        assert_eq!((short.title(), short.state()), ("Rust", None));
+
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", 1.0, "rust", 7, [3], 1795000000]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+        assert_eq!(
+            (doc.last_crawled(), doc.source()),
+            (Some(1_795_000_000), None)
+        );
+    }
+
+    #[test]
+    fn a_state_or_source_added_since_reads_as_none() {
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", null, "rust", 99, null, null, 99]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!((doc.state(), doc.source()), (None, None));
+    }
 
     fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
         Document::new(
@@ -842,7 +935,7 @@ mod tests {
         let combined = combine_documents(
             &existing,
             &incoming,
-            true,
+            Some(&"rust".to_owned()),
             &HeuristicRanker::new(f32::NEG_INFINITY),
         );
 

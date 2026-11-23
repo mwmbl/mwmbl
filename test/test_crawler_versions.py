@@ -1,6 +1,5 @@
 """Tests for the crawler version spread: recorded per submission, served to staff by the platform API."""
 
-import re
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
@@ -17,7 +16,6 @@ from mwmbl.crawler.stats import (
     LONG_EXPIRE_SECONDS,
     StatsManager,
 )
-from mwmbl.crawler.version import CRAWLER_VERSION
 from mwmbl.indexer.index_batches import IndexedDocuments, IndexedURLs
 from mwmbl.models import ApiKey, generate_api_key
 from mwmbl.utils import utc_today
@@ -45,11 +43,6 @@ def _spread(stats_manager, days=7):
 
 def _auth(user) -> dict:
     return {"Authorization": f"Bearer {RefreshToken.for_user(user).access_token}"}
-
-
-def test_crawler_version_is_what_the_release_tags_match():
-    # .github/workflows/crawler-release.yml tags each release crawler-vX.Y.Z.
-    assert re.fullmatch(r"\d+\.\d+\.\d+", CRAWLER_VERSION)
 
 
 @pytest.fixture

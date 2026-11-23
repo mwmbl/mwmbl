@@ -5,6 +5,7 @@ use ordered_float::OrderedFloat;
 
 pub static INDEX_NAME: &str = "crawl-index.tinysearch";
 pub static BLOOM_NAME: &str = "crawl-bloom";
+pub static HEALTH_FILE_NAME: &str = "indexing.health";
 pub static NUM_PAGES: usize = 100_000;
 pub static DATA_DIR: &str = ".mwmbl";
 
@@ -24,6 +25,8 @@ pub static KNOWN_DOMAINS_RANDOM_WEIGHT: usize = 99;
 
 pub static MAX_REDIRECTS: usize = 5;
 pub static READ_TIMEOUT: Duration = Duration::from_secs(30);
+// Matches the Python crawler: long enough for an external updater to replace this crawler.
+pub static UPGRADE_REQUIRED_WAIT: Duration = Duration::from_hours(1);
 pub static SEND_TIMEOUT: Duration = Duration::from_mins(2);
 pub static MAX_FETCH_SIZE: usize = 1024 * 1024;
 
@@ -55,7 +58,7 @@ pub static SCORE_TIME_CONSTANT: Duration = Duration::from_hours(24 * 30 * 10);
 
 pub static NUM_URLS_TAKENS: usize = 50;
 
-pub static SUBMIT_BATCH_SIZE: usize = 100;
-pub static SUBMIT_TOP_N: usize = 100;
+pub static SUBMIT_BATCH_SIZE: usize = 1000;
+pub static SUBMIT_TOP_N: usize = 25;
 pub static MAX_SUBMIT_QUEUE_SIZE: usize = 2000;
 pub static DEVICE_NAME_FILE: &str = "device-name";

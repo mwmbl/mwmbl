@@ -323,3 +323,64 @@ impl Drop for BloomDatabase {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Datelike, Utc};
+    use reqwest::Url;
+
+    use super::{BloomDatabase, DomainGroups, FoundURL, UrlStatus};
+    use crate::test_support::scratch_home;
+
+    fn found(url: &Url, status: UrlStatus) -> FoundURL {
+        FoundURL::new(url.clone(), status, Utc::now(), None)
+    }
+
+    #[tokio::test]
+    async fn a_crawled_url_is_remembered_across_restarts() {
+        let home = scratch_home("bloom");
+        let url = Url::parse("https://example.com/page").unwrap();
+        let today = Utc::now().date_naive();
+
+        let db = BloomDatabase::new(&home).await.unwrap();
+        let mut new = [found(&url, UrlStatus::New)];
+        db.update_found_urls(new.iter_mut());
+        assert_eq!(new[0].last_crawled(), None);
+
+        let mut crawled = [found(&url, UrlStatus::Crawled)];
+        db.update_found_urls(crawled.iter_mut());
+        assert_eq!(crawled[0].last_crawled(), Some(today));
+        drop(db);
+
+        // Seen again after a restart, the URL is known to have been crawled this month.
+        let db = BloomDatabase::new(&home).await.unwrap();
+        let mut again = [found(&url, UrlStatus::New)];
+        db.update_found_urls(again.iter_mut());
+        let first_of_month = today.with_day(1).unwrap();
+        assert_eq!(again[0].last_crawled(), Some(first_of_month));
+    }
+
+    #[tokio::test]
+    async fn links_from_a_trusted_domain_raise_the_score_of_the_domains_they_link_to() {
+        let home = scratch_home("domain-links");
+        let db = BloomDatabase::new(&home).await.unwrap();
+        assert!(db.get_domain_score("linked.example").abs() < f32::EPSILON);
+
+        db.update_domain_links("en.wikipedia.org", ["linked.example".to_owned()]);
+        db.update_domain_links("unknown-source.example", ["ignored.example".to_owned()]);
+
+        assert!(
+            (db.get_domain_score("linked.example") - DomainGroups::WikipediaEn.score()).abs()
+                < f32::EPSILON
+        );
+        assert!(db.get_domain_score("ignored.example").abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn only_finished_statuses_count_as_crawled() {
+        assert!(!UrlStatus::New.crawled());
+        assert!(!UrlStatus::Queued.crawled());
+        assert!(UrlStatus::Error404.crawled());
+        assert!(UrlStatus::Crawled.crawled());
+    }
+}

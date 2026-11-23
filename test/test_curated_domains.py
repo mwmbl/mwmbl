@@ -18,10 +18,8 @@ def clear_curated_cache():
 
 
 def test_no_database_returns_empty_without_querying():
-    """The standalone crawler runs under settings_crawler, which has no database.
-
-    It must not be possible for a blacklist construction there to reach for DomainSubmission
-    - the query would raise, and the crawler fetches the same names over HTTP instead.
+    """Without a database, a blacklist construction must not reach for DomainSubmission:
+    the query would raise.
     """
     with patch("mwmbl.curated_domains.DomainSubmission.objects") as objects:
         with override_settings(HAS_DATABASE=False):
