@@ -6,7 +6,7 @@ use rand::seq::IndexedRandom;
 use readabilityrs::ReadabilityOptions;
 #[cfg(feature = "servo")]
 use std::str::FromStr;
-use std::{cmp::min, collections::HashSet};
+use std::{cmp::max, collections::HashSet};
 use tokio::task::spawn_blocking;
 
 #[cfg(feature = "servo")]
@@ -32,7 +32,7 @@ pub enum CrawlResult {
     RobotsUnavailableError {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     RobotsDeniedError {
         timestamp: chrono::DateTime<Utc>,
@@ -41,7 +41,7 @@ pub enum CrawlResult {
     AbortError {
         timestamp: chrono::DateTime<Utc>,
         url: Url,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     NoResponseTextError {
         timestamp: chrono::DateTime<Utc>,
@@ -54,7 +54,7 @@ pub enum CrawlResult {
         url: Url,
         resolved_url: Url,
         status: StatusCode,
-        err: anyhow::Error,
+        _err: anyhow::Error,
     },
     CrawlContent(SuccesfullCrawlResult),
 }
@@ -72,11 +72,11 @@ pub struct SuccesfullCrawlResult {
 }
 
 impl SuccesfullCrawlResult {
-    pub fn to_document(self) -> mwmbl_core::indexer::Document {
+    pub fn to_document(&self) -> mwmbl_core::indexer::Document {
         mwmbl_core::indexer::Document::new(
-            self.title,
+            self.title.clone(),
             self.url.to_string(),
-            self.extract,
+            self.extract.clone(),
             None,
             None,
             None,
@@ -167,7 +167,11 @@ async fn fetch_default(
         let mime = mime::detect_mime_type_from_bytes(&data)?;
 
         if mime == "text/html" {
-            return Ok((String::from_utf8(data)?, status, resolved_url));
+            return Ok((
+                String::from_utf8_lossy(&data).into_owned(),
+                status,
+                resolved_url,
+            ));
         }
         let mut config = ExtractionConfig::default();
         config.output_format = OutputFormat::Html;
@@ -229,7 +233,7 @@ pub async fn crawl(
                 CrawlResult::RobotsUnavailableError {
                     timestamp,
                     url,
-                    err,
+                    _err: err,
                 },
             );
         }
@@ -249,13 +253,27 @@ pub async fn crawl(
                 CrawlResult::AbortError {
                     timestamp,
                     url,
-                    err,
+                    _err: err,
                 },
             );
         }
     };
 
-    let owned_url = url.to_owned();
+    // An error page or a bot challenge is not the page, so neither it nor its links are
+    // indexed.
+    if !status.is_success() {
+        return (
+            claimed_url,
+            CrawlResult::NoResponseTextError {
+                timestamp,
+                url,
+                status,
+                resolved_url,
+            },
+        );
+    }
+
+    let owned_url = url.clone();
     let crawl_result =
         match spawn_blocking(move || sanitize(&html, resolved_url, status, timestamp, owned_url))
             .await
@@ -267,7 +285,7 @@ pub async fn crawl(
                     CrawlResult::AbortError {
                         timestamp,
                         url,
-                        err: err.into(),
+                        _err: err.into(),
                     },
                 );
             }
@@ -302,7 +320,7 @@ fn sanitize(
                             timestamp,
                             url,
                             status,
-                            err: Error::msg("Article missing information"),
+                            _err: Error::msg("Article missing information"),
                             resolved_url,
                         };
                     }
@@ -312,7 +330,7 @@ fn sanitize(
                         timestamp,
                         url,
                         status,
-                        err: Error::msg("Cannot parse article"),
+                        _err: Error::msg("Cannot parse article"),
                         resolved_url,
                     };
                 }
@@ -322,7 +340,7 @@ fn sanitize(
                     timestamp,
                     url,
                     status,
-                    err: e.into(),
+                    _err: e.into(),
                     resolved_url,
                 };
             }
@@ -370,7 +388,11 @@ fn sanitize(
 }
 
 fn trim_size(string: &str, size: usize) -> String {
-    string.chars().take(size - 1).collect::<String>() + "…"
+    if string.len() > size {
+        string.chars().take(size - 1).collect::<String>() + "…"
+    } else {
+        string.to_owned()
+    }
 }
 
 fn select_links(links: HashSet<Url>) -> Vec<Url> {
@@ -391,7 +413,7 @@ fn select_links(links: HashSet<Url>) -> Vec<Url> {
     links
         .into_iter()
         .map(|v| v.1)
-        .take(min(map_len, NUM_URLS_TAKENS))
+        .take(max(map_len, NUM_URLS_TAKENS))
         .collect()
 }
 
@@ -415,4 +437,226 @@ fn extract_links_from_html(html: &str, base: &Url) -> HashSet<Url> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use chrono::Utc;
+    use reqwest::{StatusCode, Url};
+
+    use super::{CrawlResult, crawl, extract_links_from_html, sanitize, select_links, trim_size};
+    use crate::{
+        constants::{NUM_EXTRACT_CHARS, NUM_URLS_TAKENS},
+        robots::RobotCache,
+        test_support::{TestServer, client, html, text},
+        url_queue::ClaimedUrl,
+    };
+
+    const ARTICLE: &str = r#"<!doctype html><html><head><title>Rust ownership explained</title>
+        <meta name="description" content="How ownership and borrowing work in Rust.">
+        </head><body>
+        <nav><a href="/about">About</a> <a href="https://elsewhere.example/nav">Elsewhere</a></nav>
+        <article><h1>Rust ownership explained</h1>
+        <p>Ownership is the set of rules that govern how a Rust program manages memory. Every
+        value has an owner, and when the owner goes out of scope the value is dropped. This is
+        how Rust achieves memory safety without a garbage collector, and it is checked at
+        compile time so it costs nothing at run time.</p>
+        <p>Borrowing lets code use a value without taking ownership of it. A reference can be
+        shared or mutable, and the borrow checker makes sure the two never overlap, which rules
+        out data races. Read <a href="/borrowing">the borrowing chapter</a> or the
+        <a href="https://doc.rust-lang.org/book/">Rust book</a> for more.</p>
+        </article></body></html>"#;
+
+    fn base() -> Url {
+        Url::parse("https://example.com/docs/page").unwrap()
+    }
+
+    fn urls(links: &[Url]) -> HashSet<&str> {
+        links.iter().map(Url::as_str).collect()
+    }
+
+    #[test]
+    fn links_resolve_against_the_page_and_only_web_urls_with_a_domain_are_kept() {
+        let page = r#"<a href="other">relative</a> <a href="/root">root</a>
+            <a href=" https://a.example/x ">spaces</a> <a href="">empty</a>
+            <a href="mailto:me@example.com">mail</a> <a href="javascript:void(0)">js</a>
+            <a href="http://127.0.0.1/admin">ip</a> <a href="ftp://example.com/f">ftp</a>"#;
+        let links = extract_links_from_html(page, &base());
+        let links: HashSet<String> = links.iter().map(ToString::to_string).collect();
+        let expected: HashSet<String> = [
+            "https://example.com/docs/other",
+            "https://example.com/root",
+            "https://a.example/x",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        assert_eq!(links, expected);
+    }
+
+    #[test]
+    fn link_selection_caps_how_many_links_one_domain_contributes() {
+        let many: HashSet<Url> = (0..200)
+            .map(|i| Url::parse(&format!("https://big.example/{i}")).unwrap())
+            .chain([Url::parse("https://small.example/").unwrap()])
+            .collect();
+        let selected = select_links(many);
+        assert_eq!(selected.len(), NUM_URLS_TAKENS);
+        // Every domain's first pick comes before any domain's second.
+        assert!(urls(&selected[..2]).contains("https://small.example/"));
+    }
+
+    #[test]
+    fn long_text_is_cut_at_a_character_boundary_with_an_ellipsis() {
+        assert_eq!(trim_size("short", 10), "short");
+        let long = "é".repeat(200);
+        let trimmed = trim_size(&long, NUM_EXTRACT_CHARS);
+        assert_eq!(trimmed.chars().count(), NUM_EXTRACT_CHARS);
+        assert!(trimmed.ends_with('…'));
+    }
+
+    #[test]
+    fn an_article_gives_its_title_extract_and_links() {
+        let result = sanitize(ARTICLE, base(), StatusCode::OK, Utc::now(), base());
+        let CrawlResult::CrawlContent(content) = result else {
+            panic!("not crawled: {result:?}");
+        };
+        assert_eq!(content.title, "Rust ownership explained");
+        assert!(content.extract.contains("ownership"), "{}", content.extract);
+        assert!(content.extract.chars().count() <= NUM_EXTRACT_CHARS);
+        assert_eq!(
+            urls(&content.links),
+            HashSet::from([
+                "https://example.com/borrowing",
+                "https://doc.rust-lang.org/book/"
+            ])
+        );
+        // Links outside the article are kept apart from those in it.
+        assert_eq!(
+            urls(&content.extra_links),
+            HashSet::from(["https://example.com/about", "https://elsewhere.example/nav"])
+        );
+        let document = content.to_document();
+        assert_eq!(document.url(), "https://example.com/docs/page");
+        assert_eq!(document.last_crawled(), Some(content.timestamp.timestamp()));
+    }
+
+    #[test]
+    fn a_page_with_no_text_is_not_content() {
+        let result = sanitize(
+            "<html><body></body></html>",
+            base(),
+            StatusCode::OK,
+            Utc::now(),
+            base(),
+        );
+        assert!(
+            matches!(
+                result,
+                CrawlResult::HtmlParsingError { .. } | CrawlResult::NoResponseTextError { .. }
+            ),
+            "{result:?}"
+        );
+        assert_eq!(
+            result.get_resolved_info(),
+            (Some("example.com"), Some(StatusCode::OK))
+        );
+    }
+
+    #[tokio::test]
+    async fn crawling_an_allowed_page_fetches_robots_txt_then_the_page() {
+        let server = TestServer::start(vec![
+            ("/robots.txt", text(200, "User-agent: *\nAllow: /\n")),
+            ("/article", html(200, ARTICLE)),
+        ])
+        .await;
+        let url = server.url("/article");
+
+        let (claimed, result) = crawl(
+            ClaimedUrl::unqueued(url.clone()),
+            RobotCache::new(),
+            client(),
+        )
+        .await;
+
+        assert_eq!(claimed.url(), &url);
+        let CrawlResult::CrawlContent(content) = result else {
+            panic!("not crawled: {result:?}");
+        };
+        assert_eq!(content.status, StatusCode::OK);
+        assert_eq!(content.title, "Rust ownership explained");
+        assert!(urls(&content.links).contains(server.url("/borrowing").as_str()));
+        assert_eq!(server.requests(), vec!["/robots.txt", "/article"]);
+    }
+
+    #[tokio::test]
+    async fn a_page_robots_txt_disallows_is_never_fetched() {
+        let server = TestServer::start(vec![
+            ("/robots.txt", text(200, "User-agent: *\nDisallow: /\n")),
+            ("/article", html(200, ARTICLE)),
+        ])
+        .await;
+        let (_, result) = crawl(
+            ClaimedUrl::unqueued(server.url("/article")),
+            RobotCache::new(),
+            client(),
+        )
+        .await;
+        assert!(
+            matches!(result, CrawlResult::RobotsDeniedError { .. }),
+            "{result:?}"
+        );
+        assert_eq!(server.requests(), vec!["/robots.txt"]);
+    }
+
+    #[tokio::test]
+    async fn a_page_is_not_fetched_while_robots_txt_is_unavailable() {
+        let server = TestServer::start(vec![
+            ("/robots.txt", text(503, "")),
+            ("/article", html(200, ARTICLE)),
+        ])
+        .await;
+        let (_, result) = crawl(
+            ClaimedUrl::unqueued(server.url("/article")),
+            RobotCache::new(),
+            client(),
+        )
+        .await;
+        assert!(
+            matches!(result, CrawlResult::RobotsUnavailableError { .. }),
+            "{result:?}"
+        );
+        assert_eq!(server.requests(), vec!["/robots.txt"]);
+    }
+
+    #[tokio::test]
+    async fn an_error_page_is_not_content_however_much_text_it_has() {
+        let server = TestServer::start(vec![
+            ("/robots.txt", text(200, "")),
+            ("/article", html(403, ARTICLE)),
+        ])
+        .await;
+        let (_, result) = crawl(
+            ClaimedUrl::unqueued(server.url("/article")),
+            RobotCache::new(),
+            client(),
+        )
+        .await;
+        let CrawlResult::NoResponseTextError { status, .. } = result else {
+            panic!("crawled an error page: {result:?}");
+        };
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_url_with_no_domain_is_not_crawled() {
+        let url = Url::parse("http://127.0.0.1/").unwrap();
+        let (_, result) = crawl(ClaimedUrl::unqueued(url), RobotCache::new(), client()).await;
+        assert!(
+            matches!(result, CrawlResult::NoDomainError { .. }),
+            "{result:?}"
+        );
+    }
 }

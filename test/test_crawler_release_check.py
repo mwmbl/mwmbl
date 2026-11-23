@@ -1,6 +1,8 @@
-"""Tests for the CI check that crawler changes raise CRAWLER_VERSION."""
+"""Tests for the CI check that crawler changes raise the crawler's version."""
 
+import re
 import subprocess
+import tomllib
 
 import pytest
 
@@ -9,53 +11,53 @@ from mwmbl.crawler.release_check import (
     NO_CRAWLER_CHANGES,
     changed_crawler_files,
     check_commit_message,
-    crawler_source_files,
     main,
     parse_version,
 )
-from mwmbl.crawler.version import CRAWLER_VERSION
 
-CRAWLER_FILE = "mwmbl/crawler/retrieve.py"
-
-
-def test_crawler_source_files_follow_the_entry_point():
-    crawler_files = crawler_source_files()
-
-    assert {"mwmbl/crawl.py", "mwmbl/crawler/retrieve.py", "mwmbl/settings_crawler.py"} <= crawler_files
-    assert "mwmbl/platform/api.py" not in crawler_files
+CRAWLER_FILE = "rust/crawler/src/retrieve.rs"
+CARGO_TOML = (release_check.REPO_ROOT / release_check.VERSION_PATH).read_text()
+CRAWLER_VERSION = tomllib.loads(CARGO_TOML)["package"]["version"]
 
 
-def test_changed_crawler_files_ignore_server_only_changes_and_the_version_itself():
+def cargo_toml(version: str) -> str:
+    return f'[package]\nname = "crawler_rs"\nversion = "{version}"\n\n[dependencies]\nanyhow = "1"\n'
+
+
+def test_changed_crawler_files_are_the_crates_and_the_image_build():
     changed = [
-        "mwmbl/crawler/retrieve.py",
-        "mwmbl/platform/api.py",
-        "mwmbl/crawler/version.py",
-        "uv.lock",
-        "mwmbl_rank/src/lib.rs",
+        "rust/crawler/src/retrieve.rs",
+        "rust/crawler/Cargo.toml",
         "rust/mwmbl_core/src/index.rs",
-        "mwmbl/resources/document_counts.json",
-        "mwmbl/templates/index.html",
+        "Dockerfile.crawler",
+        "mwmbl/resources/wiki_stats.json",
+        "mwmbl/crawler/retrieve.py",
+        "mwmbl_rank/src/lib.rs",
+        "uv.lock",
         "README.md",
     ]
 
-    crawler_changes = changed_crawler_files(changed, {"mwmbl/crawler/retrieve.py", "mwmbl/crawler/version.py"})
-
-    assert crawler_changes == [
-        "mwmbl/crawler/retrieve.py",
-        "uv.lock",
-        "mwmbl_rank/src/lib.rs",
+    assert changed_crawler_files(changed) == [
+        "rust/crawler/src/retrieve.rs",
+        "rust/crawler/Cargo.toml",
         "rust/mwmbl_core/src/index.rs",
-        "mwmbl/resources/document_counts.json",
+        "Dockerfile.crawler",
+        "mwmbl/resources/wiki_stats.json",
     ]
 
 
 def test_parse_version_compares_numerically():
-    assert parse_version('CRAWLER_VERSION: str = "1.10.0"\n') > parse_version('CRAWLER_VERSION: str = "1.9.3"\n')
+    assert parse_version(cargo_toml("1.10.0")) > parse_version(cargo_toml("1.9.3"))
 
 
 def test_parse_version_rejects_a_version_it_cannot_compare():
     with pytest.raises(AssertionError):
-        parse_version('CRAWLER_VERSION: str = "1.0"\n')
+        parse_version(cargo_toml("1.0"))
+
+
+def test_the_crawler_version_is_what_the_release_tags_match():
+    # .github/workflows/crawler-release.yml tags each release crawler-vX.Y.Z.
+    assert re.fullmatch(r"\d+\.\d+\.\d+", CRAWLER_VERSION)
 
 
 def _fake_git(monkeypatch, changed_files: list[str], base_version: str, commits: list[tuple[str, list[str]]] = ()):
@@ -70,11 +72,10 @@ def _fake_git(monkeypatch, changed_files: list[str], base_version: str, commits:
             return shas[args[3]][0] + "\n"
         if args[0] == "diff-tree":
             return "\n".join(shas[args[-1]][1]) + "\n"
-        assert args == ("show", "base:mwmbl/crawler/version.py")
-        return f'CRAWLER_VERSION: str = "{base_version}"\n'
+        assert args == ("show", "base:rust/crawler/Cargo.toml")
+        return cargo_toml(base_version)
 
     monkeypatch.setattr(release_check, "_git", git)
-    monkeypatch.setattr(release_check, "crawler_source_files", lambda: {CRAWLER_FILE})
 
 
 def test_main_passes_when_no_crawler_code_changed(monkeypatch):
@@ -153,13 +154,12 @@ def _fake_staged(monkeypatch, staged_files: list[str], base_version: str, staged
             return "\n".join(staged_files) + "\n"
         if args == ("merge-base", "HEAD", "origin/main"):
             return "base\n"
-        if args == ("show", "base:mwmbl/crawler/version.py"):
-            return f'CRAWLER_VERSION: str = "{base_version}"\n'
-        assert args == ("show", ":mwmbl/crawler/version.py")
-        return f'CRAWLER_VERSION: str = "{staged_version}"\n'
+        if args == ("show", "base:rust/crawler/Cargo.toml"):
+            return cargo_toml(base_version)
+        assert args == ("show", ":rust/crawler/Cargo.toml")
+        return cargo_toml(staged_version)
 
     monkeypatch.setattr(release_check, "_git", git)
-    monkeypatch.setattr(release_check, "crawler_source_files", lambda: {CRAWLER_FILE})
 
 
 def _message(tmp_path, text: str) -> str:
@@ -185,16 +185,8 @@ def test_the_hook_passes_a_declared_commit_without_looking_at_it(monkeypatch, tm
 
 def test_the_hook_passes_once_the_branch_has_raised_the_version(monkeypatch, tmp_path):
     _fake_staged(monkeypatch, [CRAWLER_FILE], "1.0.0", "1.0.1")
-    monkeypatch.setattr(release_check, "crawler_source_files", None)
 
     assert check_commit_message(_message(tmp_path, "Change the crawler\n")) == 0
-
-
-def test_the_hook_skips_the_import_when_nothing_could_be_crawler_code(monkeypatch, tmp_path):
-    _fake_staged(monkeypatch, ["README.md", "front-end/src/app.js", "test/test_x.py"], "1.0.0", "1.0.0")
-    monkeypatch.setattr(release_check, "crawler_source_files", None)
-
-    assert check_commit_message(_message(tmp_path, "Docs\n")) == 0
 
 
 def test_the_hook_passes_server_only_changes(monkeypatch, tmp_path):

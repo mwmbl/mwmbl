@@ -10,8 +10,6 @@ services:
     # can be used to communicate with a index on the same local machine
     extra_hosts:
       - host.docker.internal:host-gateway
-    depends_on:
-      - redis_crawler
     environment:
       # REQUIRED: API key
       - MWMBL_API_KEY=${MWMBL_API_KEY}
@@ -19,14 +17,18 @@ services:
       # REQUIRED: Contact info for website administrators
       - MWMBL_CONTACT_INFO=${MWMBL_CONTACT_INFO}
 
-      # Set value of ./mwmbl/crawler/env_vars.py
-      - CRAWLER_WORKERS=${CRAWLER_WORKERS:-2}
-      - CRAWL_THREADS=${CRAWL_THREADS:-20}
+      # See `mwmbl-crawl --help`. Each has the crawler's own default.
+      # Threads running the crawl.
+      - CRAWL_THREADS=${CRAWL_THREADS:-32}
+      # Threads parsing pages and writing the local index.
+      - BLOCKING_THREADS=${BLOCKING_THREADS:-8}
+      # Pages fetched at once.
+      - CRAWL_MAX_TASKS=${CRAWL_MAX_TASKS:-64}
+      # Batches of results submitted at once.
+      - SUBMIT_MAX_TASKS=${SUBMIT_MAX_TASKS:-16}
       - CRAWL_DELAY_SECONDS=${CRAWL_DELAY_SECONDS:-0.0}
       # Empty: a random name is generated and kept in the data volume. Set it to name your crawler.
       - MWMBL_DEVICE_NAME=${MWMBL_DEVICE_NAME:-}
-      - PYTHONUNBUFFERED=1
-      - REDIS_URL=redis://redis_crawler:6379
     volumes:
       - crawler_data:/home/mwmbl/.mwmbl
     # Compose applies deploy.restart_policy in swarm mode only, so what was here was no
@@ -43,23 +45,5 @@ services:
     #         limits:
     #           cpus: '0.50'
 
-  redis_crawler:
-    image: redis:alpine
-    restart: unless-stopped
-    # save "": no snapshots at all. What is in here is a work queue that allkeys-lru is
-    # already free to evict, so there is nothing worth the cost of saving it, and the cost
-    # was real - a crawler host was found with 8.5GB of temp-*.rdb next to a 209MB dump.rdb.
-    # A snapshot forks a Redis holding up to maxmemory and writes a second copy of the data
-    # beside the first, and every one of those children that the OOM killer took left its
-    # temp file behind for good. That filled the disk, which failed the next snapshot, which
-    # (before stop-writes-on-bgsave-error no, kept below for a save anyone triggers by hand)
-    # made Redis reject every write and stopped the crawler.
-    command: >
-      redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
-      --save "" --stop-writes-on-bgsave-error no
-    volumes:
-      - redis_crawler_data:/data
-
 volumes:
-  redis_crawler_data:
   crawler_data:

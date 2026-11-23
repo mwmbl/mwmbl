@@ -1,29 +1,31 @@
 """Find the Rust crawler settings that crawl the most pages on this machine.
 
-The Rust counterpart of benchmark.py. The Rust crawler is one process, so there is no
-CRAWLER_WORKERS to tune. Its knobs are:
+It replaces the Python crawler's benchmark, which tuned CRAWLER_WORKERS and CRAWL_THREADS. The
+Rust crawler is one process, and the knobs it tries are:
 
 - CRAWL_THREADS: tokio worker threads, which run the fetches.
-- PARSING_THREADS: blocking threads, used mostly for parsing HTML.
-- CRAWL_MAX_TASKS: how many crawls can run at once.
+- BLOCKING_THREADS: blocking threads, which parse pages and write the local index.
+- CRAWL_MAX_TASKS: how many pages are fetched at once.
+
+SUBMIT_MAX_TASKS, how many batches are submitted at once, isn't tried: it limits submission to
+Mwmbl, not crawling, and is left at whatever the environment sets.
 
 The benchmark tries every combination one at a time. For each one it starts the crawler with those
 settings, lets it warm up, and then measures for a fixed time. The winner is the combination that
 crawled the most pages a minute. When two tie, the cheaper one wins.
 
-The Rust crawler keeps no counter in Redis. Instead it prints a `speed:` line for every page it
-crawls with content, and those lines are what get counted. Each line is a single page, so a
-fixed-length window miscounts by at most one page at each end. The Python benchmark has to align
-its window to whole batches because its counter only moves when a batch finishes. This one doesn't
-need to, so its windows can be shorter.
+The crawler prints a `speed:` line for every page it crawls with content, and those lines are what
+get counted. Each line is a single page, so a fixed-length window miscounts by at most one page at
+each end, and the windows can be much shorter than the Python benchmark's, whose counter only moved
+when a whole batch finished.
 
 The crawler submits what it crawls to Mwmbl under your API key throughout, as it does in normal
 running, so a benchmark is also a crawl. Stopping it between configurations throws away the
 results it hadn't sent yet.
 
 Pages it couldn't fetch (robots.txt denials, errors, timeouts) print nothing, so they aren't
-counted. The Python benchmark counts every fetch whatever came back, so the two numbers can't be
-compared directly.
+counted. The Python benchmark counted every fetch whatever came back, so its numbers can't be
+compared with these.
 
 The URL queue lives in memory, so every configuration starts from a cold queue, but the bloom
 filter of seen domains in ~/.mwmbl persists between runs. Later configurations therefore start
@@ -45,6 +47,7 @@ import collections
 import csv
 import itertools
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -57,23 +60,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Callable, Protocol
 
-from mwmbl.crawler.benchmark import (
-    PROGRESS_INTERVAL_SECONDS,
-    STATUS_FAILED,
-    STATUS_INTERRUPTED,
-    STATUS_OK,
-    format_duration,
-    interrupt,
-    parse_counts,
-    parse_duration,
-)
+STATUS_OK = "OK"
+STATUS_FAILED = "FAILED"
+STATUS_INTERRUPTED = "INTERRUPTED"
 
-# The settings tried, in the order ties are broken: the fewer threads, the cheaper.
-KNOBS = ("CRAWL_THREADS", "PARSING_THREADS", "CRAWL_MAX_TASKS")
+# The settings tried, in the order ties are broken: the fewer threads, the cheaper. The defaults
+# bracket docker-compose.yml's (32, 8 and 64).
+KNOBS = ("CRAWL_THREADS", "BLOCKING_THREADS", "CRAWL_MAX_TASKS")
 DEFAULT_COUNTS = {
-    "CRAWL_THREADS": [4, 8, 16],
-    "PARSING_THREADS": [4, 8],
-    "CRAWL_MAX_TASKS": [64, 128, 256],
+    "CRAWL_THREADS": [8, 16, 32],
+    "BLOCKING_THREADS": [4, 8],
+    "CRAWL_MAX_TASKS": [16, 64, 128],
 }
 DEFAULT_WARMUP = "3m"
 DEFAULT_DURATION = "15m"
@@ -86,15 +83,16 @@ PAGE_LINE_PREFIX = b"speed: "
 # The crawler has no SIGTERM handler and keeps nothing durable in memory, so a short grace period is enough.
 STOP_TIMEOUT_SECONDS = 10
 POLL_INTERVAL_SECONDS = 5
+PROGRESS_INTERVAL_SECONDS = 60
 # Lines kept from the crawler's output to explain a crash. Page lines are left out: they hold only URLs.
 OUTPUT_TAIL_LINES = 20
-# The crawler prints its CrawlerParams with Debug at startup, which includes the API key. Crash
-# output goes to the terminal, the report and the CSV, so that line is dropped and the key is
-# redacted from anything else.
+# Crash output goes to the terminal, the report and the CSV, so the API key is redacted from it.
+# Builds before 2.0.1 also printed their CrawlerParams, key included, at startup: that line is dropped.
 PARAMS_LINE_PREFIX = b"CrawlerParams"
 SECRET_SETTINGS = ("MWMBL_API_KEY",)
 REDACTED = "<redacted>"
-CRAWLER_PROCESS_NAME = "crawler_rs"
+# The binary as cargo builds it, and as the Docker image installs it.
+CRAWLER_PROCESS_NAMES = ("crawler_rs", "mwmbl-crawl")
 PLACEHOLDERS = {"MWMBL_API_KEY": ("", "CREATE_ME"), "MWMBL_CONTACT_INFO": ("", "CHANGE_ME@example.com")}
 
 CSV_COLUMNS = [
@@ -128,6 +126,31 @@ class Result:
     pages_per_minute: float | None = None
     error: str = ""
     finished_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def parse_counts(text: str) -> list[int]:
+    try:
+        counts = [int(part) for part in text.split(",")]
+    except ValueError:
+        counts = []
+    if not counts or any(count < 1 for count in counts):
+        raise argparse.ArgumentTypeError(f"expected positive integers separated by commas, got {text!r}")
+    return list(dict.fromkeys(counts))
+
+
+def parse_duration(text: str) -> int:
+    match = re.fullmatch(r"(\d+)([smh])", text)
+    if match is None:
+        raise argparse.ArgumentTypeError(f"expected a duration like 90s, 5m or 1h, got {text!r}")
+    return int(match.group(1)) * {"s": 1, "m": 60, "h": 3600}[match.group(2)]
+
+
+def format_duration(seconds: int) -> str:
+    """Like 1h 2m 33s, leaving out the units that are zero: 30m, 1m 29s, 45s."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = [f"{value}{unit}" for value, unit in ((hours, "h"), (minutes, "m"), (seconds, "s")) if value]
+    return " ".join(parts) or "0s"
 
 
 def all_configurations(counts: dict[str, list[int]]) -> list[Configuration]:
@@ -165,8 +188,12 @@ class RustCrawler:
             return []
         # The binary's own name, not the command's: a command like `cargo run` or `python3 ...` would
         # match unrelated processes, the benchmark itself included.
-        found = subprocess.run(["pgrep", "-x", CRAWLER_PROCESS_NAME], capture_output=True, text=True)
-        return found.stdout.split()
+        # A Compose crawler shows up here too, as mwmbl-crawl.
+        pids = []
+        for name in CRAWLER_PROCESS_NAMES:
+            found = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+            pids += found.stdout.split()
+        return pids
 
     def start(self, env: dict[str, str]) -> None:
         with self.lock:
@@ -444,6 +471,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
 def run(args: argparse.Namespace) -> int:
     command = [str(DEFAULT_BINARY)] if args.crawler_command is None else shlex.split(args.crawler_command)
     if args.crawler_command is None and not DEFAULT_BINARY.exists():
@@ -454,7 +485,10 @@ def run(args: argparse.Namespace) -> int:
 
     crawler = RustCrawler(command)
     if pids := crawler.already_running():
-        raise SystemExit(f"A crawler is already running (pid {', '.join(pids)}). Stop it first.")
+        raise SystemExit(
+            f"A crawler is already running (pid {', '.join(pids)}). Stop it first: for the Compose "
+            "crawler, `docker compose stop mwmbl-crawler`."
+        )
 
     counts = {knob: getattr(args, knob) for knob in KNOBS}
     total = len(all_configurations(counts))

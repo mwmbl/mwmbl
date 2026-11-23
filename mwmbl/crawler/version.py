@@ -1,6 +1,6 @@
-# No imports: the crawler release workflow runs this file with a bare python3 (runpy), without
-# installing the project. Raising the version on main publishes a release; CI fails a pull
-# request that changes the crawler without raising it (mwmbl/crawler/release_check.py).
+# The version the server's own fetches (mwmbl/crawler/retrieve.py) name in their User-Agent,
+# frozen at the last release of the Python crawler. The crawler volunteers run is the Rust one
+# in rust/crawler, whose release version is in its Cargo.toml (mwmbl/crawler/release_check.py).
 CRAWLER_VERSION: str = "1.1.3"
 
 

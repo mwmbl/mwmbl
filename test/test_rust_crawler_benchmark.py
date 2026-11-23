@@ -1,5 +1,6 @@
 """The Rust crawler benchmark: which configurations it runs, how it measures them, and what it reports."""
 
+import argparse
 import csv
 import sys
 import time
@@ -14,8 +15,11 @@ from mwmbl.crawler.benchmark_rust import (
     RustCrawler,
     all_configurations,
     check_settings,
+    format_duration,
     format_report,
     load_env_file,
+    parse_counts,
+    parse_duration,
     rank,
 )
 
@@ -67,8 +71,8 @@ class FakeCrawler:
         self.env = None
 
 
-def counts(threads=(1, 2), parsing=(4,), tasks=(64, 128)):
-    return {"CRAWL_THREADS": list(threads), "PARSING_THREADS": list(parsing), "CRAWL_MAX_TASKS": list(tasks)}
+def counts(threads=(1, 2), blocking=(4,), tasks=(64, 128)):
+    return {"CRAWL_THREADS": list(threads), "BLOCKING_THREADS": list(blocking), "CRAWL_MAX_TASKS": list(tasks)}
 
 
 def run_benchmark(tmp_path, crawler, clock, grid=None):
@@ -141,7 +145,7 @@ def test_interrupt_records_what_finished_and_stops_the_crawler(tmp_path):
         rows = list(csv.DictReader(file))
     assert [row["status"] for row in rows] == ["OK", "OK", "INTERRUPTED"]
     assert rows[0]["crawl_threads"] == "1"
-    assert rows[0]["parsing_threads"] == "4"
+    assert rows[0]["blocking_threads"] == "4"
     assert rows[0]["crawl_max_tasks"] == "64"
 
 
@@ -162,7 +166,7 @@ def test_ties_go_to_the_cheaper_configuration():
 
 def test_report_names_the_winner():
     report = format_report([Result(Configuration((8, 4, 128)), "OK", 1234.0)])
-    assert "CRAWL_THREADS=8\nPARSING_THREADS=4\nCRAWL_MAX_TASKS=128" in report
+    assert "CRAWL_THREADS=8\nBLOCKING_THREADS=4\nCRAWL_MAX_TASKS=128" in report
     assert "Pages per minute: 1234" in report
 
 
@@ -250,3 +254,23 @@ def test_cli_refuses_to_run_without_a_built_crawler(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark_rust, "DEFAULT_BINARY", tmp_path / "missing")
     with pytest.raises(SystemExit, match="cargo build"):
         benchmark_rust.main(["--env-file", str(tmp_path / ".env")])
+
+
+def test_parse_counts():
+    assert parse_counts("8,16,8") == [8, 16]
+    for bad in ("", "0", "a,1", "-1"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_counts(bad)
+
+
+def test_durations():
+    assert [parse_duration(text) for text in ("90s", "5m", "1h")] == [90, 300, 3600]
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_duration("5")
+    assert [format_duration(seconds) for seconds in (0, 45, 89, 1800, 3753)] == [
+        "0s",
+        "45s",
+        "1m 29s",
+        "30m",
+        "1h 2m 33s",
+    ]

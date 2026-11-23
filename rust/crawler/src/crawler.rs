@@ -4,10 +4,10 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::{header, redirect::Policy};
+use reqwest::{Client, header};
 use serde_json::Value;
 use std::{
-    cmp::{max, min},
+    cmp::{Reverse, max, min},
     collections::{HashMap, VecDeque},
     sync::{
         Arc,
@@ -18,7 +18,7 @@ use std::{
 use tokio::{
     spawn,
     sync::{RwLock, Semaphore},
-    time::{Instant, sleep},
+    time::{Instant, sleep, sleep_until},
 };
 
 use crate::{
@@ -26,12 +26,14 @@ use crate::{
     batch::{PostResultsResponse, SendResult, SendResults},
     bloomdb::BloomDatabase,
     constants::{
-        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_REDIRECTS, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT, SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N
+        API_PRODUCT, MAX_DOMAIN_DELAY, MAX_SUBMIT_QUEUE_SIZE, PROJECT_URL, READ_TIMEOUT,
+        SEND_TIMEOUT, SUBMIT_BATCH_SIZE, SUBMIT_TOP_N, UPGRADE_REQUIRED_WAIT,
     },
     curated_domains::{CuratedDomains, DefaultBlackList, get_default_blacklist_provider},
-    path_creation::{get_device_name, index_path},
+    path_creation::{get_device_name, healthcheck, index_path},
     retrieve::{CrawlResult, crawl},
     robots::RobotCache,
+    ssrf::{PublicAddressResolver, redirect_policy},
     url_queue::SharedURLQueue,
 };
 
@@ -40,13 +42,50 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     url_queue: SharedURLQueue<T>,
     blacklist: T,
     username: Arc<RwLock<Option<String>>>,
-    // error_last_reported_at: Arc<HashMap<String, f32>>,
     params: Arc<CrawlerParams>,
     robots_cache: RobotCache,
     domainlinkdb: Arc<BloomDatabase>,
     crawl_semaphore: Arc<Semaphore>,
+    submit_semaphore: Arc<Semaphore>,
     to_submit: Arc<RwLock<VecDeque<Document>>>,
+    submit_paused_until: Arc<RwLock<Option<Instant>>>,
     count: Arc<AtomicUsize>,
+    index: TinyIndex,
+    device_name: String,
+}
+
+#[derive(Debug)]
+enum Submission {
+    Accepted(PostResultsResponse),
+    /// The server's explanation of why it wants a newer crawler.
+    UpgradeRequired(String),
+}
+
+async fn post_results(
+    client: &reqwest::Client,
+    remote_server: &str,
+    results: &SendResults,
+) -> anyhow::Result<Submission> {
+    let response = client
+        .post(format!("{remote_server}/api/v1/crawler/results"))
+        .json(results)
+        .send()
+        .await;
+
+    let Ok(response) = response else {
+        bail!("Error in sending result, error {response:#?}");
+    };
+    let code = response.status();
+    if code == 426 {
+        return Ok(Submission::UpgradeRequired(response.text().await?));
+    }
+    let Ok(response) = response.error_for_status() else {
+        bail!("Error in sending result, error code: {code}");
+    };
+    let Ok(response) = response.json::<PostResultsResponse>().await else {
+        bail!("Error in parsing PostResultsResponse");
+    };
+    Ok(Submission::Accepted(response))
 }
 
 impl Crawler {
@@ -56,18 +95,24 @@ impl Crawler {
         let blacklist = get_default_blacklist_provider(curated_domains.clone()).await?;
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
         let domainlinkdb = BloomDatabase::new(&params.home).await?;
+        let index_path = index_path(&params.home);
+        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
+        let device_name = get_device_name(&params.home, params.device_name.clone()).await;
 
         Ok(Crawler {
             url_queue,
             blacklist,
             username,
-            // error_last_reported_at: Arc::new(HashMap::default()),
             robots_cache: RobotCache::new(),
             crawl_semaphore: Arc::new(Semaphore::new(params.max_crawl_task)),
+            submit_semaphore: Arc::new(Semaphore::new(params.max_submit_task)),
             params: Arc::new(params),
             domainlinkdb,
             count: Arc::new(AtomicUsize::new(0)),
             to_submit: Arc::new(RwLock::new(VecDeque::new())),
+            submit_paused_until: Arc::new(RwLock::new(None)),
+            index,
+            device_name,
         })
     }
 
@@ -79,8 +124,8 @@ impl Crawler {
             .zstd(true)
             .read_timeout(READ_TIMEOUT)
             .user_agent(self.crawl_user_agent())
-            .redirect(Policy::limited(MAX_REDIRECTS + 1))
-            .hickory_dns(true)
+            .redirect(redirect_policy())
+            .dns_resolver(PublicAddressResolver::system()?)
             .build()?)
     }
 
@@ -88,15 +133,7 @@ impl Crawler {
         let client = self.get_client()?;
         let start = Instant::now();
 
-        let clone = self.clone();
-        spawn(async move {
-            loop {
-                let res = clone.index().await;
-                if res.is_err() || res.is_ok_and(|completed| !completed) {
-                    sleep(Duration::from_secs(10)).await;
-                }
-            }
-        });
+        self.index().await?;
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
@@ -148,13 +185,14 @@ impl Crawler {
                     println!(
                         "speed: {}/s | queue {} | crawled {}",
                         ((count as u64) + 1) / (1 + start.elapsed().as_secs()),
+                        lock.len(),
                         result.url.as_str(),
-                        lock.len()
                     );
                     lock.push_back(result.to_document());
                     if lock.len() > MAX_SUBMIT_QUEUE_SIZE {
                         lock.pop_front();
                     }
+                    drop(lock);
                 }
             });
 
@@ -183,99 +221,116 @@ impl Crawler {
         format!("{API_PRODUCT} ({identity})")
     }
 
-    pub async fn index(&self) -> anyhow::Result<bool> {
-        println!("Sending results.");
-        let mut lock = self.to_submit.write().await;
-        let mut docs: Vec<Document> = Vec::new();
-        if lock.len() >= SUBMIT_BATCH_SIZE {
-            for _ in 0..SUBMIT_BATCH_SIZE {
-                if let Some(doc) = lock.pop_front() {
-                    docs.push(doc);
+    pub async fn index(&self) -> anyhow::Result<()> {
+        let clone = self.clone();
+        let semaphore = self.submit_semaphore.clone();
+        let to_submit = self.to_submit.clone();
+        let submit_paused_until = self.submit_paused_until.clone();
+
+        let client = clone.get_send_client().await?;
+        spawn(async move {
+            loop {
+                // Documents keep queueing (up to MAX_SUBMIT_QUEUE_SIZE) while paused, so the
+                // newest are sent once the pause is over rather than drained into rejections.
+                let paused_until = *submit_paused_until.read().await;
+                if let Some(paused_until) = paused_until
+                    && paused_until > Instant::now()
+                {
+                    sleep_until(paused_until).await;
+                    continue;
+                }
+                let mut lock = to_submit.write().await;
+                if lock.len() >= SUBMIT_BATCH_SIZE {
+                    let docs: Vec<Document> = lock.drain(0..SUBMIT_BATCH_SIZE).collect();
+                    drop(lock);
+
+                    let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                        eprintln!("Could not aquire permit for indexing");
+                        continue;
+                    };
+                    let clone = clone.clone();
+                    let client = client.clone();
+                    spawn(async move {
+                        println!("Sending results.");
+                        if let Err(err) = clone.index_batch(docs, client).await {
+                            eprintln!("Error during indexing : {err}");
+                        }
+                        drop(permit);
+                    });
+                } else {
+                    drop(lock);
+                    sleep(Duration::from_secs(1)).await;
                 }
             }
-        } else {
-            return Ok(false);
-        }
-        drop(lock);
-        self.index_batch(docs).await.map(|()| true)
+        });
+        Ok(())
     }
 
-    async fn index_batch(&self, docs: Vec<Document>) -> anyhow::Result<()> {
-        let index_path = index_path(&self.params.home);
-        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
-        let indexed_documents = index.index_documents(docs, &self.blacklist).await?;
+    async fn index_batch(&self, docs: Vec<Document>, client: Client) -> anyhow::Result<()> {
+        let indexed_documents = self.index.index_documents(docs, &self.blacklist).await?;
 
-        let mut term_new_doc_count: Vec<(&String, &usize)> = indexed_documents
-            .new_page_doc_counts()
-            .iter()
-            .collect();
-        term_new_doc_count.sort_by_key(|v| v.1);
-
-        let device_name = get_device_name(&self.params.home, self.params.device_name.clone());
+        let mut term_new_doc_count: Vec<(&String, &usize)> =
+            indexed_documents.new_page_doc_counts().iter().collect();
+        term_new_doc_count.sort_by_key(|v| Reverse(v.1));
 
         let mut terms: Vec<String> = Vec::new();
-        let result_items: Vec<SendResult> = term_new_doc_count
-            .into_iter()
-            .take(SUBMIT_TOP_N)
-            .filter_map(|(term, _)| {
-                let Ok(docs) = index.retrieve::<Document>(term) else {
-                    return None;
-                };
-                let result_items: Vec<SendResult> = docs
-                    .into_iter()
-                    .filter_map(|doc| {
-                        if matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)) {
-                            None
-                        } else {
-                            Some(SendResult::new(&doc))
-                        }
-                    })
-                    .collect();
+        let mut result_items: Vec<SendResult> = Vec::new();
 
-                terms.push(term.to_owned());
-                Some(result_items)
-            })
-            .flatten()
-            .collect();
+        for (term, _) in term_new_doc_count.into_iter().take(SUBMIT_TOP_N) {
+            let Ok(docs) = self.index.retrieve::<Document>(term).await else {
+                continue;
+            };
+            let mut items: Vec<SendResult> = docs
+                .into_iter()
+                .filter_map(|doc| {
+                    if matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)) {
+                        None
+                    } else {
+                        Some(SendResult::new(&doc))
+                    }
+                })
+                .collect();
 
-        let client = self.get_send_client().await?;
+            terms.push(term.to_owned());
+            result_items.append(&mut items);
+        }
+
         let results = SendResults::new(
             result_items,
             Some(env!("CARGO_PKG_VERSION").to_owned()),
-            Some(device_name.clone()),
+            Some(self.device_name.clone()),
             Some(true),
         );
-        let response = client
-            .post(format!(
-                "{}/api/v1/crawler/results",
-                self.params.remote_server
-            ))
-            .json(&results)
-            .send()
-            .await;
-
-        let Ok(response) = response else {
-            bail!("Error in sending result");
-        };
-        let Ok(response) = response.error_for_status() else {
-            bail!("Error in sending result");
-        };
-        let Ok(response) = response.json::<PostResultsResponse>().await else {
-            bail!("Error in parsing PostResultsResponse");
+        let response = match post_results(&client, &self.params.remote_server, &results).await? {
+            Submission::Accepted(response) => response,
+            Submission::UpgradeRequired(message) => {
+                // Waiting gives an external updater (compose timer, systemd timer) time to
+                // replace this crawler, where retrying every batch would hammer the server.
+                *self.submit_paused_until.write().await =
+                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
+                bail!(
+                    "The server requires a newer crawler: {message} Pausing submission for {} \
+                     seconds instead of sending results the server would reject.",
+                    UPGRADE_REQUIRED_WAIT.as_secs()
+                );
+            }
         };
         let Some(new_items) = response.new_items() else {
             bail!("Missing new_items from reponse");
         };
 
         for term in terms {
-            let page_index = index.get_key_page_index(&term);
+            let page_index = self.index.get_key_page_index(&term);
             let new_term_remote_items: Vec<Document> = new_items
                 .iter()
                 .filter(|doc| doc.term() == Some(&term))
                 .cloned()
                 .collect();
             let pagedocs = HashMap::from([(page_index, new_term_remote_items)]);
-            index.index_pages(pagedocs, true)?;
+            self.index.index_pages(pagedocs, Some(&term)).await?;
+        }
+        if healthcheck(&self.params.home).await.is_err() {
+            eprintln!("Failed to update healthfile");
         }
         println!("Results sendt.");
         Ok(())
@@ -335,5 +390,47 @@ impl Crawler {
             },
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Crawler, Submission, post_results};
+    use crate::{
+        batch::SendResults,
+        test_support::{TestServer, client, text},
+    };
+
+    #[tokio::test]
+    async fn an_upgrade_required_response_is_reported_with_the_servers_message() {
+        let server = TestServer::start(vec![(
+            "/api/v1/crawler/results",
+            text(426, "Crawler 2.0.0 is too old, please upgrade."),
+        )])
+        .await;
+        let remote_server = server.url("").as_str().trim_end_matches('/').to_owned();
+        let results = SendResults::new(Vec::new(), None, None, Some(true));
+
+        let submission = post_results(&client(), &remote_server, &results)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(&submission, Submission::UpgradeRequired(message) if message == "Crawler 2.0.0 is too old, please upgrade."),
+            "{submission:?}"
+        );
+    }
+
+    #[test]
+    fn the_api_user_agent_names_the_version_and_the_url_encoded_username() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(
+            Crawler::api_user_agent(None),
+            format!("mwmbl-crawler/{version} (+https://github.com/mwmbl/mwmbl)")
+        );
+        assert_eq!(
+            Crawler::api_user_agent(Some(&"jo bloggs".to_owned())),
+            format!("mwmbl-crawler/{version} (+https://github.com/mwmbl/mwmbl; user jo%20bloggs)")
+        );
     }
 }

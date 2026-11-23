@@ -44,7 +44,7 @@ SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
 .PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core coverage coverage-python coverage-rust \
-        coverage-quick run run-background optimize crawler optimize-rust \
+        coverage-quick run run-background optimize-rust \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
 help:
@@ -54,17 +54,15 @@ help:
 	@echo "  create-index   Create the search index for DJANGO_SETTINGS_MODULE (run by install)"
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
-	@echo "  rust-core      Format-check, lint and test the crates under rust/"
+	@echo "  rust-core      Format-check, lint and test the crates under rust/, the crawler among them"
 	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
 	@echo "  coverage-python Run Python tests with terminal, XML, and HTML coverage reports"
 	@echo "  coverage-rust  Run Rust unit tests and write an LCOV report (needs cargo-llvm-cov)"
 	@echo "  coverage-quick Run tests with coverage report (terminal only, faster)"
 	@echo "  run            Start the Django development server"
 	@echo "  run-background Start the background task processor"
-	@echo "  optimize       Find the best CRAWLER_WORKERS and CRAWL_THREADS for this machine (hours: run it overnight)"
-	@echo "                 Extra flags: make optimize ARGS='--processes 1,2 --threads 25,50'. 'make crawler' is the same."
-	@echo "  optimize-rust  Find the best CRAWL_THREADS, PARSING_THREADS and CRAWL_MAX_TASKS for the Rust crawler"
-	@echo "                 Build it first: cargo build --release --manifest-path rust/crawler/Cargo.toml"
+	@echo "  optimize-rust  Find the best CRAWL_THREADS, BLOCKING_THREADS and CRAWL_MAX_TASKS for the crawler"
+	@echo "                 (hours). Build it first: cargo build --release --manifest-path rust/crawler/Cargo.toml"
 	@echo ""
 	@echo "  check          Run every check CI runs: locked, format-check, lint, typecheck"
 	@echo "  fix            Auto-fix what can be auto-fixed: format + lint --fix"
@@ -110,16 +108,15 @@ test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
 
-# The Rust crates under rust/. Their tests are Rust ones, so they run here rather than
-# through pytest. mwmbl_core with default features is what mwmbl_rank links into the server,
-# so it must be clippy-clean. The `crawler` feature and rust/crawler are work in progress
-# that nothing runs yet, so they only have to build and pass their tests.
+# The Rust crates under rust/: mwmbl_core, which mwmbl_rank links into the server, and the
+# crawler volunteers run. Their tests are Rust ones, so they run here rather than through
+# pytest.
 rust-core:
 	cargo fmt --manifest-path rust/mwmbl_core/Cargo.toml --check
 	cargo fmt --manifest-path rust/crawler/Cargo.toml --check
 	cargo clippy --manifest-path rust/mwmbl_core/Cargo.toml --all-targets --locked -- -D warnings
+	cargo clippy --manifest-path rust/crawler/Cargo.toml --all-targets --locked -- -D warnings
 	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
-	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked --features crawler
 	cargo test --manifest-path rust/crawler/Cargo.toml --locked
 
 coverage: coverage-python coverage-rust
@@ -164,16 +161,8 @@ run-background:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" \
 		uv run python manage.py process_tasks --settings=$(DJANGO_SETTINGS_MODULE)
 
-# Stops your crawler, tries settings on it for 35 minutes each, and starts it again as it was.
-# .env is read from beside docker-compose.yml, so there is nothing to export first.
+# Tries crawler settings for 18 minutes each, running the release build as a child process.
 # The system python3 and not uv: the benchmark needs only the standard library, so nothing is built.
-optimize:
-	python3 -m mwmbl.crawler.benchmark $(ARGS)
-
-crawler: optimize
-
-# The same for the Rust crawler, which it runs as a child process from rust/crawler/target/release.
-# The system python3 for the same reason: it needs only the standard library.
 optimize-rust:
 	python3 -m mwmbl.crawler.benchmark_rust $(ARGS)
 

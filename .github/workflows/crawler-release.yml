@@ -1,6 +1,6 @@
 name: Release the crawler Docker image
 
-# Raising CRAWLER_VERSION in mwmbl/crawler/version.py on main publishes mwmbl/crawler:X.Y.Z,
+# Raising the version in rust/crawler/Cargo.toml on main publishes mwmbl/crawler:X.Y.Z,
 # :X.Y, :stable and :latest, then tags the commit crawler-vX.Y.Z. :latest moves with releases
 # rather than with every merge, so existing setups pulling the untagged image get each
 # release and nothing in between. CI fails a pull request that changes the crawler without
@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     paths:
-      - mwmbl/crawler/version.py
+      - rust/crawler/Cargo.toml
 
 # Two merges in quick succession must not race to publish :stable out of order. GitHub keeps
 # one pending run per group, so a third bump arriving while one runs and one waits cancels
@@ -30,14 +30,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Read CRAWLER_VERSION
+      - name: Read the crawler version
         id: version
         run: |
-          version=$(python3 -c "import runpy; print(runpy.run_path('mwmbl/crawler/version.py')['CRAWLER_VERSION'])")
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('rust/crawler/Cargo.toml', 'rb'))['package']['version'])")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
 
-      # An edit to version.py that leaves the version alone, or a revert to an older one,
+      # An edit to Cargo.toml that leaves the version alone, or a revert to an older one,
       # must not move :stable.
       - name: Check the version is not already released
         id: released

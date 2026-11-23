@@ -100,7 +100,7 @@ pub fn extract_features_batch(records: &[DocumentRecord], provider_features: boo
                 re_url,
             }
         });
-        
+
         let (url_path, url_domain, url_query) = match Url::parse(rec.doc.url()) {
             Ok(url) => (
                 url.path().to_owned(),
@@ -154,6 +154,7 @@ pub struct XGBPipeline {
 // SAFETY: see doc-comment on XGBPipeline above.
 unsafe impl Send for XGBPipeline {}
 
+#[allow(dead_code)]
 impl XGBPipeline {
     pub fn new(threshold: f32, scale_pos_weight: f32, reg_lambda: f32, num_rounds: u32) -> Self {
         XGBPipeline {
@@ -533,7 +534,7 @@ mod tests {
         let records = make_records(20);
         let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 10);
         pipeline
-            .fit(&records, &vec![1.0; 20], None)
+            .fit(&records, &[1.0; 20], None)
             .expect("fit should succeed");
 
         // Neither matches a query term; only Staan's own result survives the filter, not
@@ -628,7 +629,7 @@ mod tests {
         let preds = pipeline.predict(&records).expect("predict should succeed");
         assert_eq!(preds.len(), 20);
         for &p in &preds {
-            assert!(p >= 0.0 && p <= 1.0, "Prediction {} out of [0,1]", p);
+            assert!((0.0..=1.0).contains(&p), "Prediction {} out of [0,1]", p);
         }
     }
 
@@ -701,7 +702,7 @@ mod tests {
             .expect("fit should succeed");
         let mut weighted = XGBPipeline::new(0.0, 0.1, 2.0, 10);
         weighted
-            .fit(&records, &labels, Some(&vec![1.0; 20]))
+            .fit(&records, &labels, Some(&[1.0; 20]))
             .expect("fit should succeed");
         let base = unweighted
             .predict(&records)
@@ -736,7 +737,7 @@ mod tests {
         let records = make_records(10);
         let labels = vec![1.0; 10];
         let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 5);
-        let result = pipeline.fit(&records, &labels, Some(&vec![1.0; 3]));
+        let result = pipeline.fit(&records, &labels, Some(&[1.0; 3]));
         assert!(result.is_err());
     }
 

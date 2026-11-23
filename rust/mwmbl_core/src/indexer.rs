@@ -6,44 +6,91 @@ use std::{
     os::fd::AsRawFd,
     path::Path,
     str::FromStr,
+    sync::Arc,
     time::Instant,
 };
 
 use anyhow::{Context, bail};
 use file_guard::Lock;
-use itertools::Itertools;
+use futures_util::future::join_all;
+use itertools::{Either, Itertools};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::{
+    runtime::Handle,
+    sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
+    task::spawn_blocking,
+};
 
 use crate::{
     agreement::Agreement,
     blacklist_providers::BlacklistProvider,
-    constants::{
-        INDEX_VERSION, ITEM_FACTORY, METADATA_CONSTANT,
-        METADATA_SIZE, PAGE_SIZE,
-    },
+    constants::{INDEX_VERSION, ITEM_FACTORY, METADATA_CONSTANT, METADATA_SIZE, PAGE_SIZE},
     index::{PageIoError, pack_page, read_index_page, tokenize_document, write_index_page},
     rank::{HeuristicRanker, Ranker},
     tokenizer::clean_unicode,
 };
 
-/// The state of the document in the index. A value of None indicates an organic search result
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentState {
-    SyncedWithMainIndex = -2,
-    DELETED = -1,
-    FromUser = 2,
-    FromGoogle = 3,
-    FromWiki = 4,
-    OrganicApproved = 7,
-    FromUserApproved = 8,
-    FromGoogleApproved = 9,
-    FromWikiApproved = 10,
+/// Defines an enum the API and the index pages carry as its integer value, as the Python
+/// side writes it. Serde's default for an enum is its variant name, which the server
+/// neither sends nor accepts.
+macro_rules! integer_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident = $value:literal,)+ }) => {
+        $(#[$meta])*
+        #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+        #[serde(try_from = "i64", into = "i64")]
+        pub enum $name {
+            $($variant = $value,)+
+        }
+
+        impl From<$name> for i64 {
+            fn from(value: $name) -> i64 {
+                value as i64
+            }
+        }
+
+        impl TryFrom<i64> for $name {
+            type Error = String;
+
+            fn try_from(value: i64) -> Result<Self, Self::Error> {
+                match value {
+                    $($value => Ok($name::$variant),)+
+                    _ => Err(format!("{value} is not a {}", stringify!($name))),
+                }
+            }
+        }
+    };
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DocumentSource {
+/// A state or source this build does not know, as an older crawler sees one added since,
+/// reads as None rather than failing the page or the whole API response it is in.
+fn known_or_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: TryFrom<i64>,
+{
+    let value: Option<i64> = Option::deserialize(deserializer)?;
+    Ok(value.and_then(|value| T::try_from(value).ok()))
+}
+
+integer_enum!(
+    /// The state of the document in the index. A value of None indicates an organic search result
+    DocumentState {
+        SyncedWithMainIndex = -2,
+        DELETED = -1,
+        FromUser = 2,
+        FromGoogle = 3,
+        FromWiki = 4,
+        OrganicApproved = 7,
+        FromUserApproved = 8,
+        FromGoogleApproved = 9,
+        FromWikiApproved = 10,
+    }
+);
+
+integer_enum!(DocumentSource {
     Wikipedia = 1,
     Staan = 2,
     StaanIndexed = 3,
@@ -59,22 +106,30 @@ pub enum DocumentSource {
     CommonsCcBySa3_0 = 108,
     CommonsCcBySa4_0 = 109,
     CommonsOther = 110,
-}
+});
 
+/// `default` on the optional fields because Python writes a document to a page as a tuple
+/// with its trailing Nones cut off, so a page item has anywhere from three to nine elements.
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Document {
     title: String,
     url: String,
     extract: String,
+    #[serde(default)]
     score: Option<f32>,
+    #[serde(default)]
     term: Option<String>,
+    #[serde(default, deserialize_with = "known_or_none")]
     state: Option<DocumentState>,
+    #[serde(default)]
     user_ids: Option<Vec<i32>>,
+    #[serde(default)]
     last_crawled: Option<i64>,
+    #[serde(default, deserialize_with = "known_or_none")]
     source: Option<DocumentSource>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IndexMode {
     READ,
     WRITE,
@@ -153,7 +208,7 @@ impl Document {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TinyIndexMetadata {
     version: i32,
     page_size: usize,
@@ -211,11 +266,22 @@ impl TinyIndexMetadata {
     }
 }
 
-#[derive(Debug)]
+struct ReadPageLock {
+    process_lock: file_guard::FileGuard<Arc<File>>,
+    _task_lock: OwnedRwLockReadGuard<()>,
+}
+
+struct WritePageLock {
+    process_lock: file_guard::FileGuard<Arc<File>>,
+    _task_lock: OwnedRwLockWriteGuard<()>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TinyIndex {
-    index_file: File,
+    index_file: Arc<File>,
     mode: IndexMode,
-    metadata: TinyIndexMetadata,
+    metadata: Arc<TinyIndexMetadata>,
+    page_locks: Arc<Vec<Arc<RwLock<()>>>>,
 }
 
 impl TinyIndex {
@@ -247,10 +313,16 @@ impl TinyIndex {
                 .open(path),
         }?;
 
+        let mut page_locks = Vec::new();
+        for _ in 0..metadata.num_pages {
+            page_locks.push(Arc::new(RwLock::new(())));
+        }
+
         Ok(Self {
-            index_file: file,
+            index_file: Arc::new(file),
             mode,
-            metadata,
+            metadata: Arc::new(metadata),
+            page_locks: Arc::new(page_locks),
         })
     }
     fn create(path: &Path, num_pages: usize, overwrite: bool) -> anyhow::Result<TinyIndex> {
@@ -282,58 +354,69 @@ impl TinyIndex {
         Ok(())
     }
 
-    fn lock_page_read_only(&self, page: usize) -> anyhow::Result<file_guard::FileGuard<&File>> {
+    async fn lock_page_read_only(&self, page: usize) -> anyhow::Result<ReadPageLock> {
         let start: usize = page * self.metadata.page_size + METADATA_SIZE!();
-        let lock = file_guard::lock(
-            &self.index_file,
+        let process_lock = file_guard::lock(
+            self.index_file.clone(),
             Lock::Shared,
             start,
             self.metadata.page_size,
         )?;
-        Ok(lock)
+        let Some(task_lock) = self.page_locks.get(page) else {
+            bail!("Invalid page number");
+        };
+        let task_lock = task_lock.clone().read_owned().await;
+        Ok(ReadPageLock {
+            _task_lock: task_lock,
+            process_lock,
+        })
     }
 
-    fn lock_page(&self, page: usize) -> anyhow::Result<file_guard::FileGuard<&File>> {
+    async fn lock_page_write(&self, page: usize) -> anyhow::Result<WritePageLock> {
         if matches!(self.mode, IndexMode::READ) {
-            return self.lock_page_read_only(page);
+            bail!("Index is in read only mode");
         }
         let start: usize = page * self.metadata.page_size + METADATA_SIZE!();
-        let lock = file_guard::lock(
-            &self.index_file,
+        let process_lock = file_guard::lock(
+            self.index_file.clone(),
             Lock::Exclusive,
             start,
             self.metadata.page_size,
         )?;
-
-        Ok(lock)
+        let Some(task_lock) = self.page_locks.get(page) else {
+            bail!("Invalid page number");
+        };
+        let task_lock = task_lock.clone().write_owned().await;
+        Ok(WritePageLock {
+            _task_lock: task_lock,
+            process_lock,
+        })
     }
 
-    pub fn get_page<T: for<'a> Deserialize<'a>>(
-        lock: &file_guard::FileGuard<&File>,
+    fn get_page<T: for<'a> Deserialize<'a>>(
+        lock: Either<&ReadPageLock, &WritePageLock>,
         term: Option<&String>,
     ) -> anyhow::Result<Vec<T>> {
+        let process_lock = lock.either(|r| &r.process_lock, |w| &w.process_lock);
         Ok(read_index_page(
-            lock.as_raw_fd(),
-            lock.offset() as u64,
-            lock.len(),
+            process_lock.as_raw_fd(),
+            process_lock.offset() as u64,
+            process_lock.len(),
             term,
         )?)
     }
 
-    pub fn retrieve<T: for<'a> Deserialize<'a>>(&self, term: &str) -> anyhow::Result<Vec<T>> {
+    pub async fn retrieve<T: for<'a> Deserialize<'a>>(&self, term: &str) -> anyhow::Result<Vec<T>> {
         let page = self.get_key_page_index(term);
-        let lock = self.lock_page_read_only(page)?;
-        Self::get_page(&lock, Some(&term.to_owned()))
+        let lock = self.lock_page_read_only(page).await?;
+        Self::get_page(Either::Left(&lock), Some(&term.to_owned()))
     }
 
-    fn store_in_page<T: Serialize>(
-        lock: &file_guard::FileGuard<&File>,
-        values: &[T],
-    ) -> anyhow::Result<usize> {
+    fn store_in_page<T: Serialize>(lock: &WritePageLock, values: &[T]) -> anyhow::Result<usize> {
         Ok(write_index_page(
-            lock.as_raw_fd(),
-            lock.offset() as u64,
-            lock.len(),
+            lock.process_lock.as_raw_fd(),
+            lock.process_lock.offset() as u64,
+            lock.process_lock.len(),
             values,
         )?)
     }
@@ -343,43 +426,67 @@ impl TinyIndex {
         murmurhash32::murmurhash3_with_seed::<0>(key.as_bytes()) as usize % self.metadata.num_pages
     }
 
-    fn store_pages<I, J>(
+    /// Merges each page's new documents into it and writes it back. Each page has its own
+    /// lock and is read and written independently, so the pages are done in parallel.
+    async fn store_pages(
         &self,
-        page_documents: I,
-        mark_synced: bool,
-    ) -> anyhow::Result<Vec<StoredPage>>
-    where
-        I: IntoIterator<Item = (usize, J)>,
-        J: IntoIterator<Item = Document>,
-        for<'a> &'a J: IntoIterator<Item = &'a Document>,
-    {
-        let mut stored = Vec::new();
+        page_documents: HashMap<usize, Vec<Document>>,
+        mark_term_synced: Option<&String>,
+    ) -> Vec<StoredPage> {
+        let stored: Vec<_> = join_all(
+            page_documents
+                .into_par_iter()
+                .map(|(page, docs)| (page, docs, self.clone()))
+                .map(|(page, docs, index)| {
+                    let mark_term_synced = mark_term_synced.map(std::borrow::ToOwned::to_owned);
+                    async move {
+                        spawn_blocking(move || {
+                            Handle::current().block_on(async move {
+                                index
+                                    .store_page(page, &docs, mark_term_synced.as_ref())
+                                    .await
+                            })
+                        })
+                        .await
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        stored.into_iter().flatten_ok().flatten().collect()
+    }
 
-        for (page, docs) in page_documents {
-            if let Ok(lock) = self.lock_page(page) {
-                let existing_documents: Vec<Document> = TinyIndex::get_page(&lock, None)?;
-                let stored_copy = find_stored_copies(&docs, &existing_documents);
-                let mut combined_documents = combine_documents(
-                    &existing_documents,
-                    &docs,
-                    mark_synced,
-                    &HeuristicRanker::new(f32::NEG_INFINITY),
-                );
-                let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
-                    eprintln!("Skipping index page {page}");
-                    continue;
-                };
-                combined_documents.truncate(num_stored);
-                stored.push(StoredPage {
-                    stored: combined_documents,
-                    existing: existing_documents,
-                    stored_copies: stored_copy,
-                });
-            } else {
-                eprintln!("Skipping index page {page}");
-            }
-        }
-        Ok(stored)
+    async fn store_page(
+        &self,
+        page: usize,
+        docs: &[Document],
+        mark_term_synced: Option<&String>,
+    ) -> Option<StoredPage> {
+        let Ok(lock) = self.lock_page_write(page).await else {
+            eprintln!("Skipping index page {page}");
+            return None;
+        };
+        let Ok(existing_documents) = TinyIndex::get_page(Either::Right(&lock), None) else {
+            eprintln!("Skipping index page {page}");
+            return None;
+        };
+        let stored_copy = find_stored_copies(docs, &existing_documents);
+        let mut combined_documents = combine_documents(
+            &existing_documents,
+            docs,
+            mark_term_synced,
+            &HeuristicRanker::new(f32::NEG_INFINITY),
+        );
+        let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
+            eprintln!("Skipping index page {page}");
+            return None;
+        };
+        combined_documents.truncate(num_stored);
+        Some(StoredPage {
+            stored: combined_documents,
+            existing: existing_documents,
+            stored_copies: stored_copy,
+        })
     }
 
     pub async fn index_documents<I, T: BlacklistProvider>(
@@ -421,12 +528,13 @@ impl TinyIndex {
         let mut held_urls: HashSet<String> = HashSet::new();
         let mut copies: HashMap<String, Vec<Document>> = HashMap::new();
 
-        for page in self.store_pages(page_documents, false)? {
+        for page in self.store_pages(page_documents, None).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
-                    && let Some(term) = stored.term() {
-                        *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
-                    }
+                    && let Some(term) = stored.term()
+                {
+                    *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
+                }
                 stored_urls.insert(stored.url().to_owned());
             }
             for held in page.existing {
@@ -489,19 +597,20 @@ impl TinyIndex {
         })
     }
 
-    pub fn index_pages(
+    pub async fn index_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> anyhow::Result<HashMap<String, usize>> {
         let mut new_page_doc_counts: HashMap<String, usize> = HashMap::new();
 
-        for page in self.store_pages(page_documents, mark_synced)? {
+        for page in self.store_pages(page_documents, mark_term_synced).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
-                    && let Some(term) = stored.term() {
-                        *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
-                    }
+                    && let Some(term) = stored.term()
+                {
+                    *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
+                }
             }
         }
         Ok(new_page_doc_counts)
@@ -597,9 +706,7 @@ where
 {
     let submitters_by_url = incoming
         .into_iter()
-        .filter_map(|v| {
-            v.user_ids.clone().map(|user_ids| (v.url.clone(), user_ids))
-        })
+        .filter_map(|v| v.user_ids.clone().map(|user_ids| (v.url.clone(), user_ids)))
         .flat_map(|(url, user_ids)| user_ids.into_iter().map(move |id| (url.clone(), id)))
         .collect::<HashSet<_>>();
     let mut stored_copies = Vec::new();
@@ -633,10 +740,13 @@ impl DocumentState {
     }
 }
 
+/// Ranks and deduplicates a page's documents. Everything up to the end works on borrowed
+/// documents, so each document that is kept is cloned once, and only a document merged
+/// from several copies is built anew.
 fn combine_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
-    mark_synced: bool,
+    mark_term_synced: Option<&String>,
     ranker: &R,
 ) -> Vec<Document>
 where
@@ -646,6 +756,7 @@ where
     let sorted = sort_documents(existing_documents, documents, ranker);
     let mut values: Vec<(usize, Document)> = sorted
         .into_iter()
+        .cloned()
         .enumerate()
         .map(|(order, doc)| (doc.url.clone(), (order, doc)))
         .into_group_map()
@@ -659,41 +770,46 @@ where
     values.sort_by_key(|v| v.0);
     values
         .into_iter()
-        .map(|mut v| {
-            if mark_synced {
-                v.1.state = Some(DocumentState::SyncedWithMainIndex);
+        .map(|v| {
+            let mut doc = v.1;
+            if mark_term_synced.is_some()
+                && doc.state.is_none()
+                && doc.term.as_ref() == mark_term_synced
+            {
+                doc.state = Some(DocumentState::SyncedWithMainIndex);
             }
-            v.1
+            doc
         })
         .collect()
 }
 
+/// The first document, with the history of all of them: the latest crawl, and every
+/// user id, latest crawl last. A document with no other copies is returned as it is.
 fn merge_user_ids_last_crawled(mut docs: Vec<(usize, Document)>) -> Option<(usize, Document)> {
-    if let Some((idx, mut best_doc)) = docs.first().cloned() {
-        docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
-        if docs.len() > 1 {
-            let mut user_ids: Vec<i32> = Vec::new();
-            for (_, doc) in docs {
-                best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
-                if let Some(existing) = doc.user_ids {
-                    for id in existing {
-                        user_ids.retain(|v| *v != id);
-                        user_ids.push(id);
-                    }
-                }
-            }
-            best_doc.user_ids = Some(user_ids);
-        }
-        return Some((idx, best_doc));
+    if docs.len() <= 1 {
+        return docs.pop();
     }
-    None
+    let (idx, mut best_doc) = docs
+        .first()
+        .map(|(idx, best_doc)| (*idx, best_doc.to_owned()))?;
+    docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
+    let mut user_ids: Vec<i32> = Vec::new();
+    for (_, doc) in docs {
+        best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
+        for &id in doc.user_ids.iter().flatten() {
+            user_ids.retain(|v| *v != id);
+            user_ids.push(id);
+        }
+    }
+    best_doc.user_ids = Some(user_ids);
+    Some((idx, best_doc))
 }
 
 fn sort_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
     ranker: &R,
-) -> Vec<Document>
+) -> Vec<&'a Document>
 where
     I: IntoIterator<Item = &'a Document>,
     J: IntoIterator<Item = &'a Document>,
@@ -728,15 +844,8 @@ where
 
     let mut sorted_documents: Vec<_> = other_documents
         .into_iter()
-        .cloned()
-        .chain(existing_other.into_iter().cloned())
-        .filter_map(|doc| {
-            if let Some(term) = &doc.term {
-                Some((term.to_owned(), doc))
-            } else {
-                None
-            }
-        })
+        .chain(existing_other)
+        .filter_map(|doc| Some((doc.term.as_deref()?, doc)))
         .into_group_map()
         .into_iter()
         .flat_map(|(term, docs)| {
@@ -750,8 +859,103 @@ where
 
     curated
         .into_iter()
-        .cloned()
-        .chain(widgets.into_iter().cloned())
+        .chain(widgets)
         .chain(sorted_documents.into_iter().map(|v| v.1))
         .collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::{Document, DocumentSource, DocumentState, combine_documents};
+    use crate::rank::HeuristicRanker;
+
+    #[test]
+    fn state_and_source_are_their_integer_values_as_the_server_has_them() {
+        // The shape of a document in the server's `new_items`.
+        let json = r#"{"title": "Rust", "url": "https://rust-lang.org/", "extract": "",
+            "score": null, "term": "rust", "state": 7, "user_ids": null,
+            "last_crawled": null, "source": 4}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+
+        let value = serde_json::to_value(&doc).unwrap();
+        assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
+        let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
+        assert!(unknown.to_string().contains("5 is not a DocumentSource"));
+    }
+
+    #[test]
+    fn a_page_tuple_from_python_may_leave_off_its_trailing_nones() {
+        let short: Document =
+            serde_json::from_str(r#"["Rust", "https://rust-lang.org/", "ext"]"#).unwrap();
+        assert_eq!((short.title(), short.state()), ("Rust", None));
+
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", 1.0, "rust", 7, [3], 1795000000]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
+        assert_eq!(
+            (doc.last_crawled(), doc.source()),
+            (Some(1_795_000_000), None)
+        );
+    }
+
+    #[test]
+    fn a_state_or_source_added_since_reads_as_none() {
+        let json = r#"["Rust", "https://rust-lang.org/", "ext", null, "rust", 99, null, null, 99]"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        assert_eq!((doc.state(), doc.source()), (None, None));
+    }
+
+    fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
+        Document::new(
+            title.to_owned(),
+            url.to_owned(),
+            "rust is a language".to_owned(),
+            None,
+            Some("rust".to_owned()),
+            None,
+            Some(vec![user_id]),
+            Some(last_crawled),
+            None,
+        )
+    }
+
+    #[test]
+    fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
+        let existing = [
+            document("Rust", "https://rust-lang.org/", 10, 1),
+            document("Other", "https://other.example/rust", 5, 4),
+        ];
+        let incoming = [
+            document("Rust", "https://rust-lang.org/", 20, 2),
+            document("Rust", "https://copy.example/rust", 30, 3),
+        ];
+
+        let combined = combine_documents(
+            &existing,
+            &incoming,
+            Some(&"rust".to_owned()),
+            &HeuristicRanker::new(f32::NEG_INFINITY),
+        );
+
+        let urls: Vec<&str> = combined.iter().map(Document::url).collect();
+        assert_eq!(urls.len(), 2, "{urls:?}");
+        assert!(urls.contains(&"https://other.example/rust"), "{urls:?}");
+        // Which URL keeps the title depends on hash order, but either way it carries the
+        // history of all three copies, oldest crawl first.
+        let rust = combined.iter().find(|doc| doc.title() == "Rust").unwrap();
+        assert_eq!(rust.last_crawled(), Some(30));
+        assert_eq!(rust.user_ids(), Some(&vec![1, 2, 3]));
+        assert!(
+            combined
+                .iter()
+                .all(|doc| matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)))
+        );
+        let other = combined.iter().find(|doc| doc.title() == "Other").unwrap();
+        assert_eq!(
+            (other.last_crawled(), other.user_ids()),
+            (Some(5), Some(&vec![4]))
+        );
+    }
 }

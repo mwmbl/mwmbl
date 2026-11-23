@@ -1,0 +1,16 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/rust",
+      "title": "Rust ownership explained",
+      "extract": "How ownership and borrowing work in Rust.",
+      "score": 1.5,
+      "term": "rust",
+      "state": 2,
+      "last_crawled": 1795000000
+    }
+  ],
+  "crawler_version": "2.0.0",
+  "device_name": "blue-heron",
+  "include_new_items": true
+}

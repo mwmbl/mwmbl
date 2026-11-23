@@ -8,8 +8,7 @@ from logging import getLogger
 from typing import Collection, Iterable, NamedTuple, Optional
 from urllib.parse import unquote
 
-from mwmbl.crawler.batch import HashedBatch, Item
-from mwmbl.crawler.urls import URLStatus
+from mwmbl.crawler.batch import HashedBatch
 from mwmbl.indexer.agreement import Agreement, StoredCopy, compare, find_stored_copies
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist
 from mwmbl.indexer.index import prepare_url_for_tokenizing, tokenize_document
@@ -91,7 +90,7 @@ def index_documents(documents, index_path) -> IndexedDocuments:
     """The common choke point every indexing path (the trusted-crawler POST /results
     endpoint, the standalone crawl tool) goes through, so
     this is where the blacklist is enforced. Crawling/link-discovery also check the
-    blacklist (RedisURLQueue, update_urls.process_link) but only to stop *new* crawling -
+    blacklist (the crawler's URL queue) but only to stop *new* crawling -
     a /results submission can contain a blacklisted domain's pages regardless of whether that domain was ever handed out to be crawled (e.g. a
     browser-extension user organically visiting the site), so indexing needs its own check
     rather than relying on those upstream gates.
@@ -427,14 +426,3 @@ def preprocess_documents(documents, index_path):
                 page_documents[page].append(term_document)
     print(f"Preprocessed for {len(page_documents)} pages")
     return page_documents
-
-
-def get_url_error_status(item: Item):
-    if item.status == 404:
-        return URLStatus.ERROR_404
-    if item.error is not None:
-        if item.error.name in ("AbortError", "RobotsUnavailable"):
-            return URLStatus.ERROR_TIMEOUT
-        elif item.error.name == "RobotsDenied":
-            return URLStatus.ERROR_ROBOTS_DENIED
-    return URLStatus.ERROR_OTHER

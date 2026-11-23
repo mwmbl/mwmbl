@@ -1,165 +1,19 @@
-# Mwmbl Crawler
+# Crawler API
 
-This module handles the distributed crawling functionality for Mwmbl. The crawler allows community members to crawl web pages and submit the results to build Mwmbl's search index.
+The server's side of distributed crawling. The crawler volunteers run is the Rust one in
+[`rust/crawler`](../../rust/crawler/README.md), which documents how to run and configure it.
 
-## Environment Variables
+This module holds:
 
-The crawler can be configured using the following environment variables:
-
-### Required Configuration
-- `MWMBL_API_KEY` - **Required** API key for submitting results to the Mwmbl search index
-- `MWMBL_CONTACT_INFO` - **Required** Contact information for website administrators (email or website URL). This is included in the user-agent string so website administrators can contact you if there are issues with the crawler. Example: `contact@yourdomain.com` or `https://your-mwmbl-instance.com`
-
-### Worker Configuration
-- `CRAWLER_WORKERS` (default: 2) - Number of separate operating system processes to spawn for crawling work (uses Python's multiprocessing.Process)
-- `CRAWL_THREADS` (default: 20) - Number of threads per worker process for concurrent URL crawling (total threads = CRAWLER_WORKERS × CRAWL_THREADS)
-
-**Process Architecture**: The crawler spawns `CRAWLER_WORKERS` processes for crawling work, each using `CRAWL_THREADS` threads for concurrent URL fetching. Additionally, one separate process handles indexing work. For example, with default settings you get 2 crawler processes × 20 threads = 40 total crawling threads, plus 1 indexing process. The queue gives each batch at most one URL per domain, so the threads of one batch never fetch pages from the same site at once.
-
-**Memory**: Memory use scales with `CRAWLER_WORKERS`, not `CRAWL_THREADS`, so on a small machine prefer fewer workers with more threads. The blocklists (about 1.3 million domains) are downloaded once when the crawler starts, and again every 6 hours, by a short-lived process that publishes them to Redis as an ~11MB hash array that every worker loads. Because that first download has to succeed before any worker starts, the crawler exits at startup if it cannot reach the lists. If a later refresh fails, the crawler keeps the lists it has.
-
-Batches crawled by different workers at the same time can share domains, since each worker samples its domains independently. The core domains (Wikipedia, GitHub and so on) are in every batch, so they are the usual overlap. With the default 2 workers, about 0.7% of fetches start while another fetch to the same domain is in flight. Overlap grows with `CRAWLER_WORKERS`. The crawler records it in Redis, and `redis-cli HGETALL crawl-domain-overlap` gives the totals: `fetches`, `overlapped` (fetches that started while another fetch to their domain was in flight) and `duplicate_domains` (should stay 0).
-
-### Benchmarking `CRAWLER_WORKERS` and `CRAWL_THREADS`
-
-`make optimize` (or `make crawler`; `mwmbl benchmark` and `python -m mwmbl.crawler.benchmark` are the same thing) finds the best combination for a machine by trying every combination one at a time and comparing how many pages a minute the crawler fetches with each:
-
-```sh
-make optimize
-make optimize ARGS='--processes 1,2,4 --threads 25,50,100'
-```
-
-It needs only Docker and `python3` 3.9 or later: `benchmark.py` uses nothing but the standard library, so nothing is installed or built, and `make optimize` runs it with the system `python3`. Run `deploy/crawler/benchmark.sh` in the directory the crawler is started from: in a checkout it runs the `benchmark.py` beside it, and piped from `curl` it downloads `benchmark.py` from `main` first. Either way it passes on its arguments:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh
-curl -fsSL https://raw.githubusercontent.com/mwmbl/mwmbl/main/deploy/crawler/benchmark.sh | sh -s -- --processes 1,2,4
-```
-
-The script stops with an explanation if your user may not use Docker (not in the `docker` group) or the daemon is not running.
-
-Nothing needs exporting. Compose reads the `.env` beside `docker-compose.yml` for the crawler as it always does (or the file given with `--env-file`). No API key is used: the benchmark reads only the crawler's own Redis.
-
-For each combination it stops the crawler, starts it with `CRAWLER_WORKERS` and `CRAWL_THREADS` set, waits out `--warmup` (default 5m), measures for `--duration` (default 30m), and stops it again. It ends with a ranked table and the winner, and whether it finishes, fails or is interrupted with Ctrl+C it puts the crawler back as it found it. It tries every combination of `--processes` (default 1 to 5) and `--threads` (default 10, 25, 50, 100). A configuration takes at least 35 minutes, so the 20 defaults are a job for overnight (about 12 hours); narrow `--processes` and `--threads` for a shorter run. It prints how long it could take before it starts, and every result is written to the CSV as it is known, so stopping with Ctrl+C keeps what has finished.
-
-- `--runner compose` (default) stops and restarts the `mwmbl-crawler` service of `--compose-file`, with a two second stop grace instead of ten since the crawler ignores SIGTERM as PID 1. Settings are passed in the environment of the `docker compose` commands, so `.env` is never edited. Before stopping your crawler it records the `CRAWLER_WORKERS` and `CRAWL_THREADS` the container runs with, wherever they came from, and starts it again with those at the end. Every `up` uses `--pull never`, so a crawler release landing mid-run cannot change the version being measured (the image must already be present, as it is for a running crawler). Compose names its project after the directory, so run it from the checkout your crawler was started from.
-- `--runner process` runs `--crawler-command` (default: the Python running the benchmark, as `python -m mwmbl.crawl`, with the checkout on `PYTHONPATH`) as a child process, against the Redis in `REDIS_URL`, and stops its whole process group, workers included, between configurations. It loads `.env` beside `--compose-file` (or `--env-file`; anything already in the environment wins) into the environment the crawler inherits. It is for a crawler run from source, and the crawler's dependencies, including the Rust extension `mwmbl_rank`, must already be installed in that Python, which `pip3` alone cannot do: use `uv run mwmbl benchmark --runner process`. From any other Python, `pip3 install -r deploy/crawler/benchmark-requirements.txt` adds what the runner itself imports (`psutil`, `redis`, `python-dotenv`), then `python3 -m mwmbl.crawler.benchmark --runner process` from the checkout. It refuses to start while another crawler is running, so stop yours first. A Redis with no queue in it gives a cold-start crawl, so prefer `compose` unless you know the queue is warm.
-
-**What it measures.** The crawler adds each batch's URLs to `crawl-domain-overlap`'s `fetches` in its Redis as the batch finishes. The window opens at the first batch to finish after warmup and closes at the first to finish once `--duration` has passed, and the rate is the fetches between the two divided by the time between them, so it is never cut through a batch.
-
-**Why it runs so long.** A short run is not indicative of how the crawler runs for the rest of the time. The crawler downloads the blocklists, then starts its workers five seconds apart, and its indexing process only has work once batches have finished; from then on it competes with the workers for CPU and network and syncs with the main index. The warmup is there to get past all of that, so do not set it to nothing, and a window much shorter than the default measures a crawler that is not in its steady state.
-
-**What it cannot tell you.** Each combination runs once, so differences of a few percent are noise: the sites in a batch differ from one run to the next, and the order combinations run in is fixed. Repeat a close contest, in the opposite order if you can. It counts every URL fetched, whatever came back, not how many were new to the index or worth indexing, and more threads always fetch more up to what your machine and connection bear. The crawler's politeness limits (`mwmbl/crawler/politeness.py`) are kept per Redis, so they hold for one crawler's workers but not across volunteers' machines. Treat the winner as the most your machine can usefully do, not a target to push past what the sites you crawl, or your connection, should bear: look at the refusals in the crawler's logs, and prefer the cheaper configuration when two are close. Ties are broken that way in the report.
-
-Combinations whose estimated memory (`--memory-per-process-mb` per process plus a fixed 600MB) exceeds the machine's RAM are marked `SKIPPED`; `--no-memory-check` runs them anyway. The winner is always chosen by rate.
-
-The CSV (`benchmark-results-fetches-<date>.csv`, appended to) has the timestamp, process and thread counts, warmup and minimum window seconds, fetches per minute, status and any error.
-
-### Rate Limiting Configuration
-- `CRAWL_DELAY_SECONDS` (default: 0.0) - Delay in seconds each crawl thread waits between the URLs it crawls. Includes 10% random fuzz (±10%) to avoid synchronized requests across workers. Set to 0 to disable delays.
-
-Independently of that setting, the crawler limits how often it fetches from any one domain (`mwmbl/crawler/politeness.py`). A batch claims each domain it takes a URL from, so no other worker sharing the Redis can fetch from that domain at the same time. After the batch, the domain stays unavailable for the `Crawl-delay` its robots.txt asks for, or at least 5 seconds. A domain that answers 403, 429, 502, 503 or 504 is left alone for a minute, doubling with each refusal up to six hours, until a fetch gets through. Its URLs stay queued in the meantime.
-
-If robots.txt cannot be fetched (a 5xx, a timeout, a refused connection) the site is treated as disallowing everything for an hour, as RFC 9309 asks. A 4xx means there is no robots.txt and everything is allowed. Pages that come back with a status outside 2xx are not indexed and their links are not followed, so a Cloudflare challenge or an error page never reaches the index.
-
-### Error Reporting
-- `CRAWL_REPORT_ERRORS` (default: true) - Send the errors the crawler catches and recovers from to the Mwmbl server (`POST /api/v1/crawler/errors`), so the maintainers can see when crawlers are failing. A report holds the exception, its traceback, the crawler version and the device name. File paths are sent relative to the Python path and your home directory is replaced with `~`, so reports do not name your account. Each distinct error is reported at most once an hour per process. Set to `false` to opt out. Nothing is reported when `CRAWL_SUBMIT_MODE` is `off`.
-
-### Redis Configuration
-- `REDIS_URL` (default: 'redis://127.0.0.1:6379') - Redis connection URL for URL queues and stats
-
-## Setup
-
-For development setup and deployment configuration, see `./docker-compose.yml` at the root of the repository.
-
-## Architecture Overview
-
-The Mwmbl crawler is a **distributed, collaborative web crawler** where multiple users help crawl the web to build Mwmbl's search index. The system coordinates URL assignment, deduplication, and result aggregation.
-
-### What Data It Fetches
-
-The crawler fetches **web pages (HTML content)** from URLs, specifically:
-- Page titles and main text content (using the justext library for clean content extraction)
-- Internal and external links found on each page
-- HTTP status codes and error information
-- Respects robots.txt files before crawling any URL
-
-### How It Works (Request/Response Flow)
-
-This is an **on-demand, distributed crawler**:
-
-1. **URL Assignment**: Users request batches of URLs to crawl via `/api/v1/crawler/batches/new`
-2. **Batch Processing**: The system assigns up to 100 URLs at a time (configurable via the `CRAWL_BATCH_SIZE` environment variable)
-3. **Crawling**: Users crawl those URLs with rate limiting (configurable delay between requests)
-4. **Result Submission**: Users submit crawled results back via `/api/v1/crawler/batches/`
-
-### Data Processing Pipeline
-
-The crawler processes data through several stages:
-
-1. **Content Extraction**: Uses the justext library to extract clean, readable text content from HTML
-2. **Link Discovery**: Finds and validates new links (up to 50 content links + 50 navigation links per page)
-3. **Data Validation**: Filters out problematic URLs (localhost, binary files like .jpg/.pdf, etc.)
-4. **Deduplication**: Uses bloom filters to track which URLs have already been crawled
-5. **Domain Authority Scoring**: Tracks which domains link to which other domains using `DOMAIN_GROUPS` - a predefined list of high-authority domains and their scoring weights (e.g., GitHub, Wikipedia, HackerNews get weight 10; Lemmy/Mastodon get weight 2; top domains get weight 5; others get weight 1). This creates a domain authority system where links from high-authority sources boost the ranking of target pages.
-6. **Statistics Tracking**: Records detailed crawl statistics per domain and user in Redis
-
-### What Data Gets Uploaded
-
-The crawler uploads several types of data:
-
-#### 1. Crawled Batches (to S3-compatible storage)
-Compressed JSON files containing:
-- URL, title, and extracted text content
-- Discovered links categorized by type (content vs navigation)
-- Crawl timestamps and HTTP status codes
-- Any errors encountered during crawling
-
-#### 2. Search Results (for indexing)
-Processed data for the tiny search engine:
-- URL, title, extract text
-- Used to build the searchable index that powers Mwmbl search
-
-#### 3. Statistics (to Redis)
-Real-time monitoring data:
-- URLs crawled per day/hour
-- Top contributing users and domains
-- Domain link relationships for scoring
-- Error rates and success metrics
-
-### Batch Processing Workflow
-
-The **batch processing** handles the actual web crawling work:
-
-1. **URL Assignment**: Gets batches of URLs from the Redis URL queue 
-2. **Concurrent Crawling**: Crawls the batch on `CRAWL_THREADS` threads, at most one URL per domain, skipping domains fetched too recently
-3. **Content Extraction**: Uses justext library to extract clean text content and discover new links
-4. **Result Recording**: Records crawl results in database for URL tracking and deduplication
-5. **Queue Handoff**: Pushes completed batches to Redis queue for the indexing process
-
-Each batch is processed as a `HashedBatch` object containing metadata (user ID, timestamp) and an array of crawl results (URL, title, extract, links, errors).
-
-### Indexing Workflow  
-
-The **indexing process** transforms crawl results into searchable content:
-
-1. **Batch Retrieval**: Pulls completed crawl batches from Redis queue (processes up to 10 batches at once)
-2. **Local Indexing**: Uses the tiny search engine indexer to build local search index from crawl results
-3. **Quality Filtering**: For high-activity search terms, compares local results against the remote Mwmbl index
-4. **Selective Sync**: Only submits local results that score higher than existing remote results (prevents low-quality content pollution)
-5. **Remote Integration**: Downloads updated remote results and merges them back into local index
-
-This two-stage process ensures that:
-- High-quality crawl results reach the main Mwmbl search index
-- Local crawlers maintain up-to-date search indexes
-- The main index maintains quality standards through score-based filtering
-
-### Community-Driven Approach
-
-The distributed nature allows the crawler to:
-- Scale horizontally with more community contributors
-- Respect rate limits across many different IP addresses
-- Reduce load on any single crawler instance
-- Build a diverse, community-curated web index
-
-See the main [README](../../README.md) for more context on Mwmbl's community-driven approach.
+- `app.py` - the crawler endpoints under `/api/v1/crawler/`: `POST /results`, where crawlers
+  submit what they found and get the main index's results for the same terms back,
+  `GET /curated-domains`, and `POST /errors`. `POST /results` answers 426 to a crawler
+  older than the `MIN_CRAWLER_VERSION` setting.
+- `batch.py` - the request and response schemas of those endpoints. The Rust crawler's side
+  of them is pinned by `rust/crawler/fixtures/` and `test/test_rust_crawler_contract.py`.
+- `stats.py`, `agreement.py`, `agreement_rollups.py`, `worst_agreements.py` - crawl
+  statistics and how often crawlers' results agree with the main index.
+- `retrieve.py`, `ssrf.py`, `urls.py` - the server's own fetching of other sites, for seed
+  crawls, moderation evidence, widgets and super search.
+- `release_check.py` - CI's check that a change to the crawler raises its version, which is
+  what publishes a release.

@@ -108,18 +108,23 @@ fn a_term_keeps_its_own_documents_and_those_with_no_term() {
     // as_tuple truncates trailing Nones, so a document with no term can be this short.
     let truncated = json!(["A title", "https://truncated.example/", "An extract", 1.0]);
     let not_a_string = json!(["A title", "https://number.example/", "An extract", 1.0, 7]);
+    // The crawler writes its documents as objects rather than tuples.
+    let own_object = json!({"title": "A title", "url": "https://object.example/", "term": "rust"});
+    let other_object = json!({"title": "A title", "url": "https://py.example/", "term": "python"});
     let documents = vec![
         own.clone(),
         other,
         null_term.clone(),
         truncated.clone(),
         not_a_string,
+        own_object.clone(),
+        other_object,
     ];
     write_index_page(scratch.fd(), 0, PAGE_SIZE, &documents).unwrap();
 
     let matching = read(&scratch, 0, Some("rust")).unwrap();
 
-    assert_eq!(matching, vec![own, null_term, truncated]);
+    assert_eq!(matching, vec![own, null_term, truncated, own_object]);
 }
 
 #[test]
@@ -149,6 +154,27 @@ fn packing_keeps_the_longest_prefix_that_fits() {
         one_more, num_stored,
         "the next document should not have fitted"
     );
+}
+
+#[test]
+fn packing_any_prefix_stores_all_of_it_that_fits() {
+    let documents: Vec<Value> = (0..60u64)
+        .map(|i| {
+            let extract: String = (0..20)
+                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
+                .collect();
+            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
+        })
+        .collect();
+    let (_, fits) = pack_page(PAGE_SIZE, &documents).unwrap();
+    assert!(fits > 1 && fits < documents.len(), "stored {fits}");
+
+    // Up to `fits` the whole list is stored (the common case, a single compression), and
+    // past it the search finds the same prefix as before.
+    for count in 0..=documents.len() {
+        let (_, num_stored) = pack_page(PAGE_SIZE, &documents[..count]).unwrap();
+        assert_eq!(num_stored, count.min(fits), "packing {count} documents");
+    }
 }
 
 #[test]

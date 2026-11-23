@@ -77,8 +77,6 @@ indexer = [
 
 [project.scripts]
 mwmbl-tinysearchengine = "mwmbl.main:run"
-mwmbl-crawl = "mwmbl.crawl:main"
-mwmbl = "mwmbl.cli:main"
 
 [dependency-groups]
 dev = [
@@ -147,8 +145,6 @@ exclude_also = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-# Volunteers run the benchmark with whatever python3 their system has, macOS's 3.9 included.
-per-file-target-version = { "mwmbl/crawler/benchmark.py" = "py39" }
 extend-exclude = ["devdata", "front-end", "test_env"]
 
 [tool.ruff.lint]
@@ -163,7 +159,6 @@ ignore = ["E501"]
 # These modules must call django.setup() (or pytest.importorskip) before the imports
 # that reach Django models or the Rust extension, so those imports cannot be at the top.
 "analyse/analyse_crawled_links.py" = ["E402"]
-"mwmbl/crawl.py" = ["E402"]
 "mwmbl/rankeval/evaluation/compare_ltr_models.py" = ["E402"]
 "test/test_rust_features.py" = ["E402"]
 "scripts/combined_search_haiku/*.py" = ["E402"]

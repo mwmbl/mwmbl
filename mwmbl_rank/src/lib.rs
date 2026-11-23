@@ -1,12 +1,16 @@
+mod features;
 /// mwmbl_rank: Rust extension module for Mwmbl learning-to-rank.
 ///
 /// Exposes RustXGBPipeline to Python via PyO3.
 /// Build with: maturin develop  (or maturin build --release)
 mod index;
 mod pipeline;
-mod features;
 
-use mwmbl_core::{indexer::Document, rank::{get_features_regex_unchecked, get_query_regex}, wiki};
+use mwmbl_core::{
+    indexer::Document,
+    rank::{get_features_regex_unchecked, get_query_regex},
+    wiki,
+};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use regex::regex;
@@ -60,7 +64,17 @@ fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
 
     Ok(DocumentRecord {
         query,
-        doc: Document::new(title, url, extract, Some(score), None, None, None, None, None),
+        doc: Document::new(
+            title,
+            url,
+            extract,
+            Some(score),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
         staan_rank,
         from_staan,
     })
@@ -263,10 +277,20 @@ fn get_features_py(
     url: &str,
     extract: &str,
     score: f32,
-    is_complete: bool,
+    _is_complete: bool,
 ) -> Vec<f32> {
     let term_refs: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
-    let doc = Document::new(title.to_owned(), url.to_owned(), extract.to_owned(), Some(score), None, None, None, None, None);
+    let doc = Document::new(
+        title.to_owned(),
+        url.to_owned(),
+        extract.to_owned(),
+        Some(score),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let (url_path, url_domain, url_query) = match Url::parse(url) {
         Ok(url) => (
             url.path().to_owned(),
@@ -277,7 +301,7 @@ fn get_features_py(
     };
     let re_text = get_query_regex(&term_refs, true, false).unwrap_or(regex!("").clone());
     let re_url = get_query_regex(&term_refs, true, true).unwrap_or(regex!("").clone());
-            
+
     let features = get_features_regex_unchecked(
         &term_refs,
         &doc,

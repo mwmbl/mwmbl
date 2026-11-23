@@ -4,6 +4,7 @@ use itertools::Itertools;
 
 use crate::indexer::Document;
 
+#[allow(dead_code)]
 pub struct Agreement {
     url: String,
     existing_user_id: i32,

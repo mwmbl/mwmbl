@@ -254,10 +254,16 @@ def delete_user(request, username: str):
     ),
 )
 @paginate
-def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmissionSchema]:
-    # Submissions are stored under the normalized domain, so look them up the same way, otherwise a
-    # client cannot find back a submission it made using the URL it submitted.
-    return DomainSubmission.objects.filter(name=normalize_domain(domain)).all()
+def get_domain_submissions_for_domain(request, domain: str):
+    # Submissions are stored under the normalized domain.
+    queryset = DomainSubmission.objects.filter(name=normalize_domain(domain))
+
+    status = request.GET.get("status")
+
+    if status in ["APPROVED", "REJECTED", "PENDING"]:
+        queryset = queryset.filter(status=status)
+
+    return queryset
 
 
 @router.get(
@@ -271,7 +277,14 @@ def get_domain_submissions_for_domain(request, domain: str) -> list[DomainSubmis
 )
 @paginate
 def get_domain_submissions(request) -> list[DomainSubmission]:
-    return DomainSubmission.objects.all()
+    queryset = DomainSubmission.objects.all()
+
+    status = request.GET.get("status")
+
+    if status in ["APPROVED", "REJECTED", "PENDING"]:
+        queryset = queryset.filter(status=status)
+
+    return queryset
 
 
 @router.post(

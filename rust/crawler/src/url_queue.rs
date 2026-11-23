@@ -72,11 +72,11 @@ impl Drop for ClaimedDomain {
         if !self.keep_avaliable
             && let Some(domain_claims) = self.domain_claims.upgrade()
         {
-            let domain = self.domain_lock.to_owned();
+            let (domain, instant) = (self.domain_lock.0.clone(), self.domain_lock.2);
             spawn(async move {
                 sleep(DOMAIN_TIMEOUT).await;
                 domain_claims
-                    .remove_if_async(&domain.0, |v| v.try_lock().is_ok_and(|v| v.2 == domain.2))
+                    .remove_if_async(&domain, |v| v.try_lock().is_ok_and(|v| v.2 == instant))
                     .await;
             });
         }
@@ -92,6 +92,18 @@ pub struct ClaimedUrl {
 impl ClaimedUrl {
     pub fn url(&self) -> &reqwest::Url {
         &self.url
+    }
+
+    /// A URL on a domain claimed by nothing else, already released, for tests that crawl it.
+    #[cfg(test)]
+    pub fn unqueued(url: reqwest::Url) -> ClaimedUrl {
+        let domain = Arc::new(Mutex::new((String::new(), UrlQueue::new(), Instant::now())));
+        let claim = ClaimedDomain::new(Weak::new(), domain.try_lock_owned().unwrap(), true);
+        ClaimedUrl {
+            claim,
+            url,
+            released: true,
+        }
     }
     pub fn release_after_delay(self, resolved_domain: Option<&str>, delay: Duration) {
         let resolved_domain = resolved_domain.map(std::borrow::ToOwned::to_owned).clone();
@@ -181,6 +193,7 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
     }
 
     pub async fn get_url(&mut self) -> ClaimedUrl {
+        let mut loop_count = 0;
         loop {
             // loop until we can claim a domain, if claim fails we yield to allow other computation to add new domains
             let total_seed = SEED_DOMAIN_RANDOM_WEIGHT + KNOWN_DOMAINS_RANDOM_WEIGHT;
@@ -270,7 +283,12 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                     return claimed_url;
                 }
             }
-            yield_now().await;
+            loop_count += 1;
+            if loop_count > 1000 {
+                sleep(Duration::from_millis(100)).await;
+            } else {
+                yield_now().await;
+            }
         }
 
         // data struct:
@@ -397,9 +415,6 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
             })
             .collect();
 
-        if scores.is_empty() {
-            return;
-        }
         let domain_score = db.get_domain_score(&domain);
 
         spawn(async move {
@@ -433,14 +448,11 @@ impl<T: BlacklistProvider, const S: usize> SharedURLQueue<T, S> {
                     lock.domain_lock.1.pop_min();
                 }
             }
-            let domain_best = lock
-                .domain_lock
-                .1
-                .peek_max()
-                .map_or(OrderedFloat(-1.0), |v| *v.1);
+            let domain_best = lock.domain_lock.1.peek_max();
 
-            if let Some(domain_queue) =
-                domain_scores.get(Self::get_priority_queue_index(&build_hasher, &domain))
+            if let Some((_, domain_best)) = domain_best
+                && let Some(domain_queue) =
+                    domain_scores.get(Self::get_priority_queue_index(&build_hasher, &domain))
             {
                 let mut lock = domain_queue.write().await;
                 lock.push(domain.clone(), domain_best + domain_score);

@@ -103,6 +103,7 @@ pub struct FoundURL {
     last_crawled: Option<NaiveDate>,
 }
 
+#[allow(dead_code)]
 impl FoundURL {
     pub fn new(
         url: Url,
@@ -183,7 +184,7 @@ impl BloomDatabase {
                     let db = db.clone();
 
                     if !db.changed.load(std::sync::atomic::Ordering::Relaxed) {
-                        return;
+                        continue;
                     }
                     let bloompath = bloom_path(&db.home);
 
@@ -196,11 +197,11 @@ impl BloomDatabase {
                     {
                         if file.write_all(&vec).await.is_err() {
                             eprintln!("Cannot write to bloom file");
-                            return;
+                            continue;
                         }
                     } else {
                         eprintln!("Cannot open bloom file");
-                        return;
+                        continue;
                     }
 
                     db.changed.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -259,6 +260,7 @@ impl BloomDatabase {
         I: IntoIterator<Item = &'a mut FoundURL>,
     {
         let times = Self::db_times();
+        let mut any_change = false;
         found_urls.into_iter().for_each(|url| {
             if url.status.crawled() {
                 url.last_crawled = Some(url.timestamp.date_naive());
@@ -269,7 +271,14 @@ impl BloomDatabase {
                         Some(max(time, url.last_crawled.unwrap_or(NaiveDate::default())));
                 }
             }
+            any_change |= !self
+                .bloom
+                .insert(&Self::format_url_time(times[0], &url.url));
         });
+        if any_change {
+            self.changed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     fn format_url_time(time: NaiveDate, url: &Url) -> String {
@@ -278,7 +287,7 @@ impl BloomDatabase {
 
     fn db_times() -> [NaiveDate; 3] {
         let time = Utc::now().date_naive();
-        if let Some(first) = time.with_day(0)
+        if let Some(first) = time.with_day(1)
             && let Some(second) = first.checked_sub_months(Months::new(1))
             && let Some(third) = second.checked_sub_months(Months::new(1))
         {
@@ -312,5 +321,66 @@ impl Drop for BloomDatabase {
         } else {
             eprintln!("Cannot open bloom file");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Datelike, Utc};
+    use reqwest::Url;
+
+    use super::{BloomDatabase, DomainGroups, FoundURL, UrlStatus};
+    use crate::test_support::scratch_home;
+
+    fn found(url: &Url, status: UrlStatus) -> FoundURL {
+        FoundURL::new(url.clone(), status, Utc::now(), None)
+    }
+
+    #[tokio::test]
+    async fn a_crawled_url_is_remembered_across_restarts() {
+        let home = scratch_home("bloom");
+        let url = Url::parse("https://example.com/page").unwrap();
+        let today = Utc::now().date_naive();
+
+        let db = BloomDatabase::new(&home).await.unwrap();
+        let mut new = [found(&url, UrlStatus::New)];
+        db.update_found_urls(new.iter_mut());
+        assert_eq!(new[0].last_crawled(), None);
+
+        let mut crawled = [found(&url, UrlStatus::Crawled)];
+        db.update_found_urls(crawled.iter_mut());
+        assert_eq!(crawled[0].last_crawled(), Some(today));
+        drop(db);
+
+        // Seen again after a restart, the URL is known to have been crawled this month.
+        let db = BloomDatabase::new(&home).await.unwrap();
+        let mut again = [found(&url, UrlStatus::New)];
+        db.update_found_urls(again.iter_mut());
+        let first_of_month = today.with_day(1).unwrap();
+        assert_eq!(again[0].last_crawled(), Some(first_of_month));
+    }
+
+    #[tokio::test]
+    async fn links_from_a_trusted_domain_raise_the_score_of_the_domains_they_link_to() {
+        let home = scratch_home("domain-links");
+        let db = BloomDatabase::new(&home).await.unwrap();
+        assert!(db.get_domain_score("linked.example").abs() < f32::EPSILON);
+
+        db.update_domain_links("en.wikipedia.org", ["linked.example".to_owned()]);
+        db.update_domain_links("unknown-source.example", ["ignored.example".to_owned()]);
+
+        assert!(
+            (db.get_domain_score("linked.example") - DomainGroups::WikipediaEn.score()).abs()
+                < f32::EPSILON
+        );
+        assert!(db.get_domain_score("ignored.example").abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn only_finished_statuses_count_as_crawled() {
+        assert!(!UrlStatus::New.crawled());
+        assert!(!UrlStatus::Queued.crawled());
+        assert!(UrlStatus::Error404.crawled());
+        assert!(UrlStatus::Crawled.crawled());
     }
 }
