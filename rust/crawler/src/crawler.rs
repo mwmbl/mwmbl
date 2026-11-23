@@ -328,7 +328,7 @@ impl Crawler {
                 .cloned()
                 .collect();
             let pagedocs = HashMap::from([(page_index, new_term_remote_items)]);
-            self.index.index_pages(pagedocs, true).await?;
+            self.index.index_pages(pagedocs, Some(&term)).await?;
         }
         if healthcheck(&self.params.home).await.is_err() {
             eprintln!("Failed to update healthfile");

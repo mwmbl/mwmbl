@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     cmp::max,
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -432,19 +431,24 @@ impl TinyIndex {
     async fn store_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> Vec<StoredPage> {
         let stored: Vec<_> = join_all(
             page_documents
                 .into_par_iter()
                 .map(|(page, docs)| (page, docs, self.clone()))
-                .map(|(page, docs, index)| async move {
-                    spawn_blocking(move || {
-                        Handle::current().block_on(async move {
-                            index.store_page(page, &docs, mark_synced).await
+                .map(|(page, docs, index)| {
+                    let mark_term_synced = mark_term_synced.map(std::borrow::ToOwned::to_owned);
+                    async move {
+                        spawn_blocking(move || {
+                            Handle::current().block_on(async move {
+                                index
+                                    .store_page(page, &docs, mark_term_synced.as_ref())
+                                    .await
+                            })
                         })
-                    })
-                    .await
+                        .await
+                    }
                 })
                 .collect::<Vec<_>>(),
         )
@@ -456,7 +460,7 @@ impl TinyIndex {
         &self,
         page: usize,
         docs: &[Document],
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> Option<StoredPage> {
         let Ok(lock) = self.lock_page_write(page).await else {
             eprintln!("Skipping index page {page}");
@@ -470,7 +474,7 @@ impl TinyIndex {
         let mut combined_documents = combine_documents(
             &existing_documents,
             docs,
-            mark_synced,
+            mark_term_synced,
             &HeuristicRanker::new(f32::NEG_INFINITY),
         );
         let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
@@ -524,7 +528,7 @@ impl TinyIndex {
         let mut held_urls: HashSet<String> = HashSet::new();
         let mut copies: HashMap<String, Vec<Document>> = HashMap::new();
 
-        for page in self.store_pages(page_documents, false).await {
+        for page in self.store_pages(page_documents, None).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -596,11 +600,11 @@ impl TinyIndex {
     pub async fn index_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
-        mark_synced: bool,
+        mark_term_synced: Option<&String>,
     ) -> anyhow::Result<HashMap<String, usize>> {
         let mut new_page_doc_counts: HashMap<String, usize> = HashMap::new();
 
-        for page in self.store_pages(page_documents, mark_synced).await {
+        for page in self.store_pages(page_documents, mark_term_synced).await {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -742,7 +746,7 @@ impl DocumentState {
 fn combine_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
-    mark_synced: bool,
+    mark_term_synced: Option<&String>,
     ranker: &R,
 ) -> Vec<Document>
 where
@@ -750,10 +754,11 @@ where
     J: IntoIterator<Item = &'a Document>,
 {
     let sorted = sort_documents(existing_documents, documents, ranker);
-    let mut values: Vec<(usize, Cow<'a, Document>)> = sorted
+    let mut values: Vec<(usize, Document)> = sorted
         .into_iter()
+        .cloned()
         .enumerate()
-        .map(|(order, doc)| (doc.url.as_str(), (order, Cow::Borrowed(doc))))
+        .map(|(order, doc)| (doc.url.clone(), (order, doc)))
         .into_group_map()
         .into_values()
         .filter_map(merge_user_ids_last_crawled)
@@ -765,9 +770,12 @@ where
     values.sort_by_key(|v| v.0);
     values
         .into_iter()
-        .map(|(_, doc)| {
-            let mut doc = doc.into_owned();
-            if mark_synced {
+        .map(|v| {
+            let mut doc = v.1;
+            if mark_term_synced.is_some()
+                && doc.state.is_none()
+                && doc.term.as_ref() == mark_term_synced
+            {
                 doc.state = Some(DocumentState::SyncedWithMainIndex);
             }
             doc
@@ -777,18 +785,16 @@ where
 
 /// The first document, with the history of all of them: the latest crawl, and every
 /// user id, latest crawl last. A document with no other copies is returned as it is.
-fn merge_user_ids_last_crawled(
-    mut docs: Vec<(usize, Cow<'_, Document>)>,
-) -> Option<(usize, Cow<'_, Document>)> {
+fn merge_user_ids_last_crawled(mut docs: Vec<(usize, Document)>) -> Option<(usize, Document)> {
     if docs.len() <= 1 {
         return docs.pop();
     }
     let (idx, mut best_doc) = docs
         .first()
-        .map(|(idx, doc)| (*idx, Document::clone(doc)))?;
+        .map(|(idx, best_doc)| (*idx, best_doc.to_owned()))?;
     docs.sort_by_key(|(_, doc)| doc.last_crawled.unwrap_or(i64::MIN));
     let mut user_ids: Vec<i32> = Vec::new();
-    for (_, doc) in &docs {
+    for (_, doc) in docs {
         best_doc.last_crawled = max(best_doc.last_crawled, doc.last_crawled);
         for &id in doc.user_ids.iter().flatten() {
             user_ids.retain(|v| *v != id);
@@ -796,7 +802,7 @@ fn merge_user_ids_last_crawled(
         }
     }
     best_doc.user_ids = Some(user_ids);
-    Some((idx, Cow::Owned(best_doc)))
+    Some((idx, best_doc))
 }
 
 fn sort_documents<'a, I, J, R: Ranker>(
@@ -929,7 +935,7 @@ mod tests {
         let combined = combine_documents(
             &existing,
             &incoming,
-            true,
+            Some(&"rust".to_owned()),
             &HeuristicRanker::new(f32::NEG_INFINITY),
         );
 
