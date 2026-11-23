@@ -4,7 +4,7 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::header;
+use reqwest::{Client, header};
 use serde_json::Value;
 use std::{
     cmp::{Reverse, max, min},
@@ -51,6 +51,7 @@ pub struct Crawler<T: BlacklistProvider = DefaultBlackList> {
     submit_paused_until: Arc<RwLock<Option<Instant>>>,
     count: Arc<AtomicUsize>,
     index: TinyIndex,
+    device_name: String,
 }
 
 #[derive(Debug)]
@@ -65,19 +66,21 @@ async fn post_results(
     remote_server: &str,
     results: &SendResults,
 ) -> anyhow::Result<Submission> {
-    let Ok(response) = client
+    let response = client
         .post(format!("{remote_server}/api/v1/crawler/results"))
         .json(results)
         .send()
-        .await
-    else {
-        bail!("Error in sending result");
+        .await;
+
+    let Ok(response) = response else {
+        bail!("Error in sending result, error {response:#?}");
     };
-    if response.status() == 426 {
+    let code = response.status();
+    if code == 426 {
         return Ok(Submission::UpgradeRequired(response.text().await?));
     }
     let Ok(response) = response.error_for_status() else {
-        bail!("Error in sending result");
+        bail!("Error in sending result, error code: {code}");
     };
     let Ok(response) = response.json::<PostResultsResponse>().await else {
         bail!("Error in parsing PostResultsResponse");
@@ -94,6 +97,7 @@ impl Crawler {
         let domainlinkdb = BloomDatabase::new(&params.home).await?;
         let index_path = index_path(&params.home);
         let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
+        let device_name = get_device_name(&params.home, params.device_name.clone()).await;
 
         Ok(Crawler {
             url_queue,
@@ -108,6 +112,7 @@ impl Crawler {
             to_submit: Arc::new(RwLock::new(VecDeque::new())),
             submit_paused_until: Arc::new(RwLock::new(None)),
             index,
+            device_name,
         })
     }
 
@@ -128,7 +133,7 @@ impl Crawler {
         let client = self.get_client()?;
         let start = Instant::now();
 
-        self.index();
+        self.index().await?;
 
         loop {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
@@ -140,7 +145,6 @@ impl Crawler {
             let db = self.domainlinkdb.clone();
             let to_submit = self.to_submit.clone();
             let count = self.count.clone();
-            let params = self.params.clone();
 
             spawn(async move {
                 let url = url_queue.get_url().await;
@@ -189,11 +193,6 @@ impl Crawler {
                         lock.pop_front();
                     }
                     drop(lock);
-                    // Crawling counts as alive, not just submitting: with a long crawl delay a
-                    // batch takes longer to fill than the health check's window.
-                    if healthcheck(&params.home).await.is_err() {
-                        eprintln!("Failed to update healthfile");
-                    }
                 }
             });
 
@@ -222,11 +221,13 @@ impl Crawler {
         format!("{API_PRODUCT} ({identity})")
     }
 
-    pub fn index(&self) {
+    pub async fn index(&self) -> anyhow::Result<()> {
         let clone = self.clone();
         let semaphore = self.submit_semaphore.clone();
         let to_submit = self.to_submit.clone();
         let submit_paused_until = self.submit_paused_until.clone();
+
+        let client = clone.get_send_client().await?;
         spawn(async move {
             loop {
                 // Documents keep queueing (up to MAX_SUBMIT_QUEUE_SIZE) while paused, so the
@@ -248,9 +249,10 @@ impl Crawler {
                         continue;
                     };
                     let clone = clone.clone();
+                    let client = client.clone();
                     spawn(async move {
                         println!("Sending results.");
-                        if let Err(err) = clone.index_batch(docs).await {
+                        if let Err(err) = clone.index_batch(docs, client).await {
                             eprintln!("Error during indexing : {err}");
                         }
                         drop(permit);
@@ -261,16 +263,15 @@ impl Crawler {
                 }
             }
         });
+        Ok(())
     }
 
-    async fn index_batch(&self, docs: Vec<Document>) -> anyhow::Result<()> {
+    async fn index_batch(&self, docs: Vec<Document>, client: Client) -> anyhow::Result<()> {
         let indexed_documents = self.index.index_documents(docs, &self.blacklist).await?;
 
         let mut term_new_doc_count: Vec<(&String, &usize)> =
             indexed_documents.new_page_doc_counts().iter().collect();
         term_new_doc_count.sort_by_key(|v| Reverse(v.1));
-
-        let device_name = get_device_name(&self.params.home, self.params.device_name.clone()).await;
 
         let mut terms: Vec<String> = Vec::new();
         let mut result_items: Vec<SendResult> = Vec::new();
@@ -294,11 +295,10 @@ impl Crawler {
             result_items.append(&mut items);
         }
 
-        let client = self.get_send_client().await?;
         let results = SendResults::new(
             result_items,
             Some(env!("CARGO_PKG_VERSION").to_owned()),
-            Some(device_name.clone()),
+            Some(self.device_name.clone()),
             Some(true),
         );
         let response = match post_results(&client, &self.params.remote_server, &results).await? {
@@ -306,14 +306,13 @@ impl Crawler {
             Submission::UpgradeRequired(message) => {
                 // Waiting gives an external updater (compose timer, systemd timer) time to
                 // replace this crawler, where retrying every batch would hammer the server.
-                eprintln!(
+                *self.submit_paused_until.write().await =
+                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
+                bail!(
                     "The server requires a newer crawler: {message} Pausing submission for {} \
                      seconds instead of sending results the server would reject.",
                     UPGRADE_REQUIRED_WAIT.as_secs()
                 );
-                *self.submit_paused_until.write().await =
-                    Some(Instant::now() + UPGRADE_REQUIRED_WAIT);
-                return Ok(());
             }
         };
         let Some(new_items) = response.new_items() else {
@@ -328,7 +327,7 @@ impl Crawler {
                 .cloned()
                 .collect();
             let pagedocs = HashMap::from([(page_index, new_term_remote_items)]);
-            self.index.index_pages(pagedocs, true).await?;
+            self.index.index_pages(pagedocs, Some(&term)).await?;
         }
         if healthcheck(&self.params.home).await.is_err() {
             eprintln!("Failed to update healthfile");
