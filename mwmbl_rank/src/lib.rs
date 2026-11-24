@@ -20,7 +20,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use regex::regex;
 
-use pipeline::{extract_features_batch, num_features, DocumentRecord, StaanRank, XGBPipeline};
+use pipeline::{DocumentRecord, StaanRank, XGBPipeline, extract_features_batch, num_features};
 use url::Url;
 
 /// Convert a Python dict (passed as a Bound<PyAny>) to a DocumentRecord.
