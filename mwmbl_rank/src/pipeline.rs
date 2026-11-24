@@ -10,10 +10,10 @@ use url::Url;
 /// from mwmbl/rankeval/ltr/evaluate.py.
 ///
 /// Uses the xgb 3.0.5 crate (prebuilt XGBoost binaries, same API as xgboost 0.1.4).
-use xgb::{parameters, Booster, DMatrix};
+use xgb::{Booster, DMatrix, parameters};
 
 use crate::features::{
-    features_vec, MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES,
+    MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES, features_vec,
 };
 
 /// What Staan said about a record's URL for its query.
@@ -253,8 +253,13 @@ impl XGBPipeline {
         let t1 = Instant::now();
         let flat_features = extract_features_batch(records, self.provider_features);
         let n_rows = records.len();
-        eprintln!("[XGBPipeline::fit] Feature extraction done in {:.2?}: {} rows × {} features = {} values",
-            t1.elapsed(), n_rows, flat_features.len() / n_rows.max(1), flat_features.len());
+        eprintln!(
+            "[XGBPipeline::fit] Feature extraction done in {:.2?}: {} rows × {} features = {} values",
+            t1.elapsed(),
+            n_rows,
+            flat_features.len() / n_rows.max(1),
+            flat_features.len()
+        );
 
         // Build DMatrix
         let t2 = Instant::now();
