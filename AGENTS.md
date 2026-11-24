@@ -64,6 +64,8 @@ raising the version. The commit-msg hook catches a commit that needs one or the 
 - Match the surrounding code's naming and idiom over any general preference.
 - Tests live next to the behaviour they cover, in `test/`, and are part of the same
   change — not a follow-up.
+- Rust (`rust/` and `mwmbl_rank/`) follows `rust/AGENTS.md`. Read it before writing or
+  reviewing Rust.
 
 ## Evaluating ranking changes
 
