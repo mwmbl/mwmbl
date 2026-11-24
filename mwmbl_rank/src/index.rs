@@ -24,7 +24,7 @@
 //! Python opens the file and passes the descriptor in, holds the metadata and the page locks,
 //! and turns the documents that come back into `Document`s.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use mwmbl_core::index::{self, PageIoError};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyOSError, PyTypeError, PyValueError};
@@ -54,7 +54,7 @@ fn page_error(error: &anyhow::Error) -> PyErr {
 }
 
 /// A JSON value as the object `json.loads` would have returned.
-fn value_to_py(py: Python<'_>, value: Value) -> Result<PyObject> {
+fn value_to_py(py: Python<'_>, value: Value) -> PyResult<PyObject> {
     let object = match value {
         Value::Null => py.None(),
         Value::Bool(boolean) => boolean.into_py(py),
@@ -67,7 +67,7 @@ fn value_to_py(py: Python<'_>, value: Value) -> Result<PyObject> {
                 float.into_py(py)
             } else {
                 // Without serde_json's arbitrary_precision, every number is one of the three.
-                bail!("Unreadable number {number}")
+                return Err(PageError::new_err(format!("Unreadable number {number}")));
             }
         }
         Value::String(string) => string.into_py(py),
@@ -84,19 +84,16 @@ fn value_to_py(py: Python<'_>, value: Value) -> Result<PyObject> {
 }
 
 /// A JSON array as the list `json.loads` would have returned.
-fn values_to_py(py: Python<'_>, values: Vec<Value>) -> Result<Bound<'_, PyList>> {
+fn values_to_py(py: Python<'_>, values: Vec<Value>) -> PyResult<Bound<'_, PyList>> {
     let items = values
         .into_iter()
         .map(|value| value_to_py(py, value))
-        .collect::<Result<Vec<PyObject>>>()?;
+        .collect::<PyResult<Vec<PyObject>>>()?;
     Ok(PyList::new_bound(py, items))
 }
 
 /// A Python object as a JSON value.
-///
-/// The failures it finds itself are Python exceptions, so that their messages name a type
-/// like the `OverflowError` and `UnicodeEncodeError` that pyo3 raises here.
-fn py_to_value(object: &Bound<'_, PyAny>) -> Result<Value> {
+fn py_to_value(object: &Bound<'_, PyAny>) -> PyResult<Value> {
     if object.is_none() {
         return Ok(Value::Null);
     }
@@ -115,8 +112,7 @@ fn py_to_value(object: &Bound<'_, PyAny>) -> Result<Value> {
         let Some(number) = Number::from_f64(value) else {
             return Err(PyValueError::new_err(format!(
                 "{value} cannot be stored in an index page"
-            ))
-            .into());
+            )));
         };
         return Ok(Value::Number(number));
     }
@@ -125,11 +121,11 @@ fn py_to_value(object: &Bound<'_, PyAny>) -> Result<Value> {
     }
     if let Ok(list) = object.downcast::<PyList>() {
         let items = list.iter().map(|item| py_to_value(&item));
-        return Ok(Value::Array(items.collect::<Result<_>>()?));
+        return Ok(Value::Array(items.collect::<PyResult<_>>()?));
     }
     if let Ok(tuple) = object.downcast::<PyTuple>() {
         let items = tuple.iter().map(|item| py_to_value(&item));
-        return Ok(Value::Array(items.collect::<Result<_>>()?));
+        return Ok(Value::Array(items.collect::<PyResult<_>>()?));
     }
     if let Ok(dict) = object.downcast::<PyDict>() {
         let mut fields = Map::with_capacity(dict.len());
@@ -137,8 +133,7 @@ fn py_to_value(object: &Bound<'_, PyAny>) -> Result<Value> {
             let Ok(name) = key.downcast::<PyString>() else {
                 return Err(PyTypeError::new_err(
                     "Only string keys can be stored in an index page",
-                )
-                .into());
+                ));
             };
             fields.insert(name.to_str()?.to_owned(), py_to_value(&value)?);
         }
@@ -146,7 +141,9 @@ fn py_to_value(object: &Bound<'_, PyAny>) -> Result<Value> {
     }
     let object_type = object.get_type();
     let type_name = object_type.name()?;
-    Err(PyTypeError::new_err(format!("Cannot store {type_name} in an index page")).into())
+    Err(PyTypeError::new_err(format!(
+        "Cannot store {type_name} in an index page"
+    )))
 }
 
 /// The items to store, as JSON values.
@@ -159,7 +156,7 @@ fn py_items_to_values(items: &Bound<'_, PyList>) -> Result<Vec<Value>> {
     items
         .iter()
         .map(|item| py_to_value(&item))
-        .collect::<Result<_>>()
+        .collect::<PyResult<_>>()
         .context("Cannot store these documents on a page")
 }
 
@@ -191,15 +188,14 @@ pub fn read_index_page(
     let values = py
         .allow_threads(|| index::read_index_page::<Value>(fd, offset, page_size, term.as_ref()))
         .map_err(page_io_error)?;
-    let documents = values_to_py(py, values).map_err(|error| page_error(&error))?;
-    Ok(documents.unbind())
+    Ok(values_to_py(py, values)?.unbind())
 }
 
 /// Write `items` over the page at `offset`, returning how many of them fitted.
 ///
 /// # Errors
 ///
-/// Raises `PageError` if an item can't be stored, rather than the `TypeError` or `ValueError`
+/// Raises `PageError` if an item can't be stored, rather than the Python exception
 /// behind it, so that a caller catching `PageError` loses only this page. Also raises
 /// `PageError` if `page_size` is too small for an empty page, and `OSError` if the write fails.
 #[pyfunction]
