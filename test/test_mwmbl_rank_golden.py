@@ -466,6 +466,11 @@ def test_written_page_round_trips_and_filters_by_term(page_file):
     assert as_json(read_index_page(page_file, 512, 512, term="other")) == as_json([STORED_ITEMS[i] for i in [1, 2, 4]])
 
 
+def test_one_letter_terms_filter_too(page_file):
+    write_index_page(page_file, 0, 512, [["t", "u", "e", 1, "a"], ["t", "u", "e", 2, "b"], {"term": "a"}])
+    assert as_json(read_index_page(page_file, 0, 512, "a")) == '[["t","u","e",1,"a"],{"term":"a"}]'
+
+
 def test_a_page_holding_scalars_keeps_them_for_every_term(page_file):
     """Documents current behaviour: only a list or an object can belong to another term.
     The u64 is one the writer refuses but the reader accepts."""
