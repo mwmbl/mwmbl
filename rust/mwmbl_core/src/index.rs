@@ -16,7 +16,6 @@ use std::mem::ManuallyDrop;
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::FromRawFd;
 
-use itertools::Itertools;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -41,7 +40,7 @@ const MAX_PAGE_EXPANSION: usize = 1024;
 /// `OSError` for `Io` and a `PageError` for `Unreadable`.
 #[derive(Debug)]
 pub enum PageIoError {
-    /// The read or the write failed, or zstd could not compress.
+    /// The read or the write failed, or zstd could not make a context or compress.
     Io(io::Error),
     /// The page is short, corrupt or half-written, or the documents won't fit on one.
     Unreadable(String),
@@ -181,7 +180,14 @@ fn has_term(document: &Value, term: &str) -> bool {
 
 /// The first `count` of the serialised documents, as a compressed JSON array.
 fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageIoError> {
-    let json = format!("[{}]", serialised.iter().take(count).join(","));
+    let mut json = String::from("[");
+    for (position, document) in serialised.iter().take(count).enumerate() {
+        if position > 0 {
+            json.push(',');
+        }
+        json.push_str(document);
+    }
+    json.push(']');
     compress(json.as_bytes())
 }
 
@@ -217,7 +223,7 @@ fn longest_fitting_prefix(
 /// # Errors
 ///
 /// Fails with `Unreadable` if a document won't serialise or even an empty page is too big,
-/// and with `Io` if zstd fails.
+/// and with `Io` if zstd could not make a context or compress.
 pub fn pack_page<T: Serialize>(
     page_size: usize,
     documents: &[T],
@@ -255,10 +261,10 @@ fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>,
 ///
 /// # Errors
 ///
-/// Fails with `Io` if the read fails, and with `Unreadable` if the page comes up short or
-/// won't decode, which means it is corrupt or was caught half-written. There is no falling
-/// back to an empty page: a writer that merged onto one would store its result over
-/// everything that was there.
+/// Fails with `Io` if the read fails or zstd could not make a context, and with `Unreadable`
+/// if the page comes up short or won't decode, which means it is corrupt or was caught
+/// half-written. There is no falling back to an empty page: a writer that merged onto one
+/// would store its result over everything that was there.
 ///
 /// # Panics
 ///

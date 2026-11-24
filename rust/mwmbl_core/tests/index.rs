@@ -2,6 +2,7 @@
 //! mwmbl_rank (test_index_page_writes and friends); these pin the crate's own behaviour so
 //! a change to it fails here, next to the code, rather than only through the extension.
 
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
@@ -201,6 +202,21 @@ fn a_page_too_small_for_even_an_empty_list_is_an_error() {
     assert!(
         matches!(result, Err(PageIoError::Unreadable(_))),
         "{result:?}"
+    );
+}
+
+#[test]
+fn a_document_with_no_json_form_is_unreadable() {
+    let tuple_keyed = BTreeMap::from([((1u8, 2u8), 3u8)]);
+
+    let result = pack_page(PAGE_SIZE, &[tuple_keyed]);
+
+    let Err(PageIoError::Unreadable(message)) = result else {
+        panic!("expected Unreadable, got {result:?}");
+    };
+    assert!(
+        message.contains("Failed to serialize data: key must be a string"),
+        "{message}"
     );
 }
 
