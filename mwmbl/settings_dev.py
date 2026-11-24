@@ -28,3 +28,7 @@ DOMAIN_LINKS_BLOOM_FILTER_PATH = str(Path(DATA_PATH) / "links_{domain_group}.blo
 NUM_DOMAINS_IN_BLOOM_FILTER = 100_000
 
 REQUEST_CACHE_PATH = f"{DATA_PATH}/request_cache"
+
+# A local `mwmbl-social serve` started with this admin token.
+MWMBL_SOCIAL_URL = os.environ.get("MWMBL_SOCIAL_URL", "http://localhost:8080")
+MWMBL_SOCIAL_ADMIN_TOKEN = os.environ.get("MWMBL_SOCIAL_ADMIN_TOKEN", "dev-admin-token-0123456789")
