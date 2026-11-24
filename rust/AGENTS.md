@@ -10,7 +10,7 @@ code rather than copying them.
 ## Lints
 
 Every crate's root module starts with this block, and `cargo clippy --all-targets -- -D
-warnings` must pass. (`mwmbl_rank` doesn't have it yet; it is being brought into line.)
+warnings` must pass.
 
 ```rust
 #![cfg_attr(
