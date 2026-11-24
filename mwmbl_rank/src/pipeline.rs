@@ -213,7 +213,7 @@ pub struct XGBPipeline {
 unsafe impl Send for XGBPipeline {}
 
 impl XGBPipeline {
-    #[allow(
+    #[expect(
         clippy::too_many_arguments,
         reason = "one argument per keyword argument of the Python constructor"
     )]
