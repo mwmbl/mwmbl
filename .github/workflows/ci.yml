@@ -112,6 +112,12 @@ jobs:
       #----------------------------------------------
       - name: Install project with maturin
         run: .github/scripts/retry.sh uv run maturin develop
+      - name: Check the mwmbl_rank extension's formatting
+        run: make rust-rank-fmt
+      # Retried like the step above: clippy runs the same build script, which downloads
+      # libxgboost.so if this profile's target directory does not have it yet.
+      - name: Lint the mwmbl_rank extension
+        run: .github/scripts/retry.sh make rust-rank-clippy
       #----------------------------------------------
       #              run test suite
       #----------------------------------------------

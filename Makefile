@@ -43,7 +43,7 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core coverage coverage-python coverage-rust \
+.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core rust-rank rust-rank-fmt rust-rank-clippy coverage coverage-python coverage-rust \
         coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
@@ -55,6 +55,7 @@ help:
 	@echo "  test           Run the full test suite (set DATABASE_URL to a PostgreSQL database)"
 	@echo "  test-file FILE Run a specific test file, e.g. make test-file FILE=test/test_search_api_key.py"
 	@echo "  rust-core      Format-check, lint and test the crates under rust/, the crawler among them"
+	@echo "  rust-rank      Format-check and lint mwmbl_rank (needs the venv, for pyo3's Python)"
 	@echo "  coverage       Run Python and Rust coverage and print a combined line-weighted total"
 	@echo "  coverage-python Run Python tests with terminal, XML, and HTML coverage reports"
 	@echo "  coverage-rust  Run Rust unit tests and write an LCOV report (needs cargo-llvm-cov)"
@@ -116,6 +117,17 @@ rust-core:
 	cargo clippy --manifest-path rust/crawler/Cargo.toml --all-targets --locked -- -D warnings
 	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
 	cargo test --manifest-path rust/crawler/Cargo.toml --locked
+
+# The server's Python extension. pyo3 needs a Python to build against, so this runs after
+# the venv exists; its tests cross into Python and run under coverage-rust and pytest.
+rust-rank: rust-rank-fmt rust-rank-clippy
+
+rust-rank-fmt:
+	cargo fmt --manifest-path mwmbl_rank/Cargo.toml --check
+
+rust-rank-clippy:
+	PYO3_PYTHON="$(CURDIR)/.venv/bin/python" \
+		cargo clippy --manifest-path mwmbl_rank/Cargo.toml --all-targets --locked -- -D warnings
 
 coverage: coverage-python coverage-rust
 	uv run python scripts/combine_coverage.py coverage/python.xml coverage/rust.lcov

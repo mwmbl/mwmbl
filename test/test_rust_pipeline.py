@@ -316,3 +316,18 @@ class TestRustXGBPipelineProviderFeatures:
             os.unlink(model_path)
 
         assert not loaded.provider_features
+
+
+class TestRustXGBPipelineShim:
+    """The Python wrapper's own behaviour, which a rewrite of the extension has to keep."""
+
+    def test_repr_and_from_model_path_keep_the_given_parameters(self, tmp_path):
+        model_path = str(tmp_path / "model.xgb")
+        RustXGBPipeline(num_rounds=5).fit(make_dataframe(20), make_labels(20)).save_model(model_path)
+
+        loaded = RustXGBPipeline.from_model_path(model_path, threshold=0.25, max_depth=4)
+
+        assert repr(loaded) == (
+            "RustXGBPipeline(threshold=0.25, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100, max_depth=4, "
+            "min_child_weight=None, gamma=None, subsample=None, provider_features=False)"
+        )

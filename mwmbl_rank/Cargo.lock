@@ -1052,7 +1052,6 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "mwmbl_core",
- "once_cell",
  "pyo3",
  "regex",
  "serde",
