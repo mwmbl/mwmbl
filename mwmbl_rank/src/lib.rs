@@ -22,10 +22,6 @@
 //! reading and writing index pages.
 
 mod features;
-#[expect(
-    clippy::pedantic,
-    reason = "index.rs isn't yet in line with rust/AGENTS.md (#696)"
-)]
 mod index;
 mod pipeline;
 
