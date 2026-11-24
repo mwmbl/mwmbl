@@ -254,7 +254,8 @@ fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>,
     (page, num_stored)
 }
 
-/// The documents on the page of `page_size` bytes at `offset` in the file open as `fd`.
+/// The documents on the page of `page_size` bytes at `offset` in the file open as `fd`, which
+/// must stay open for the whole call.
 ///
 /// Pass `term` to keep only the documents that belong to it: those whose term is `term`, or
 /// which have none.
@@ -280,7 +281,7 @@ pub fn read_index_page<T: DeserializeOwned>(
 }
 
 /// Writes as many of `documents` as fit over the page at `offset` in the file open as `fd`,
-/// returning how many that is.
+/// returning how many that is. `fd` must stay open for the whole call.
 ///
 /// # Errors
 ///
