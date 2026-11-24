@@ -98,13 +98,57 @@ pub(crate) fn feature_row(features: Features) -> [f32; NUM_FEATURES] {
     // SAFETY: `Features` is made of `f32`s only, so every bit pattern is a valid array, and
     // `transmute` fails to compile unless the sizes match. The field order isn't guaranteed
     // without `#[repr(C)]`, which `mwmbl_core` doesn't declare: the golden tests catch a
-    // reordering.
+    // reordering, and `feature_row_follows_the_fields_of_features` ties the order to the names.
     unsafe { std::mem::transmute::<Features, [f32; NUM_FEATURES]>(features) }
 }
 
 #[cfg(test)]
 mod tests {
+    use mwmbl_core::{indexer::Document, rank::get_features};
+    use regex::Regex;
+
     use super::*;
+
+    /// The `{field}_{section}` names and values of `features`, in the order `Debug` prints them.
+    fn named_fields(features: &Features) -> Vec<(String, f32)> {
+        let debug = format!("{features:?}");
+        let section = Regex::new(r"(\w+): MatchFeatures \{([^}]*)\}").unwrap();
+        let field = Regex::new(r"(\w+): ([-+\w.]+)").unwrap();
+        let mut named = Vec::new();
+        for section in section.captures_iter(&debug) {
+            for field in field.captures_iter(&section[2]) {
+                named.push((
+                    format!("{}_{}", &field[1], &section[1]),
+                    field[2].parse().unwrap(),
+                ));
+            }
+        }
+        let scalars = section.replace_all(&debug, "");
+        for field in field.captures_iter(&scalars) {
+            named.push((field[1].to_owned(), field[2].parse().unwrap()));
+        }
+        named
+    }
+
+    #[test]
+    fn feature_row_follows_the_fields_of_features() {
+        let doc = Document::new(
+            "Rust programming language".to_owned(),
+            "https://www.rust-lang.org/learn/get-started?x=rust".to_owned(),
+            "A language empowering everyone to build reliable software".to_owned(),
+            Some(2.5),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let features = get_features(&["rust", "language"], &doc, true).unwrap();
+        let (names, values): (Vec<String>, Vec<f32>) = named_fields(&features).into_iter().unzip();
+        assert_eq!(names, FEATURE_NAMES);
+        let value_bits: Vec<u32> = values.iter().map(|value| value.to_bits()).collect();
+        assert_eq!(value_bits, feature_row(features).map(f32::to_bits));
+    }
 
     #[test]
     fn indices_name_their_features() {
