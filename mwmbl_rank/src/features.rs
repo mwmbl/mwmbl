@@ -1,9 +1,25 @@
-use bytemuck::{Pod, Zeroable};
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::exit,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::string_slice,
+        clippy::unimplemented,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::pedantic
+    )
+)]
+
+//! The names and order of the features `mwmbl_core` computes for a query and a document.
+
 use mwmbl_core::rank::Features;
 
-/// The canonical feature names in the order they appear in the feature vector.
-/// This order MUST match what the Python FeatureExtractor produces so that
-/// models trained in Rust are compatible with models trained in Python.
+/// The feature names in the order of a feature row. Models trained in Rust and with the
+/// Python `FeatureExtractor` share this order, so either can score the other's features.
 pub const FEATURE_NAMES: &[&str] = &[
     // title
     "last_match_char_title",
@@ -65,25 +81,34 @@ pub const FEATURE_NAMES: &[&str] = &[
     "match_terms",
 ];
 
-pub const NUM_FEATURES: usize = FEATURE_NAMES.len(); // 50
+pub const NUM_FEATURES: usize = FEATURE_NAMES.len();
 
-/// Index of `num_terms` (number of query terms) in the feature vector.
+/// Index of `num_terms`, the number of query terms, in a feature row.
 pub const NUM_TERMS_INDEX: usize = 42;
-/// Index of `match_terms` (max distinct terms matched over title/extract/domain/
-/// domain_tokenized/path) in the feature vector.
+/// Index of `match_terms`, the most distinct terms matched in any one of the title, extract,
+/// domain, tokenized domain and path, in a feature row.
 pub const MATCH_TERMS_INDEX: usize = NUM_FEATURES - 1;
 
-/// Staan's own ranking, appended after FEATURE_NAMES by a pipeline that uses provider
+/// Staan's own ranking, appended after `FEATURE_NAMES` by a pipeline that uses provider
 /// features (Combined Search's). Standard search never sees these columns.
 pub const PROVIDER_FEATURE_NAMES: &[&str] = &["in_staan", "staan_rank"];
 
-#[allow(dead_code)]
-#[derive(Copy, Clone)]
-pub(crate) struct MyFeatures(Features);
+/// The features as a row, in the order of `FEATURE_NAMES`.
+pub(crate) fn feature_row(features: Features) -> [f32; NUM_FEATURES] {
+    // SAFETY: `Features` is made of `f32`s only, so every bit pattern is a valid array, and
+    // `transmute` fails to compile unless the sizes match. The field order isn't guaranteed
+    // without `#[repr(C)]`, which `mwmbl_core` doesn't declare: the golden tests catch a
+    // reordering.
+    unsafe { std::mem::transmute::<Features, [f32; NUM_FEATURES]>(features) }
+}
 
-unsafe impl Pod for MyFeatures {}
-unsafe impl Zeroable for MyFeatures {}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(crate) fn features_vec(p: Features) -> [f32; 50] {
-    bytemuck::cast::<MyFeatures, [f32; 50]>(MyFeatures(p))
+    #[test]
+    fn indices_name_their_features() {
+        assert_eq!(FEATURE_NAMES[NUM_TERMS_INDEX], "num_terms");
+        assert_eq!(FEATURE_NAMES[MATCH_TERMS_INDEX], "match_terms");
+    }
 }
