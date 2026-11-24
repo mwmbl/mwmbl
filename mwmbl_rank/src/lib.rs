@@ -1,3 +1,8 @@
+#![expect(
+    unsafe_op_in_unsafe_fn,
+    reason = "pyo3 0.21's #[pyfunction] and #[pymethods] expansions call unsafe functions without an unsafe block"
+)]
+
 mod features;
 /// mwmbl_rank: Rust extension module for Mwmbl learning-to-rank.
 ///

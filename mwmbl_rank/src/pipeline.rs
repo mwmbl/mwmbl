@@ -225,14 +225,14 @@ impl XGBPipeline {
                 labels.len()
             ));
         }
-        if let Some(w) = weights {
-            if w.len() != records.len() {
-                return Err(format!(
-                    "weights length ({}) != records length ({})",
-                    w.len(),
-                    records.len()
-                ));
-            }
+        if let Some(w) = weights
+            && w.len() != records.len()
+        {
+            return Err(format!(
+                "weights length ({}) != records length ({})",
+                w.len(),
+                records.len()
+            ));
         }
 
         // Binarise labels at threshold (ThresholdPredictor logic)
