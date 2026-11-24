@@ -8,6 +8,7 @@ name = "mwmbl_rank"
 crate-type = ["cdylib"]
 
 [dependencies]
+anyhow = "1.0.104"
 pyo3 = { version = "0.21", features = ["extension-module"] }
 xgb = { version = "3.0.5", features = ["use_prebuilt_xgb"] }
 regex = "1"

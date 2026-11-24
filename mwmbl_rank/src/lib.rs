@@ -23,6 +23,11 @@ use regex::regex;
 use pipeline::{DocumentRecord, StaanRank, XGBPipeline, extract_features_batch, num_features};
 use url::Url;
 
+/// A pipeline error as a Python `ValueError`, with its context chain in the message.
+fn value_error(error: &anyhow::Error) -> PyErr {
+    PyValueError::new_err(format!("{error:#}"))
+}
+
 /// Convert a Python dict (passed as a Bound<PyAny>) to a DocumentRecord.
 fn py_dict_to_record(obj: &Bound<'_, PyAny>) -> PyResult<DocumentRecord> {
     let query: String = obj
@@ -171,7 +176,7 @@ impl PyXGBPipeline {
         let doc_records = self.extract_records(records)?;
         self.inner
             .fit(&doc_records, &labels, sample_weight.as_deref())
-            .map_err(PyValueError::new_err)?;
+            .map_err(|error| value_error(&error))?;
         // Return self as a Python object for sklearn-style chaining
         Ok(py.None())
     }
@@ -186,17 +191,21 @@ impl PyXGBPipeline {
         let doc_records = self.extract_records(records)?;
         self.inner
             .predict(&doc_records)
-            .map_err(PyValueError::new_err)
+            .map_err(|error| value_error(&error))
     }
 
     /// Save the trained model to disk (XGBoost binary format).
     fn save_model(&self, path: &str) -> PyResult<()> {
-        self.inner.save_model(path).map_err(PyValueError::new_err)
+        self.inner
+            .save_model(path)
+            .map_err(|error| value_error(&error))
     }
 
     /// Load a model from disk (XGBoost binary format). Sets provider_features from the model.
     fn load_model(&mut self, path: &str) -> PyResult<()> {
-        self.inner.load_model(path).map_err(PyValueError::new_err)
+        self.inner
+            .load_model(path)
+            .map_err(|error| value_error(&error))
     }
 
     /// Whether this pipeline appends Staan's ranking to the features.
