@@ -69,7 +69,7 @@ impl StaanRank {
 }
 
 /// A single document record passed from Python.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DocumentRecord {
     pub query: String,
     pub doc: Document,
@@ -221,6 +221,7 @@ pub struct XGBPipeline {
 unsafe impl Send for XGBPipeline {}
 
 impl XGBPipeline {
+    /// An untrained pipeline with these hyperparameters.
     #[expect(
         clippy::too_many_arguments,
         reason = "one argument per keyword argument of the Python constructor"
@@ -420,8 +421,8 @@ mod tests {
             .map(|i| DocumentRecord {
                 query: "rust programming".to_owned(),
                 doc: Document::new(
-                    format!("Rust Programming Example {}", i),
-                    format!("https://example{}.com/page", i),
+                    format!("Rust Programming Example {i}"),
+                    format!("https://example{i}.com/page"),
                     "A great systems language".to_owned(),
                     Some(i as f32 * 0.1),
                     None,
@@ -475,13 +476,13 @@ mod tests {
         assert_eq!(width, NUM_FEATURES + 2);
         assert_eq!(flat.len(), 3 * width);
 
-        let rows: Vec<&[f32]> = flat.chunks(width).collect();
-        for (i, row) in rows.iter().enumerate() {
-            assert_eq!(
-                &row[..NUM_FEATURES],
-                &shared[i * NUM_FEATURES..(i + 1) * NUM_FEATURES]
-            );
+        for (row, shared_row) in flat
+            .chunks_exact(width)
+            .zip(shared.chunks_exact(NUM_FEATURES))
+        {
+            assert_eq!(&row[..NUM_FEATURES], shared_row);
         }
+        let rows: Vec<&[f32]> = flat.chunks(width).collect();
         assert!(rows[0][NUM_FEATURES].is_nan() && rows[0][NUM_FEATURES + 1].is_nan());
         assert_eq!(rows[1][NUM_FEATURES], 0.0);
         assert!(rows[1][NUM_FEATURES + 1].is_nan());
@@ -588,7 +589,7 @@ mod tests {
         let preds = pipeline.predict(&records).expect("predict should succeed");
         assert_eq!(preds.len(), 20);
         for &p in &preds {
-            assert!((0.0..=1.0).contains(&p), "Prediction {} out of [0,1]", p);
+            assert!((0.0..=1.0).contains(&p), "Prediction {p} out of [0,1]");
         }
     }
 
@@ -683,11 +684,10 @@ mod tests {
             .expect("fit should succeed");
         let up = skewed.predict(&records).expect("predict should succeed");
         let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        let (up_mean, base_mean) = (mean(&up), mean(&base));
         assert!(
-            mean(&up) > mean(&base),
-            "down-weighting negatives should raise mean prediction ({} vs {})",
-            mean(&up),
-            mean(&base)
+            up_mean > base_mean,
+            "down-weighting negatives should raise mean prediction ({up_mean} vs {base_mean})"
         );
     }
 

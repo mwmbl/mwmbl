@@ -65,6 +65,7 @@ pub const FEATURE_NAMES: &[&str] = &[
     "match_terms",
 ];
 
+/// The width of a feature row.
 pub const NUM_FEATURES: usize = FEATURE_NAMES.len();
 
 /// Index of `num_terms`, the number of query terms, in a feature row.
