@@ -43,7 +43,7 @@ DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
 SODIR := .venv/lib/python3.11/site-packages/mwmbl_rank
 XGB_SO := mwmbl_rank/target/release/deps/libxgboost.so
 
-.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core rust-rank coverage coverage-python coverage-rust \
+.PHONY: help install install-hooks create-index patch-xgboost migrate test test-file rust-core rust-rank rust-rank-fmt rust-rank-clippy coverage coverage-python coverage-rust \
         coverage-quick run run-background \
         check fix format format-check lint lint-fix typecheck typecheck-all locked
 
@@ -120,8 +120,12 @@ rust-core:
 
 # The server's Python extension. pyo3 needs a Python to build against, so this runs after
 # the venv exists; its tests cross into Python and run under coverage-rust and pytest.
-rust-rank:
+rust-rank: rust-rank-fmt rust-rank-clippy
+
+rust-rank-fmt:
 	cargo fmt --manifest-path mwmbl_rank/Cargo.toml --check
+
+rust-rank-clippy:
 	PYO3_PYTHON="$(CURDIR)/.venv/bin/python" \
 		cargo clippy --manifest-path mwmbl_rank/Cargo.toml --all-targets --locked -- -D warnings
 

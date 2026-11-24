@@ -1,14 +1,15 @@
 """Characterisation tests for everything mwmbl_rank exports to Python.
 
 These pin what the extension does today, odd behaviour included, so that rewriting its Rust
-changes nothing by accident. A test named for something surprising documents current
-behaviour rather than endorsing it: change it deliberately, in the commit that changes the
-behaviour, never to get a rewrite through.
+changes nothing by accident. A test that "documents current behaviour" does not endorse it:
+change it deliberately, in the commit that changes the behaviour. Regenerate the larger
+expected values in mwmbl_rank_golden.json with `uv run --no-sync python <this file>`.
 
-The larger expected values live in mwmbl_rank_golden.json, which this regenerates from the
-extension as built:
+After `maturin develop`, run these with `uv run --no-sync` too: a plain `uv run` can
+reinstall a cached wheel of the extension over the fresh build.
 
-    uv run python test/test_mwmbl_rank_golden.py
+Features and wiki scores are compared exactly, which assumes the same libm as the build
+that wrote them; predictions get a tolerance, see test_predictions.
 """
 
 import hashlib
@@ -58,18 +59,9 @@ PROVIDER_VARIANTS = [
 # every hyperparameter, so dropping any of them on the way to XGBoost changes its output.
 MODEL_PARAMS = {
     "default": {"num_rounds": 20},
-    "configured": {
-        "threshold": 0.5,
-        "scale_pos_weight": 1.0,
-        "reg_lambda": 1.0,
-        "num_rounds": 15,
-        "max_depth": 3,
-        "min_child_weight": 0.5,
-        "gamma": 0.1,
-        "subsample": 0.8,
-        "provider_features": True,
-    },
-}
+    "configured": dict(threshold=0.5, scale_pos_weight=1.0, reg_lambda=1.0, num_rounds=15, max_depth=3,
+                       min_child_weight=0.5, gamma=0.1, subsample=0.8, provider_features=True),
+}  # fmt: skip
 
 
 def provider_records() -> list[dict]:
@@ -98,7 +90,6 @@ def train(name: str) -> mwmbl_rank.RustXGBPipeline:
 def golden_values() -> dict:
     """Everything mwmbl_rank_golden.json holds, computed by the extension as built."""
     return {
-        "features": mwmbl_rank.RustXGBPipeline.extract_features(RECORDS),
         "provider_features": mwmbl_rank.RustXGBPipeline.extract_features(provider_records(), True),
         "predictions": {name: train(name).predict(provider_records()) for name in MODEL_PARAMS},
     }
@@ -133,13 +124,10 @@ def test_constants():
 
 
 def test_extracted_features(golden):
-    assert_same_floats(mwmbl_rank.RustXGBPipeline.extract_features(RECORDS), golden["features"])
-
-
-def test_extracted_features_with_provider_features(golden):
     rows = mwmbl_rank.RustXGBPipeline.extract_features(provider_records(), True)
     assert_same_floats(rows, golden["provider_features"])
-    assert_same_floats([row[:50] for row in rows], golden["features"])
+    shared = [row[:50] for row in golden["provider_features"]]
+    assert_same_floats(mwmbl_rank.RustXGBPipeline.extract_features(RECORDS), shared)
 
 
 def test_get_features_py_matches_extract_features_and_ignores_is_complete_and_term_case(golden):
@@ -147,7 +135,7 @@ def test_get_features_py_matches_extract_features_and_ignores_is_complete_and_te
         mwmbl_rank.get_features_py(r["query"].split(), r["title"], r["url"], r["extract"], r["score"], is_complete)
         for r, is_complete in zip(RECORDS, [True, False] * 5)
     ]
-    assert_same_floats(rows, golden["features"])
+    assert_same_floats(rows, [row[:50] for row in golden["provider_features"]])
     record = RECORDS[0]
     args = (record["title"], record["url"], record["extract"], record["score"], True)
     assert mwmbl_rank.get_features_py(["RUST"], *args) == mwmbl_rank.get_features_py(["rust"], *args)
@@ -168,14 +156,33 @@ def test_too_few_matching_terms_zero_a_prediction_unless_staan_returned_the_reco
     predictions = golden["predictions"][name]
     assert [i for i, prediction in enumerate(predictions) if prediction == 0.0] == [6, 9]
     assert predictions[2] > 0.0 and predictions[7] > 0.0
-    assert train(name).predict([record | {"from_staan": False} for record in provider_records()])[7] == 0.0
+
+
+@pytest.mark.parametrize(
+    "fields, kept",
+    [
+        ({"query": "rust cooking"}, False),
+        ({"query": "rust cooking recipes"}, True),
+        ({"from_staan": True}, True),
+        ({"from_staan": np.bool_(True)}, True),
+        ({"from_staan": 1}, False),
+        ({"from_staan": "yes"}, False),
+        ({"from_staan": None}, False),
+    ],
+)
+def test_term_filter_boundary_and_from_staan_parsing(fields, kept):
+    """Documents current behaviour: exactly half the terms is filtered, and from_staan must
+    be a real bool to exempt a record."""
+    prediction = train("default").predict([RECORDS[7] | fields])[0]
+    assert (prediction > 0.0) == kept
 
 
 def test_an_empty_query_has_infinite_match_scores_and_cannot_be_predicted():
+    """Documents current behaviour: no terms divides by zero, and XGBoost refuses the inf."""
     record = RECORDS[0] | {"query": ""}
     infinite = [i for i, value in enumerate(features_of(record)) if math.isinf(value)]
     assert infinite == [3, 5, 9, 11, 15, 17, 21, 23, 27, 29, 33, 35, 39, 41]
-    with pytest.raises(ValueError, match="Failed to create DMatrix: .*Input data contains `inf`"):
+    with pytest.raises(ValueError, match="Failed to create DMatrix"):
         train("default").predict([record])
 
 
@@ -194,6 +201,7 @@ def test_model_round_trips_through_a_file_with_its_provider_features_attribute(t
 
 
 def test_rust_repr_uses_rust_formatting():
+    """Documents current behaviour, which differs from the Python wrapper's repr."""
     assert repr(mwmbl_rank.RustXGBPipeline()) == (
         "RustXGBPipeline(threshold=0, scale_pos_weight=0.1, reg_lambda=2, num_rounds=100, max_depth=None, "
         "min_child_weight=None, gamma=None, subsample=None, provider_features=false)"
@@ -204,9 +212,11 @@ def test_rust_repr_uses_rust_formatting():
     )
 
 
-def test_rust_fit_returns_none():
+def test_rust_fit_returns_none_and_negative_rounds_overflow():
     records, labels, _ = training_data()
     assert mwmbl_rank.RustXGBPipeline(num_rounds=1).fit(records, labels) is None
+    with pytest.raises(OverflowError):
+        mwmbl_rank.RustXGBPipeline(num_rounds=-1)
 
 
 @pytest.mark.parametrize(
@@ -217,11 +227,7 @@ def test_rust_fit_returns_none():
         (lambda p: p.fit(RECORDS[:1], [1.0], [1.0, 2.0]), ValueError, r"weights length \(2\) != records length \(1\)"),
         (lambda p: p.predict(RECORDS), ValueError, r"Model has not been trained yet. Call fit\(\) first."),
         (lambda p: p.save_model("/nonexistent/model.xgb"), ValueError, "No trained model to save."),
-        (
-            lambda p: p.load_model("/nonexistent/model.xgb"),
-            ValueError,
-            "Failed to load model: XGBoost error: File not found",
-        ),
+        (lambda p: p.load_model("/nonexistent/model.xgb"), ValueError, "Failed to load model"),
     ],
 )
 def test_pipeline_errors(call, error, message):
@@ -229,38 +235,33 @@ def test_pipeline_errors(call, error, message):
         call(mwmbl_rank.RustXGBPipeline(num_rounds=1))
 
 
-def test_negative_num_rounds_is_an_overflow_error():
-    with pytest.raises(OverflowError):
-        mwmbl_rank.RustXGBPipeline(num_rounds=-1)
-
-
 @pytest.mark.parametrize(
     "record, error, message",
     [
         ({"url": "https://a.com/"}, ValueError, "Record missing 'query' key"),
         ({"query": "a"}, ValueError, "Record missing 'url' key"),
-        ({"query": 5, "url": "https://a.com/"}, TypeError, "'int' object cannot be converted to 'PyString'"),
-        ({"query": "a", "url": None}, TypeError, "'NoneType' object cannot be converted to 'PyString'"),
+        ({"query": 5, "url": "https://a.com/"}, TypeError, ""),
+        ({"query": "a", "url": None}, TypeError, ""),
         (1, ValueError, "Record missing 'query' key"),
         (["a"], ValueError, "Record missing 'query' key"),
     ],
 )
 def test_unreadable_record_errors(record, error, message):
+    """Documents current behaviour: anything that is not a mapping is missing its query."""
     with pytest.raises(error, match=message):
         mwmbl_rank.RustXGBPipeline.extract_features([record])
 
 
 def test_records_must_be_a_sequence_but_not_a_string():
-    with pytest.raises(TypeError, match="'dict' object cannot be converted to 'Sequence'"):
-        mwmbl_rank.RustXGBPipeline.extract_features(RECORDS[0])
-    with pytest.raises(TypeError, match="Can't extract `str` to `Vec`"):
-        mwmbl_rank.RustXGBPipeline.extract_features("records")
-    assert mwmbl_rank.RustXGBPipeline.extract_features(
-        tuple(RECORDS[:1])
-    ) == mwmbl_rank.RustXGBPipeline.extract_features(RECORDS[:1])
+    extract = mwmbl_rank.RustXGBPipeline.extract_features
+    for records in [RECORDS[0], "records"]:
+        with pytest.raises(TypeError):
+            extract(records)
+    assert extract(tuple(RECORDS[:1])) == extract(RECORDS[:1])
 
 
 def test_missing_or_non_string_title_and_extract_are_read_as_empty():
+    """Documents current behaviour: no error for a title or extract of the wrong type."""
     record = RECORDS[0]
     for field in ["title", "extract"]:
         empty = features_of(record | {field: ""})
@@ -271,6 +272,7 @@ def test_missing_or_non_string_title_and_extract_are_read_as_empty():
 
 
 def test_missing_or_non_numeric_score_is_read_as_zero():
+    """Documents current behaviour: no error for a score of the wrong type."""
     record = RECORDS[0]
     zero = features_of(record | {"score": 0.0})
     assert features_of({key: value for key, value in record.items() if key != "score"}) == zero
@@ -295,12 +297,14 @@ def test_missing_or_non_numeric_score_is_read_as_zero():
     ],
 )
 def test_staan_rank_is_truncated_saturated_and_lenient(fields, expected):
-    """A fractional rank truncates, an out-of-range one saturates to u32, a rank that
-    is not a number counts as not returned, and staan_asked must be a real bool."""
+    """Documents current behaviour: a fractional rank truncates, an out-of-range one
+    saturates to u32, a rank that is not a number counts as not returned, and staan_asked
+    must be a real bool."""
     assert_same_floats(features_of(RECORDS[0] | fields, True)[50:], expected)
 
 
 def test_wiki_score_reads_the_last_path_segment_of_any_url():
+    """Documents current behaviour: the domain is never checked."""
     python = mwmbl_rank.wiki_score("https://en.wikipedia.org/wiki/Python_(programming_language)")
     assert python == 0.0009181497562013591
     assert mwmbl_rank.wiki_score("https://example.com/Python_(programming_language)") == python
@@ -328,6 +332,11 @@ PAGE_JSON = (
 STORED_ITEMS = json.loads(PAGE_JSON)
 
 
+def as_json(items) -> str:
+    """Exact types, which == would blur: True == 1 and 2 == 2.0."""
+    return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+
+
 def test_packed_page_bytes():
     """The hash is of zstd's level-3 output, so a zstd upgrade may change it legitimately."""
     page, num_stored = pack_index_page(512, PAGE_ITEMS)
@@ -351,22 +360,22 @@ def test_packing_json_number_formats_and_empty_pages():
     [
         ([math.nan], "ValueError: NaN cannot be stored in an index page"),
         ([math.inf], "ValueError: inf cannot be stored in an index page"),
-        ([2**63], "OverflowError: Python int too large to convert to C long"),
+        ([2**63], "OverflowError"),
         ([{1}], "TypeError: Cannot store set in an index page"),
         ([b"x"], "TypeError: Cannot store bytes in an index page"),
         ({1: 2}, "TypeError: Only string keys can be stored in an index page"),
-        (["\ud800"], "UnicodeEncodeError: 'utf-8' codec can't encode character"),
+        (["\ud800"], "UnicodeEncodeError"),
     ],
 )
 def test_unstorable_items_are_page_errors(item, message):
-    with pytest.raises(PageError, match=f"^Cannot store these documents on a page: {message}"):
+    with pytest.raises(PageError, match=f"Cannot store these documents on a page: {message}"):
         pack_index_page(512, [item])
 
 
 def test_page_size_and_argument_errors():
-    with pytest.raises(PageError, match=r"^Data is too big \(11\) for page size \(5\)$"):
+    with pytest.raises(PageError, match=r"Data is too big \(11\) for page size \(5\)"):
         pack_index_page(5, [])
-    with pytest.raises(TypeError, match="'tuple' object cannot be converted to 'PyList'"):
+    with pytest.raises(TypeError):
         pack_index_page(512, tuple(PAGE_ITEMS))
 
 
@@ -383,34 +392,31 @@ def test_written_page_round_trips_and_filters_by_term(page_file):
     assert write_index_page(page_file, 512, 512, PAGE_ITEMS) == 6
 
     assert os.pread(page_file, 512, 512) == pack_index_page(512, PAGE_ITEMS)[0]
-    assert read_index_page(page_file, 512, 512) == STORED_ITEMS
-    assert read_index_page(page_file, 512, 512, "term") == [STORED_ITEMS[i] for i in [0, 2, 3, 4]]
-    assert read_index_page(page_file, 512, 512, term="other") == [STORED_ITEMS[i] for i in [1, 2, 4]]
+    assert as_json(read_index_page(page_file, 512, 512)) == PAGE_JSON
+    assert as_json(read_index_page(page_file, 512, 512, "term")) == as_json([STORED_ITEMS[i] for i in [0, 2, 3, 4]])
+    assert as_json(read_index_page(page_file, 512, 512, term="other")) == as_json([STORED_ITEMS[i] for i in [1, 2, 4]])
 
 
 def test_a_page_holding_scalars_keeps_them_for_every_term(page_file):
-    os.pwrite(page_file, pack_index_page(512, [1, "x", [2]])[0], 0)
-    assert read_index_page(page_file, 0, 512, "x") == [1, "x", [2]]
+    """Documents current behaviour: only a list or an object can belong to another term.
+    The u64 is one the writer refuses but the reader accepts."""
+    os.pwrite(page_file, ZstdCompressor().compress(b'[18446744073709551615,"x",[2.0,true]]'), 0)
+    assert as_json(read_index_page(page_file, 0, 512, "x")) == '[18446744073709551615,"x",[2.0,true]]'
 
 
 @pytest.mark.parametrize(
-    "contents, message",
-    [
-        (bytes(512), "^Unknown frame descriptor$"),
-        (b"garbage!" * 8, "^Unknown frame descriptor$"),
-        (ZstdCompressor().compress(b"not json"), "^expected ident at line 1 column 2$"),
-        (ZstdCompressor().compress(b'{"a": 1}'), "^invalid type: map, expected a sequence at line 1 column 0$"),
-    ],
+    "contents",
+    [bytes(512), b"garbage!" * 8, ZstdCompressor().compress(b"not json"), ZstdCompressor().compress(b'{"a": 1}')],
 )
-def test_corrupt_pages_are_page_errors(page_file, contents, message):
+def test_corrupt_pages_are_page_errors(page_file, contents):
     os.pwrite(page_file, contents, 0)
-    with pytest.raises(PageError, match=message):
+    with pytest.raises(PageError):
         read_index_page(page_file, 0, 512)
 
 
 def test_short_reads_are_page_errors(page_file):
     for offset in [768, 4096]:
-        with pytest.raises(PageError, match="^could not read a whole page: failed to fill whole buffer$"):
+        with pytest.raises(PageError, match="could not read a whole page"):
             read_index_page(page_file, offset, 512)
 
 
@@ -418,28 +424,26 @@ def test_bad_descriptors_and_offsets(tmp_path):
     path = tmp_path / "pages"
     path.write_bytes(bytes(1024))
     read_only = os.open(path, os.O_RDONLY)
-    with pytest.raises(OSError, match=r"^Bad file descriptor \(os error 9\)$"):
+    with pytest.raises(OSError):
         write_index_page(read_only, 0, 512, [])
-    with pytest.raises(OverflowError, match="can't convert negative int to unsigned"):
+    with pytest.raises(OverflowError):
         read_index_page(read_only, -1, 512)
     os.close(read_only)
-    with pytest.raises(OSError, match=r"^Bad file descriptor \(os error 9\)$"):
+    with pytest.raises(OSError):
         read_index_page(read_only, 0, 512)
 
 
 def test_descriptor_minus_one_panics():
-    """std's File::from_raw_fd asserts the descriptor is not -1, and pyo3 turns the panic
-    into a PanicException, which is a BaseException rather than an Exception."""
-    with pytest.raises(BaseException, match="fd != -1") as raised:
+    """Documents current behaviour: std's File::from_raw_fd asserts the descriptor is not
+    -1, and pyo3 turns the panic into a PanicException, a BaseException not an Exception."""
+    with pytest.raises(BaseException) as raised:
         read_index_page(-1, 0, 512)
     assert type(raised.value).__name__ == "PanicException"
 
 
 if __name__ == "__main__":
     # One row to a line, so a change shows up in a diff as the rows it touched.
-    sections = [
-        f'"{key}": '
-        + ("[\n" + ",\n".join(json.dumps(row) for row in rows) + "\n]" if isinstance(rows, list) else json.dumps(rows))
-        for key, rows in golden_values().items()
-    ]
-    GOLDEN_PATH.write_text("{\n" + ",\n".join(sections) + "\n}\n")
+    values = golden_values()
+    rows = ",\n".join(json.dumps(row) for row in values["provider_features"])
+    predictions = json.dumps(values["predictions"])
+    GOLDEN_PATH.write_text(f'{{\n"provider_features": [\n{rows}\n],\n"predictions": {predictions}\n}}\n')

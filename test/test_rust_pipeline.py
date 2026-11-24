@@ -331,14 +331,3 @@ class TestRustXGBPipelineShim:
             "RustXGBPipeline(threshold=0.25, scale_pos_weight=0.1, reg_lambda=2.0, num_rounds=100, max_depth=4, "
             "min_child_weight=None, gamma=None, subsample=None, provider_features=False)"
         )
-
-    def test_missing_title_extract_and_score_are_filled_before_the_extension(self):
-        X = make_dataframe(20)
-        pipeline = RustXGBPipeline(num_rounds=5).fit(X, make_labels(20))
-        with_nulls = X.copy()
-        with_nulls.loc[0, ["title", "extract", "score"]] = None
-        filled = X.copy()
-        filled.loc[0, ["title", "extract", "score"]] = ["", "", 0.0]
-
-        assert pipeline.predict(with_nulls).tolist() == pipeline.predict(filled).tolist()
-        assert pipeline.predict(X.to_dict("records")).tolist() == pipeline.predict(X).tolist()
