@@ -6,3 +6,5 @@
 - `crawler`: the crawler volunteers run, see [its README](crawler/README.md).
 
 `make rust-core` formats, lints and tests them, and CI requires both to be clippy-clean.
+
+How to write Rust here, for people and agents alike: [AGENTS.md](AGENTS.md).
