@@ -320,8 +320,9 @@ def test_any_mapping_is_a_record_and_a_failed_lookup_counts_as_missing():
 
 
 def test_missing_or_non_string_title_and_extract_are_read_as_empty():
-    """Documents current behaviour: no error for a title or extract of the wrong type."""
-    record = RECORDS[0]
+    """Documents current behaviour: no error for a title or extract of the wrong type. The
+    query's one-letter term would match a default that isn't empty."""
+    record = RECORDS[0] | {"query": "rust x"}
     for field in ["title", "extract"]:
         empty = features_of(record | {field: ""})
         missing = features_of({key: value for key, value in record.items() if key != field})
@@ -339,6 +340,7 @@ def test_missing_or_non_numeric_score_is_read_as_zero():
     assert features_of(record | {"score": "high"}) == zero
     assert features_of(record | {"score": 3})[48] == 3.0
     assert features_of(record | {"score": np.float32(2.5)})[48] == 2.5
+    assert features_of(record | {"score": 1 / 3})[48] == np.float32(1 / 3)
 
 
 @pytest.mark.parametrize(
