@@ -151,9 +151,10 @@ impl PyXGBPipeline {
     ///
     /// # Errors
     ///
-    /// Raises `ValueError` if a record has no `query` or `url`, and `TypeError` if `records`
-    /// isn't a sequence of records, a `query` or `url` isn't a string, or `labels` or
-    /// `sample_weight` isn't a sequence of numbers. Also raises `ValueError` if there are no
+    /// Raises `ValueError` if a record has no `query` or `url`, which includes a record that
+    /// isn't a mapping, and `TypeError` if `records` isn't a sequence or is a string, a `query`
+    /// or `url` isn't a string, or `labels` or `sample_weight` isn't a sequence of numbers.
+    /// Also raises `ValueError` if there are no
     /// records, if `labels` or `sample_weight` doesn't have one value per record, or if XGBoost
     /// fails.
     #[pyo3(signature = (records, labels, sample_weight=None))]
