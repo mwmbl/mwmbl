@@ -743,7 +743,10 @@ mod tests {
         let labels = vec![1.0; 10];
         let mut pipeline = XGBPipeline::new(0.0, 0.1, 2.0, 5);
         let result = pipeline.fit(&records, &labels, Some(&[1.0; 3]));
-        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "weights length (3) != records length (10)"
+        );
     }
 
     #[test]
