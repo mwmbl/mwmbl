@@ -148,6 +148,14 @@ impl PyXGBPipeline {
 
     /// Train the model on records and their relevance labels, with equal weights unless
     /// `sample_weight` gives one per record.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if a record has no `query` or `url`, and `TypeError` if `records`
+    /// isn't a sequence of records, a `query` or `url` isn't a string, or `labels` or
+    /// `sample_weight` isn't a sequence of numbers. Also raises `ValueError` if there are no
+    /// records, if `labels` or `sample_weight` doesn't have one value per record, or if XGBoost
+    /// fails.
     #[pyo3(signature = (records, labels, sample_weight=None))]
     #[expect(
         clippy::needless_pass_by_value,
@@ -167,6 +175,11 @@ impl PyXGBPipeline {
 
     /// The probability that each record is relevant, or 0 for a record that matches no more
     /// than half its query's terms unless it is Staan's own result.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if the model hasn't been trained or loaded, or if XGBoost fails, and
+    /// as `fit` does for a record it can't read.
     fn predict(&self, records: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
         let records = extract_records(records)?;
         self.inner
@@ -176,6 +189,11 @@ impl PyXGBPipeline {
 
     /// Save the trained model to disk, in the format its extension names, such as JSON for
     /// `.json`.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if the model hasn't been trained or loaded, or if XGBoost can't write
+    /// the file.
     fn save_model(&self, path: &str) -> PyResult<()> {
         self.inner
             .save_model(path)
@@ -183,6 +201,10 @@ impl PyXGBPipeline {
     }
 
     /// Load a model saved by `save_model`. Sets `provider_features` from the model.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if XGBoost can't read the model or its attributes.
     fn load_model(&mut self, path: &str) -> PyResult<()> {
         self.inner
             .load_model(path)
@@ -200,6 +222,10 @@ impl PyXGBPipeline {
     ///
     /// Exposed so experiments can add features of their own alongside these without
     /// reimplementing the extraction in Python.
+    ///
+    /// # Errors
+    ///
+    /// Raises as `fit` does for a record it can't read.
     #[staticmethod]
     #[pyo3(signature = (records, provider_features=false))]
     fn extract_features(
