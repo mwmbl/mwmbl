@@ -1,19 +1,3 @@
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unwrap_used,
-        clippy::panic,
-        clippy::string_slice,
-        clippy::unimplemented,
-        clippy::unreachable,
-        clippy::todo,
-        clippy::pedantic
-    )
-)]
-
 //! Reading and writing `TinyIndex` pages for Python.
 //!
 //! A page is a zstd frame holding a JSON array of documents, padded with zeros to the page

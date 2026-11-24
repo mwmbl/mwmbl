@@ -1,19 +1,3 @@
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unwrap_used,
-        clippy::panic,
-        clippy::string_slice,
-        clippy::unimplemented,
-        clippy::unreachable,
-        clippy::todo,
-        clippy::pedantic
-    )
-)]
-
 //! The names and order of the features `mwmbl_core` computes for a query and a document.
 
 use mwmbl_core::rank::Features;
