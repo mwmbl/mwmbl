@@ -476,10 +476,10 @@ mod tests {
         assert_eq!(width, NUM_FEATURES + 2);
         assert_eq!(flat.len(), 3 * width);
 
-        for (row, shared_row) in flat
-            .chunks_exact(width)
-            .zip(shared.chunks_exact(NUM_FEATURES))
-        {
+        let (shared_rows, []) = shared.as_chunks::<NUM_FEATURES>() else {
+            panic!("shared features aren't whole rows");
+        };
+        for (row, shared_row) in flat.chunks_exact(width).zip(shared_rows) {
             assert_eq!(&row[..NUM_FEATURES], shared_row);
         }
         let rows: Vec<&[f32]> = flat.chunks(width).collect();
