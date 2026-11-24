@@ -95,10 +95,11 @@ pub const PROVIDER_FEATURE_NAMES: &[&str] = &["in_staan", "staan_rank"];
 
 /// The features as a row, in the order of `FEATURE_NAMES`.
 pub(crate) fn feature_row(features: Features) -> [f32; NUM_FEATURES] {
-    // SAFETY: `Features` is made of `f32`s only, so every bit pattern is a valid array, and
-    // `transmute` fails to compile unless the sizes match. The field order isn't guaranteed
-    // without `#[repr(C)]`, which `mwmbl_core` doesn't declare: the golden tests catch a
-    // reordering, and `feature_row_follows_the_fields_of_features` ties the order to the names.
+    // SAFETY: `Features` is made of `f32`s only, so it has no padding and every bit pattern is a
+    // valid array. `transmute` checks only that the sizes match, so a non-`f32` field added to
+    // `mwmbl_core` could still compile; `feature_row_follows_the_fields_of_features` is what
+    // checks the fields are all `f32`s, and it also ties their order to the names, which isn't
+    // guaranteed without `#[repr(C)]` on the `mwmbl_core` types.
     unsafe { std::mem::transmute::<Features, [f32; NUM_FEATURES]>(features) }
 }
 
