@@ -1,27 +1,24 @@
-//! `TinyIndex` page I/O.
+//! `TinyIndex` pages, and the tokens a document is indexed under.
 //!
-//! A page of the index is a zstd frame holding a JSON array of document tuples, padded
-//! with zeros to the page size. Reading one is a positioned read, a decompress and a
-//! parse, and writing one is a serialise, a compress and a positioned write. All of that
-//! happens here with the GIL released, so worker threads overlap their page reads instead
-//! of queueing for the interpreter - which is what a pread in Python cannot do, because it
-//! releases the GIL for the syscall and then has to win it back for the decompress and the
-//! parse.
-//!
-//! Python keeps everything else: it opens the file and passes the descriptor in, holds the
-//! metadata and the page locks, and turns the tuples that come back into Documents.
+//! A page is a zstd frame holding a JSON array of documents, padded with zeros to the page
+//! size. The page functions take the descriptor of a file the caller has open and leave it
+//! open, so that `mwmbl_rank` can read and write pages with the GIL released while Python
+//! keeps the file, the metadata and the page locks.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
+use std::io;
 use std::iter::zip;
 use std::mem::ManuallyDrop;
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::FromRawFd;
 
-use serde::{Deserialize, Serialize};
+use itertools::Itertools;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use zstd::bulk::{Compressor, Decompressor};
 use zstd::zstd_safe;
@@ -29,24 +26,31 @@ use zstd::zstd_safe;
 use crate::constants::NUM_FIRST_TOKENS;
 use crate::tokenizer::{get_bigrams, tokenize};
 
-/// Where `term` sits in `Document.as_tuple()`. `as_tuple` truncates trailing Nones, so a
-/// document with no term may have nothing at that position at all.
+/// Where the term sits in a document written as a tuple. Python's `Document.as_tuple` drops
+/// trailing `None`s, so a document with no term may stop before it.
 const TERM_INDEX: usize = 4;
 
-/// python-zstandard's default level, which is what wrote every page in the index today.
+/// python-zstandard's default level, which wrote the pages already in the index.
 const COMPRESSION_LEVEL: i32 = 3;
 
-/// How much bigger than the page itself its contents are allowed to claim to be. See
-/// `decompress_page`: it bounds what a corrupt frame header can make this allocate.
+/// How many times the page's size its contents may claim to be. It bounds what a corrupt frame
+/// header can make `decompress_page` allocate.
 const MAX_PAGE_EXPANSION: usize = 1024;
 
-/// Everything that can go wrong away from the GIL, split by what Python should see: a
-/// failed syscall is an `OSError` as it has always been, and a page that will not decode is
-/// a `PageError`, which every caller of the index already handles.
+/// A failed page read or write, split by how callers handle it: `mwmbl_rank` raises an
+/// `OSError` for `Io` and a `PageError` for `Unreadable`.
 #[derive(Debug)]
 pub enum PageIoError {
-    Io(std::io::Error),
+    /// The read or the write failed, or zstd could not compress.
+    Io(io::Error),
+    /// The page is short, corrupt or half-written, or the documents won't fit on one.
     Unreadable(String),
+}
+
+impl PageIoError {
+    fn unreadable(error: impl fmt::Display) -> PageIoError {
+        PageIoError::Unreadable(error.to_string())
+    }
 }
 
 impl fmt::Display for PageIoError {
@@ -60,18 +64,18 @@ impl fmt::Display for PageIoError {
 
 impl Error for PageIoError {}
 
-/// The descriptor belongs to the Python file object that opened it, so wrap it without
-/// taking ownership - a plain File would close it when this returns.
+/// The file behind `fd`, which belongs to the caller: dropping a plain `File` would close it.
 fn borrow_file(fd: i32) -> ManuallyDrop<File> {
+    // SAFETY: the callers pass a descriptor they keep open for the whole call, and the
+    // ManuallyDrop never closes it.
     ManuallyDrop::new(unsafe { File::from_raw_fd(fd) })
 }
 
-/// A read that came up short is a page that is not there rather than a failed syscall: a
-/// positioned read stops at the end of the file, so it means the file is not the shape the
-/// metadata says it is - truncated, or half-written by create. Decoding the fragment anyway
-/// is how a writer comes to merge onto a page it never actually read.
-fn read_error(error: std::io::Error) -> PageIoError {
-    if error.kind() == std::io::ErrorKind::UnexpectedEof {
+/// A positioned read stops at the end of the file, so a short one means the file isn't the
+/// shape the metadata says: truncated, or half-written by create. That is an unreadable page,
+/// because decoding the fragment would let a writer merge onto a page it never read.
+fn read_error(error: io::Error) -> PageIoError {
+    if error.kind() == io::ErrorKind::UnexpectedEof {
         return PageIoError::Unreadable(format!("could not read a whole page: {error}"));
     }
     PageIoError::Io(error)
@@ -80,165 +84,156 @@ fn read_error(error: std::io::Error) -> PageIoError {
 fn read_page_bytes(fd: i32, offset: u64, page_size: usize) -> Result<Vec<u8>, PageIoError> {
     let file = borrow_file(fd);
     let mut page = vec![0u8; page_size];
-    // read_exact_at rather than read_at: it reads until it has the whole page, and it
-    // retries a read the kernel interrupted with a signal, which is what os.pread does
-    // since PEP 475 and what a bare read_at does not.
+    // read_exact_at rather than read_at, which can stop short and doesn't retry a read a
+    // signal interrupted.
     file.read_exact_at(&mut page, offset).map_err(read_error)?;
     Ok(page)
 }
 
 thread_local! {
-    /// One decompression context per thread, reused for every page it reads. Building one
-    /// allocates a working buffer and costs about as much as decompressing a page, and
-    /// each call decompresses a whole frame on its own, so there is no state to carry
-    /// between reads and a failed page cannot poison the next one.
-    #[allow(clippy::expect_used)] static DECOMPRESSOR: RefCell<Decompressor<'static>> =
-        RefCell::new(Decompressor::new().expect("Could not create a zstd decompression context"));
-
-    /// And one compression context, for the same reason. Packing a full page compresses
-    /// about a dozen prefixes of the documents to find the ones that fit, so building a
-    /// context per compression cost more than the compression did.
-    #[allow(clippy::expect_used)] static COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::new(COMPRESSION_LEVEL).expect("Could not create a zstd compression context"));
+    // Made on first use and kept for every page the thread reads or writes: making one costs
+    // about as much as compressing a page, and packing a full page compresses about a dozen
+    // prefixes. Each call handles a whole frame, so nothing carries over from a failed page.
+    static DECOMPRESSOR: RefCell<Option<Decompressor<'static>>> = const { RefCell::new(None) };
+    static COMPRESSOR: RefCell<Option<Compressor<'static>>> = const { RefCell::new(None) };
 }
 
-/// Decompress the one zstd frame at the start of the page, ignoring whatever follows it -
-/// which is the zero padding that brings the page up to its fixed size.
+fn decompress(frame: &[u8], contents_size: usize) -> Result<Vec<u8>, PageIoError> {
+    DECOMPRESSOR.with_borrow_mut(|decompressor| {
+        let decompressor = match decompressor {
+            Some(decompressor) => decompressor,
+            None => decompressor.insert(Decompressor::new().map_err(PageIoError::Io)?),
+        };
+        decompressor
+            .decompress(frame, contents_size)
+            .map_err(PageIoError::unreadable)
+    })
+}
+
+fn compress(contents: &[u8]) -> Result<Vec<u8>, PageIoError> {
+    COMPRESSOR.with_borrow_mut(|compressor| {
+        let compressor = match compressor {
+            Some(compressor) => compressor,
+            None => compressor.insert(Compressor::new(COMPRESSION_LEVEL).map_err(PageIoError::Io)?),
+        };
+        compressor.compress(contents).map_err(PageIoError::Io)
+    })
+}
+
+/// The contents of the zstd frame at the start of `page`, ignoring the padding after it.
 fn decompress_page(page: &[u8]) -> Result<Vec<u8>, PageIoError> {
-    let unreadable = |e: std::io::Error| PageIoError::Unreadable(e.to_string());
     let frame_size = zstd_safe::find_frame_compressed_size(page).map_err(zstd_error)?;
     let Some(frame) = page.get(..frame_size) else {
-        return Err(PageIoError::Unreadable("Invalid frame size".to_string()));
+        return Err(PageIoError::unreadable("Invalid frame size"));
     };
-    // Every frame the index writes carries its content size, so this is the exact size of
-    // the buffer to decompress into rather than a guess.
-    let contents_size: usize = zstd_safe::get_frame_content_size(frame)
-        .map_err(|e| PageIoError::Unreadable(e.to_string()))?
-        .ok_or_else(|| PageIoError::Unreadable("The frame has no content size".to_string()))?
-        .try_into()
-        .map_err(|e: std::num::TryFromIntError| PageIoError::Unreadable(e.to_string()))?;
-    // That size is data like anything else on the page, and the buffer is allocated before
-    // a byte is decompressed, so a corrupt header must not be able to ask for a gigabyte.
-    // Real pages expand by well under ten times; this is far past that and still bounded.
+    // Every frame the index writes records its content size, so the buffer can be exactly
+    // that big.
+    let recorded_size =
+        zstd_safe::get_frame_content_size(frame).map_err(PageIoError::unreadable)?;
+    let Some(recorded_size) = recorded_size else {
+        return Err(PageIoError::unreadable("The frame has no content size"));
+    };
+    let contents_size = usize::try_from(recorded_size).map_err(PageIoError::unreadable)?;
+    // The size is allocated before anything is decompressed, so a corrupt header mustn't be
+    // able to ask for a gigabyte. Real pages expand by well under ten times.
     let largest_readable = page.len() * MAX_PAGE_EXPANSION;
     if contents_size > largest_readable {
         return Err(PageIoError::Unreadable(format!(
             "The frame claims {contents_size} bytes, more than the {largest_readable} a page can hold"
         )));
     }
-    DECOMPRESSOR.with_borrow_mut(|decompressor| {
-        decompressor
-            .decompress(frame, contents_size)
-            .map_err(unreadable)
-    })
+    decompress(frame, contents_size)
 }
 
-/// zstd reports a failure as an error code, and the text for it is all there is to say.
 fn zstd_error(code: usize) -> PageIoError {
-    PageIoError::Unreadable(zstd_safe::get_error_name(code).to_string())
+    PageIoError::unreadable(zstd_safe::get_error_name(code))
 }
 
-fn decode_page<T: for<'a> Deserialize<'a>>(
+fn decode_page<T: DeserializeOwned>(
     page: &[u8],
     term: Option<&str>,
 ) -> Result<Vec<T>, PageIoError> {
     let contents = decompress_page(page)?;
-    // Damage that gets past zstd lands on the parse instead, and it is the same kind of
-    // unreadable. Invalid UTF-8 fails here too, as the decode in Python did.
-    let items_t: Vec<T> =
-        serde_json::from_slice(&contents).map_err(|e| PageIoError::Unreadable(e.to_string()))?;
-    match term {
-        // Writers read the whole page, so only parse it a second time to filter by term.
-        None => Ok(items_t),
-        Some(term) => {
-            let items_values: Vec<Value> = serde_json::from_slice(&contents)
-                .map_err(|e| PageIoError::Unreadable(e.to_string()))?;
-            Ok(zip(items_t, items_values)
-                .filter_map(|(item_t, item)| has_term(&item, term).then_some(item_t))
-                .collect())
-        }
-    }
+    let documents: Vec<T> = serde_json::from_slice(&contents).map_err(PageIoError::unreadable)?;
+    let Some(term) = term else {
+        return Ok(documents);
+    };
+    // Writers read whole pages, so only readers pay for parsing the page a second time.
+    let values: Vec<Value> = serde_json::from_slice(&contents).map_err(PageIoError::unreadable)?;
+    Ok(zip(documents, values)
+        .filter_map(|(document, value)| has_term(&value, term).then_some(document))
+        .collect())
 }
 
-/// Whether a document belongs to this term: its own, or no term at all. Filtering here
-/// rather than in Python means a page's documents that another term put there are never
-/// built into Python objects. Python writes a document as a tuple and the crawler as an
-/// object, so the term is looked up either way.
-fn has_term(item: &Value, term: &str) -> bool {
-    let item_term = match item {
+/// Whether a document belongs to `term`: its own, or no term at all. Python writes documents
+/// as tuples and the crawler as objects, so the term is looked for in either.
+fn has_term(document: &Value, term: &str) -> bool {
+    let document_term = match document {
         Value::Object(fields) => fields.get("term"),
-        _ => item.get(TERM_INDEX),
+        _ => document.get(TERM_INDEX),
     };
-    match item_term {
+    match document_term {
         None | Some(Value::Null) => true,
-        Some(Value::String(item_term)) => item_term == term,
+        Some(Value::String(document_term)) => document_term == term,
         Some(_) => false,
     }
 }
 
+/// The first `count` of the serialised documents, as a compressed JSON array.
 fn compress_prefix(serialised: &[String], count: usize) -> Result<Vec<u8>, PageIoError> {
-    let mut json = String::from("[");
-    let Some(bounded) = serialised.get(..count) else {
-        return Err(PageIoError::Unreadable("Out of bound read".to_string()));
-    };
-    for (position, item) in bounded.iter().enumerate() {
-        if position > 0 {
-            json.push(',');
-        }
-        json.push_str(item);
-    }
-    json.push(']');
-    COMPRESSOR.with_borrow_mut(|compressor| {
-        compressor
-            .compress(json.as_bytes())
-            .map_err(PageIoError::Io)
-    })
+    let json = format!("[{}]", serialised.iter().take(count).join(","));
+    compress(json.as_bytes())
 }
 
-/// The padded page bytes, and how many of `items` actually fit on them.
-///
-/// A page holds a fixed number of bytes, and how many documents that is depends on how
-/// well they compress. When they do not all fit, the largest prefix that does is found by
-/// binary search over the compressed size. The tail that does not fit is dropped, which is why callers pass their
-/// documents best-first.
-pub fn pack_page<T: Serialize>(
+/// The most of `serialised` that compresses to `page_size` bytes or fewer, found by binary
+/// search, as a count and the compressed bytes. If even none is too big, it is that.
+fn longest_fitting_prefix(
+    serialised: &[String],
     page_size: usize,
-    items: &[T],
-) -> Result<(Vec<u8>, usize), PageIoError> {
-    let mut serialised: Vec<String> = Vec::new();
-    for item in items {
-        if let Ok(item_serialised) = serde_json::to_string(item) {
-            serialised.push(item_serialised);
-        } else {
-            return Err(PageIoError::Unreadable(
-                "Failed to serialize data".to_owned(),
-            ));
-        }
-    }
-    // Nearly every page (99% when indexing a crawl) holds all of its documents, so try that
-    // first: one compression instead of a binary search's handful.
-    let all = compress_prefix(&serialised, items.len())?;
-    if all.len() <= page_size {
-        return Ok(pad_page(all, items.len(), page_size));
-    }
-    let mut low = 0;
-    let mut high = items.len();
-    let mut best = (0, compress_prefix(&serialised, 0)?);
+) -> Result<(usize, Vec<u8>), PageIoError> {
+    let mut best = (0, compress_prefix(serialised, 0)?);
+    let (mut low, mut high) = (0, serialised.len());
     while low <= high {
         let count = usize::midpoint(low, high);
-        let compressed = compress_prefix(&serialised, count)?;
-        if compressed.len() > page_size {
-            if count == 0 {
-                break;
-            }
-            high = count - 1;
-        } else {
+        let compressed = compress_prefix(serialised, count)?;
+        if compressed.len() <= page_size {
             best = (count, compressed);
             low = count + 1;
+        } else if let Some(below) = count.checked_sub(1) {
+            high = below;
+        } else {
+            break;
         }
     }
+    Ok(best)
+}
 
-    let (num_stored, page) = best;
+/// The padded bytes of a page of `page_size` holding as many of `documents` as fit, and how
+/// many that is.
+///
+/// How many fit depends on how well they compress. Those that don't are dropped from the
+/// end, so callers pass their documents best first.
+///
+/// # Errors
+///
+/// Fails with `Unreadable` if a document won't serialise or even an empty page is too big,
+/// and with `Io` if zstd fails.
+pub fn pack_page<T: Serialize>(
+    page_size: usize,
+    documents: &[T],
+) -> Result<(Vec<u8>, usize), PageIoError> {
+    let serialised = documents
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| PageIoError::Unreadable(format!("Failed to serialize data: {error}")))?;
+    // Nearly every page holds all of its documents (99% when indexing a crawl), and that
+    // takes one compression rather than a search's handful.
+    let all = compress_prefix(&serialised, documents.len())?;
+    if all.len() <= page_size {
+        return Ok(pad_page(all, documents.len(), page_size));
+    }
+    let (num_stored, page) = longest_fitting_prefix(&serialised, page_size)?;
     if page.len() > page_size {
         return Err(PageIoError::Unreadable(format!(
             "Data is too big ({}) for page size ({page_size})",
@@ -253,79 +248,85 @@ fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>,
     (page, num_stored)
 }
 
-/// Read the page at `offset`, returning its document tuples as lists.
+/// The documents on the page of `page_size` bytes at `offset` in the file open as `fd`.
 ///
-/// Pass `term` to keep only the documents that belong to it - the ones whose term is that
-/// term, or which have none. Raises `PageError` if the page will not decode, which means it
-/// is corrupt or was caught half-written; it deliberately does not fall back to an empty
-/// page, because a writer that merged onto one would store its result over everything that
-/// was there.
-pub fn read_index_page<T: for<'a> Deserialize<'a>>(
+/// Pass `term` to keep only the documents that belong to it: those whose term is `term`, or
+/// which have none.
+///
+/// # Errors
+///
+/// Fails with `Io` if the read fails, and with `Unreadable` if the page comes up short or
+/// won't decode, which means it is corrupt or was caught half-written. There is no falling
+/// back to an empty page: a writer that merged onto one would store its result over
+/// everything that was there.
+///
+/// # Panics
+///
+/// If `fd` is -1.
+pub fn read_index_page<T: DeserializeOwned>(
     fd: i32,
     offset: u64,
     page_size: usize,
-    term: Option<&String>,
+    term: Option<&str>,
 ) -> Result<Vec<T>, PageIoError> {
     let page = read_page_bytes(fd, offset, page_size)?;
-    decode_page(&page, term.map(std::string::String::as_str))
+    decode_page(&page, term)
 }
 
-/// Write `values` over the page at `offset`, returning how many of them fitted.
+/// Writes as many of `documents` as fit over the page at `offset` in the file open as `fd`,
+/// returning how many that is.
+///
+/// # Errors
+///
+/// Fails as [`pack_page`] does, and with `Io` if the write fails.
+///
+/// # Panics
+///
+/// If `fd` is -1.
 pub fn write_index_page<T: Serialize>(
     fd: i32,
     offset: u64,
     page_size: usize,
-    values: &[T],
+    documents: &[T],
 ) -> Result<usize, PageIoError> {
-    let (page, num_stored) = pack_page(page_size, values)?;
+    let (page, num_stored) = pack_page(page_size, documents)?;
     let file = borrow_file(fd);
-    // write_all_at rather than write_at: a short write would leave the page half old
-    // and half new, which is the torn page every reader and writer here is guarding
-    // against, so it writes the rest rather than reporting it - and, like the read, it
-    // retries a write a signal interrupted. What is left is a real failure of the
-    // device, which is an OSError as it has always been.
+    // write_all_at rather than write_at, because a short write would leave the page torn,
+    // half old and half new. It also retries a write a signal interrupted.
     file.write_all_at(&page, offset).map_err(PageIoError::Io)?;
     Ok(num_stored)
 }
 
+/// The tokens to index a document under, with no repeats and in no particular order: every
+/// token of its title, URL and extract, and the bigrams of the first tokens of each.
 #[must_use]
 pub fn tokenize_document(url: &str, title: &str, extract: &str) -> Vec<String> {
-    let title_tokens = tokenize(title);
-    let url_tokens = tokenize(&prepare_url_for_tokenizing(url));
-    let extract_tokens = tokenize(extract);
-    get_bigrams(
-        NUM_FIRST_TOKENS,
-        &title_tokens
-            .iter()
-            .take(NUM_FIRST_TOKENS)
-            .cloned()
-            .collect::<Vec<_>>(),
-    )
-    .into_iter()
-    .chain(get_bigrams(
-        NUM_FIRST_TOKENS,
-        &url_tokens
-            .iter()
-            .take(NUM_FIRST_TOKENS)
-            .cloned()
-            .collect::<Vec<_>>(),
-    ))
-    .chain(get_bigrams(
-        NUM_FIRST_TOKENS,
-        &extract_tokens
-            .iter()
-            .take(NUM_FIRST_TOKENS)
-            .cloned()
-            .collect::<Vec<_>>(),
-    ))
-    .chain(title_tokens)
-    .chain(url_tokens)
-    .chain(extract_tokens)
-    .collect::<HashSet<String>>()
-    .into_iter()
-    .collect()
+    let token_lists = [
+        tokenize(title),
+        tokenize(&prepare_url_for_tokenizing(url)),
+        tokenize(extract),
+    ];
+    let bigrams: Vec<String> = token_lists
+        .iter()
+        .flat_map(|tokens| first_bigrams(tokens))
+        .collect();
+    let tokens: HashSet<String> = bigrams
+        .into_iter()
+        .chain(token_lists.into_iter().flatten())
+        .collect();
+    tokens.into_iter().collect()
 }
 
+fn first_bigrams(tokens: &[String]) -> Vec<String> {
+    let first_tokens = tokens.get(..NUM_FIRST_TOKENS).unwrap_or(tokens);
+    get_bigrams(NUM_FIRST_TOKENS, first_tokens)
+}
+
+/// `url` with each character but an ASCII letter or digit replaced by a space, for
+/// `tokenize`.
+///
+/// An `http://` prefix is removed first, but `https://` only when it is followed by
+/// `http://`, which goes too: other `https` URLs keep their scheme as a token.
 #[must_use]
 pub fn prepare_url_for_tokenizing(url: &str) -> String {
     let url = url

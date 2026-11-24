@@ -158,19 +158,15 @@ fn py_items_to_values(items: &Bound<'_, PyList>) -> Result<Vec<Value>> {
 /// that was there.
 #[pyfunction]
 #[pyo3(signature = (fd, offset, page_size, term=None))]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "mwmbl_core's read_index_page takes the term as an Option<&String>"
-)]
 pub fn read_index_page(
     py: Python<'_>,
     fd: i32,
     offset: u64,
     page_size: usize,
-    term: Option<String>,
+    term: Option<&str>,
 ) -> PyResult<Py<PyList>> {
     let values = py
-        .allow_threads(|| index::read_index_page::<Value>(fd, offset, page_size, term.as_ref()))
+        .allow_threads(|| index::read_index_page::<Value>(fd, offset, page_size, term))
         .map_err(page_io_error)?;
     Ok(values_to_py(py, values)?.unbind())
 }

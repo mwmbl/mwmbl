@@ -8,7 +8,10 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mwmbl_core::index::{PageIoError, pack_page, read_index_page, write_index_page};
+use mwmbl_core::index::{
+    PageIoError, pack_page, prepare_url_for_tokenizing, read_index_page, tokenize_document,
+    write_index_page,
+};
 use serde_json::{Value, json};
 
 const PAGE_SIZE: usize = 4096;
@@ -53,14 +56,20 @@ fn document(url: &str, term: Option<&str>) -> Value {
     json!(["A title", url, "An extract", 1.5, term, "page"])
 }
 
+/// Documents with distinct pseudo-random extracts, so they don't compress away to nothing.
+fn distinct_documents(count: u64) -> Vec<Value> {
+    (0..count)
+        .map(|i| {
+            let extract: String = (0..20)
+                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
+                .collect();
+            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
+        })
+        .collect()
+}
+
 fn read(scratch: &ScratchFile, page: u64, term: Option<&str>) -> Result<Vec<Value>, PageIoError> {
-    let term = term.map(str::to_string);
-    read_index_page(
-        scratch.fd(),
-        page * PAGE_SIZE as u64,
-        PAGE_SIZE,
-        term.as_ref(),
-    )
+    read_index_page(scratch.fd(), page * PAGE_SIZE as u64, PAGE_SIZE, term)
 }
 
 #[test]
@@ -129,15 +138,7 @@ fn a_term_keeps_its_own_documents_and_those_with_no_term() {
 
 #[test]
 fn packing_keeps_the_longest_prefix_that_fits() {
-    // Distinct pseudo-random extracts, so the documents do not compress away to nothing.
-    let documents: Vec<Value> = (0..500u64)
-        .map(|i| {
-            let extract: String = (0..20)
-                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
-                .collect();
-            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
-        })
-        .collect();
+    let documents = distinct_documents(500);
 
     let (page, num_stored) = pack_page(PAGE_SIZE, &documents).unwrap();
 
@@ -158,14 +159,7 @@ fn packing_keeps_the_longest_prefix_that_fits() {
 
 #[test]
 fn packing_any_prefix_stores_all_of_it_that_fits() {
-    let documents: Vec<Value> = (0..60u64)
-        .map(|i| {
-            let extract: String = (0..20)
-                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
-                .collect();
-            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
-        })
-        .collect();
+    let documents = distinct_documents(60);
     let (_, fits) = pack_page(PAGE_SIZE, &documents).unwrap();
     assert!(fits > 1 && fits < documents.len(), "stored {fits}");
 
@@ -174,6 +168,21 @@ fn packing_any_prefix_stores_all_of_it_that_fits() {
     for count in 0..=documents.len() {
         let (_, num_stored) = pack_page(PAGE_SIZE, &documents[..count]).unwrap();
         assert_eq!(num_stored, count.min(fits), "packing {count} documents");
+    }
+}
+
+#[test]
+fn documents_that_compress_to_exactly_the_page_size_fit() {
+    let documents = distinct_documents(20);
+    let compressed_size = |count: usize| {
+        zstd::bulk::compress(json!(documents[..count]).to_string().as_bytes(), 3)
+            .unwrap()
+            .len()
+    };
+
+    for count in [documents.len(), 7] {
+        let (_, num_stored) = pack_page(compressed_size(count), &documents).unwrap();
+        assert_eq!(num_stored, count);
     }
 }
 
@@ -247,6 +256,29 @@ fn a_frame_claiming_too_much_content_is_refused_before_decompressing() {
 }
 
 #[test]
+fn a_corrupt_frame_is_unreadable_rather_than_an_io_error() {
+    let (page, _) = pack_page(PAGE_SIZE, &distinct_documents(5)).unwrap();
+    let frame_size = page.iter().rposition(|&byte| byte != 0).unwrap() + 1;
+    let scratch = ScratchFile::with_pages(1);
+    let mut num_unreadable = 0;
+
+    // A flipped byte in the compressed text can decode to other valid JSON, so only some
+    // corruptions are caught, and those must be Unreadable.
+    for position in 0..frame_size {
+        let mut corrupt = page.clone();
+        corrupt[position] ^= 0xff;
+        scratch.file.write_all_at(&corrupt, 0).unwrap();
+
+        match read(&scratch, 0, None) {
+            Ok(_) => {}
+            Err(PageIoError::Unreadable(_)) => num_unreadable += 1,
+            Err(error) => panic!("byte {position}: {error:?}"),
+        }
+    }
+    assert!(num_unreadable > 0);
+}
+
+#[test]
 fn a_page_that_is_not_json_is_unreadable() {
     let mut page = zstd::bulk::compress(b"[not json", 3).unwrap();
     page.resize(PAGE_SIZE, 0);
@@ -269,4 +301,57 @@ fn a_failed_read_is_an_io_error() {
     let result = read_index_page::<Value>(directory.as_raw_fd(), 0, PAGE_SIZE, None);
 
     assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
+}
+
+#[test]
+fn a_failed_write_is_an_io_error() {
+    let read_only = File::open(std::env::temp_dir()).unwrap();
+
+    let result = write_index_page(
+        read_only.as_raw_fd(),
+        0,
+        PAGE_SIZE,
+        &[document("https://example.com/", None)],
+    );
+
+    assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
+}
+
+#[test]
+fn a_url_loses_its_http_scheme_and_its_punctuation() {
+    let cases = [
+        ("http://example.com/a-b_c?d=e", "example com a b c d e"),
+        (
+            "https://en.wikipedia.org/wiki/Rust",
+            "https   en wikipedia org wiki Rust",
+        ),
+        ("https://http://example.com", "example com"),
+        ("ftp://x.y", "ftp   x y"),
+        ("HTTP://Upper.case/", "HTTP   Upper case "),
+        ("https://café.fr", "https   caf  fr"),
+    ];
+    for (url, prepared) in cases {
+        assert_eq!(prepare_url_for_tokenizing(url), prepared, "{url}");
+    }
+}
+
+#[test]
+fn a_document_is_indexed_under_its_tokens_and_their_first_bigrams() {
+    let cases = [
+        (
+            "https://en.wikipedia.org/wiki/Café",
+            "Café — one two three four five six seven eight nine ten eleven",
+            "A café is a shop …",
+            "a|a café|caf|café|café is|café —|eight|eleven|en|en wikipedia|five|five six|four|\
+             four five|https|https en|is|is a|nine|one|one two|org|org wiki|seven|seven eight|\
+             six|six seven|ten|three|three four|two|two three|wiki|wiki caf|wikipedia|\
+             wikipedia org|—|— one",
+        ),
+        ("https://a.b/", "x", "y z w…", "a|a b|b|https|https a|x|y"),
+    ];
+    for (url, title, extract, expected) in cases {
+        let mut tokens = tokenize_document(url, title, extract);
+        tokens.sort();
+        assert_eq!(tokens.join("|"), expected, "{url}");
+    }
 }

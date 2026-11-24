@@ -395,7 +395,7 @@ impl TinyIndex {
 
     fn get_page<T: for<'a> Deserialize<'a>>(
         lock: Either<&ReadPageLock, &WritePageLock>,
-        term: Option<&String>,
+        term: Option<&str>,
     ) -> anyhow::Result<Vec<T>> {
         let process_lock = lock.either(|r| &r.process_lock, |w| &w.process_lock);
         Ok(read_index_page(
@@ -409,7 +409,7 @@ impl TinyIndex {
     pub async fn retrieve<T: for<'a> Deserialize<'a>>(&self, term: &str) -> anyhow::Result<Vec<T>> {
         let page = self.get_key_page_index(term);
         let lock = self.lock_page_read_only(page).await?;
-        Self::get_page(Either::Left(&lock), Some(&term.to_owned()))
+        Self::get_page(Either::Left(&lock), Some(term))
     }
 
     fn store_in_page<T: Serialize>(lock: &WritePageLock, values: &[T]) -> anyhow::Result<usize> {
