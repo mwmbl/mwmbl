@@ -28,11 +28,11 @@ warnings` must pass. (`mwmbl_rank` doesn't have it yet; it is being brought into
         clippy::pedantic
     )
 )]
-#![allow(clippy::missing_errors_doc)]
 ```
 
-`missing_errors_doc` is the one crate-wide exception. Otherwise fix the code rather than
-adding `#[allow(...)]`. An `allow` needs a reason a reviewer would accept, such as a cast
+`mwmbl_core` still allows `clippy::missing_errors_doc` crate-wide, because keeping those
+docs up to date by hand is costly. Code written by agents doesn't need that exception:
+document the errors (see below). Fix the code rather than adding `#[allow(...)]`. An `allow` needs a reason a reviewer would accept, such as a cast
 whose range is known.
 
 ## Errors
@@ -92,6 +92,18 @@ panicking.
   almost no comments.
 - A doc comment on a public item says what it does, briefly. Explain why only when the
   reason isn't visible in the code.
+- A public function that returns a `Result` has an `# Errors` section saying when it
+  fails:
+
+  ```rust
+  /// Reads the page at `offset`.
+  ///
+  /// # Errors
+  ///
+  /// Fails if the read comes up short or the page doesn't decode.
+  ```
+
+  When you change such a function, update its `# Errors` section to match.
 - Don't narrate history ("this used to...", "was written as..."). That belongs in the
   commit message.
 - No timing or progress prints in library code. Print only in binaries, or to report an
