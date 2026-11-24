@@ -13,6 +13,10 @@ struct WikiTable {
 }
 
 /// Split when the crate is compiled, so a table that doesn't match the layout fails the build.
+#[expect(
+    long_running_const_eval,
+    reason = "checking that the offsets never decrease visits every title once"
+)]
 static WIKI_TABLE: WikiTable = {
     let table = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin")).as_slice();
     let Some((num_titles, table)) = table.split_first_chunk::<4>() else {
@@ -26,6 +30,16 @@ static WIKI_TABLE: WikiTable = {
         panic!("The wiki table is too short for its scores");
     };
     let (title_offsets, _) = title_offsets.as_chunks::<4>();
+    let mut remaining = title_offsets;
+    while let [start, rest @ ..] = remaining {
+        if let [end, ..] = rest {
+            assert!(
+                u32::from_le_bytes(*start) <= u32::from_le_bytes(*end),
+                "The wiki table's title offsets decrease"
+            );
+        }
+        remaining = rest;
+    }
     let Some(titles_end) = title_offsets.last() else {
         panic!("The wiki table has no title offsets");
     };
@@ -50,8 +64,8 @@ impl WikiTable {
         let [start, end] = self.title_offsets.get(position..position + 2)? else {
             return None;
         };
-        let start = usize::try_from(u32::from_le_bytes(*start)).ok()?;
-        let end = usize::try_from(u32::from_le_bytes(*end)).ok()?;
+        let start = u32::from_le_bytes(*start) as usize;
+        let end = u32::from_le_bytes(*end) as usize;
         self.titles.get(start..end)
     }
 
