@@ -1,56 +1,91 @@
-/// Wikipedia score lookup.
-/// Replicates `get_wiki_score` from mwmbl/tinysearchengine/rank.py.
-///
-/// The scores are a sorted table that build.rs generates from `wiki_stats.json`; see there for
-/// the layout and why it is not a `HashMap`.
-static WIKI_TABLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin"));
+//! Wikipedia page view scores, as `get_wiki_score` in mwmbl/tinysearchengine/rank.py gives
+//! them.
+//!
+//! The scores are a sorted table that build.rs generates from `wiki_stats.json`; see there for
+//! the layout and why it is not a `HashMap`.
 
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-fn read_u32(at: usize) -> usize {
-    u32::from_le_bytes(WIKI_TABLE[at..at + 4].try_into().unwrap()) as usize
+/// The article titles and their scores, split out of the table that build.rs wrote.
+struct WikiTable {
+    /// Where each title starts in `titles`, and where the last one ends.
+    title_offsets: &'static [[u8; 4]],
+    scores: &'static [[u8; 8]],
+    titles: &'static [u8],
 }
 
-fn len() -> usize {
-    read_u32(0)
-}
-
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-fn key(i: usize) -> &'static [u8] {
-    let n = len();
-    let keys_start = 4 + (n + 1) * 4 + n * 8;
-    &WIKI_TABLE[keys_start + read_u32(4 + i * 4)..keys_start + read_u32(4 + (i + 1) * 4)]
-}
-
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-fn score(i: usize) -> f64 {
-    let at = 4 + (len() + 1) * 4 + i * 8;
-    f64::from_le_bytes(WIKI_TABLE[at..at + 8].try_into().unwrap())
-}
-
-/// The page view count of an article divided by the largest, or 0 for one not in the stats.
-fn lookup(title: &str) -> f64 {
-    let target = title.as_bytes();
-    let (mut low, mut high) = (0, len());
-    while low < high {
-        let mid = low + (high - low) / 2;
-        match key(mid).cmp(target) {
-            std::cmp::Ordering::Less => low = mid + 1,
-            std::cmp::Ordering::Greater => high = mid,
-            std::cmp::Ordering::Equal => return score(mid),
-        }
+/// Split when the crate is compiled, so a table that doesn't match the layout fails the build.
+static WIKI_TABLE: WikiTable = {
+    let table = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin")).as_slice();
+    let Some((num_titles, table)) = table.split_first_chunk::<4>() else {
+        panic!("The wiki table has no length");
+    };
+    let num_titles = u32::from_le_bytes(*num_titles) as usize;
+    let Some((title_offsets, table)) = table.split_at_checked((num_titles + 1) * 4) else {
+        panic!("The wiki table is too short for its title offsets");
+    };
+    let Some((scores, titles)) = table.split_at_checked(num_titles * 8) else {
+        panic!("The wiki table is too short for its scores");
+    };
+    let (title_offsets, _) = title_offsets.as_chunks::<4>();
+    let Some(titles_end) = title_offsets.last() else {
+        panic!("The wiki table has no title offsets");
+    };
+    assert!(
+        u32::from_le_bytes(*titles_end) as usize == titles.len(),
+        "The wiki table's titles don't end where its offsets say"
+    );
+    WikiTable {
+        title_offsets,
+        scores: scores.as_chunks::<8>().0,
+        titles,
     }
-    0.0
+};
+
+impl WikiTable {
+    fn len(&self) -> usize {
+        self.scores.len()
+    }
+
+    /// The title at `position`, or `None` past the end of the table.
+    fn title(&self, position: usize) -> Option<&'static [u8]> {
+        let [start, end] = self.title_offsets.get(position..position + 2)? else {
+            return None;
+        };
+        let start = usize::try_from(u32::from_le_bytes(*start)).ok()?;
+        let end = usize::try_from(u32::from_le_bytes(*end)).ok()?;
+        self.titles.get(start..end)
+    }
+
+    fn score(&self, position: usize) -> Option<f64> {
+        self.scores.get(position).copied().map(f64::from_le_bytes)
+    }
+
+    /// The score of the article called `title`, or `None` for one that isn't in the stats.
+    fn lookup(&self, title: &str) -> Option<f64> {
+        let target = title.as_bytes();
+        let (mut low, mut high) = (0, self.len());
+        while low < high {
+            let middle = usize::midpoint(low, high);
+            match self.title(middle)?.cmp(target) {
+                std::cmp::Ordering::Less => low = middle + 1,
+                std::cmp::Ordering::Greater => high = middle,
+                std::cmp::Ordering::Equal => return self.score(middle),
+            }
+        }
+        None
+    }
 }
 
-/// Get a normalised wiki score for the given URL.
-/// Extracts the last path segment as the Wikipedia article title.
+/// The page view count of the Wikipedia article named by the last path segment of `url`,
+/// divided by the largest count: 0 for an article that isn't in the stats.
+///
+/// The domain is ignored, so any URL ending in an article's title gets its score.
 #[must_use]
 pub fn get_wiki_score(url: &str) -> f64 {
-    let title = url.split('/').next_back().unwrap_or("");
+    let title = url.rsplit_once('/').map_or(url, |(_, title)| title);
     if title.is_empty() {
         return 0.0;
     }
-    lookup(title)
+    WIKI_TABLE.lookup(title).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -64,16 +99,30 @@ mod tests {
     }
 
     #[test]
-    fn test_wiki_score_range() {
-        // Any known article should be in [0, 1]
-        let score = get_wiki_score("https://en.wikipedia.org/wiki/Python_(programming_language)");
-        assert!(score > 0.0);
-        assert!(score <= 1.0);
+    fn test_wiki_score_is_the_normalised_count_of_the_last_path_segment() {
+        let python = get_wiki_score("https://en.wikipedia.org/wiki/Python_(programming_language)");
+        assert_eq!(python, 0.0009181497562013591);
+        assert_eq!(
+            get_wiki_score("https://example.com/test"),
+            2.490051113958321e-5
+        );
+        assert_eq!(
+            get_wiki_score("Rust_(programming_language)"),
+            0.0003626419895055664
+        );
+        assert_eq!(
+            get_wiki_score("https://en.wikipedia.org/wiki/Main_Page"),
+            1.0
+        );
+        assert_eq!(get_wiki_score("https://en.wikipedia.org/wiki/"), 0.0);
+        assert_eq!(get_wiki_score(""), 0.0);
     }
 
     #[test]
     fn test_wiki_max_score_normalised() {
-        let max = (0..len()).map(score).fold(f64::NEG_INFINITY, f64::max);
+        let max = (0..WIKI_TABLE.len())
+            .map(|position| WIKI_TABLE.score(position).unwrap())
+            .fold(f64::NEG_INFINITY, f64::max);
         assert!(
             (max - 1.0).abs() < 1e-9,
             "Max wiki score should be 1.0, got {}",
@@ -82,10 +131,11 @@ mod tests {
     }
 
     #[test]
-    fn test_every_key_is_found() {
-        for i in 0..len() {
-            let title = std::str::from_utf8(key(i)).unwrap();
-            assert_eq!(lookup(title), score(i));
+    fn test_every_title_is_found() {
+        assert!(WIKI_TABLE.len() > 100_000, "{}", WIKI_TABLE.len());
+        for position in 0..WIKI_TABLE.len() {
+            let title = std::str::from_utf8(WIKI_TABLE.title(position).unwrap()).unwrap();
+            assert_eq!(WIKI_TABLE.lookup(title), WIKI_TABLE.score(position));
         }
     }
 }
