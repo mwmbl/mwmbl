@@ -55,6 +55,21 @@ pub enum StaanRank {
 }
 
 impl StaanRank {
+    /// What Staan said, from a record's `staan_asked` and `staan_rank` items. A rank that is
+    /// missing, not a number or NaN (as pandas writes `None`) means Staan didn't return the URL.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "`as` truncates a fractional rank and saturates one outside u32, which the golden tests pin"
+    )]
+    pub fn from_items(asked: bool, rank: Option<f64>) -> Self {
+        match (asked, rank.filter(|rank| !rank.is_nan())) {
+            (false, _) => StaanRank::NotAsked,
+            (true, None) => StaanRank::NotReturned,
+            (true, Some(rank)) => StaanRank::Rank(rank as u32),
+        }
+    }
+
     /// The `in_staan` and `staan_rank` columns, NaN where XGBoost should treat them as missing.
     #[allow(
         clippy::cast_precision_loss,
@@ -96,7 +111,7 @@ pub fn num_features(provider_features: bool) -> usize {
 const PROVIDER_FEATURES_ATTRIBUTE: &str = "mwmbl_provider_features";
 
 /// A query's terms and their regexes, compiled once per query in a batch.
-struct QueryTerms {
+pub struct QueryTerms {
     terms: Vec<String>,
     text_regex: Regex,
     url_regex: Regex,
@@ -104,15 +119,44 @@ struct QueryTerms {
 
 impl QueryTerms {
     fn new(query: &str) -> Self {
-        let terms = tokenize(&query.to_lowercase());
+        Self::from_terms(tokenize(&query.to_lowercase()))
+    }
+
+    /// Terms used as given, without lowercasing or tokenizing them.
+    pub fn from_terms(terms: Vec<String>) -> Self {
         let term_refs: Vec<&str> = terms.iter().map(String::as_str).collect();
-        let text_regex = get_query_regex(&term_refs, true, false).unwrap_or(regex!("").clone());
-        let url_regex = get_query_regex(&term_refs, true, true).unwrap_or(regex!("").clone());
+        let text_regex =
+            get_query_regex(&term_refs, true, false).unwrap_or_else(|_| regex!("").clone());
+        let url_regex =
+            get_query_regex(&term_refs, true, true).unwrap_or_else(|_| regex!("").clone());
         QueryTerms {
             terms,
             text_regex,
             url_regex,
         }
+    }
+
+    /// The features of `doc` for these terms.
+    pub fn feature_row(&self, doc: &Document) -> [f32; NUM_FEATURES] {
+        let (url_path, url_domain, url_query) = match Url::parse(doc.url()) {
+            Ok(url) => (
+                url.path().to_owned(),
+                url.domain().unwrap_or("").to_owned(),
+                url.query().unwrap_or("").to_owned(),
+            ),
+            Err(_) => (String::new(), String::new(), String::new()),
+        };
+        let terms: Vec<&str> = self.terms.iter().map(String::as_str).collect();
+        let features = get_features_regex_unchecked(
+            &terms,
+            doc,
+            &url_path,
+            &url_domain,
+            &url_query,
+            &self.text_regex,
+            &self.url_regex,
+        );
+        feature_row(features)
     }
 }
 
@@ -127,27 +171,7 @@ pub fn extract_features_batch(records: &[DocumentRecord], provider_features: boo
         let query = queries
             .entry(record.query.as_str())
             .or_insert_with(|| QueryTerms::new(&record.query));
-
-        let (url_path, url_domain, url_query) = match Url::parse(record.doc.url()) {
-            Ok(url) => (
-                url.path().to_owned(),
-                url.domain().unwrap_or("").to_owned(),
-                url.query().unwrap_or("").to_owned(),
-            ),
-            Err(_) => (String::new(), String::new(), String::new()),
-        };
-
-        let terms: Vec<&str> = query.terms.iter().map(String::as_str).collect();
-        let row = get_features_regex_unchecked(
-            &terms,
-            &record.doc,
-            &url_path,
-            &url_domain,
-            &url_query,
-            &query.text_regex,
-            &query.url_regex,
-        );
-        features.extend_from_slice(&feature_row(row));
+        features.extend_from_slice(&query.feature_row(&record.doc));
         if provider_features {
             features.extend_from_slice(&record.staan_rank.features());
         }

@@ -29,17 +29,13 @@ mod features;
 mod index;
 mod pipeline;
 
-use mwmbl_core::{
-    indexer::Document,
-    rank::{get_features_regex_unchecked, get_query_regex},
-    wiki,
-};
+use mwmbl_core::{indexer::Document, wiki};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use regex::regex;
 
-use pipeline::{DocumentRecord, StaanRank, XGBPipeline, extract_features_batch, num_features};
-use url::Url;
+use pipeline::{
+    DocumentRecord, QueryTerms, StaanRank, XGBPipeline, extract_features_batch, num_features,
+};
 
 /// A pipeline error as a Python `ValueError`, with its context chain in the message.
 fn value_error(error: &anyhow::Error) -> PyErr {
@@ -55,24 +51,9 @@ fn required_item<'py>(record: &Bound<'py, PyAny>, key: &str) -> PyResult<Bound<'
 
 /// The item `key` of a record as a `T`, or `None` if it is missing or of another type.
 ///
-/// Leniency over wrongly typed values is an open decision in #696, so it stays for now.
+/// Lenient pending the decision in #696.
 fn lenient_item<'py, T: FromPyObject<'py>>(record: &Bound<'py, PyAny>, key: &str) -> Option<T> {
     record.get_item(key).and_then(|value| value.extract()).ok()
-}
-
-/// What Staan said about a record, from its `staan_asked` and `staan_rank` items. A rank that
-/// is missing, not a number or NaN (as pandas writes `None`) means Staan didn't return the URL.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "`as` truncates a fractional rank and saturates one outside u32, which the golden tests pin"
-)]
-fn staan_rank(asked: bool, rank: Option<f64>) -> StaanRank {
-    match (asked, rank.filter(|rank| !rank.is_nan())) {
-        (false, _) => StaanRank::NotAsked,
-        (true, None) => StaanRank::NotReturned,
-        (true, Some(rank)) => StaanRank::Rank(rank as u32),
-    }
 }
 
 /// Reads a record from anything with string keys, such as a dict. `query` and `url` are
@@ -101,7 +82,7 @@ impl<'py> FromPyObject<'py> for DocumentRecord {
         Ok(DocumentRecord {
             query,
             doc,
-            staan_rank: staan_rank(staan_asked, rank),
+            staan_rank: StaanRank::from_items(staan_asked, rank),
             from_staan,
         })
     }
@@ -273,10 +254,6 @@ fn extract_records(records: &Bound<'_, PyAny>) -> PyResult<Vec<DocumentRecord>> 
 /// The features of one document for a list of query terms, as `extract_features` computes
 /// them for a query. `_is_complete` is ignored.
 #[pyfunction]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "pyo3 extracts a list argument as an owned Vec"
-)]
 fn get_features_py(
     terms: Vec<String>,
     title: &str,
@@ -285,7 +262,6 @@ fn get_features_py(
     score: f32,
     _is_complete: bool,
 ) -> Vec<f32> {
-    let terms: Vec<&str> = terms.iter().map(String::as_str).collect();
     let doc = Document::new(
         title.to_owned(),
         url.to_owned(),
@@ -297,27 +273,7 @@ fn get_features_py(
         None,
         None,
     );
-    let (url_path, url_domain, url_query) = match Url::parse(url) {
-        Ok(url) => (
-            url.path().to_owned(),
-            url.domain().unwrap_or("").to_owned(),
-            url.query().unwrap_or("").to_owned(),
-        ),
-        Err(_) => (String::new(), String::new(), String::new()),
-    };
-    let text_regex = get_query_regex(&terms, true, false).unwrap_or(regex!("").clone());
-    let url_regex = get_query_regex(&terms, true, true).unwrap_or(regex!("").clone());
-
-    let features = get_features_regex_unchecked(
-        &terms,
-        &doc,
-        &url_path,
-        &url_domain,
-        &url_query,
-        &text_regex,
-        &url_regex,
-    );
-    features::feature_row(features).to_vec()
+    QueryTerms::from_terms(terms).feature_row(&doc).to_vec()
 }
 
 /// The normalised Wikipedia page view score of a URL, in [0, 1]: 0 for a page not in the stats.
