@@ -433,6 +433,14 @@ def test_unstorable_items_are_page_errors(item, message):
         pack_index_page(512, [item])
 
 
+def test_unstorable_nested_items_name_only_the_page_and_the_item():
+    with pytest.raises(PageError) as raised:
+        pack_index_page(512, [["ok", [{"a": {1: 2}}]]])
+    assert str(raised.value) == (
+        "Cannot store these documents on a page: TypeError: Only string keys can be stored in an index page"
+    )
+
+
 def test_page_size_and_argument_errors():
     with pytest.raises(PageError, match=r"Data is too big \(11\) for page size \(5\)"):
         pack_index_page(5, [])
@@ -485,13 +493,19 @@ def test_bad_descriptors_and_offsets(tmp_path):
     path = tmp_path / "pages"
     path.write_bytes(bytes(1024))
     read_only = os.open(path, os.O_RDONLY)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         write_index_page(read_only, 0, 512, [])
+    assert (type(raised.value), raised.value.errno, str(raised.value)) == (
+        OSError,
+        None,
+        "Bad file descriptor (os error 9)",
+    )
     with pytest.raises(OverflowError):
         read_index_page(read_only, -1, 512)
     os.close(read_only)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         read_index_page(read_only, 0, 512)
+    assert str(raised.value) == "Bad file descriptor (os error 9)"
 
 
 def test_descriptor_minus_one_panics():
