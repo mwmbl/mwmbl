@@ -98,3 +98,27 @@ def test_crawl_url_prefers_og_description(monkeypatch):
     )
     content = _crawl_html(monkeypatch, html)["content"]
     assert content["extract"] == "The OG summary."
+
+
+def test_crawl_url_strips_numeric_char_ref_control_chars(monkeypatch):
+    # &#1; is ASCII on the wire, so the fetch-time control-byte strip misses
+    # it; the parser decodes it to \x01, which lxml cannot move while cleaning.
+    # The page must still be indexed, with the control character removed.
+    html = (
+        "<html><head><title>kitsas</title></head><body>"
+        "<p>&#1; kitsas (genitive kitsa, partitive kitsast) tail <script>bad</script></p>"
+        "</body></html>"
+    )
+    content = _crawl_html(monkeypatch, html)["content"]
+    assert content is not None
+    assert "\x01" not in content["extract"]
+    assert "kitsas" in content["extract"]
+
+
+def test_strip_dom_control_chars():
+    # Text, tails and attribute values can all carry decoded control
+    # characters that lxml rejects when the cleaner reshuffles the tree.
+    dom = _dom("<html><body><p>&#1; kitsas <b>bold&#x0e;</b> tail&#2;</p></body></html>")
+    retrieve.strip_dom_control_chars(dom)
+    text = "".join(dom.itertext())
+    assert "\x01" not in text and "\x02" not in text and "\x0e" not in text
