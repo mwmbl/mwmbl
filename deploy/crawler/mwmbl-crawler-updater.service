@@ -8,9 +8,7 @@ Type=oneshot
 # MWMBL_REPO_DIR points at the clone of mwmbl/mwmbl that docker-compose.yml lives in,
 # e.g. /home/crawler/mwmbl - see README.md in this directory. systemd expands env-file
 # variables in Exec* command lines only, not in path settings like WorkingDirectory, so the
-# compose file is passed explicitly. It must be -f: --project-directory alone does not make
-# compose look for docker-compose.yml there ("no configuration file provided"). With -f the
-# project directory, and so the .env file, is the file's directory.
+# directory is passed to compose explicitly.
 EnvironmentFile=/etc/default/mwmbl-crawler-updater
-ExecStart=/usr/bin/docker compose -f "$MWMBL_REPO_DIR/docker-compose.yml" pull mwmbl-crawler
-ExecStart=/usr/bin/docker compose -f "$MWMBL_REPO_DIR/docker-compose.yml" up -d mwmbl-crawler
+ExecStart=/usr/bin/docker compose --project-directory "$MWMBL_REPO_DIR" pull mwmbl-crawler
+ExecStart=/usr/bin/docker compose --project-directory "$MWMBL_REPO_DIR" up -d mwmbl-crawler
