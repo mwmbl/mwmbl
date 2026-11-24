@@ -13,10 +13,6 @@ struct WikiTable {
 }
 
 /// Split when the crate is compiled, so a table that doesn't match the layout fails the build.
-#[expect(
-    long_running_const_eval,
-    reason = "checking that the offsets never decrease visits every title once"
-)]
 static WIKI_TABLE: WikiTable = {
     let table = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin")).as_slice();
     let Some((num_titles, table)) = table.split_first_chunk::<4>() else {
@@ -30,16 +26,6 @@ static WIKI_TABLE: WikiTable = {
         panic!("The wiki table is too short for its scores");
     };
     let (title_offsets, _) = title_offsets.as_chunks::<4>();
-    let mut remaining = title_offsets;
-    while let [start, rest @ ..] = remaining {
-        if let [end, ..] = rest {
-            assert!(
-                u32::from_le_bytes(*start) <= u32::from_le_bytes(*end),
-                "The wiki table's title offsets decrease"
-            );
-        }
-        remaining = rest;
-    }
     let Some(titles_end) = title_offsets.last() else {
         panic!("The wiki table has no title offsets");
     };
@@ -142,6 +128,21 @@ mod tests {
             "Max wiki score should be 1.0, got {}",
             max
         );
+    }
+
+    #[test]
+    fn test_the_title_offsets_never_decrease_so_every_title_is_readable() {
+        let offsets: Vec<u32> = WIKI_TABLE
+            .title_offsets
+            .iter()
+            .map(|offset| u32::from_le_bytes(*offset))
+            .collect();
+        for (position, pair) in offsets.windows(2).enumerate() {
+            assert!(pair[0] <= pair[1], "offset {position}: {pair:?}");
+        }
+        for position in 0..WIKI_TABLE.len() {
+            assert!(WIKI_TABLE.title(position).is_some(), "title {position}");
+        }
     }
 
     #[test]
