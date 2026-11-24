@@ -37,7 +37,7 @@ use xgb::{
 };
 
 use crate::features::{
-    MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES, features_vec,
+    MATCH_TERMS_INDEX, NUM_FEATURES, NUM_TERMS_INDEX, PROVIDER_FEATURE_NAMES, feature_row,
 };
 
 /// What Staan said about a record's URL for its query.
@@ -147,7 +147,7 @@ pub fn extract_features_batch(records: &[DocumentRecord], provider_features: boo
             &query.text_regex,
             &query.url_regex,
         );
-        features.extend_from_slice(&features_vec(row));
+        features.extend_from_slice(&feature_row(row));
         if provider_features {
             features.extend_from_slice(&record.staan_rank.features());
         }

@@ -325,7 +325,7 @@ fn get_features_py(
         &re_text,
         &re_url,
     );
-    features::features_vec(features).into_iter().collect()
+    features::feature_row(features).to_vec()
 }
 
 /// The normalised Wikipedia page view score of a URL, in [0, 1]: 0 for a page not in the stats.
