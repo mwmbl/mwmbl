@@ -1048,11 +1048,9 @@ dependencies = [
  "mwmbl_core",
  "pyo3",
  "regex",
- "serde",
  "serde_json",
  "url",
  "xgb",
- "zstd",
 ]
 
 [[package]]
