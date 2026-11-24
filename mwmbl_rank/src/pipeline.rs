@@ -1,19 +1,3 @@
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unwrap_used,
-        clippy::panic,
-        clippy::string_slice,
-        clippy::unimplemented,
-        clippy::unreachable,
-        clippy::todo,
-        clippy::pedantic
-    )
-)]
-
 //! The learning-to-rank pipeline: feature extraction, label binarisation at a threshold, and
 //! an XGBoost classifier, matching `mwmbl/rankeval/ltr/evaluate.py`.
 
@@ -71,7 +55,7 @@ impl StaanRank {
     }
 
     /// The `in_staan` and `staan_rank` columns, NaN where XGBoost should treat them as missing.
-    #[allow(
+    #[expect(
         clippy::cast_precision_loss,
         reason = "Staan returns a page of results, so its ranks are far below 2^24"
     )]
