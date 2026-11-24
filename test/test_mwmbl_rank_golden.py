@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -56,10 +57,11 @@ PROVIDER_VARIANTS = [
 ]
 
 # Arguments to RustXGBPipeline for the models whose predictions are pinned. The second sets
-# every hyperparameter, so dropping any of them on the way to XGBoost changes its output.
+# every hyperparameter, so dropping any of them on the way to XGBoost changes its output: its
+# max_depth stops trees that would grow deeper, and its threshold falls between two labels above 0.
 MODEL_PARAMS = {
     "default": {"num_rounds": 20},
-    "configured": dict(threshold=0.5, scale_pos_weight=1.0, reg_lambda=1.0, num_rounds=15, max_depth=3,
+    "configured": dict(threshold=0.5, scale_pos_weight=1.0, reg_lambda=1.0, num_rounds=15, max_depth=1,
                        min_child_weight=0.5, gamma=0.1, subsample=0.8, provider_features=True),
 }  # fmt: skip
 
@@ -75,7 +77,7 @@ def training_data() -> tuple[list[dict], list[float], list[float]]:
         | {"score": (i * 7 % 11) / 5, "title": RECORDS[(i * 3) % len(RECORDS)]["title"]}
         for i in range(60)
     ]
-    labels = [float((i * 3) % 5 - 1) for i in range(60)]
+    labels = [((i * 3) % 5 - 1) / 2 for i in range(60)]
     weights = [1.0 + i % 3 for i in range(60)]
     return records, labels, weights
 
@@ -200,6 +202,28 @@ def test_model_round_trips_through_a_file_with_its_provider_features_attribute(t
     assert loaded.predict(provider_records()) == trained.predict(provider_records())
 
 
+def test_a_model_without_the_provider_features_attribute_loads_without_them(tmp_path):
+    path = tmp_path / "model.json"
+    train("configured").save_model(str(path))
+    model = json.loads(path.read_text())
+    del model["learner"]["attributes"]["mwmbl_provider_features"]
+    path.write_text(json.dumps(model))
+
+    loaded = mwmbl_rank.RustXGBPipeline(provider_features=True)
+    loaded.load_model(str(path))
+
+    assert not loaded.provider_features
+
+
+def test_saving_to_a_missing_directory_reports_xgboosts_error(tmp_path):
+    path = tmp_path / "missing" / "model.json"
+    with pytest.raises(
+        ValueError,
+        match=rf'^Failed to save model: XGBoost error: .*"{re.escape(str(path))}": No such file or directory',
+    ):
+        train("default").save_model(str(path))
+
+
 def test_rust_repr_uses_rust_formatting():
     """Documents current behaviour, which differs from the Python wrapper's repr."""
     assert repr(mwmbl_rank.RustXGBPipeline()) == (
@@ -207,7 +231,7 @@ def test_rust_repr_uses_rust_formatting():
         "min_child_weight=None, gamma=None, subsample=None, provider_features=false)"
     )
     assert repr(train("configured")) == (
-        "RustXGBPipeline(threshold=0.5, scale_pos_weight=1, reg_lambda=1, num_rounds=15, max_depth=Some(3), "
+        "RustXGBPipeline(threshold=0.5, scale_pos_weight=1, reg_lambda=1, num_rounds=15, max_depth=Some(1), "
         "min_child_weight=Some(0.5), gamma=Some(0.1), subsample=Some(0.8), provider_features=true)"
     )
 
@@ -227,7 +251,11 @@ def test_rust_fit_returns_none_and_negative_rounds_overflow():
         (lambda p: p.fit(RECORDS[:1], [1.0], [1.0, 2.0]), ValueError, r"weights length \(2\) != records length \(1\)"),
         (lambda p: p.predict(RECORDS), ValueError, r"Model has not been trained yet. Call fit\(\) first."),
         (lambda p: p.save_model("/nonexistent/model.xgb"), ValueError, "No trained model to save."),
-        (lambda p: p.load_model("/nonexistent/model.xgb"), ValueError, "Failed to load model"),
+        (
+            lambda p: p.load_model("/nonexistent/model.xgb"),
+            ValueError,
+            "^Failed to load model: XGBoost error: File not found: /nonexistent/model.xgb$",
+        ),
     ],
 )
 def test_pipeline_errors(call, error, message):
