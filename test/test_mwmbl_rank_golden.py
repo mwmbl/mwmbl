@@ -18,6 +18,7 @@ import math
 import os
 import re
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -268,8 +269,8 @@ def test_pipeline_errors(call, error, message):
     [
         ({"url": "https://a.com/"}, ValueError, "Record missing 'query' key"),
         ({"query": "a"}, ValueError, "Record missing 'url' key"),
-        ({"query": 5, "url": "https://a.com/"}, TypeError, ""),
-        ({"query": "a", "url": None}, TypeError, ""),
+        ({"query": 5, "url": "https://a.com/"}, TypeError, "^'int' object cannot be converted to 'PyString'$"),
+        ({"query": "a", "url": None}, TypeError, "^'NoneType' object cannot be converted to 'PyString'$"),
         (1, ValueError, "Record missing 'query' key"),
         (["a"], ValueError, "Record missing 'query' key"),
     ],
@@ -286,6 +287,36 @@ def test_records_must_be_a_sequence_but_not_a_string():
         with pytest.raises(TypeError):
             extract(records)
     assert extract(tuple(RECORDS[:1])) == extract(RECORDS[:1])
+
+
+def test_labels_are_read_before_records():
+    with pytest.raises(TypeError, match="^argument 'labels': Can't extract `str` to `Vec`$"):
+        mwmbl_rank.RustXGBPipeline().fit([1], "labels")
+
+
+class FailingLookup(dict):
+    """A record whose lookups of `failing` raise something other than KeyError."""
+
+    def __init__(self, record: dict, failing: str):
+        super().__init__(record)
+        self.failing = failing
+
+    def __getitem__(self, key):
+        if key == self.failing:
+            raise RuntimeError(key)
+        return super().__getitem__(key)
+
+
+def test_any_mapping_is_a_record_and_a_failed_lookup_counts_as_missing():
+    """Documents current behaviour: any error looking up an item counts as a missing item."""
+    record = RECORDS[0] | {"staan_asked": True, "staan_rank": 3, "from_staan": True}
+    assert features_of(MappingProxyType(record), True) == features_of(record, True)
+    for field in ["title", "extract", "score", "staan_asked", "staan_rank", "from_staan"]:
+        missing = {key: value for key, value in record.items() if key != field}
+        assert_same_floats(features_of(FailingLookup(record, field), True), features_of(missing, True))
+    for field in ["query", "url"]:
+        with pytest.raises(ValueError, match=f"^Record missing '{field}' key$"):
+            features_of(FailingLookup(record, field))
 
 
 def test_missing_or_non_string_title_and_extract_are_read_as_empty():
