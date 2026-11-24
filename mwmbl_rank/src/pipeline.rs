@@ -418,11 +418,11 @@ mod tests {
     fn make_records(n: usize) -> Vec<DocumentRecord> {
         (0..n)
             .map(|i| DocumentRecord {
-                query: "rust programming".to_string(),
+                query: "rust programming".to_owned(),
                 doc: Document::new(
                     format!("Rust Programming Example {}", i),
                     format!("https://example{}.com/page", i),
-                    "A great systems language".to_string(),
+                    "A great systems language".to_owned(),
                     Some(i as f32 * 0.1),
                     None,
                     None,
@@ -438,10 +438,10 @@ mod tests {
 
     fn record(url: &str, title: &str, staan_rank: StaanRank, from_staan: bool) -> DocumentRecord {
         DocumentRecord {
-            query: "rust programming".to_string(),
+            query: "rust programming".to_owned(),
             doc: Document::new(
-                title.to_string(),
-                url.to_string(),
+                title.to_owned(),
+                url.to_owned(),
                 String::new(),
                 Some(1.0),
                 None,
@@ -607,11 +607,11 @@ mod tests {
         let test = vec![
             // Matches both query terms ("rust programming") -> kept.
             DocumentRecord {
-                query: "rust programming".to_string(),
+                query: "rust programming".to_owned(),
                 doc: Document::new(
-                    "Rust Programming".to_string(),
-                    "https://example.com/rust".to_string(),
-                    "rust programming language".to_string(),
+                    "Rust Programming".to_owned(),
+                    "https://example.com/rust".to_owned(),
+                    "rust programming language".to_owned(),
                     Some(1.0),
                     None,
                     None,
@@ -624,11 +624,11 @@ mod tests {
             },
             // Matches no query terms -> filtered to 0.0.
             DocumentRecord {
-                query: "rust programming".to_string(),
+                query: "rust programming".to_owned(),
                 doc: Document::new(
-                    "Cooking Recipes".to_string(),
-                    "https://example.com/cooking".to_string(),
-                    "how to bake bread".to_string(),
+                    "Cooking Recipes".to_owned(),
+                    "https://example.com/cooking".to_owned(),
+                    "how to bake bread".to_owned(),
                     Some(1.0),
                     None,
                     None,
