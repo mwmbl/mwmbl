@@ -60,12 +60,11 @@ pub const FEATURE_NAMES: &[&str] = &[
     "domain_score",
     "path_length",
     "domain_length",
-    "wiki_score",
     "item_score",
     "match_terms",
 ];
 
-pub const NUM_FEATURES: usize = FEATURE_NAMES.len(); // 50
+pub const NUM_FEATURES: usize = FEATURE_NAMES.len(); // 49
 
 /// Index of `num_terms` (number of query terms) in the feature vector.
 pub const NUM_TERMS_INDEX: usize = 42;
@@ -84,6 +83,6 @@ pub(crate) struct MyFeatures(Features);
 unsafe impl Pod for MyFeatures {}
 unsafe impl Zeroable for MyFeatures {}
 
-pub(crate) fn features_vec(p: Features) -> [f32; 50] {
-    bytemuck::cast::<MyFeatures, [f32; 50]>(MyFeatures(p))
+pub(crate) fn features_vec(p: Features) -> [f32; NUM_FEATURES] {
+    bytemuck::cast::<MyFeatures, [f32; NUM_FEATURES]>(MyFeatures(p))
 }

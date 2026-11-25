@@ -15,7 +15,6 @@ use crate::{
     hn_top_domains_filtered::{DOMAIN_MAX_SCORE, DOMAIN_MIN_SCORE, DOMAINS},
     indexer::{Document, DocumentState},
     term_matcher::TermMatcher,
-    wiki::get_wiki_score,
 };
 
 pub trait Ranker {
@@ -123,7 +122,6 @@ pub struct Features {
     domain_score: f32,
     path_length: f32,
     domain_length: f32,
-    wiki_score: f32,
     item_score: f32,
     match_terms: f32,
 }
@@ -275,7 +273,6 @@ fn assemble_features<E>(
         domain_score: get_domain_score(url_domain),
         path_length: url_path.len() as f32,
         domain_length: url_domain.len() as f32,
-        wiki_score: get_wiki_score(doc.url()) as f32,
         item_score: doc.score().unwrap_or(0.0),
         match_terms: *match_terms,
     })
