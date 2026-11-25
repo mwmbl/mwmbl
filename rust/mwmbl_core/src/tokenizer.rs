@@ -1,5 +1,3 @@
-use std::{cmp::min, iter::zip};
-
 #[must_use]
 pub fn tokenize(input_text: &str) -> Vec<String> {
     let cleaned_text = clean_unicode(input_text);
@@ -17,13 +15,11 @@ pub fn tokenize(input_text: &str) -> Vec<String> {
 
 #[must_use]
 pub fn get_bigrams(num_bigrams: usize, tokens: &[String]) -> Vec<String> {
-    let num_bigrams = min(num_bigrams, tokens.len() - 1);
-    zip(
-        tokens.iter().take(num_bigrams),
-        tokens.iter().skip(1).take(num_bigrams),
-    )
-    .map(|(a, b)| format!("{a} {b}"))
-    .collect()
+    tokens
+        .windows(2)
+        .take(num_bigrams)
+        .map(|pair| pair.join(" "))
+        .collect()
 }
 
 #[must_use]

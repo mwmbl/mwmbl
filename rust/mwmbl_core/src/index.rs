@@ -312,14 +312,12 @@ fn first_bigrams(tokens: &[String]) -> Vec<String> {
 /// `url` with each character but an ASCII letter or digit replaced by a space, for
 /// `tokenize`.
 ///
-/// An `http://` prefix is removed first, but `https://` only when it is followed by
-/// `http://`, which goes too: other `https` URLs keep their scheme as a token.
+/// An `http://` or `https://` prefix is removed first, so the scheme is not a token.
 #[must_use]
 pub fn prepare_url_for_tokenizing(url: &str) -> String {
     let url = url
         .strip_prefix("https://")
-        .unwrap_or(url)
-        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
     url.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })

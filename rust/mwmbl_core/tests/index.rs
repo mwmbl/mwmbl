@@ -329,17 +329,18 @@ fn a_failed_write_is_an_io_error() {
 }
 
 #[test]
-fn a_url_loses_its_http_scheme_and_its_punctuation() {
+fn a_url_loses_its_http_or_https_scheme_and_its_punctuation() {
     let cases = [
         ("http://example.com/a-b_c?d=e", "example com a b c d e"),
         (
             "https://en.wikipedia.org/wiki/Rust",
-            "https   en wikipedia org wiki Rust",
+            "en wikipedia org wiki Rust",
         ),
-        ("https://http://example.com", "example com"),
+        ("https://http://example.com", "http   example com"),
+        ("http://https://example.com", "https   example com"),
         ("ftp://x.y", "ftp   x y"),
         ("HTTP://Upper.case/", "HTTP   Upper case "),
-        ("https://café.fr", "https   caf  fr"),
+        ("https://café.fr", "caf  fr"),
     ];
     for (url, prepared) in cases {
         assert_eq!(prepare_url_for_tokenizing(url), prepared, "{url}");
@@ -354,11 +355,11 @@ fn a_document_is_indexed_under_its_tokens_and_their_first_bigrams() {
             "Café — one two three four five six seven eight nine ten eleven",
             "A café is a shop …",
             "a|a café|caf|café|café is|café —|eight|eleven|en|en wikipedia|five|five six|four|\
-             four five|https|https en|is|is a|nine|one|one two|org|org wiki|seven|seven eight|\
+             four five|is|is a|nine|one|one two|org|org wiki|seven|seven eight|\
              six|six seven|ten|three|three four|two|two three|wiki|wiki caf|wikipedia|\
              wikipedia org|—|— one",
         ),
-        ("https://a.b/", "x", "y z w…", "a|a b|b|https|https a|x|y"),
+        ("https://a.b/", "x", "y z w…", "a|a b|b|x|y"),
     ];
     for (url, title, extract, expected) in cases {
         let mut tokens = tokenize_document(url, title, extract);
