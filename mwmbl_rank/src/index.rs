@@ -8,6 +8,10 @@
 //! Python opens the file and passes the descriptor in, holds the metadata and the page locks,
 //! and turns the documents that come back into `Document`s.
 
+use std::fs::File;
+use std::mem::ManuallyDrop;
+use std::os::unix::io::FromRawFd;
+
 use anyhow::{Context, Result};
 use mwmbl_core::index::{self, PageIoError};
 use pyo3::create_exception;
@@ -22,6 +26,19 @@ create_exception!(
     PyException,
     "A page that will not decode, or data that will not fit on one."
 );
+
+/// The file Python has open as `fd`, borrowed for one call. Python owns it, so it must not be
+/// closed: a `File` would close it on drop, and the `ManuallyDrop` stops that.
+///
+/// # Panics
+///
+/// If `fd` is -1, which `File::from_raw_fd` asserts against.
+fn borrow_python_file(fd: i32) -> ManuallyDrop<File> {
+    // SAFETY: Python keeps the file open across the call, and the ManuallyDrop never closes
+    // it. Python hands over only an integer, so this is the one place a raw descriptor
+    // becomes a File.
+    ManuallyDrop::new(unsafe { File::from_raw_fd(fd) })
+}
 
 /// A page I/O error as a Python `OSError`, or a `PageError` for a page that won't decode or
 /// data that won't fit.
@@ -165,8 +182,9 @@ pub fn read_index_page(
     page_size: usize,
     term: Option<&str>,
 ) -> PyResult<Py<PyList>> {
+    let file = borrow_python_file(fd);
     let values = py
-        .allow_threads(|| index::read_index_page::<Value>(fd, offset, page_size, term))
+        .allow_threads(|| index::read_index_page::<Value>(&file, offset, page_size, term))
         .map_err(page_io_error)?;
     Ok(values_to_py(py, values)?.unbind())
 }
@@ -187,7 +205,8 @@ pub fn write_index_page(
     items: &Bound<'_, PyList>,
 ) -> PyResult<usize> {
     let values = py_items_to_values(items).map_err(|error| page_error(&error))?;
-    py.allow_threads(|| index::write_index_page(fd, offset, page_size, &values))
+    let file = borrow_python_file(fd);
+    py.allow_threads(|| index::write_index_page(&file, offset, page_size, &values))
         .map_err(page_io_error)
 }
 

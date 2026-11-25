@@ -4,40 +4,20 @@
 //! The scores are a sorted table that build.rs generates from `wiki_stats.json`; see there for
 //! the layout and why it is not a `HashMap`.
 
-/// The article titles and their scores, split out of the table that build.rs wrote.
+include!(concat!(env!("OUT_DIR"), "/wiki_table.rs"));
+
+/// The article titles, sorted, and their scores.
 struct WikiTable {
     /// Where each title starts in `titles`, and where the last one ends.
-    title_offsets: &'static [[u8; 4]],
-    scores: &'static [[u8; 8]],
-    titles: &'static [u8],
+    title_offsets: &'static [u32],
+    scores: &'static [f64],
+    titles: &'static str,
 }
 
-/// Split when the crate is compiled, so a table that doesn't match the layout fails the build.
-static WIKI_TABLE: WikiTable = {
-    let table = include_bytes!(concat!(env!("OUT_DIR"), "/wiki_scores.bin")).as_slice();
-    let Some((num_titles, table)) = table.split_first_chunk::<4>() else {
-        panic!("The wiki table has no length");
-    };
-    let num_titles = u32::from_le_bytes(*num_titles) as usize;
-    let Some((title_offsets, table)) = table.split_at_checked((num_titles + 1) * 4) else {
-        panic!("The wiki table is too short for its title offsets");
-    };
-    let Some((scores, titles)) = table.split_at_checked(num_titles * 8) else {
-        panic!("The wiki table is too short for its scores");
-    };
-    let (title_offsets, _) = title_offsets.as_chunks::<4>();
-    let Some(titles_end) = title_offsets.last() else {
-        panic!("The wiki table has no title offsets");
-    };
-    assert!(
-        u32::from_le_bytes(*titles_end) as usize == titles.len(),
-        "The wiki table's titles don't end where its offsets say"
-    );
-    WikiTable {
-        title_offsets,
-        scores: scores.as_chunks::<8>().0,
-        titles,
-    }
+static WIKI_TABLE: WikiTable = WikiTable {
+    title_offsets: &TITLE_OFFSETS,
+    scores: &SCORES,
+    titles: TITLES,
 };
 
 impl WikiTable {
@@ -46,26 +26,23 @@ impl WikiTable {
     }
 
     /// The title at `position`, or `None` past the end of the table.
-    fn title(&self, position: usize) -> Option<&'static [u8]> {
+    fn title(&self, position: usize) -> Option<&'static str> {
         let [start, end] = self.title_offsets.get(position..position + 2)? else {
             return None;
         };
-        let start = u32::from_le_bytes(*start) as usize;
-        let end = u32::from_le_bytes(*end) as usize;
-        self.titles.get(start..end)
+        self.titles.get(*start as usize..*end as usize)
     }
 
     fn score(&self, position: usize) -> Option<f64> {
-        self.scores.get(position).copied().map(f64::from_le_bytes)
+        self.scores.get(position).copied()
     }
 
     /// The score of the article called `title`, or `None` for one that isn't in the stats.
     fn lookup(&self, title: &str) -> Option<f64> {
-        let target = title.as_bytes();
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = usize::midpoint(low, high);
-            match self.title(middle)?.cmp(target) {
+            match self.title(middle)?.cmp(title) {
                 std::cmp::Ordering::Less => low = middle + 1,
                 std::cmp::Ordering::Greater => high = middle,
                 std::cmp::Ordering::Equal => return self.score(middle),
@@ -131,13 +108,16 @@ mod tests {
     }
 
     #[test]
+    fn test_the_titles_end_where_the_offsets_say() {
+        assert_eq!(
+            WIKI_TABLE.title_offsets.last().map(|end| *end as usize),
+            Some(WIKI_TABLE.titles.len())
+        );
+    }
+
+    #[test]
     fn test_the_title_offsets_never_decrease_so_every_title_is_readable() {
-        let offsets: Vec<u32> = WIKI_TABLE
-            .title_offsets
-            .iter()
-            .map(|offset| u32::from_le_bytes(*offset))
-            .collect();
-        for (position, pair) in offsets.windows(2).enumerate() {
+        for (position, pair) in WIKI_TABLE.title_offsets.windows(2).enumerate() {
             assert!(pair[0] <= pair[1], "offset {position}: {pair:?}");
         }
         for position in 0..WIKI_TABLE.len() {
@@ -149,7 +129,7 @@ mod tests {
     fn test_every_title_is_found() {
         assert!(WIKI_TABLE.len() > 100_000, "{}", WIKI_TABLE.len());
         for position in 0..WIKI_TABLE.len() {
-            let title = std::str::from_utf8(WIKI_TABLE.title(position).unwrap()).unwrap();
+            let title = WIKI_TABLE.title(position).unwrap();
             assert_eq!(WIKI_TABLE.lookup(title), WIKI_TABLE.score(position));
         }
     }

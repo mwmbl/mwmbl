@@ -5,7 +5,6 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
-use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -41,10 +40,6 @@ impl ScratchFile {
         file.set_len((num_pages * PAGE_SIZE) as u64).unwrap();
         ScratchFile { path, file }
     }
-
-    fn fd(&self) -> i32 {
-        self.file.as_raw_fd()
-    }
 }
 
 impl Drop for ScratchFile {
@@ -70,7 +65,7 @@ fn distinct_documents(count: u64) -> Vec<Value> {
 }
 
 fn read(scratch: &ScratchFile, page: u64, term: Option<&str>) -> Result<Vec<Value>, PageIoError> {
-    read_index_page(scratch.fd(), page * PAGE_SIZE as u64, PAGE_SIZE, term)
+    read_index_page(&scratch.file, page * PAGE_SIZE as u64, PAGE_SIZE, term)
 }
 
 #[test]
@@ -83,7 +78,7 @@ fn a_written_page_reads_back_unchanged() {
     ];
 
     let num_stored =
-        write_index_page(scratch.fd(), PAGE_SIZE as u64, PAGE_SIZE, &documents).unwrap();
+        write_index_page(&scratch.file, PAGE_SIZE as u64, PAGE_SIZE, &documents).unwrap();
 
     assert_eq!(num_stored, documents.len());
     assert_eq!(read(&scratch, 1, None).unwrap(), documents);
@@ -94,11 +89,11 @@ fn writing_a_page_leaves_its_neighbours_alone() {
     let scratch = ScratchFile::with_pages(3);
     let first = vec![document("https://first.example/", None)];
     let last = vec![document("https://last.example/", None)];
-    write_index_page(scratch.fd(), 0, PAGE_SIZE, &first).unwrap();
-    write_index_page(scratch.fd(), 2 * PAGE_SIZE as u64, PAGE_SIZE, &last).unwrap();
+    write_index_page(&scratch.file, 0, PAGE_SIZE, &first).unwrap();
+    write_index_page(&scratch.file, 2 * PAGE_SIZE as u64, PAGE_SIZE, &last).unwrap();
 
     write_index_page(
-        scratch.fd(),
+        &scratch.file,
         PAGE_SIZE as u64,
         PAGE_SIZE,
         &[document("https://middle.example/", None)],
@@ -130,7 +125,7 @@ fn a_term_keeps_its_own_documents_and_those_with_no_term() {
         own_object.clone(),
         other_object,
     ];
-    write_index_page(scratch.fd(), 0, PAGE_SIZE, &documents).unwrap();
+    write_index_page(&scratch.file, 0, PAGE_SIZE, &documents).unwrap();
 
     let matching = read(&scratch, 0, Some("rust")).unwrap();
 
@@ -236,7 +231,7 @@ fn a_page_of_zeros_is_unreadable_rather_than_empty() {
 fn a_page_past_the_end_of_the_file_is_unreadable() {
     let scratch = ScratchFile::with_pages(1);
     write_index_page(
-        scratch.fd(),
+        &scratch.file,
         0,
         PAGE_SIZE,
         &[document("https://example.com/", None)],
@@ -263,7 +258,7 @@ fn a_frame_claiming_too_much_content_is_refused_before_decompressing() {
     let scratch = ScratchFile::with_pages(1);
     scratch.file.write_all_at(&page, 0).unwrap();
 
-    let result = read_index_page::<Value>(scratch.fd(), 0, page_size, None);
+    let result = read_index_page::<Value>(&scratch.file, 0, page_size, None);
 
     let Err(PageIoError::Unreadable(message)) = result else {
         panic!("expected Unreadable, got {result:?}");
@@ -314,7 +309,7 @@ fn a_failed_read_is_an_io_error() {
     // Reading a directory fails with EISDIR: a real syscall failure, not a bad page.
     let directory = File::open(std::env::temp_dir()).unwrap();
 
-    let result = read_index_page::<Value>(directory.as_raw_fd(), 0, PAGE_SIZE, None);
+    let result = read_index_page::<Value>(&directory, 0, PAGE_SIZE, None);
 
     assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
 }
@@ -324,7 +319,7 @@ fn a_failed_write_is_an_io_error() {
     let read_only = File::open(std::env::temp_dir()).unwrap();
 
     let result = write_index_page(
-        read_only.as_raw_fd(),
+        &read_only,
         0,
         PAGE_SIZE,
         &[document("https://example.com/", None)],

@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
-    os::fd::AsRawFd,
     path::Path,
     str::FromStr,
     sync::Arc,
@@ -399,7 +398,7 @@ impl TinyIndex {
     ) -> anyhow::Result<Vec<T>> {
         let process_lock = lock.either(|r| &r.process_lock, |w| &w.process_lock);
         Ok(read_index_page(
-            process_lock.as_raw_fd(),
+            process_lock,
             process_lock.offset() as u64,
             process_lock.len(),
             term,
@@ -414,7 +413,7 @@ impl TinyIndex {
 
     fn store_in_page<T: Serialize>(lock: &WritePageLock, values: &[T]) -> anyhow::Result<usize> {
         Ok(write_index_page(
-            lock.process_lock.as_raw_fd(),
+            &lock.process_lock,
             lock.process_lock.offset() as u64,
             lock.process_lock.len(),
             values,

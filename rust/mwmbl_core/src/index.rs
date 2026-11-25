@@ -1,9 +1,9 @@
 //! `TinyIndex` pages, and the tokens a document is indexed under.
 //!
 //! A page is a zstd frame holding a JSON array of documents, padded with zeros to the page
-//! size. The page functions take the descriptor of a file the caller has open and leave it
-//! open, so that `mwmbl_rank` can read and write pages with the GIL released while Python
-//! keeps the file, the metadata and the page locks.
+//! size. The page functions borrow a file the caller has open, so that the caller keeps the
+//! file and the page locks on it: `mwmbl_rank` reads and writes pages with the GIL released
+//! while Python holds them.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -12,9 +12,7 @@ use std::fmt;
 use std::fs::File;
 use std::io;
 use std::iter::zip;
-use std::mem::ManuallyDrop;
 use std::os::unix::fs::FileExt;
-use std::os::unix::io::FromRawFd;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -63,13 +61,6 @@ impl fmt::Display for PageIoError {
 
 impl Error for PageIoError {}
 
-/// The file behind `fd`, which belongs to the caller: dropping a plain `File` would close it.
-fn borrow_file(fd: i32) -> ManuallyDrop<File> {
-    // SAFETY: the callers pass a descriptor they keep open for the whole call, and the
-    // ManuallyDrop never closes it.
-    ManuallyDrop::new(unsafe { File::from_raw_fd(fd) })
-}
-
 /// A positioned read stops at the end of the file, so a short one means the file isn't the
 /// shape the metadata says: truncated, or half-written by create. That is an unreadable page,
 /// because decoding the fragment would let a writer merge onto a page it never read.
@@ -80,8 +71,7 @@ fn read_error(error: io::Error) -> PageIoError {
     PageIoError::Io(error)
 }
 
-fn read_page_bytes(fd: i32, offset: u64, page_size: usize) -> Result<Vec<u8>, PageIoError> {
-    let file = borrow_file(fd);
+fn read_page_bytes(file: &File, offset: u64, page_size: usize) -> Result<Vec<u8>, PageIoError> {
     let mut page = vec![0u8; page_size];
     // read_exact_at rather than read_at, which can stop short and doesn't retry a read a
     // signal interrupted.
@@ -254,8 +244,7 @@ fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>,
     (page, num_stored)
 }
 
-/// The documents on the page of `page_size` bytes at `offset` in the file open as `fd`, which
-/// must stay open for the whole call.
+/// The documents on the page of `page_size` bytes at `offset` in `file`.
 ///
 /// Pass `term` to keep only the documents that belong to it: those whose term is `term`, or
 /// which have none.
@@ -266,38 +255,29 @@ fn pad_page(mut page: Vec<u8>, num_stored: usize, page_size: usize) -> (Vec<u8>,
 /// if the page comes up short or won't decode, which means it is corrupt or was caught
 /// half-written. There is no falling back to an empty page: a writer that merged onto one
 /// would store its result over everything that was there.
-///
-/// # Panics
-///
-/// If `fd` is -1.
 pub fn read_index_page<T: DeserializeOwned>(
-    fd: i32,
+    file: &File,
     offset: u64,
     page_size: usize,
     term: Option<&str>,
 ) -> Result<Vec<T>, PageIoError> {
-    let page = read_page_bytes(fd, offset, page_size)?;
+    let page = read_page_bytes(file, offset, page_size)?;
     decode_page(&page, term)
 }
 
-/// Writes as many of `documents` as fit over the page at `offset` in the file open as `fd`,
-/// returning how many that is. `fd` must stay open for the whole call.
+/// Writes as many of `documents` as fit over the page at `offset` in `file`, returning how
+/// many that is.
 ///
 /// # Errors
 ///
 /// Fails as [`pack_page`] does, and with `Io` if the write fails.
-///
-/// # Panics
-///
-/// If `fd` is -1.
 pub fn write_index_page<T: Serialize>(
-    fd: i32,
+    file: &File,
     offset: u64,
     page_size: usize,
     documents: &[T],
 ) -> Result<usize, PageIoError> {
     let (page, num_stored) = pack_page(page_size, documents)?;
-    let file = borrow_file(fd);
     // write_all_at rather than write_at, because a short write would leave the page torn,
     // half old and half new. It also retries a write a signal interrupted.
     file.write_all_at(&page, offset).map_err(PageIoError::Io)?;

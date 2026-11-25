@@ -1,14 +1,17 @@
-//! Turns wiki_stats.json into a sorted, read-only table that wiki.rs embeds with include_bytes!.
+//! Turns `wiki_stats.json` into a sorted, read-only table that `wiki.rs` includes.
 //!
-//! As a HashMap built at runtime the 500k page view counts cost each process ~60MB of heap.
+//! As a `HashMap` built at runtime the 500k page view counts cost each process ~60MB of heap.
 //! Embedded, they live in the shared library's read-only data: mapped from the file, shared by
 //! every process that loads it, and paged out under memory pressure rather than swapped.
 //!
-//! Layout, all little-endian: n: u32, then n + 1 key offsets: u32, then n scores: f64 (each
-//! count divided by the largest), then the keys' UTF-8 bytes, sorted bytewise.
+//! It writes the titles, sorted bytewise, as one string (`wiki_titles.txt`), and a Rust file
+//! (`wiki_table.rs`) holding where each title starts in it and each title's score: its count
+//! divided by the largest. A `[&str; N]` would be simpler to read but costs a relocation per
+//! title when the library loads, which makes those pages private to each process.
 
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 
@@ -21,30 +24,37 @@ fn main() {
     let json = fs::read_to_string(WIKI_STATS).expect("Failed to read wiki_stats.json");
     let counts: HashMap<String, f64> =
         serde_json::from_str(&json).expect("Failed to parse wiki_stats.json");
-    let max = counts.values().cloned().fold(0.0, f64::max);
+    let max = counts.values().copied().fold(0.0, f64::max);
     assert!(max > 0.0, "wiki_stats.json has no positive counts");
 
     let mut entries: Vec<(&String, f64)> = counts.iter().map(|(k, v)| (k, v / max)).collect();
-    entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
-    let n = u32::try_from(entries.len()).unwrap();
-    let mut out = Vec::new();
-    out.extend_from_slice(&n.to_le_bytes());
+    let titles: String = entries.iter().map(|(title, _)| title.as_str()).collect();
+    let mut offsets = String::from("0,");
     let mut offset = 0u32;
-    out.extend_from_slice(&offset.to_le_bytes());
-    for (key, _) in &entries {
+    for (title, _) in &entries {
         offset = offset
-            .checked_add(u32::try_from(key.len()).unwrap())
+            .checked_add(u32::try_from(title.len()).unwrap())
             .unwrap();
-        out.extend_from_slice(&offset.to_le_bytes());
+        write!(offsets, "{offset},").unwrap();
     }
+    let mut scores = String::new();
     for (_, score) in &entries {
-        out.extend_from_slice(&score.to_le_bytes());
+        // Debug prints the shortest literal that reads back as the same f64.
+        write!(scores, "{score:?},").unwrap();
     }
-    for (key, _) in &entries {
-        out.extend_from_slice(key.as_bytes());
-    }
+    let num_titles = entries.len();
+    let table = format!(
+        "static TITLES: &str = include_str!(concat!(env!(\"OUT_DIR\"), \"/wiki_titles.txt\"));\n\
+         #[allow(clippy::unreadable_literal)]\n\
+         static TITLE_OFFSETS: [u32; {}] = [{offsets}];\n\
+         #[allow(clippy::unreadable_literal)]\n\
+         static SCORES: [f64; {num_titles}] = [{scores}];\n",
+        num_titles + 1
+    );
 
-    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("wiki_scores.bin");
-    fs::write(path, out).expect("Failed to write wiki_scores.bin");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    fs::write(out_dir.join("wiki_titles.txt"), titles).expect("Failed to write wiki_titles.txt");
+    fs::write(out_dir.join("wiki_table.rs"), table).expect("Failed to write wiki_table.rs");
 }
