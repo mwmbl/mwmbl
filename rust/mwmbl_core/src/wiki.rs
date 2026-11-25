@@ -6,49 +6,63 @@
 
 include!(concat!(env!("OUT_DIR"), "/wiki_table.rs"));
 
-/// The article titles, sorted, and their scores.
-struct WikiTable {
-    /// Where each title starts in `titles`, and where the last one ends.
-    title_offsets: &'static [u32],
-    scores: &'static [f64],
-    titles: &'static str,
+/// The article titles, sorted bytewise.
+///
+/// They are packed into one string with the offsets alongside rather than stored as a
+/// `[&str; N]`, which costs a relocation per title; see build.rs.
+struct Titles {
+    /// Where each title starts in `text`, and where the last one ends.
+    offsets: &'static [u32],
+    text: &'static str,
 }
 
-static WIKI_TABLE: WikiTable = WikiTable {
-    title_offsets: &TITLE_OFFSETS,
-    scores: &SCORES,
-    titles: TITLES,
-};
-
-impl WikiTable {
+impl Titles {
     fn len(&self) -> usize {
-        self.scores.len()
+        self.offsets.len().saturating_sub(1)
     }
 
-    /// The title at `position`, or `None` past the end of the table.
-    fn title(&self, position: usize) -> Option<&'static str> {
-        let [start, end] = self.title_offsets.get(position..position + 2)? else {
+    /// The title at `position`, or `None` past the end.
+    fn get(&self, position: usize) -> Option<&'static str> {
+        let [start, end] = self.offsets.get(position..position + 2)? else {
             return None;
         };
-        self.titles.get(*start as usize..*end as usize)
+        self.text.get(*start as usize..*end as usize)
     }
 
-    fn score(&self, position: usize) -> Option<f64> {
-        self.scores.get(position).copied()
-    }
-
-    /// The score of the article called `title`, or `None` for one that isn't in the stats.
-    fn lookup(&self, title: &str) -> Option<f64> {
+    /// Where `title` is, or `None` if it isn't one of them.
+    fn position(&self, title: &str) -> Option<usize> {
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = usize::midpoint(low, high);
-            match self.title(middle)?.cmp(title) {
+            match self.get(middle)?.cmp(title) {
                 std::cmp::Ordering::Less => low = middle + 1,
                 std::cmp::Ordering::Greater => high = middle,
-                std::cmp::Ordering::Equal => return self.score(middle),
+                std::cmp::Ordering::Equal => return Some(middle),
             }
         }
         None
+    }
+}
+
+/// The article titles and, at the same positions, their scores.
+struct WikiTable {
+    titles: Titles,
+    scores: &'static [f64],
+}
+
+static WIKI_TABLE: WikiTable = WikiTable {
+    titles: Titles {
+        offsets: &TITLE_OFFSETS,
+        text: TITLES,
+    },
+    scores: &SCORES,
+};
+
+impl WikiTable {
+    /// The score of the article called `title`, or `None` for one that isn't in the stats.
+    fn lookup(&self, title: &str) -> Option<f64> {
+        let position = self.titles.position(title)?;
+        self.scores.get(position).copied()
     }
 }
 
@@ -71,8 +85,10 @@ mod tests {
 
     #[test]
     fn test_wiki_max_score_normalised() {
-        let max = (0..WIKI_TABLE.len())
-            .map(|position| WIKI_TABLE.score(position).unwrap())
+        let max = WIKI_TABLE
+            .scores
+            .iter()
+            .copied()
             .fold(f64::NEG_INFINITY, f64::max);
         assert!(
             (max - 1.0).abs() < 1e-9,
@@ -82,29 +98,49 @@ mod tests {
     }
 
     #[test]
+    fn test_there_is_a_score_for_every_title() {
+        assert_eq!(WIKI_TABLE.titles.len(), WIKI_TABLE.scores.len());
+    }
+
+    #[test]
     fn test_the_titles_end_where_the_offsets_say() {
+        let titles = &WIKI_TABLE.titles;
         assert_eq!(
-            WIKI_TABLE.title_offsets.last().map(|end| *end as usize),
-            Some(WIKI_TABLE.titles.len())
+            titles.offsets.last().map(|end| *end as usize),
+            Some(titles.text.len())
         );
     }
 
     #[test]
     fn test_the_title_offsets_never_decrease_so_every_title_is_readable() {
-        for (position, pair) in WIKI_TABLE.title_offsets.windows(2).enumerate() {
+        let titles = &WIKI_TABLE.titles;
+        for (position, pair) in titles.offsets.windows(2).enumerate() {
             assert!(pair[0] <= pair[1], "offset {position}: {pair:?}");
         }
-        for position in 0..WIKI_TABLE.len() {
-            assert!(WIKI_TABLE.title(position).is_some(), "title {position}");
+        for position in 0..titles.len() {
+            assert!(titles.get(position).is_some(), "title {position}");
         }
     }
 
     #[test]
-    fn test_every_title_is_found() {
-        assert!(WIKI_TABLE.len() > 100_000, "{}", WIKI_TABLE.len());
-        for position in 0..WIKI_TABLE.len() {
-            let title = WIKI_TABLE.title(position).unwrap();
-            assert_eq!(WIKI_TABLE.lookup(title), WIKI_TABLE.score(position));
+    fn test_every_title_is_found_where_it_is() {
+        assert!(
+            WIKI_TABLE.titles.len() > 100_000,
+            "{}",
+            WIKI_TABLE.titles.len()
+        );
+        for position in 0..WIKI_TABLE.titles.len() {
+            let title = WIKI_TABLE.titles.get(position).unwrap();
+            assert_eq!(WIKI_TABLE.titles.position(title), Some(position));
+            assert_eq!(
+                WIKI_TABLE.lookup(title),
+                WIKI_TABLE.scores.get(position).copied()
+            );
         }
+    }
+
+    #[test]
+    fn test_past_the_end_there_is_no_title() {
+        assert_eq!(WIKI_TABLE.titles.get(WIKI_TABLE.titles.len()), None);
     }
 }
