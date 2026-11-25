@@ -1,6 +1,14 @@
 limit_req_zone $binary_remote_addr zone={{ $.APP }}_login:10m rate=10r/m;
 limit_req_zone $binary_remote_addr zone={{ $.APP }}_register:10m rate=3r/m;
 
+# No client address and no query string, so search queries are never logged. The timings
+# show whether the app keeps up: rt is the whole request, including reading the upload
+# body, and urt is the time gunicorn took to answer. Named per app because log_format
+# lives in the http context, which every Dokku app's config shares.
+log_format {{ $.APP }}_timed '- [$time_local] "$uri" $status $body_bytes_sent '
+                             '"$http_referer" "$http_user_agent" '
+                             'rt=$request_time urt=$upstream_response_time';
+
 {{ range $port_map := .PROXY_PORT_MAP | split " " }}
 {{ $port_map_list := $port_map | split ":" }}
 {{ $scheme := index $port_map_list 0 }}
@@ -12,7 +20,7 @@ server {
   listen      [{{ $.NGINX_BIND_ADDRESS_IP6 }}]:{{ $listen_port }};
   listen      {{ if $.NGINX_BIND_ADDRESS_IP4 }}{{ $.NGINX_BIND_ADDRESS_IP4 }}:{{end}}{{ $listen_port }};
   {{ if $.NOSSL_SERVER_NAME }}server_name {{ $.NOSSL_SERVER_NAME }}; {{ end }}
-  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if and ($.NGINX_ACCESS_LOG_FORMAT) (ne $.NGINX_ACCESS_LOG_PATH "off") }} {{ $.NGINX_ACCESS_LOG_FORMAT }}{{ end }};
+  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if ne $.NGINX_ACCESS_LOG_PATH "off" }} {{ $.APP }}_timed{{ end }};
   error_log   {{ $.NGINX_ERROR_LOG_PATH }};
   rewrite_log on;
 
@@ -27,7 +35,7 @@ server {
   listen      {{ if $.NGINX_BIND_ADDRESS_IP4 }}{{ $.NGINX_BIND_ADDRESS_IP4 }}:{{end}}{{ $listen_port }} ssl;
   {{ if $.SSL_SERVER_NAME }}server_name {{ $.SSL_SERVER_NAME }}; {{ end }}
   {{ if $.NOSSL_SERVER_NAME }}server_name {{ $.NOSSL_SERVER_NAME }}; {{ end }}
-  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if and ($.NGINX_ACCESS_LOG_FORMAT) (ne $.NGINX_ACCESS_LOG_PATH "off") }} {{ $.NGINX_ACCESS_LOG_FORMAT }}{{ end }};
+  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if ne $.NGINX_ACCESS_LOG_PATH "off" }} {{ $.APP }}_timed{{ end }};
   error_log   {{ $.NGINX_ERROR_LOG_PATH }};
   rewrite_log on;
 
@@ -210,7 +218,7 @@ server {
   listen      [{{ $.NGINX_BIND_ADDRESS_IP6 }}]:{{ $listen_port }} http2;
   listen      {{ if $.NGINX_BIND_ADDRESS_IP4 }}{{ $.NGINX_BIND_ADDRESS_IP4 }}:{{end}}{{ $listen_port }} http2;
   {{ if $.NOSSL_SERVER_NAME }}server_name {{ $.NOSSL_SERVER_NAME }}; {{ end }}
-  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if and ($.NGINX_ACCESS_LOG_FORMAT) (ne $.NGINX_ACCESS_LOG_PATH "off") }} {{ $.NGINX_ACCESS_LOG_FORMAT }}{{ end }};
+  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if ne $.NGINX_ACCESS_LOG_PATH "off" }} {{ $.APP }}_timed{{ end }};
   error_log   {{ $.NGINX_ERROR_LOG_PATH }};
   rewrite_log on;
 
@@ -228,7 +236,7 @@ server {
   listen      [{{ $.NGINX_BIND_ADDRESS_IP6 }}]:{{ $listen_port }} ssl http2;
   listen      {{ if $.NGINX_BIND_ADDRESS_IP4 }}{{ $.NGINX_BIND_ADDRESS_IP4 }}:{{end}}{{ $listen_port }} ssl http2;
   {{ if $.NOSSL_SERVER_NAME }}server_name {{ $.NOSSL_SERVER_NAME }}; {{ end }}
-  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if and ($.NGINX_ACCESS_LOG_FORMAT) (ne $.NGINX_ACCESS_LOG_PATH "off") }} {{ $.NGINX_ACCESS_LOG_FORMAT }}{{ end }};
+  access_log  {{ $.NGINX_ACCESS_LOG_PATH }}{{ if ne $.NGINX_ACCESS_LOG_PATH "off" }} {{ $.APP }}_timed{{ end }};
   error_log   {{ $.NGINX_ERROR_LOG_PATH }};
   rewrite_log on;
 
