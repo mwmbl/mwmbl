@@ -1,0 +1,38 @@
+{
+  "dropped_users": 18,
+  "spammer_domains": {
+    "u1": "mwmbl.org",
+    "u10": "12bytes.org",
+    "u89": "twitter.com",
+    "u396": "globalseoshop.com"
+  },
+  "curations": {
+    "total": 9370,
+    "kept": 8138,
+    "urlish_queries": 188,
+    "no_ops": 778
+  },
+  "user_curations": {
+    "total": 33517,
+    "kept": 1182
+  },
+  "pairs": {
+    "total": 61514,
+    "by_rule": {
+      "move": 23822,
+      "add": 28865,
+      "approve": 8773,
+      "nsfw_dropped": 642,
+      "delete": 54
+    },
+    "distinct_queries": 6071,
+    "both_sides_have_text": 47489,
+    "urls_still_missing_text": 4010
+  },
+  "pointwise": {
+    "total": 994,
+    "by_rule": {
+      "vote": 994
+    }
+  }
+}
