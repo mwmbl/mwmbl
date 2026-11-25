@@ -58,7 +58,7 @@ pub static SCORE_TIME_CONSTANT: Duration = Duration::from_hours(24 * 30 * 10);
 
 pub static NUM_URLS_TAKENS: usize = 50;
 
-pub static SUBMIT_BATCH_SIZE: usize = 1000;
-pub static SUBMIT_TOP_N: usize = 25;
+pub static SUBMIT_BATCH_SIZE: usize = 500;
+pub static SUBMIT_TOP_N: usize = 50;
 pub static MAX_SUBMIT_QUEUE_SIZE: usize = 2000;
 pub static DEVICE_NAME_FILE: &str = "device-name";
