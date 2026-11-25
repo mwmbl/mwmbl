@@ -220,7 +220,12 @@ devdata/llm_relabel/pass2_staan.jsonl
 # Relevance judge artifacts (small results*.json stay tracked via explicit add)
 devdata/judge_bakeoff/*.npy
 devdata/judge_bakeoff/*.npz
-devdata/judgments_export/
+# Raw production export stays local; the derived training files are tracked.
+devdata/judgments_export/*
+!devdata/judgments_export/pairs.jsonl.gz
+!devdata/judgments_export/pointwise.jsonl.gz
+!devdata/judgments_export/transform_report.json
+!devdata/judgments_export/backfill_cache.jsonl.gz
 devdata/judge_train/*
 # Combined Search Haiku judging: batch files and raw judge outputs. The consolidated
 # judgments are tracked under devdata/combined_providers_eval/haiku/.
