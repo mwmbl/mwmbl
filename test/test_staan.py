@@ -167,6 +167,39 @@ def test_a_response_with_no_titled_results_is_empty_on_first_fetch_too(cache_ind
         mock.stop()
 
 
+def test_an_oversized_title_is_truncated(cache_index):
+    """Regression test: a provider can hand back a "title" that is really a whole page's
+    worth of text (seen from a page whose malformed heading tag confused whatever scraped
+    it) - get_staan_results must never pass that through unbounded."""
+    huge_title = "OmniOS Community Edition r151060 " + "Published at November 2, 2026. " * 50
+    response = {"web": {"results": [{"url": "https://omnios.org/article/r60", "title": huge_title}]}}
+    mock, _ = _patched_staan(response)
+    try:
+        results = get_staan_results("omnios")
+    finally:
+        mock.stop()
+
+    assert len(results[0].title) <= 65
+    assert results[0].title.startswith("OmniOS Community Edition r151060")
+    assert results[0].title.endswith("…")
+
+
+def test_an_oversized_extract_is_truncated(cache_index):
+    """Same fault, but in the snippet/description instead of the title."""
+    huge_extract = "OmniOSce v11 r151060 is out! " * 20
+    response = {
+        "web": {"results": [{"url": "https://omnios.org/article/r60", "title": "OmniOS", "snippet": huge_extract}]}
+    }
+    mock, _ = _patched_staan(response)
+    try:
+        results = get_staan_results("omnios")
+    finally:
+        mock.stop()
+
+    assert len(results[0].extract) <= 155
+    assert results[0].extract.endswith("…")
+
+
 def test_no_more_than_num_staan_results_are_kept(cache_index):
     many = {"web": {"results": [{"url": f"https://example.com/{i}", "title": str(i)} for i in range(50)]}}
     mock, _ = _patched_staan(many)
