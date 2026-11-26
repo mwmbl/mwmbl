@@ -48,6 +48,12 @@ EXCLUDED_DOMAINS = {
     "lain.ovh",
     # Crawling this domain can lead to abuse reports
     "www.inb.gov.br",
+    # Shinhan Financial Group's CERT reported a single crawler fetch as an attack (2026-11-26).
+    "shinhan.com",
+    "shinhangroup.com",
+    "shinhancard.com",
+    "shinhansec.com",
+    "shinhanlife.co.kr",
 }
 # `booru.org` is a free hosting platform for imageboards; every subdomain we've found ranking
 # (nyou/hypno/inflate/futaba/captions.booru.org) hosts adult/fetish content, so block the whole domain.

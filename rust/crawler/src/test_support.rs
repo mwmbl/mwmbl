@@ -1,12 +1,13 @@
 //! A local HTTP server and scratch directories, so tests crawl nothing outside the machine.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use reqwest::{Client, Url};
+use mwmbl_core::blacklist_providers::StaticBlacklistProvider;
+use reqwest::{Client, Url, redirect::Policy};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -108,9 +109,18 @@ impl TestServer {
     }
 }
 
-/// A client that ignores the environment's proxy, so requests reach the test server.
+/// A client that ignores the environment's proxy, so requests reach the test server, and
+/// leaves redirects to `fetch`, as the crawler's does.
 pub fn client() -> Client {
-    Client::builder().no_proxy().build().unwrap()
+    Client::builder()
+        .no_proxy()
+        .redirect(Policy::none())
+        .build()
+        .unwrap()
+}
+
+pub fn no_blacklist() -> StaticBlacklistProvider {
+    StaticBlacklistProvider::new(HashSet::new())
 }
 
 /// A new, empty directory under the system temp directory, standing in for `$HOME`.
