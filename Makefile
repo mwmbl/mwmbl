@@ -30,7 +30,7 @@ REDIS_URL      ?= redis://127.0.0.1:6379
 # A Redis database the tests flush, so keep it apart from REDIS_URL's.
 TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
 # Python tests that cross into the mwmbl_rank extension, run against the instrumented build.
-RUST_COVERAGE_TESTS ?= test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
+RUST_COVERAGE_TESTS ?= test/test_mwmbl_rank_golden.py test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
 	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py
 CARGO_HOME     ?= $(HOME)/.cargo
 

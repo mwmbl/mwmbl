@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::bail;
+use mwmbl_core::blacklist_providers::BlacklistProvider;
 use priority_queue::DoublePriorityQueue;
 use reqwest::{Client, StatusCode, Url};
 use scc::HashMap;
@@ -152,6 +153,7 @@ pub async fn robot_allowed(
     url: &Url,
     domain: &str,
     client: &Client,
+    blacklist: &impl BlacklistProvider,
     robots_cache: &mut RobotCache,
 ) -> anyhow::Result<bool> {
     let robot_url = get_robot_url(url);
@@ -160,7 +162,7 @@ pub async fn robot_allowed(
         return Ok(can_fetch);
     }
 
-    let v = fetch(client, &robot_url).await;
+    let v = fetch(client, blacklist, &robot_url).await;
 
     if let Ok((data, status, _)) = v
         && (status.is_success() || (status.is_client_error() && status.as_u16() != 429))
@@ -195,7 +197,7 @@ mod tests {
             BLOCK_COOL_OFF, DEFAULT_DOMAIN_DELAY, MAX_BLOCK_COOL_OFF,
             ROBOTS_CACHE_ERROR_TTL_SECONDS, ROBOTS_CACHE_TTL_SECONDS,
         },
-        test_support::{TestServer, client, text},
+        test_support::{TestServer, client, no_blacklist, text},
     };
 
     const ROBOTS: &str = "User-agent: mwmbl-crawler\nDisallow: /private\nCrawl-delay: 2\n";
@@ -264,12 +266,12 @@ mod tests {
         let public = server.url("/public");
         let private = server.url("/private/page");
         assert!(
-            robot_allowed(&public, "localhost", &client, &mut cache)
+            robot_allowed(&public, "localhost", &client, &no_blacklist(), &mut cache)
                 .await
                 .unwrap()
         );
         assert!(
-            !robot_allowed(&private, "localhost", &client, &mut cache)
+            !robot_allowed(&private, "localhost", &client, &no_blacklist(), &mut cache)
                 .await
                 .unwrap()
         );
@@ -284,9 +286,15 @@ mod tests {
     async fn a_missing_robots_txt_allows_everything() {
         let server = TestServer::start(vec![]).await;
         let mut cache = RobotCache::new();
-        let allowed = robot_allowed(&server.url("/anything"), "localhost", &client(), &mut cache)
-            .await
-            .unwrap();
+        let allowed = robot_allowed(
+            &server.url("/anything"),
+            "localhost",
+            &client(),
+            &no_blacklist(),
+            &mut cache,
+        )
+        .await
+        .unwrap();
         assert!(allowed);
     }
 
@@ -295,8 +303,14 @@ mod tests {
         for status in [500, 503, 429] {
             let server = TestServer::start(vec![("/robots.txt", text(status, ""))]).await;
             let mut cache = RobotCache::new();
-            let result =
-                robot_allowed(&server.url("/page"), "localhost", &client(), &mut cache).await;
+            let result = robot_allowed(
+                &server.url("/page"),
+                "localhost",
+                &client(),
+                &no_blacklist(),
+                &mut cache,
+            )
+            .await;
             assert!(result.is_err(), "status {status}");
             assert_eq!(
                 cache.domain_delay(Some(StatusCode::OK), "localhost").await,

@@ -2,8 +2,8 @@
 //! through a client whose resolver refuses hostnames that resolve to private, loopback,
 //! link-local or otherwise non-public addresses. Checking at resolution time means the address
 //! checked is the address connected to, so redirects, robots.txt fetches and DNS rebinding are
-//! all covered. reqwest never asks the resolver about IP literals, so the redirect policy
-//! refuses those, and `crawl` refuses them as the first URL.
+//! all covered. reqwest never asks the resolver about IP literals, so `fetch` refuses a
+//! redirect to one, and `crawl` refuses them as the first URL.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -12,12 +12,7 @@ use hickory_resolver::{
     config::{GOOGLE, LookupIpStrategy, ResolverConfig},
     net::runtime::TokioRuntimeProvider,
 };
-use reqwest::{
-    dns::{Addrs, Name, Resolve, Resolving},
-    redirect::Policy,
-};
-
-use crate::constants::MAX_REDIRECTS;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 #[must_use]
 pub fn is_public_ipv4(ip: Ipv4Addr) -> bool {
@@ -136,24 +131,6 @@ impl<L: LookupIps> Resolve for PublicAddressResolver<L> {
     }
 }
 
-/// Follows at most `MAX_REDIRECTS + 1` redirects, and none to an IP literal, which would
-/// skip the resolver.
-pub fn redirect_policy() -> Policy {
-    Policy::custom(|attempt| {
-        if attempt.url().domain().is_none() {
-            let error = format!(
-                "refusing redirect to {}, which has no domain",
-                attempt.url()
-            );
-            attempt.error(error)
-        } else if attempt.previous().len() > MAX_REDIRECTS + 1 {
-            attempt.error("too many redirects")
-        } else {
-            attempt.follow()
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::{future::Future, net::IpAddr, str::FromStr};
@@ -163,10 +140,10 @@ mod tests {
         dns::{Name, Resolve},
     };
 
-    use super::{BoxError, LookupIps, PublicAddressResolver, is_public, redirect_policy};
+    use super::{BoxError, LookupIps, PublicAddressResolver, is_public};
     use crate::{
         retrieve::fetch,
-        test_support::{TestServer, html, redirect},
+        test_support::{TestServer, client, html, no_blacklist, redirect},
     };
 
     fn public(address: &str) -> bool {
@@ -257,7 +234,11 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(fetch(&client, &server.url("/")).await.is_err());
+        assert!(
+            fetch(&client, &no_blacklist(), &server.url("/"))
+                .await
+                .is_err()
+        );
         assert!(server.requests().is_empty());
     }
 
@@ -288,13 +269,12 @@ mod tests {
         let target = TestServer::start(vec![("/", html(200, "secret"))]).await;
         let location = format!("http://127.0.0.1:{}/", target.url("/").port().unwrap());
         let origin = TestServer::start(vec![("/", redirect(&location))]).await;
-        let client = Client::builder()
-            .no_proxy()
-            .redirect(redirect_policy())
-            .build()
-            .unwrap();
 
-        assert!(fetch(&client, &origin.url("/")).await.is_err());
+        assert!(
+            fetch(&client(), &no_blacklist(), &origin.url("/"))
+                .await
+                .is_err()
+        );
         assert!(target.requests().is_empty());
     }
 }

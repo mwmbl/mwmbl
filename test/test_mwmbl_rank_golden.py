@@ -16,7 +16,9 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -56,10 +58,11 @@ PROVIDER_VARIANTS = [
 ]
 
 # Arguments to RustXGBPipeline for the models whose predictions are pinned. The second sets
-# every hyperparameter, so dropping any of them on the way to XGBoost changes its output.
+# every hyperparameter, so dropping any of them on the way to XGBoost changes its output: its
+# max_depth stops trees that would grow deeper, and its threshold falls between two labels above 0.
 MODEL_PARAMS = {
     "default": {"num_rounds": 20},
-    "configured": dict(threshold=0.5, scale_pos_weight=1.0, reg_lambda=1.0, num_rounds=15, max_depth=3,
+    "configured": dict(threshold=0.5, scale_pos_weight=1.0, reg_lambda=1.0, num_rounds=15, max_depth=1,
                        min_child_weight=0.5, gamma=0.1, subsample=0.8, provider_features=True),
 }  # fmt: skip
 
@@ -75,7 +78,7 @@ def training_data() -> tuple[list[dict], list[float], list[float]]:
         | {"score": (i * 7 % 11) / 5, "title": RECORDS[(i * 3) % len(RECORDS)]["title"]}
         for i in range(60)
     ]
-    labels = [float((i * 3) % 5 - 1) for i in range(60)]
+    labels = [((i * 3) % 5 - 1) / 2 for i in range(60)]
     weights = [1.0 + i % 3 for i in range(60)]
     return records, labels, weights
 
@@ -200,6 +203,28 @@ def test_model_round_trips_through_a_file_with_its_provider_features_attribute(t
     assert loaded.predict(provider_records()) == trained.predict(provider_records())
 
 
+def test_a_model_without_the_provider_features_attribute_loads_without_them(tmp_path):
+    path = tmp_path / "model.json"
+    train("configured").save_model(str(path))
+    model = json.loads(path.read_text())
+    del model["learner"]["attributes"]["mwmbl_provider_features"]
+    path.write_text(json.dumps(model))
+
+    loaded = mwmbl_rank.RustXGBPipeline(provider_features=True)
+    loaded.load_model(str(path))
+
+    assert not loaded.provider_features
+
+
+def test_saving_to_a_missing_directory_reports_xgboosts_error(tmp_path):
+    path = tmp_path / "missing" / "model.json"
+    with pytest.raises(
+        ValueError,
+        match=rf'^Failed to save model: XGBoost error: .*"{re.escape(str(path))}": No such file or directory',
+    ):
+        train("default").save_model(str(path))
+
+
 def test_rust_repr_uses_rust_formatting():
     """Documents current behaviour, which differs from the Python wrapper's repr."""
     assert repr(mwmbl_rank.RustXGBPipeline()) == (
@@ -207,7 +232,7 @@ def test_rust_repr_uses_rust_formatting():
         "min_child_weight=None, gamma=None, subsample=None, provider_features=false)"
     )
     assert repr(train("configured")) == (
-        "RustXGBPipeline(threshold=0.5, scale_pos_weight=1, reg_lambda=1, num_rounds=15, max_depth=Some(3), "
+        "RustXGBPipeline(threshold=0.5, scale_pos_weight=1, reg_lambda=1, num_rounds=15, max_depth=Some(1), "
         "min_child_weight=Some(0.5), gamma=Some(0.1), subsample=Some(0.8), provider_features=true)"
     )
 
@@ -227,7 +252,11 @@ def test_rust_fit_returns_none_and_negative_rounds_overflow():
         (lambda p: p.fit(RECORDS[:1], [1.0], [1.0, 2.0]), ValueError, r"weights length \(2\) != records length \(1\)"),
         (lambda p: p.predict(RECORDS), ValueError, r"Model has not been trained yet. Call fit\(\) first."),
         (lambda p: p.save_model("/nonexistent/model.xgb"), ValueError, "No trained model to save."),
-        (lambda p: p.load_model("/nonexistent/model.xgb"), ValueError, "Failed to load model"),
+        (
+            lambda p: p.load_model("/nonexistent/model.xgb"),
+            ValueError,
+            "^Failed to load model: XGBoost error: File not found: /nonexistent/model.xgb$",
+        ),
     ],
 )
 def test_pipeline_errors(call, error, message):
@@ -240,8 +269,8 @@ def test_pipeline_errors(call, error, message):
     [
         ({"url": "https://a.com/"}, ValueError, "Record missing 'query' key"),
         ({"query": "a"}, ValueError, "Record missing 'url' key"),
-        ({"query": 5, "url": "https://a.com/"}, TypeError, ""),
-        ({"query": "a", "url": None}, TypeError, ""),
+        ({"query": 5, "url": "https://a.com/"}, TypeError, "^'int' object cannot be converted to 'PyString'$"),
+        ({"query": "a", "url": None}, TypeError, "^'NoneType' object cannot be converted to 'PyString'$"),
         (1, ValueError, "Record missing 'query' key"),
         (["a"], ValueError, "Record missing 'query' key"),
     ],
@@ -260,9 +289,40 @@ def test_records_must_be_a_sequence_but_not_a_string():
     assert extract(tuple(RECORDS[:1])) == extract(RECORDS[:1])
 
 
+def test_labels_are_read_before_records():
+    with pytest.raises(TypeError, match="^argument 'labels': Can't extract `str` to `Vec`$"):
+        mwmbl_rank.RustXGBPipeline().fit([1], "labels")
+
+
+class FailingLookup(dict):
+    """A record whose lookups of `failing` raise something other than KeyError."""
+
+    def __init__(self, record: dict, failing: str):
+        super().__init__(record)
+        self.failing = failing
+
+    def __getitem__(self, key):
+        if key == self.failing:
+            raise RuntimeError(key)
+        return super().__getitem__(key)
+
+
+def test_any_mapping_is_a_record_and_a_failed_lookup_counts_as_missing():
+    """Documents current behaviour: any error looking up an item counts as a missing item."""
+    record = RECORDS[0] | {"staan_asked": True, "staan_rank": 3, "from_staan": True}
+    assert features_of(MappingProxyType(record), True) == features_of(record, True)
+    for field in ["title", "extract", "score", "staan_asked", "staan_rank", "from_staan"]:
+        missing = {key: value for key, value in record.items() if key != field}
+        assert_same_floats(features_of(FailingLookup(record, field), True), features_of(missing, True))
+    for field in ["query", "url"]:
+        with pytest.raises(ValueError, match=f"^Record missing '{field}' key$"):
+            features_of(FailingLookup(record, field))
+
+
 def test_missing_or_non_string_title_and_extract_are_read_as_empty():
-    """Documents current behaviour: no error for a title or extract of the wrong type."""
-    record = RECORDS[0]
+    """Documents current behaviour: no error for a title or extract of the wrong type. The
+    query's one-letter term would match a default that isn't empty."""
+    record = RECORDS[0] | {"query": "rust x"}
     for field in ["title", "extract"]:
         empty = features_of(record | {field: ""})
         missing = features_of({key: value for key, value in record.items() if key != field})
@@ -280,6 +340,7 @@ def test_missing_or_non_numeric_score_is_read_as_zero():
     assert features_of(record | {"score": "high"}) == zero
     assert features_of(record | {"score": 3})[48] == 3.0
     assert features_of(record | {"score": np.float32(2.5)})[48] == 2.5
+    assert features_of(record | {"score": 1 / 3})[48] == np.float32(1 / 3)
 
 
 @pytest.mark.parametrize(
@@ -372,6 +433,14 @@ def test_unstorable_items_are_page_errors(item, message):
         pack_index_page(512, [item])
 
 
+def test_unstorable_nested_items_name_only_the_page_and_the_item():
+    with pytest.raises(PageError) as raised:
+        pack_index_page(512, [["ok", [{"a": {1: 2}}]]])
+    assert str(raised.value) == (
+        "Cannot store these documents on a page: TypeError: Only string keys can be stored in an index page"
+    )
+
+
 def test_page_size_and_argument_errors():
     with pytest.raises(PageError, match=r"Data is too big \(11\) for page size \(5\)"):
         pack_index_page(5, [])
@@ -395,6 +464,11 @@ def test_written_page_round_trips_and_filters_by_term(page_file):
     assert as_json(read_index_page(page_file, 512, 512)) == PAGE_JSON
     assert as_json(read_index_page(page_file, 512, 512, "term")) == as_json([STORED_ITEMS[i] for i in [0, 2, 3, 4]])
     assert as_json(read_index_page(page_file, 512, 512, term="other")) == as_json([STORED_ITEMS[i] for i in [1, 2, 4]])
+
+
+def test_one_letter_terms_filter_too(page_file):
+    write_index_page(page_file, 0, 512, [["t", "u", "e", 1, "a"], ["t", "u", "e", 2, "b"], {"term": "a"}])
+    assert as_json(read_index_page(page_file, 0, 512, "a")) == '[["t","u","e",1,"a"],{"term":"a"}]'
 
 
 def test_a_page_holding_scalars_keeps_them_for_every_term(page_file):
@@ -424,13 +498,19 @@ def test_bad_descriptors_and_offsets(tmp_path):
     path = tmp_path / "pages"
     path.write_bytes(bytes(1024))
     read_only = os.open(path, os.O_RDONLY)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         write_index_page(read_only, 0, 512, [])
+    assert (type(raised.value), raised.value.errno, str(raised.value)) == (
+        OSError,
+        None,
+        "Bad file descriptor (os error 9)",
+    )
     with pytest.raises(OverflowError):
         read_index_page(read_only, -1, 512)
     os.close(read_only)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         read_index_page(read_only, 0, 512)
+    assert str(raised.value) == "Bad file descriptor (os error 9)"
 
 
 def test_descriptor_minus_one_panics():

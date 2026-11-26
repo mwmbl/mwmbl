@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
-    os::fd::AsRawFd,
     path::Path,
     str::FromStr,
     sync::Arc,
@@ -395,11 +394,11 @@ impl TinyIndex {
 
     fn get_page<T: for<'a> Deserialize<'a>>(
         lock: Either<&ReadPageLock, &WritePageLock>,
-        term: Option<&String>,
+        term: Option<&str>,
     ) -> anyhow::Result<Vec<T>> {
         let process_lock = lock.either(|r| &r.process_lock, |w| &w.process_lock);
         Ok(read_index_page(
-            process_lock.as_raw_fd(),
+            process_lock,
             process_lock.offset() as u64,
             process_lock.len(),
             term,
@@ -409,12 +408,12 @@ impl TinyIndex {
     pub async fn retrieve<T: for<'a> Deserialize<'a>>(&self, term: &str) -> anyhow::Result<Vec<T>> {
         let page = self.get_key_page_index(term);
         let lock = self.lock_page_read_only(page).await?;
-        Self::get_page(Either::Left(&lock), Some(&term.to_owned()))
+        Self::get_page(Either::Left(&lock), Some(term))
     }
 
     fn store_in_page<T: Serialize>(lock: &WritePageLock, values: &[T]) -> anyhow::Result<usize> {
         Ok(write_index_page(
-            lock.process_lock.as_raw_fd(),
+            &lock.process_lock,
             lock.process_lock.offset() as u64,
             lock.process_lock.len(),
             values,
@@ -862,100 +861,4 @@ where
         .chain(widgets)
         .chain(sorted_documents.into_iter().map(|v| v.1))
         .collect()
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-mod tests {
-    use super::{Document, DocumentSource, DocumentState, combine_documents};
-    use crate::rank::HeuristicRanker;
-
-    #[test]
-    fn state_and_source_are_their_integer_values_as_the_server_has_them() {
-        // The shape of a document in the server's `new_items`.
-        let json = r#"{"title": "Rust", "url": "https://rust-lang.org/", "extract": "",
-            "score": null, "term": "rust", "state": 7, "user_ids": null,
-            "last_crawled": null, "source": 4}"#;
-        let doc: Document = serde_json::from_str(json).unwrap();
-        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
-
-        let value = serde_json::to_value(&doc).unwrap();
-        assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
-        let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
-        assert!(unknown.to_string().contains("5 is not a DocumentSource"));
-    }
-
-    #[test]
-    fn a_page_tuple_from_python_may_leave_off_its_trailing_nones() {
-        let short: Document =
-            serde_json::from_str(r#"["Rust", "https://rust-lang.org/", "ext"]"#).unwrap();
-        assert_eq!((short.title(), short.state()), ("Rust", None));
-
-        let json = r#"["Rust", "https://rust-lang.org/", "ext", 1.0, "rust", 7, [3], 1795000000]"#;
-        let doc: Document = serde_json::from_str(json).unwrap();
-        assert_eq!(doc.state(), Some(&DocumentState::OrganicApproved));
-        assert_eq!(
-            (doc.last_crawled(), doc.source()),
-            (Some(1_795_000_000), None)
-        );
-    }
-
-    #[test]
-    fn a_state_or_source_added_since_reads_as_none() {
-        let json = r#"["Rust", "https://rust-lang.org/", "ext", null, "rust", 99, null, null, 99]"#;
-        let doc: Document = serde_json::from_str(json).unwrap();
-        assert_eq!((doc.state(), doc.source()), (None, None));
-    }
-
-    fn document(title: &str, url: &str, last_crawled: i64, user_id: i32) -> Document {
-        Document::new(
-            title.to_owned(),
-            url.to_owned(),
-            "rust is a language".to_owned(),
-            None,
-            Some("rust".to_owned()),
-            None,
-            Some(vec![user_id]),
-            Some(last_crawled),
-            None,
-        )
-    }
-
-    #[test]
-    fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
-        let existing = [
-            document("Rust", "https://rust-lang.org/", 10, 1),
-            document("Other", "https://other.example/rust", 5, 4),
-        ];
-        let incoming = [
-            document("Rust", "https://rust-lang.org/", 20, 2),
-            document("Rust", "https://copy.example/rust", 30, 3),
-        ];
-
-        let combined = combine_documents(
-            &existing,
-            &incoming,
-            Some(&"rust".to_owned()),
-            &HeuristicRanker::new(f32::NEG_INFINITY),
-        );
-
-        let urls: Vec<&str> = combined.iter().map(Document::url).collect();
-        assert_eq!(urls.len(), 2, "{urls:?}");
-        assert!(urls.contains(&"https://other.example/rust"), "{urls:?}");
-        // Which URL keeps the title depends on hash order, but either way it carries the
-        // history of all three copies, oldest crawl first.
-        let rust = combined.iter().find(|doc| doc.title() == "Rust").unwrap();
-        assert_eq!(rust.last_crawled(), Some(30));
-        assert_eq!(rust.user_ids(), Some(&vec![1, 2, 3]));
-        assert!(
-            combined
-                .iter()
-                .all(|doc| matches!(doc.state(), Some(DocumentState::SyncedWithMainIndex)))
-        );
-        let other = combined.iter().find(|doc| doc.title() == "Other").unwrap();
-        assert_eq!(
-            (other.last_crawled(), other.user_ids()),
-            (Some(5), Some(&vec![4]))
-        );
-    }
 }

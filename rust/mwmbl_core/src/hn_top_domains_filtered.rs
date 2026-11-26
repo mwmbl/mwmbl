@@ -26,14 +26,3 @@ pub static DOMAIN_MAX_SCORE: LazyLock<f64> = LazyLock::new(|| {
         .max()
         .map_or(1.0, |v| *v)
 });
-
-#[cfg(test)]
-mod tests {
-    use super::DOMAINS;
-
-    #[test]
-    fn domains_parse() {
-        assert!(DOMAINS.len() > 7000);
-        assert!(DOMAINS.contains_key("paulgraham.com"));
-    }
-}

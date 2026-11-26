@@ -28,6 +28,8 @@ pub static METADATA_CONSTANT: &[u8; 17] = b"mwmbl-tiny-search";
 pub static ITEM_FACTORY: &str = "Document";
 
 pub static BLACKLIST_REFRESH_CHECK: Duration = Duration::from_mins(5);
+// Matches the server's BLACKLIST_SNAPSHOT_REFRESH_SECONDS; HaGeZi's lists say they expire after 8.
+pub static REMOTE_BLACKLIST_MAX_AGE: Duration = Duration::from_hours(6);
 
 pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     "web.archive.org",
@@ -43,7 +45,13 @@ pub static EXCLUDED_DOMAINS: phf::Set<&'static str> = phf_set! {
     // The site owner asked to be removed from the index (issue #559).
     "lain.ovh",
     // Crawling this domain can lead to abuse reports
-    "www.inb.gov.br"
+    "www.inb.gov.br",
+    // Shinhan Financial Group's CERT reported a single crawler fetch as an attack (2026-11-26).
+    "shinhan.com",
+    "shinhangroup.com",
+    "shinhancard.com",
+    "shinhansec.com",
+    "shinhanlife.co.kr",
 };
 
 pub static CORE_DOMAINS: [&str; 9] = [

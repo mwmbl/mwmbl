@@ -2,13 +2,16 @@
 //! mwmbl_rank (test_index_page_writes and friends); these pin the crate's own behaviour so
 //! a change to it fails here, next to the code, rather than only through the extension.
 
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
-use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mwmbl_core::index::{PageIoError, pack_page, read_index_page, write_index_page};
+use mwmbl_core::index::{
+    PageIoError, pack_page, prepare_url_for_tokenizing, read_index_page, tokenize_document,
+    write_index_page,
+};
 use serde_json::{Value, json};
 
 const PAGE_SIZE: usize = 4096;
@@ -37,10 +40,6 @@ impl ScratchFile {
         file.set_len((num_pages * PAGE_SIZE) as u64).unwrap();
         ScratchFile { path, file }
     }
-
-    fn fd(&self) -> i32 {
-        self.file.as_raw_fd()
-    }
 }
 
 impl Drop for ScratchFile {
@@ -53,14 +52,20 @@ fn document(url: &str, term: Option<&str>) -> Value {
     json!(["A title", url, "An extract", 1.5, term, "page"])
 }
 
+/// Documents with distinct pseudo-random extracts, so they don't compress away to nothing.
+fn distinct_documents(count: u64) -> Vec<Value> {
+    (0..count)
+        .map(|i| {
+            let extract: String = (0..20)
+                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
+                .collect();
+            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
+        })
+        .collect()
+}
+
 fn read(scratch: &ScratchFile, page: u64, term: Option<&str>) -> Result<Vec<Value>, PageIoError> {
-    let term = term.map(str::to_string);
-    read_index_page(
-        scratch.fd(),
-        page * PAGE_SIZE as u64,
-        PAGE_SIZE,
-        term.as_ref(),
-    )
+    read_index_page(&scratch.file, page * PAGE_SIZE as u64, PAGE_SIZE, term)
 }
 
 #[test]
@@ -73,7 +78,7 @@ fn a_written_page_reads_back_unchanged() {
     ];
 
     let num_stored =
-        write_index_page(scratch.fd(), PAGE_SIZE as u64, PAGE_SIZE, &documents).unwrap();
+        write_index_page(&scratch.file, PAGE_SIZE as u64, PAGE_SIZE, &documents).unwrap();
 
     assert_eq!(num_stored, documents.len());
     assert_eq!(read(&scratch, 1, None).unwrap(), documents);
@@ -84,11 +89,11 @@ fn writing_a_page_leaves_its_neighbours_alone() {
     let scratch = ScratchFile::with_pages(3);
     let first = vec![document("https://first.example/", None)];
     let last = vec![document("https://last.example/", None)];
-    write_index_page(scratch.fd(), 0, PAGE_SIZE, &first).unwrap();
-    write_index_page(scratch.fd(), 2 * PAGE_SIZE as u64, PAGE_SIZE, &last).unwrap();
+    write_index_page(&scratch.file, 0, PAGE_SIZE, &first).unwrap();
+    write_index_page(&scratch.file, 2 * PAGE_SIZE as u64, PAGE_SIZE, &last).unwrap();
 
     write_index_page(
-        scratch.fd(),
+        &scratch.file,
         PAGE_SIZE as u64,
         PAGE_SIZE,
         &[document("https://middle.example/", None)],
@@ -120,7 +125,7 @@ fn a_term_keeps_its_own_documents_and_those_with_no_term() {
         own_object.clone(),
         other_object,
     ];
-    write_index_page(scratch.fd(), 0, PAGE_SIZE, &documents).unwrap();
+    write_index_page(&scratch.file, 0, PAGE_SIZE, &documents).unwrap();
 
     let matching = read(&scratch, 0, Some("rust")).unwrap();
 
@@ -129,15 +134,7 @@ fn a_term_keeps_its_own_documents_and_those_with_no_term() {
 
 #[test]
 fn packing_keeps_the_longest_prefix_that_fits() {
-    // Distinct pseudo-random extracts, so the documents do not compress away to nothing.
-    let documents: Vec<Value> = (0..500u64)
-        .map(|i| {
-            let extract: String = (0..20)
-                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
-                .collect();
-            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
-        })
-        .collect();
+    let documents = distinct_documents(500);
 
     let (page, num_stored) = pack_page(PAGE_SIZE, &documents).unwrap();
 
@@ -158,14 +155,7 @@ fn packing_keeps_the_longest_prefix_that_fits() {
 
 #[test]
 fn packing_any_prefix_stores_all_of_it_that_fits() {
-    let documents: Vec<Value> = (0..60u64)
-        .map(|i| {
-            let extract: String = (0..20)
-                .map(|j| format!("{:x}", (i * 7919 + j * 104_729).wrapping_mul(2_654_435_761)))
-                .collect();
-            json!(["Title", format!("https://example.com/{i}"), extract, 1.0])
-        })
-        .collect();
+    let documents = distinct_documents(60);
     let (_, fits) = pack_page(PAGE_SIZE, &documents).unwrap();
     assert!(fits > 1 && fits < documents.len(), "stored {fits}");
 
@@ -174,6 +164,21 @@ fn packing_any_prefix_stores_all_of_it_that_fits() {
     for count in 0..=documents.len() {
         let (_, num_stored) = pack_page(PAGE_SIZE, &documents[..count]).unwrap();
         assert_eq!(num_stored, count.min(fits), "packing {count} documents");
+    }
+}
+
+#[test]
+fn documents_that_compress_to_exactly_the_page_size_fit() {
+    let documents = distinct_documents(20);
+    let compressed_size = |count: usize| {
+        zstd::bulk::compress(json!(documents[..count]).to_string().as_bytes(), 3)
+            .unwrap()
+            .len()
+    };
+
+    for count in [documents.len(), 7] {
+        let (_, num_stored) = pack_page(compressed_size(count), &documents).unwrap();
+        assert_eq!(num_stored, count);
     }
 }
 
@@ -196,6 +201,21 @@ fn a_page_too_small_for_even_an_empty_list_is_an_error() {
 }
 
 #[test]
+fn a_document_with_no_json_form_is_unreadable() {
+    let tuple_keyed = BTreeMap::from([((1u8, 2u8), 3u8)]);
+
+    let result = pack_page(PAGE_SIZE, &[tuple_keyed]);
+
+    let Err(PageIoError::Unreadable(message)) = result else {
+        panic!("expected Unreadable, got {result:?}");
+    };
+    assert!(
+        message.contains("Failed to serialize data: key must be a string"),
+        "{message}"
+    );
+}
+
+#[test]
 fn a_page_of_zeros_is_unreadable_rather_than_empty() {
     let scratch = ScratchFile::with_pages(1);
 
@@ -211,7 +231,7 @@ fn a_page_of_zeros_is_unreadable_rather_than_empty() {
 fn a_page_past_the_end_of_the_file_is_unreadable() {
     let scratch = ScratchFile::with_pages(1);
     write_index_page(
-        scratch.fd(),
+        &scratch.file,
         0,
         PAGE_SIZE,
         &[document("https://example.com/", None)],
@@ -238,12 +258,35 @@ fn a_frame_claiming_too_much_content_is_refused_before_decompressing() {
     let scratch = ScratchFile::with_pages(1);
     scratch.file.write_all_at(&page, 0).unwrap();
 
-    let result = read_index_page::<Value>(scratch.fd(), 0, page_size, None);
+    let result = read_index_page::<Value>(&scratch.file, 0, page_size, None);
 
     let Err(PageIoError::Unreadable(message)) = result else {
         panic!("expected Unreadable, got {result:?}");
     };
     assert!(message.contains("more than"), "{message}");
+}
+
+#[test]
+fn a_corrupt_frame_is_unreadable_rather_than_an_io_error() {
+    let (page, _) = pack_page(PAGE_SIZE, &distinct_documents(5)).unwrap();
+    let frame_size = page.iter().rposition(|&byte| byte != 0).unwrap() + 1;
+    let scratch = ScratchFile::with_pages(1);
+    let mut num_unreadable = 0;
+
+    // A flipped byte in the compressed text can decode to other valid JSON, so only some
+    // corruptions are caught, and those must be Unreadable.
+    for position in 0..frame_size {
+        let mut corrupt = page.clone();
+        corrupt[position] ^= 0xff;
+        scratch.file.write_all_at(&corrupt, 0).unwrap();
+
+        match read(&scratch, 0, None) {
+            Ok(_) => {}
+            Err(PageIoError::Unreadable(_)) => num_unreadable += 1,
+            Err(error) => panic!("byte {position}: {error:?}"),
+        }
+    }
+    assert!(num_unreadable > 0);
 }
 
 #[test]
@@ -266,7 +309,61 @@ fn a_failed_read_is_an_io_error() {
     // Reading a directory fails with EISDIR: a real syscall failure, not a bad page.
     let directory = File::open(std::env::temp_dir()).unwrap();
 
-    let result = read_index_page::<Value>(directory.as_raw_fd(), 0, PAGE_SIZE, None);
+    let result = read_index_page::<Value>(&directory, 0, PAGE_SIZE, None);
 
     assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
+}
+
+#[test]
+fn a_failed_write_is_an_io_error() {
+    let read_only = File::open(std::env::temp_dir()).unwrap();
+
+    let result = write_index_page(
+        &read_only,
+        0,
+        PAGE_SIZE,
+        &[document("https://example.com/", None)],
+    );
+
+    assert!(matches!(result, Err(PageIoError::Io(_))), "{result:?}");
+}
+
+#[test]
+fn a_url_loses_its_http_or_https_scheme_and_its_punctuation() {
+    let cases = [
+        ("http://example.com/a-b_c?d=e", "example com a b c d e"),
+        (
+            "https://en.wikipedia.org/wiki/Rust",
+            "en wikipedia org wiki Rust",
+        ),
+        ("https://http://example.com", "http   example com"),
+        ("http://https://example.com", "https   example com"),
+        ("ftp://x.y", "ftp   x y"),
+        ("HTTP://Upper.case/", "HTTP   Upper case "),
+        ("https://café.fr", "caf  fr"),
+    ];
+    for (url, prepared) in cases {
+        assert_eq!(prepare_url_for_tokenizing(url), prepared, "{url}");
+    }
+}
+
+#[test]
+fn a_document_is_indexed_under_its_tokens_and_their_first_bigrams() {
+    let cases = [
+        (
+            "https://en.wikipedia.org/wiki/Café",
+            "Café — one two three four five six seven eight nine ten eleven",
+            "A café is a shop …",
+            "a|a café|caf|café|café is|café —|eight|eleven|en|en wikipedia|five|five six|four|\
+             four five|is|is a|nine|one|one two|org|org wiki|seven|seven eight|\
+             six|six seven|ten|three|three four|two|two three|wiki|wiki caf|wikipedia|\
+             wikipedia org|—|— one",
+        ),
+        ("https://a.b/", "x", "y z w…", "a|a b|b|x|y"),
+    ];
+    for (url, title, extract, expected) in cases {
+        let mut tokens = tokenize_document(url, title, extract);
+        tokens.sort();
+        assert_eq!(tokens.join("|"), expected, "{url}");
+    }
 }

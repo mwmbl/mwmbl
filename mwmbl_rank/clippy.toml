@@ -1,0 +1,2 @@
+# The library's name, not an identifier to put in backticks.
+doc-valid-idents = ["XGBoost", ".."]

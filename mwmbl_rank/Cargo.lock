@@ -97,12 +97,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
-name = "bytemuck"
-version = "1.25.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
-
-[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1050,15 +1044,13 @@ dependencies = [
 name = "mwmbl_rank"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
+ "anyhow",
  "mwmbl_core",
  "pyo3",
  "regex",
- "serde",
  "serde_json",
  "url",
  "xgb",
- "zstd",
 ]
 
 [[package]]

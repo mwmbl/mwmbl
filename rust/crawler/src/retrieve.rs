@@ -12,14 +12,17 @@ use tokio::task::spawn_blocking;
 #[cfg(feature = "servo")]
 use crate::constants::READ_TIMEOUT;
 use crate::{
-    constants::{MAX_FETCH_SIZE, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, NUM_URLS_TAKENS},
+    constants::{
+        MAX_FETCH_SIZE, MAX_REDIRECTS, NUM_EXTRACT_CHARS, NUM_TITLE_CHARS, NUM_URLS_TAKENS,
+    },
     robots::{RobotCache, robot_allowed},
     url_queue::ClaimedUrl,
 };
 use anyhow::{Error, bail};
 use futures_util::StreamExt;
+use mwmbl_core::blacklist_providers::BlacklistProvider;
 use readabilityrs::Readability;
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, StatusCode, Url, header::LOCATION};
 #[cfg(feature = "servo")]
 use servo_fetch::{FetchOptions, VisibilityPolicy};
 
@@ -134,11 +137,41 @@ impl CrawlResult {
     }
 }
 
-pub async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, StatusCode, Url)> {
-    let r = client.get(url.clone()).send().await?;
+/// Follows redirects here rather than in reqwest, so that a redirect to a blacklisted domain is
+/// refused before it is requested: reqwest's redirect policy can't wait on the blacklist. The
+/// client must therefore not follow redirects itself.
+pub async fn fetch(
+    client: &Client,
+    blacklist: &impl BlacklistProvider,
+    url: &Url,
+) -> anyhow::Result<(Vec<u8>, StatusCode, Url)> {
+    let mut url = url.clone();
+    let mut redirects = 0;
+    let r = loop {
+        let response = client.get(url.clone()).send().await?;
+        let Some(location) = response
+            .headers()
+            .get(LOCATION)
+            .filter(|_| response.status().is_redirection())
+        else {
+            break response;
+        };
+        if redirects == MAX_REDIRECTS {
+            bail!("too many redirects from {url}");
+        }
+        let next = url.join(location.to_str()?)?;
+        // reqwest never asks the resolver about an IP literal, so it would skip the SSRF check.
+        let Some(domain) = next.domain() else {
+            bail!("refusing redirect to {next}, which has no domain");
+        };
+        if blacklist.is_domain_blacklisted(domain).await {
+            bail!("refusing redirect to {next}, which is blacklisted");
+        }
+        url = next;
+        redirects += 1;
+    };
 
     let status = r.status();
-    let url = r.url().to_owned();
 
     let mut stream = r.bytes_stream();
 
@@ -156,13 +189,14 @@ pub async fn fetch(client: &Client, url: &Url) -> anyhow::Result<(Vec<u8>, Statu
 #[allow(clippy::field_reassign_with_default)]
 async fn fetch_default(
     client: &Client,
+    blacklist: &impl BlacklistProvider,
     robots_cache: &mut RobotCache,
     url: &Url,
 ) -> anyhow::Result<(String, StatusCode, Url)> {
-    let (data, status, resolved_url) = fetch(client, url).await?;
+    let (data, status, resolved_url) = fetch(client, blacklist, url).await?;
 
     if let Some(domain) = resolved_url.domain()
-        && robot_allowed(&resolved_url, domain, client, robots_cache).await?
+        && robot_allowed(&resolved_url, domain, client, blacklist, robots_cache).await?
     {
         let mime = mime::detect_mime_type_from_bytes(&data)?;
 
@@ -185,6 +219,7 @@ async fn fetch_default(
 #[cfg(feature = "servo")]
 async fn fetch_servo(
     client: &Client,
+    blacklist: &impl BlacklistProvider,
     robots_cache: &mut RobotCache,
     url: &Url,
     user_agent: &str,
@@ -198,19 +233,22 @@ async fn fetch_servo(
 
     let resolved_url = Url::from_str(&page.url)?;
 
+    // Servo follows redirects itself, so a blacklisted destination is only caught afterwards.
     if let Some(domain) = resolved_url.domain()
-        && robot_allowed(&resolved_url, domain, client, robots_cache).await?
+        && !blacklist.is_domain_blacklisted(domain).await
+        && robot_allowed(&resolved_url, domain, client, blacklist, robots_cache).await?
     {
         // Assume 200 code for servo as the value is not exposed: https://github.com/konippi/servo-fetch/issues/586
         return Ok((page.html, StatusCode::OK, resolved_url));
     }
-    bail!("Robots.txt unallowed or missing on resolved domain");
+    bail!("Blacklisted, or robots.txt unallowed or missing, on resolved domain");
 }
 
 pub async fn crawl(
     claimed_url: ClaimedUrl,
     mut robots_cache: RobotCache,
     client: Client,
+    blacklist: &impl BlacklistProvider,
     #[cfg(feature = "servo")] user_agent: String,
 ) -> (ClaimedUrl, CrawlResult) {
     let url = claimed_url.url().clone();
@@ -219,7 +257,7 @@ pub async fn crawl(
         return (claimed_url, CrawlResult::NoDomainError { timestamp, url });
     };
 
-    match robot_allowed(&url, domain, &client, &mut robots_cache).await {
+    match robot_allowed(&url, domain, &client, blacklist, &mut robots_cache).await {
         Ok(true) => {}
         Ok(false) => {
             return (
@@ -240,8 +278,8 @@ pub async fn crawl(
     }
 
     let res = cfg_select! {
-        feature = "servo" => fetch_servo(&client, &mut robots_cache, &url, &user_agent),
-        _ => fetch_default(&client, &mut robots_cache, &url)
+        feature = "servo" => fetch_servo(&client, blacklist, &mut robots_cache, &url, &user_agent),
+        _ => fetch_default(&client, blacklist, &mut robots_cache, &url)
     }
     .await;
 
@@ -446,11 +484,15 @@ mod tests {
     use chrono::Utc;
     use reqwest::{StatusCode, Url};
 
-    use super::{CrawlResult, crawl, extract_links_from_html, sanitize, select_links, trim_size};
+    use mwmbl_core::blacklist_providers::StaticBlacklistProvider;
+
+    use super::{
+        CrawlResult, crawl, extract_links_from_html, fetch, sanitize, select_links, trim_size,
+    };
     use crate::{
-        constants::{NUM_EXTRACT_CHARS, NUM_URLS_TAKENS},
+        constants::{MAX_REDIRECTS, NUM_EXTRACT_CHARS, NUM_URLS_TAKENS},
         robots::RobotCache,
-        test_support::{TestServer, client, html, text},
+        test_support::{TestServer, client, html, no_blacklist, redirect, text},
         url_queue::ClaimedUrl,
     };
 
@@ -578,6 +620,7 @@ mod tests {
             ClaimedUrl::unqueued(url.clone()),
             RobotCache::new(),
             client(),
+            &no_blacklist(),
         )
         .await;
 
@@ -602,6 +645,7 @@ mod tests {
             ClaimedUrl::unqueued(server.url("/article")),
             RobotCache::new(),
             client(),
+            &no_blacklist(),
         )
         .await;
         assert!(
@@ -622,6 +666,7 @@ mod tests {
             ClaimedUrl::unqueued(server.url("/article")),
             RobotCache::new(),
             client(),
+            &no_blacklist(),
         )
         .await;
         assert!(
@@ -642,6 +687,7 @@ mod tests {
             ClaimedUrl::unqueued(server.url("/article")),
             RobotCache::new(),
             client(),
+            &no_blacklist(),
         )
         .await;
         let CrawlResult::NoResponseTextError { status, .. } = result else {
@@ -653,10 +699,59 @@ mod tests {
     #[tokio::test]
     async fn a_url_with_no_domain_is_not_crawled() {
         let url = Url::parse("http://127.0.0.1/").unwrap();
-        let (_, result) = crawl(ClaimedUrl::unqueued(url), RobotCache::new(), client()).await;
+        let (_, result) = crawl(
+            ClaimedUrl::unqueued(url),
+            RobotCache::new(),
+            client(),
+            &no_blacklist(),
+        )
+        .await;
         assert!(
             matches!(result, CrawlResult::NoDomainError { .. }),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_followed_to_the_page() {
+        let server = TestServer::start(vec![
+            ("/old", redirect("/new")),
+            ("/new", html(200, ARTICLE)),
+        ])
+        .await;
+        let (_, status, resolved) = fetch(&client(), &no_blacklist(), &server.url("/old"))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(resolved, server.url("/new"));
+        assert_eq!(server.requests(), vec!["/old", "/new"]);
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_blacklisted_domain_is_not_followed() {
+        let target = TestServer::start(vec![("/", html(200, ARTICLE))]).await;
+        let origin = TestServer::start(vec![("/", redirect(target.url("/").as_str()))]).await;
+        // The origin is reached by IP, so only the target's domain, localhost, is blacklisted.
+        let origin_url = Url::parse(&format!(
+            "http://127.0.0.1:{}/",
+            origin.url("/").port().unwrap()
+        ))
+        .unwrap();
+        let blacklist = StaticBlacklistProvider::new(HashSet::from(["localhost".to_owned()]));
+
+        assert!(fetch(&client(), &blacklist, &origin_url).await.is_err());
+        assert_eq!(origin.requests(), vec!["/"]);
+        assert!(target.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_redirect_loop_is_abandoned() {
+        let server = TestServer::start(vec![("/loop", redirect("/loop"))]).await;
+        assert!(
+            fetch(&client(), &no_blacklist(), &server.url("/loop"))
+                .await
+                .is_err()
+        );
+        assert_eq!(server.requests().len(), MAX_REDIRECTS + 1);
     }
 }

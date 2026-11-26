@@ -4,7 +4,6 @@
 //! Usage: `cargo run --release --example bench_rank -- <index file> <batches>`. Indexing
 //! writes to the file, so use a copy.
 use std::fs::File;
-use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -25,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     let mut pages = Vec::new();
     for page in 0..100_000u64 {
         let offset = HEADER_SIZE + page * PAGE_SIZE;
-        if let Ok(docs) = read_index_page::<Document>(file.as_raw_fd(), offset, 4096, None) {
+        if let Ok(docs) = read_index_page::<Document>(&file, offset, 4096, None) {
             pages.push(docs);
         }
     }

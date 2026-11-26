@@ -4,7 +4,7 @@ use mwmbl_core::{
     indexer::{Document, DocumentState, IndexMode, TinyIndex},
 };
 use rand::RngExt;
-use reqwest::{Client, header};
+use reqwest::{Client, header, redirect::Policy};
 use serde_json::Value;
 use std::{
     cmp::{Reverse, max, min},
@@ -33,7 +33,7 @@ use crate::{
     path_creation::{get_device_name, healthcheck, index_path},
     retrieve::{CrawlResult, crawl},
     robots::RobotCache,
-    ssrf::{PublicAddressResolver, redirect_policy},
+    ssrf::PublicAddressResolver,
     url_queue::SharedURLQueue,
 };
 
@@ -124,7 +124,8 @@ impl Crawler {
             .zstd(true)
             .read_timeout(READ_TIMEOUT)
             .user_agent(self.crawl_user_agent())
-            .redirect(redirect_policy())
+            // fetch follows redirects itself, to check each one against the blacklist.
+            .redirect(Policy::none())
             .dns_resolver(PublicAddressResolver::system()?)
             .build()?)
     }
@@ -139,6 +140,7 @@ impl Crawler {
             let permit = self.crawl_semaphore.clone().acquire_owned().await?;
             let cache = self.robots_cache.clone();
             let crawl_client = client.clone();
+            let blacklist = self.blacklist.clone();
             #[cfg(feature = "servo")]
             let user_agent = self.crawl_user_agent();
             let mut url_queue = self.url_queue.clone();
@@ -154,6 +156,7 @@ impl Crawler {
                     url,
                     cache.clone(),
                     crawl_client,
+                    &blacklist,
                     #[cfg(feature = "servo")]
                     user_agent,
                 )
