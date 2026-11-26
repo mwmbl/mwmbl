@@ -20,7 +20,7 @@ from django.conf import settings
 
 from mwmbl import provider_usage
 from mwmbl.indexer.external_cache import get_cached_external_results, store_external_results
-from mwmbl.tinysearchengine.indexer import Document, DocumentSource
+from mwmbl.tinysearchengine.indexer import Document, DocumentSource, cleaned_document
 from mwmbl.tinysearchengine.rank import MAX_QUERY_CHARS
 
 logger = getLogger(__name__)
@@ -62,13 +62,15 @@ def _documents(payload: dict, query: str) -> list[Document]:
     documents = []
     for rank, result in enumerate(results[:NUM_STAAN_RESULTS]):
         documents.append(
-            Document(
-                title=result["title"],
-                url=result["url"],
-                extract=result.get("snippet") or result.get("description", ""),
-                score=staan_score(rank),
-                term=query,
-                source=DocumentSource.STAAN,
+            cleaned_document(
+                Document(
+                    title=result["title"],
+                    url=result["url"],
+                    extract=result.get("snippet") or result.get("description", ""),
+                    score=staan_score(rank),
+                    term=query,
+                    source=DocumentSource.STAAN,
+                )
             )
         )
     return documents

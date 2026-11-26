@@ -12,6 +12,7 @@ from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
 
+from mwmbl.settings import NUM_TITLE_CHARS
 from mwmbl.tokenizer import clean_unicode
 
 # Pages are read, packed and written by the Rust extension, which does the positioned
@@ -180,7 +181,8 @@ class Document:
 
 
 def cleaned_document(document: Document) -> Document:
-    """The document with text that cannot be stored on a page taken out of it.
+    """The document with text that cannot be stored on a page, or doesn't belong in a
+    title, taken out of it.
 
     A lone surrogate is the case that turns up: a title or an extract that a UTF-16 client
     truncated in the middle of an astral character, which arrives as a \\udXXX escape that
@@ -190,8 +192,19 @@ def cleaned_document(document: Document) -> Document:
     clean_unicode is what tokenize already does to the same text, so the terms a document
     is indexed under do not change - only the text stored alongside them, which until now
     kept a character the reader could not render anyway.
+
+    The title is also capped at NUM_TITLE_CHARS here, the same limit the crawler already
+    enforces on its own titles. Every Document ends up here regardless of where it came
+    from - our own crawl, the external cache, or a provider like Staan - so this is the one
+    place that can guarantee a title is short no matter how its source built it. A source
+    that hands back its whole page as "the title" (seen from a provider scraping a page
+    with a malformed heading tag) is a data-quality fault we cannot fix at the source; what
+    we can do is make sure it never reaches ranking, caching or highlighting unbounded.
     """
-    return replace(document, title=clean_unicode(document.title), extract=clean_unicode(document.extract))
+    title = document.title
+    if len(title) > NUM_TITLE_CHARS:
+        title = title[: NUM_TITLE_CHARS - 1] + "…"
+    return replace(document, title=clean_unicode(title), extract=clean_unicode(document.extract))
 
 
 @dataclass
