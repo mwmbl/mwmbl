@@ -184,6 +184,22 @@ def test_an_oversized_title_is_truncated(cache_index):
     assert results[0].title.endswith("…")
 
 
+def test_an_oversized_extract_is_truncated(cache_index):
+    """Same fault, but in the snippet/description instead of the title."""
+    huge_extract = "OmniOSce v11 r151060 is out! " * 20
+    response = {
+        "web": {"results": [{"url": "https://omnios.org/article/r60", "title": "OmniOS", "snippet": huge_extract}]}
+    }
+    mock, _ = _patched_staan(response)
+    try:
+        results = get_staan_results("omnios")
+    finally:
+        mock.stop()
+
+    assert len(results[0].extract) <= 155
+    assert results[0].extract.endswith("…")
+
+
 def test_no_more_than_num_staan_results_are_kept(cache_index):
     many = {"web": {"results": [{"url": f"https://example.com/{i}", "title": str(i)} for i in range(50)]}}
     mock, _ = _patched_staan(many)

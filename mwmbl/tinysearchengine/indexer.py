@@ -12,7 +12,7 @@ from typing import Callable, Generic, List, Optional, TypeVar
 
 import mmh3
 
-from mwmbl.settings import NUM_TITLE_CHARS
+from mwmbl.settings import NUM_EXTRACT_CHARS, NUM_TITLE_CHARS
 from mwmbl.tokenizer import clean_unicode
 
 # Pages are read, packed and written by the Rust extension, which does the positioned
@@ -182,7 +182,7 @@ class Document:
 
 def cleaned_document(document: Document) -> Document:
     """The document with text that cannot be stored on a page, or doesn't belong in a
-    title, taken out of it.
+    title or extract, taken out of it.
 
     A lone surrogate is the case that turns up: a title or an extract that a UTF-16 client
     truncated in the middle of an astral character, which arrives as a \\udXXX escape that
@@ -193,18 +193,22 @@ def cleaned_document(document: Document) -> Document:
     is indexed under do not change - only the text stored alongside them, which until now
     kept a character the reader could not render anyway.
 
-    The title is also capped at NUM_TITLE_CHARS here, the same limit the crawler already
-    enforces on its own titles. Every Document ends up here regardless of where it came
-    from - our own crawl, the external cache, or a provider like Staan - so this is the one
-    place that can guarantee a title is short no matter how its source built it. A source
-    that hands back its whole page as "the title" (seen from a provider scraping a page
-    with a malformed heading tag) is a data-quality fault we cannot fix at the source; what
-    we can do is make sure it never reaches ranking, caching or highlighting unbounded.
+    The title and extract are also capped at NUM_TITLE_CHARS/NUM_EXTRACT_CHARS here, the
+    same limits the crawler already enforces on its own. Every Document ends up here
+    regardless of where it came from - our own crawl, the external cache, or a provider
+    like Staan - so this is the one place that can guarantee both are short no matter how
+    their source built them. A source that hands back its whole page as "the title" or
+    "the extract" (seen from a provider scraping a page with a malformed heading tag) is a
+    data-quality fault we cannot fix at the source; what we can do is make sure it never
+    reaches ranking, caching or highlighting unbounded.
     """
     title = document.title
     if len(title) > NUM_TITLE_CHARS:
         title = title[: NUM_TITLE_CHARS - 1] + "…"
-    return replace(document, title=clean_unicode(title), extract=clean_unicode(document.extract))
+    extract = document.extract
+    if len(extract) > NUM_EXTRACT_CHARS:
+        extract = extract[: NUM_EXTRACT_CHARS - 1] + "…"
+    return replace(document, title=clean_unicode(title), extract=clean_unicode(extract))
 
 
 @dataclass
