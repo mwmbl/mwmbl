@@ -252,7 +252,7 @@ fn page_bytes(path: &Path, page: usize) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn racing_conditional_writes_both_land_after_a_retry() {
+async fn a_stale_conditional_write_conflicts_and_lands_after_a_retry() {
     let path = index_path("conditional");
     let router = router(&path);
     // An unknown state and the elements a newer build adds survive the round trip.

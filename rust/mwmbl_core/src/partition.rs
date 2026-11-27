@@ -524,4 +524,71 @@ mod tests {
         assert_eq!(read.blocking_recv().unwrap().unwrap().documents.len(), 1);
         std::fs::remove_file(path).unwrap();
     }
+
+    fn merge_request(docs: Vec<Document>) -> (PageRequest, oneshot::Receiver<StoredPage>) {
+        let (reply, receiver) = oneshot::channel();
+        let request = PageRequest::Merge {
+            page: 0,
+            docs,
+            mark_term_synced: None,
+            reply,
+        };
+        (request, receiver)
+    }
+
+    type WriteReceiver = oneshot::Receiver<Result<ConditionalWrite, PageIoError>>;
+
+    fn write_request(docs: Vec<Document>, if_version: u64) -> (PageRequest, WriteReceiver) {
+        let (reply, receiver) = oneshot::channel();
+        let request = PageRequest::WritePage {
+            page: 0,
+            docs,
+            if_version,
+            reply,
+        };
+        (request, receiver)
+    }
+
+    fn run_round(owner: &Owner, requests: Vec<PageRequest>) {
+        let (sender, receiver) = mpsc::channel();
+        for request in requests {
+            sender.send(request).unwrap();
+        }
+        drop(sender);
+        owner.run(&receiver);
+    }
+
+    #[test]
+    fn a_conditional_write_after_a_merge_in_its_round_conflicts() {
+        let (owner, path) = owner("merge_then_write");
+        let version = owner.read_versioned(0).unwrap().version;
+        let (merge, _merged) = merge_request(vec![document("https://rust-lang.org/", "Rust", 1)]);
+        let (write, written) = write_request(Vec::new(), version);
+
+        run_round(&owner, vec![merge, write]);
+
+        let written = written.blocking_recv().unwrap().unwrap();
+        assert_eq!(written, ConditionalWrite::Conflict);
+        assert_eq!(owner.read_versioned(0).unwrap().documents.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_merge_after_a_conditional_write_in_its_round_applies_on_top_of_it() {
+        let (owner, path) = owner("write_then_merge");
+        let version = owner.read_versioned(0).unwrap().version;
+        let written_document = document("https://rust-lang.org/", "Rust", 1);
+        let (write, written) = write_request(vec![written_document], version);
+        let (merge, _merged) = merge_request(vec![document("https://other.example/", "Other", 2)]);
+
+        run_round(&owner, vec![write, merge]);
+
+        let written = written.blocking_recv().unwrap().unwrap();
+        assert_eq!(written, ConditionalWrite::Stored(1));
+        let documents = owner.read_versioned(0).unwrap().documents;
+        let mut urls: Vec<&str> = documents.iter().map(Document::url).collect();
+        urls.sort_unstable();
+        assert_eq!(urls, ["https://other.example/", "https://rust-lang.org/"]);
+        std::fs::remove_file(path).unwrap();
+    }
 }
