@@ -1,4 +1,5 @@
 use std::{
+    os::unix::fs::FileExt,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -75,6 +76,20 @@ async fn indexed_documents_are_retrieved() {
     assert_eq!(retrieved(&router, "rust").await, 1);
     let (status, _) = post(&router, "/v1/other/retrieve", json!({"terms": ["rust"]})).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = post(&router, "/v1/main/pages", json!({"pages": {"16": []}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An unreadable page costs its term's results, not the request's.
+    let page = TinyIndex::from_file(&path, IndexMode::READ, 1)
+        .unwrap()
+        .get_key_page_index("language");
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.write_all_at(&[0xff; 4096], u64::try_from((page + 1) * 4096).unwrap())
+        .unwrap();
+    let terms = json!({"terms": ["rust", "language"]});
+    let (status, body) = post(&router, "/v1/main/retrieve", terms).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"]["language"], json!([]));
 }
 
 #[tokio::test]
@@ -112,7 +127,7 @@ async fn a_second_server_queues_writes_until_the_first_releases_the_lock() {
 }
 
 #[tokio::test]
-async fn shutting_down_applies_the_writes_already_queued() {
+async fn shutting_down_before_the_lock_is_taken_fails_the_queued_writes() {
     let path = index_path("shutdown");
     let socket = path.with_extension("sock");
     let first = TinyIndex::from_file(&path, IndexMode::WRITE, 1).unwrap();
@@ -136,18 +151,16 @@ async fn shutting_down_applies_the_writes_already_queued() {
     stream.write_all(request.as_bytes()).await.unwrap();
     sleep(Duration::from_millis(100)).await;
     stop.send(()).unwrap();
-    tokio::task::spawn_blocking(move || drop(first))
-        .await
-        .unwrap();
 
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
-    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.starts_with("HTTP/1.1 503"), "{response}");
     timeout(Duration::from_secs(5), server)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
+    drop(first);
     let index = TinyIndex::from_file(&path, IndexMode::READ, 1).unwrap();
-    assert_eq!(index.retrieve("rust").await.unwrap().len(), 1);
+    assert_eq!(index.retrieve("rust").await.unwrap().len(), 0);
 }

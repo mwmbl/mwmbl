@@ -3,10 +3,16 @@
 
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{File, TryLockError},
+    io::ErrorKind,
     os::unix::fs::FileExt,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use anyhow::{Context, bail};
@@ -49,10 +55,22 @@ impl PageRequest {
     }
 }
 
+/// How often an owner waiting for the index's lock tries again, and checks whether to stop.
+const LOCK_RETRY: Duration = Duration::from_millis(100);
+
+/// Whether the owners of an index waiting for its lock hold it yet, and whether to stop
+/// waiting for it.
+#[derive(Default)]
+pub(crate) struct LockState {
+    held: AtomicBool,
+    abandoned: AtomicBool,
+}
+
 pub(crate) struct Partitions {
     senders: Vec<mpsc::Sender<PageRequest>>,
     threads: Vec<JoinHandle<()>>,
     num_pages: usize,
+    lock: Arc<LockState>,
 }
 
 impl Partitions {
@@ -66,6 +84,8 @@ impl Partitions {
         if num_threads == 0 {
             bail!("An index needs at least one owner thread");
         }
+        let lock = Arc::new(LockState::default());
+        lock.held.store(!wait_for_lock, Ordering::Release);
         let mut senders = Vec::with_capacity(num_threads);
         let mut threads = Vec::with_capacity(num_threads);
         for number in 0..num_threads {
@@ -74,14 +94,13 @@ impl Partitions {
                 file: Arc::clone(file),
                 page_size,
             };
+            let lock = Arc::clone(&lock);
             let thread = thread::Builder::new()
                 .name(format!("index-owner-{number}"))
                 .spawn(move || {
-                    // Every owner blocks here, so none touches a page before the lock is
-                    // held. They share one open file description, which holds the lock for
-                    // all of them once any has it.
-                    if wait_for_lock && let Err(error) = owner.file.lock() {
-                        eprintln!("Could not lock the index file: {error}");
+                    if wait_for_lock && !owner.wait_for_lock(&lock) {
+                        // Dropping the queued requests unanswered fails them.
+                        drop(receiver);
                         return;
                     }
                     owner.run(&receiver);
@@ -94,7 +113,18 @@ impl Partitions {
             senders,
             threads,
             num_pages,
+            lock,
         })
+    }
+
+    pub(crate) fn holds_lock(&self) -> bool {
+        self.lock.held.load(Ordering::Acquire)
+    }
+
+    /// Tells owners still waiting for the lock to stop, failing the requests queued for
+    /// them. Owners that hold it carry on.
+    pub(crate) fn abandon_lock_wait(&self) {
+        self.lock.abandoned.store(true, Ordering::Release);
     }
 
     pub(crate) fn send(&self, request: PageRequest) -> anyhow::Result<()> {
@@ -151,6 +181,34 @@ impl Drop for AbortOnPanic {
 }
 
 impl Owner {
+    /// Waits for the index's lock, polling rather than blocking so it can stop waiting when
+    /// the server shuts down before the old one has released it. Every owner waits, so none
+    /// touches a page before the lock is held; they share one open file description, which
+    /// holds the lock for all of them once any has it. Returns whether it got the lock.
+    fn wait_for_lock(&self, lock: &LockState) -> bool {
+        loop {
+            match self.file.try_lock() {
+                Ok(()) => {
+                    lock.held.store(true, Ordering::Release);
+                    return true;
+                }
+                Err(TryLockError::WouldBlock) => {
+                    if lock.abandoned.load(Ordering::Acquire) {
+                        return false;
+                    }
+                    thread::sleep(LOCK_RETRY);
+                }
+                Err(TryLockError::Error(error)) if error.kind() == ErrorKind::Interrupted => {}
+                Err(TryLockError::Error(error)) => {
+                    // Serving on with this partition dead would fail every request for its
+                    // pages while health says all is well.
+                    eprintln!("Could not lock the index file ({error}); aborting");
+                    std::process::abort();
+                }
+            }
+        }
+    }
+
     fn run(&self, receiver: &mpsc::Receiver<PageRequest>) {
         let _abort_on_panic = AbortOnPanic;
         while let Ok(first) = receiver.recv() {

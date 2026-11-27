@@ -8,7 +8,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -20,8 +20,17 @@ use mwmbl_core::{
     indexer::{Document, TinyIndex},
 };
 use serde::{Deserialize, Serialize};
+use tower::limit::GlobalConcurrencyLimitLayer;
 
 pub type Indexes = Arc<HashMap<String, TinyIndex>>;
+
+/// The largest request body. Clients chunk batches to fit, and a bound stops one request
+/// holding unbounded memory; axum's default of 2 MiB is less than a large crawl batch.
+const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+/// The most requests handled at once. During a deploy's handover requests queue until the
+/// lock is taken, so this bounds what they can hold; the rest wait to be read.
+const MAX_CONCURRENT_REQUESTS: usize = 64;
 
 pub fn router(indexes: Indexes) -> Router {
     Router::new()
@@ -29,12 +38,27 @@ pub fn router(indexes: Indexes) -> Router {
         .route("/v1/{index}/documents", post(index_documents))
         .route("/v1/{index}/pages", post(index_pages))
         .route("/v1/{index}/retrieve", post(retrieve))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(GlobalConcurrencyLimitLayer::new(MAX_CONCURRENT_REQUESTS))
         .with_state(indexes)
 }
 
 pub enum ApiError {
     UnknownIndex(String),
+    BadRequest(String),
+    /// The server stopped before it could take the index's lock.
+    Unavailable(anyhow::Error),
     Failed(anyhow::Error),
+}
+
+impl ApiError {
+    fn of(index: &TinyIndex, error: anyhow::Error) -> ApiError {
+        if index.holds_lock() {
+            ApiError::Failed(error)
+        } else {
+            ApiError::Unavailable(error)
+        }
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
@@ -48,6 +72,10 @@ impl IntoResponse for ApiError {
         match self {
             ApiError::UnknownIndex(name) => {
                 (StatusCode::NOT_FOUND, format!("No index named {name}")).into_response()
+            }
+            ApiError::BadRequest(reason) => (StatusCode::BAD_REQUEST, reason).into_response(),
+            ApiError::Unavailable(error) => {
+                (StatusCode::SERVICE_UNAVAILABLE, format!("{error:#}")).into_response()
             }
             ApiError::Failed(error) => {
                 eprintln!("Index request failed: {error:#}");
@@ -90,9 +118,11 @@ async fn index_documents(
     Json(request): Json<DocumentsRequest>,
 ) -> Result<Response, ApiError> {
     let no_blacklist = StaticBlacklistProvider::new(HashSet::new());
-    let result = index(&indexes, &name)?
+    let index = index(&indexes, &name)?;
+    let result = index
         .index_documents(request.documents, &no_blacklist)
-        .await?;
+        .await
+        .map_err(|error| ApiError::of(index, error))?;
     let response = DocumentsResponse {
         stored_urls: result.stored_urls(),
         new_urls: result.new_urls(),
@@ -105,7 +135,9 @@ async fn index_documents(
 #[derive(Deserialize)]
 struct PagesRequest {
     pages: HashMap<usize, Vec<Document>>,
-    mark_synced: Option<String>,
+    /// The one term whose organic documents are marked as synced with the main index.
+    /// Python's `index_pages(mark_synced: bool)` marks those of every term on the pages.
+    mark_synced_term: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -119,9 +151,17 @@ async fn index_pages(
     Path(name): Path<String>,
     Json(request): Json<PagesRequest>,
 ) -> Result<Json<PagesResponse>, ApiError> {
-    let new_page_doc_counts = index(&indexes, &name)?
-        .index_pages(request.pages, request.mark_synced.as_ref())
-        .await?;
+    let index = index(&indexes, &name)?;
+    let num_pages = index.num_pages();
+    if let Some(page) = request.pages.keys().find(|page| **page >= num_pages) {
+        return Err(ApiError::BadRequest(format!(
+            "Page {page} is not in an index of {num_pages} pages"
+        )));
+    }
+    let new_page_doc_counts = index
+        .index_pages(request.pages, request.mark_synced_term.as_ref())
+        .await
+        .map_err(|error| ApiError::of(index, error))?;
     Ok(Json(PagesResponse {
         new_page_doc_counts,
     }))
@@ -137,7 +177,8 @@ struct RetrieveResponse {
     results: HashMap<String, Vec<Document>>,
 }
 
-/// The documents for each term, read in parallel by the terms' owner threads.
+/// The documents for each term, read in parallel by the terms' owner threads. A page that
+/// can't be read costs its term's results, not the whole request, as in Python's retrieve.
 async fn retrieve(
     State(indexes): State<Indexes>,
     Path(name): Path<String>,
@@ -145,11 +186,17 @@ async fn retrieve(
 ) -> Result<Json<RetrieveResponse>, ApiError> {
     let index = index(&indexes, &name)?;
     let documents = join_all(request.terms.iter().map(|term| index.retrieve(term))).await;
-    let results = request
-        .terms
-        .into_iter()
-        .zip(documents)
-        .map(|(term, documents)| Ok((term, documents?)))
-        .collect::<anyhow::Result<_>>()?;
+    let mut results = HashMap::new();
+    for (term, documents) in request.terms.into_iter().zip(documents) {
+        let documents = match documents {
+            Ok(documents) => documents,
+            Err(error) if !index.holds_lock() => return Err(ApiError::Unavailable(error)),
+            Err(error) => {
+                eprintln!("Could not retrieve {term}: {error:#}");
+                Vec::new()
+            }
+        };
+        results.insert(term, documents);
+    }
     Ok(Json(RetrieveResponse { results }))
 }

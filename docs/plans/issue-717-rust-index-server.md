@@ -134,15 +134,28 @@ retries. `main.py` starts the server before gunicorn when `RUN_INDEX_SERVER` is 
 defaults off, and must not be turned on in production until PR 6 has landed. Until then,
 Python still writes the same file under OFD locks that the owner threads don't take, and
 an owner thread that reads a page while Python is writing it would see an undecodable
-page and reset it. The
-socket goes in `INDEX_SERVER_SOCKET`, a directory local to the container.
-`index_documents` and `index_pages` in `index_batches.py` call the client, and they keep
-the blacklist filter and text cleaning in Python. A pytest fixture starts
-`serve_index` in a spawned process on a temporary socket.
+page and reset it. The socket goes in `INDEX_SERVER_SOCKET`, which must be a directory
+local to the container, never on a shared volume, or the old and new containers' servers
+would share it. `index_documents` and `index_pages` in `index_batches.py` call the
+client, and `/documents` is only called after `filter_blacklisted_documents` and text
+cleaning. A pytest fixture starts `serve_index` in a spawned process on a temporary
+socket.
+
+Lifecycle and failure handling:
+- `main.py` forwards SIGTERM to the server child and waits for it to drain, within the
+  container's stop timeout, which is set explicitly. The child exits if its parent dies
+  (`PR_SET_PDEATHSIG`, set from Rust).
+- Client timeouts exceed the handover window. A retried write can be applied twice, so
+  the stats from a retried request may undercount `new_urls`: document this, or add a
+  request id.
+- Batches are chunked to the server's 32 MiB body limit.
+- `stored_urls` and `new_urls` map to `IndexedURLs`.
 
 - A parity test runs the same fixture batches through the old Python path and through
   the server, and compares the pages, `new_page_doc_counts`, URLs and agreements. Any
-  difference is fixed in Rust here, or written down as intended.
+  difference is fixed in Rust here, or written down as intended. It covers URLs with no
+  domain (IP hosts, unparseable URLs), which Rust's `index_documents` drops and Python
+  keeps.
 - `RUN_INDEX_SERVER` defaults off, and its setting says it must stay off in production
   until PR 6 has landed.
 - `make check` and `make test` pass.

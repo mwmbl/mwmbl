@@ -31,7 +31,7 @@ REDIS_URL      ?= redis://127.0.0.1:6379
 TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
 # Python tests that cross into the mwmbl_rank extension, run against the instrumented build.
 RUST_COVERAGE_TESTS ?= test/test_mwmbl_rank_golden.py test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
-	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py
+	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py test/test_index_server.py
 CARGO_HOME     ?= $(HOME)/.cargo
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
