@@ -145,6 +145,10 @@ pub struct Document {
     last_crawled: Option<i64>,
     #[serde(default)]
     source: Option<Coded<DocumentSource>>,
+    /// The elements a page item from a newer build has after the nine this one knows, kept
+    /// to be written back unchanged.
+    #[serde(skip)]
+    extra: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +181,7 @@ impl Document {
             user_ids,
             last_crawled,
             source: source.map(Coded::Known),
+            extra: Vec::new(),
         }
     }
 
@@ -647,11 +652,16 @@ impl Serialize for PageItem<'_> {
             document.last_crawled.is_some(),
             document.source.is_some(),
         ];
-        let num_optional = present
-            .iter()
-            .rposition(|is_some| *is_some)
-            .map_or(0, |last| last + 1);
-        let mut items = serializer.serialize_seq(Some(3 + num_optional))?;
+        let num_optional = if document.extra.is_empty() {
+            present
+                .iter()
+                .rposition(|is_some| *is_some)
+                .map_or(0, |last| last + 1)
+        } else {
+            present.len()
+        };
+        let num_items = 3 + num_optional + document.extra.len();
+        let mut items = serializer.serialize_seq(Some(num_items))?;
         items.serialize_element(&document.title)?;
         items.serialize_element(&document.url)?;
         items.serialize_element(&document.extract)?;
@@ -673,14 +683,17 @@ impl Serialize for PageItem<'_> {
         if num_optional > 5 {
             items.serialize_element(&document.source)?;
         }
+        for extra in &document.extra {
+            items.serialize_element(extra)?;
+        }
         items.end()
     }
 }
 
 /// A document as a page holds it, read from either form a page may hold: the array Python
 /// writes, or the object older crawlers wrote. An array may have more elements than this
-/// build knows, written by a newer one; they are dropped rather than failing the page, which
-/// a merge would then reset.
+/// build knows, written by a newer one. They are kept, to be written back unchanged, rather
+/// than failing the page, which a merge would then reset.
 pub struct PageDocument(pub Document);
 
 /// The number of elements of a page item's array that this build reads.
@@ -689,12 +702,15 @@ const DOCUMENT_FIELDS: usize = 9;
 impl<'de> Deserialize<'de> for PageDocument {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(deserializer)?;
-        if let Value::Array(items) = &mut value {
-            items.truncate(DOCUMENT_FIELDS);
-        }
-        Document::deserialize(value)
-            .map(PageDocument)
-            .map_err(serde::de::Error::custom)
+        let extra = match &mut value {
+            Value::Array(items) if items.len() > DOCUMENT_FIELDS => {
+                items.split_off(DOCUMENT_FIELDS)
+            }
+            _ => Vec::new(),
+        };
+        let mut document = Document::deserialize(value).map_err(serde::de::Error::custom)?;
+        document.extra = extra;
+        Ok(PageDocument(document))
     }
 }
 
