@@ -107,16 +107,19 @@ test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
 
-# The Rust crates under rust/: mwmbl_core, which mwmbl_rank links into the server, and the
-# crawler volunteers run. Their tests are Rust ones, so they run here rather than through
+# The Rust crates under rust/: mwmbl_core, which mwmbl_rank links into the server, the
+# index server, which mwmbl_rank links too, and the crawler volunteers run. Their tests are Rust ones, so they run here rather than through
 # pytest.
 rust-core:
 	cargo fmt --manifest-path rust/mwmbl_core/Cargo.toml --check
 	cargo fmt --manifest-path rust/crawler/Cargo.toml --check
+	cargo fmt --manifest-path rust/index_server/Cargo.toml --check
 	cargo clippy --manifest-path rust/mwmbl_core/Cargo.toml --all-targets --locked -- -D warnings
 	cargo clippy --manifest-path rust/crawler/Cargo.toml --all-targets --locked -- -D warnings
+	cargo clippy --manifest-path rust/index_server/Cargo.toml --all-targets --locked -- -D warnings
 	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
 	cargo test --manifest-path rust/crawler/Cargo.toml --locked
+	cargo test --manifest-path rust/index_server/Cargo.toml --locked
 
 # The server's Python extension. pyo3 needs a Python to build against, so this runs after
 # the venv exists; its tests cross into Python and run under coverage-rust and pytest.

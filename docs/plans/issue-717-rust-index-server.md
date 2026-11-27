@@ -74,7 +74,7 @@ both forms.
 
 - A page Rust writes is byte-identical to the one Python writes for the same documents.
 
-## PR 3: Index server crate with the indexing operations
+## PR 3: Index server crate with the indexing operations (Done)
 **Estimated added lines:** ~450
 **Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/partition.rs, rust/index_server/{Cargo.toml,src/lib.rs,src/api.rs,src/ownership.rs}, mwmbl_rank/Cargo.toml, mwmbl_rank/src/lib.rs, Dockerfile
 

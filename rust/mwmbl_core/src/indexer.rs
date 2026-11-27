@@ -129,6 +129,16 @@ pub enum IndexMode {
     WRITE,
 }
 
+/// What opening an index for writing does when another process holds its lock.
+#[derive(Debug, Clone, Copy)]
+pub enum LockPolicy {
+    /// Fail at once, as the crawler does: two crawlers must not share an index.
+    Fail,
+    /// Accept requests at once and apply them once the lock is taken, as the index server
+    /// does while the container it replaces finishes its writes.
+    Wait,
+}
+
 impl Document {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
@@ -285,6 +295,30 @@ impl TinyIndex {
         mode: IndexMode,
         num_threads: usize,
     ) -> anyhow::Result<TinyIndex> {
+        Self::open(path, mode, num_threads, LockPolicy::Fail)
+    }
+
+    /// Opens the index at `path` for writing, as `from_file` does in `WRITE` mode, but with
+    /// `policy` deciding what happens while another process holds its lock. With `Wait`,
+    /// requests queue until the owner threads have taken it.
+    ///
+    /// # Errors
+    ///
+    /// Fails as `from_file` does.
+    pub fn open_writer(
+        path: &Path,
+        num_threads: usize,
+        policy: LockPolicy,
+    ) -> anyhow::Result<TinyIndex> {
+        Self::open(path, IndexMode::WRITE, num_threads, policy)
+    }
+
+    fn open(
+        path: &Path,
+        mode: IndexMode,
+        num_threads: usize,
+        policy: LockPolicy,
+    ) -> anyhow::Result<TinyIndex> {
         let mut file = File::open(path)?;
         let mut metadata_bytes: [u8; 4096] = [0; METADATA_SIZE!()];
         file.read_exact(&mut metadata_bytes)?;
@@ -301,7 +335,8 @@ impl TinyIndex {
             .read(true)
             .write(matches!(mode, IndexMode::WRITE))
             .open(path)?;
-        if matches!(mode, IndexMode::WRITE) {
+        let wait_for_lock = matches!(mode, IndexMode::WRITE) && matches!(policy, LockPolicy::Wait);
+        if matches!(mode, IndexMode::WRITE) && matches!(policy, LockPolicy::Fail) {
             match file.try_lock() {
                 Ok(()) => {}
                 Err(TryLockError::WouldBlock) => bail!(
@@ -318,6 +353,7 @@ impl TinyIndex {
             metadata.page_size,
             metadata.num_pages,
             num_threads,
+            wait_for_lock,
         )?;
 
         Ok(Self {

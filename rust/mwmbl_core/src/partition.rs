@@ -59,6 +59,7 @@ impl Partitions {
         page_size: usize,
         num_pages: usize,
         num_threads: usize,
+        wait_for_lock: bool,
     ) -> anyhow::Result<Partitions> {
         if num_threads == 0 {
             bail!("An index needs at least one owner thread");
@@ -73,7 +74,16 @@ impl Partitions {
             };
             let thread = thread::Builder::new()
                 .name(format!("index-owner-{number}"))
-                .spawn(move || owner.run(&receiver))
+                .spawn(move || {
+                    // Every owner blocks here, so none touches a page before the lock is
+                    // held. They share one open file description, which holds the lock for
+                    // all of them once any has it.
+                    if wait_for_lock && let Err(error) = owner.file.lock() {
+                        eprintln!("Could not lock the index file: {error}");
+                        return;
+                    }
+                    owner.run(&receiver);
+                })
                 .context("Could not start an index owner thread")?;
             senders.push(sender);
             threads.push(thread);

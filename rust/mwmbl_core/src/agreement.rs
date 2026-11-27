@@ -1,10 +1,12 @@
 use std::{collections::HashSet, iter::zip};
 
 use itertools::Itertools;
+use serde::Serialize;
 
 use crate::indexer::Document;
 
 #[allow(dead_code)]
+#[derive(Serialize)]
 pub struct Agreement {
     url: String,
     existing_user_id: i32,

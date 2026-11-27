@@ -25,8 +25,10 @@ mod features;
 mod index;
 mod pipeline;
 
+use std::path::PathBuf;
+
 use mwmbl_core::{indexer::Document, wiki};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 use pipeline::{
@@ -304,12 +306,27 @@ fn wiki_score(url: &str) -> f64 {
     wiki::get_wiki_score(url)
 }
 
+/// Runs the index server on `socket_path` for the indexes in `index_paths`, a list of (name,
+/// path) pairs, until the process gets SIGTERM. The GIL is released throughout, so this is
+/// for a process of its own.
+#[pyfunction]
+fn serve_index(
+    py: Python<'_>,
+    socket_path: PathBuf,
+    index_paths: Vec<(String, PathBuf)>,
+    num_threads: usize,
+) -> PyResult<()> {
+    py.allow_threads(move || index_server::run(&socket_path, &index_paths, num_threads))
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))
+}
+
 /// The `mwmbl_rank` Python extension module.
 #[pymodule]
 fn mwmbl_rank(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyXGBPipeline>()?;
     m.add_function(wrap_pyfunction!(get_features_py, m)?)?;
     m.add_function(wrap_pyfunction!(wiki_score, m)?)?;
+    m.add_function(wrap_pyfunction!(serve_index, m)?)?;
     m.add_function(wrap_pyfunction!(index::read_index_page, m)?)?;
     m.add_function(wrap_pyfunction!(index::write_index_page, m)?)?;
     m.add_function(wrap_pyfunction!(index::pack_index_page, m)?)?;
