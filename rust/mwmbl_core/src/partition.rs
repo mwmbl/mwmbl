@@ -4,6 +4,7 @@
 use std::{
     collections::HashMap,
     fs::File,
+    os::unix::fs::FileExt,
     sync::{Arc, mpsc},
     thread::{self, JoinHandle},
 };
@@ -13,7 +14,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     constants::METADATA_SIZE,
-    index::{PageIoError, read_index_page, write_index_page},
+    index::{PageIoError, pack_page, read_index_page},
     indexer::{Document, StoredPage, combine_documents, find_stored_copies},
     rank::HeuristicRanker,
 };
@@ -110,11 +111,11 @@ impl Drop for Partitions {
     }
 }
 
-/// Merges for one page that are applied with a single read and write. Only merges that
-/// mark the same term as synced are grouped, since the mark applies to the whole page.
-struct MergeGroup {
+/// One merge waiting for its page's next read and write.
+struct Merge {
+    docs: Vec<Document>,
     mark_term_synced: Option<String>,
-    requests: Vec<(Vec<Document>, oneshot::Sender<StoredPage>)>,
+    reply: oneshot::Sender<StoredPage>,
 }
 
 struct Owner {
@@ -127,7 +128,7 @@ impl Owner {
         while let Ok(first) = receiver.recv() {
             let round =
                 std::iter::once(first).chain(receiver.try_iter().take(MAX_REQUESTS_PER_ROUND));
-            let mut pending: HashMap<usize, MergeGroup> = HashMap::new();
+            let mut pending: HashMap<usize, Vec<Merge>> = HashMap::new();
             for request in round {
                 match request {
                     PageRequest::Retrieve { page, term, reply } => {
@@ -148,20 +149,11 @@ impl Owner {
                         mark_term_synced,
                         reply,
                     } => {
-                        let marks_differ = pending
-                            .get(&page)
-                            .is_some_and(|group| group.mark_term_synced != mark_term_synced);
-                        if marks_differ && let Some(group) = pending.remove(&page) {
-                            self.merge(page, group);
-                        }
-                        pending
-                            .entry(page)
-                            .or_insert_with(|| MergeGroup {
-                                mark_term_synced,
-                                requests: Vec::new(),
-                            })
-                            .requests
-                            .push((docs, reply));
+                        pending.entry(page).or_default().push(Merge {
+                            docs,
+                            mark_term_synced,
+                            reply,
+                        });
                     }
                 }
             }
@@ -175,9 +167,13 @@ impl Owner {
         (page * self.page_size + METADATA_SIZE!()) as u64
     }
 
-    fn merge(&self, page: usize, group: MergeGroup) {
+    /// Applies the merges to the page in order, each to the page as the one before left it,
+    /// so each reply is what applying the merges one at a time would give. Only the result
+    /// is written, once. The replies are sent after that write, and a merge whose documents
+    /// can't be packed is skipped as it would have been alone.
+    fn merge(&self, page: usize, merges: Vec<Merge>) {
         let offset = self.offset(page);
-        let existing: Vec<Document> =
+        let mut state: Vec<Document> =
             match read_index_page(&self.file, offset, self.page_size, None) {
                 Ok(existing) => existing,
                 // This thread is the page's only writer, so this is real damage rather than a
@@ -191,27 +187,42 @@ impl Owner {
                     return;
                 }
             };
-        let incoming = group.requests.iter().flat_map(|(docs, _)| docs);
-        let mut combined = combine_documents(
-            &existing,
-            incoming,
-            group.mark_term_synced.as_ref(),
-            &HeuristicRanker::new(f32::NEG_INFINITY),
-        );
-        match write_index_page(&self.file, offset, self.page_size, &combined) {
-            Ok(num_stored) => combined.truncate(num_stored),
-            Err(error) => {
-                eprintln!("Skipping index page {page}: {error}");
-                return;
-            }
-        }
-        for (docs, reply) in group.requests {
-            let stored_copies = find_stored_copies(&docs, &existing);
+        let ranker = HeuristicRanker::new(f32::NEG_INFINITY);
+        let mut packed = None;
+        let mut replies = Vec::with_capacity(merges.len());
+        for merge in merges {
+            let stored_copies = find_stored_copies(&merge.docs, &state);
+            let mut combined = combine_documents(
+                &state,
+                &merge.docs,
+                merge.mark_term_synced.as_ref(),
+                &ranker,
+            );
+            let (bytes, num_stored) = match pack_page(self.page_size, &combined) {
+                Ok(page_bytes) => page_bytes,
+                Err(error) => {
+                    eprintln!("Skipping a merge into index page {page}: {error}");
+                    continue;
+                }
+            };
+            combined.truncate(num_stored);
+            packed = Some(bytes);
+            let existing = std::mem::replace(&mut state, combined);
             let stored_page = StoredPage {
-                stored: combined.clone(),
-                existing: existing.clone(),
+                stored: state.clone(),
+                existing,
                 stored_copies,
             };
+            replies.push((merge.reply, stored_page));
+        }
+        let Some(bytes) = packed else {
+            return;
+        };
+        if let Err(error) = self.file.write_all_at(&bytes, offset) {
+            eprintln!("Skipping index page {page}: {error}");
+            return;
+        }
+        for (reply, stored_page) in replies {
             respond(reply, stored_page);
         }
     }
@@ -220,5 +231,104 @@ impl Owner {
 fn respond<T>(reply: oneshot::Sender<T>, value: T) {
     if reply.send(value).is_err() {
         eprintln!("An index request was abandoned before its reply");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs::OpenOptions, path::PathBuf};
+
+    use super::*;
+    use crate::indexer::create_index;
+
+    fn document(url: &str, title: &str, user_id: i32) -> Document {
+        Document::new(
+            title.to_owned(),
+            url.to_owned(),
+            "rust is a language".to_owned(),
+            None,
+            Some("rust".to_owned()),
+            None,
+            Some(vec![user_id]),
+            Some(1),
+            None,
+        )
+    }
+
+    fn owner(name: &str) -> (Owner, PathBuf) {
+        let path =
+            std::env::temp_dir().join(format!("mwmbl_partition_{}_{name}", std::process::id()));
+        create_index(&path, 4, false).unwrap();
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let owner = Owner {
+            file: Arc::new(file),
+            page_size: 4096,
+        };
+        (owner, path)
+    }
+
+    fn merges(batches: Vec<Vec<Document>>) -> (Vec<Merge>, Vec<oneshot::Receiver<StoredPage>>) {
+        batches
+            .into_iter()
+            .map(|docs| {
+                let (reply, receiver) = oneshot::channel();
+                let merge = Merge {
+                    docs,
+                    mark_term_synced: None,
+                    reply,
+                };
+                (merge, receiver)
+            })
+            .unzip()
+    }
+
+    fn summary(receiver: oneshot::Receiver<StoredPage>) -> serde_json::Value {
+        let page = receiver.blocking_recv().unwrap();
+        serde_json::json!({
+            "stored": page.stored,
+            "existing": page.existing,
+            "stored_copies": page.stored_copies,
+        })
+    }
+
+    #[test]
+    fn grouped_merges_reply_as_sequential_merges_would() {
+        let batches = || {
+            vec![
+                vec![document("https://rust-lang.org/", "Rust", 1)],
+                vec![
+                    document("https://rust-lang.org/", "Rust", 1),
+                    document("https://other.example/", "Other", 2),
+                ],
+            ]
+        };
+        let (grouped_owner, grouped_path) = owner("grouped");
+        let (grouped, grouped_receivers) = merges(batches());
+        grouped_owner.merge(0, grouped);
+        let (sequential_owner, sequential_path) = owner("sequential");
+        let mut sequential_replies = Vec::new();
+        for batch in batches() {
+            let (sequential, receivers) = merges(vec![batch]);
+            sequential_owner.merge(0, sequential);
+            sequential_replies.extend(receivers.into_iter().map(summary));
+        }
+
+        let grouped_replies: Vec<_> = grouped_receivers.into_iter().map(summary).collect();
+        assert_eq!(grouped_replies, sequential_replies);
+        let second = &grouped_replies[1];
+        assert_eq!(second["existing"].as_array().unwrap().len(), 1, "{second}");
+        assert_eq!(
+            second["stored_copies"].as_array().unwrap().len(),
+            1,
+            "{second}"
+        );
+        let read = |path: &PathBuf| std::fs::read(path).unwrap();
+        assert_eq!(read(&grouped_path), read(&sequential_path));
+        std::fs::remove_file(grouped_path).unwrap();
+        std::fs::remove_file(sequential_path).unwrap();
     }
 }
