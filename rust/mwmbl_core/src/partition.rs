@@ -19,8 +19,9 @@ use crate::{
     rank::HeuristicRanker,
 };
 
-/// The most requests an owner thread takes off its queue before applying them, so a read
-/// behind a long stream of writes still gets an answer.
+/// The most requests an owner thread takes off its queue in one round. Merges are written
+/// at the end of their round, so this bounds how long they, and the requests queued after
+/// the round, wait.
 const MAX_REQUESTS_PER_ROUND: usize = 1024;
 
 pub(crate) enum PageRequest {
@@ -123,8 +124,23 @@ struct Owner {
     page_size: usize,
 }
 
+/// Aborts the process if an owner thread panics. Without it the other partitions carry on
+/// and every request for the dead one fails, so a crawler keeps running but submits
+/// nothing; aborting lets Docker's restart policy start it afresh.
+struct AbortOnPanic;
+
+impl Drop for AbortOnPanic {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            eprintln!("An index owner thread panicked; aborting");
+            std::process::abort();
+        }
+    }
+}
+
 impl Owner {
     fn run(&self, receiver: &mpsc::Receiver<PageRequest>) {
+        let _abort_on_panic = AbortOnPanic;
         while let Ok(first) = receiver.recv() {
             let round =
                 std::iter::once(first).chain(receiver.try_iter().take(MAX_REQUESTS_PER_ROUND));
@@ -330,5 +346,35 @@ mod tests {
         assert_eq!(read(&grouped_path), read(&sequential_path));
         std::fs::remove_file(grouped_path).unwrap();
         std::fs::remove_file(sequential_path).unwrap();
+    }
+
+    #[test]
+    fn a_retrieve_in_the_same_round_as_a_merge_sees_it() {
+        let (owner, path) = owner("round");
+        let (sender, receiver) = mpsc::channel();
+        let (mut queued, _merge_receivers) =
+            merges(vec![vec![document("https://rust-lang.org/", "Rust", 1)]]);
+        let merge = queued.remove(0);
+        let (reply, retrieved) = oneshot::channel();
+        sender
+            .send(PageRequest::Merge {
+                page: 0,
+                docs: merge.docs,
+                mark_term_synced: None,
+                reply: merge.reply,
+            })
+            .unwrap();
+        sender
+            .send(PageRequest::Retrieve {
+                page: 0,
+                term: "rust".to_owned(),
+                reply,
+            })
+            .unwrap();
+        drop(sender);
+        owner.run(&receiver);
+
+        assert_eq!(retrieved.blocking_recv().unwrap().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
     }
 }

@@ -197,9 +197,9 @@ fn only_one_handle_may_write_an_index_at_a_time() {
 async fn a_page_outside_the_index_is_an_error() {
     let scratch = ScratchIndex::new(4);
     let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 1).unwrap();
+    let page = index.get_key_page_index("rust");
     let doc = document("Rust", "https://rust-lang.org/", 1, 1);
-    let result = index
-        .index_pages(HashMap::from([(4, vec![doc])]), None)
-        .await;
-    assert!(result.is_err());
+    let page_documents = HashMap::from([(page, vec![doc.clone()]), (4, vec![doc])]);
+    assert!(index.index_pages(page_documents, None).await.is_err());
+    assert!(index.retrieve("rust").await.unwrap().is_empty());
 }

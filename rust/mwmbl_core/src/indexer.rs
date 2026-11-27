@@ -359,7 +359,7 @@ impl TinyIndex {
     ///
     /// # Errors
     ///
-    /// Fails if the page can't be read or doesn't decode.
+    /// Fails if the page can't be read or doesn't decode, or its owner thread has stopped.
     pub async fn retrieve(&self, term: &str) -> anyhow::Result<Vec<Document>> {
         let page = self.get_key_page_index(term);
         let (reply, receiver) = oneshot::channel();
@@ -387,6 +387,10 @@ impl TinyIndex {
     ) -> anyhow::Result<Vec<StoredPage>> {
         if matches!(self.mode, IndexMode::READ) {
             bail!("Index is in read only mode");
+        }
+        let num_pages = self.metadata.num_pages;
+        if let Some(page) = page_documents.keys().find(|page| **page >= num_pages) {
+            bail!("Page {page} is not in an index of {num_pages} pages");
         }
         let mut receivers = Vec::with_capacity(page_documents.len());
         for (page, docs) in page_documents {
