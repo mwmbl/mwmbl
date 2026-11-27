@@ -15,7 +15,9 @@ use tokio::sync::oneshot;
 use crate::{
     constants::METADATA_SIZE,
     index::{PageIoError, pack_page, read_index_page},
-    indexer::{Document, PageItem, StoredPage, combine_documents, find_stored_copies},
+    indexer::{
+        Document, PageDocument, PageItem, StoredPage, combine_documents, find_stored_copies,
+    },
     rank::HeuristicRanker,
 };
 
@@ -161,13 +163,7 @@ impl Owner {
                         if let Some(group) = pending.remove(&page) {
                             self.merge(page, group);
                         }
-                        let documents = read_index_page(
-                            &self.file,
-                            self.offset(page),
-                            self.page_size,
-                            Some(&term),
-                        );
-                        respond(reply, documents);
+                        respond(reply, self.read(page, Some(&term)));
                     }
                     PageRequest::Merge {
                         page,
@@ -193,26 +189,31 @@ impl Owner {
         (page * self.page_size + METADATA_SIZE!()) as u64
     }
 
+    fn read(&self, page: usize, term: Option<&str>) -> Result<Vec<Document>, PageIoError> {
+        let documents: Vec<PageDocument> =
+            read_index_page(&self.file, self.offset(page), self.page_size, term)?;
+        Ok(documents.into_iter().map(|document| document.0).collect())
+    }
+
     /// Applies the merges to the page in order, each to the page as the one before left it,
     /// so each reply is what applying the merges one at a time would give. Only the result
     /// is written, once. The replies are sent after that write, and a merge whose documents
     /// can't be packed is skipped as it would have been alone.
     fn merge(&self, page: usize, merges: Vec<Merge>) {
         let offset = self.offset(page);
-        let mut state: Vec<Document> =
-            match read_index_page(&self.file, offset, self.page_size, None) {
-                Ok(existing) => existing,
-                // This thread is the page's only writer, so this is real damage rather than a
-                // write caught half-done. Nothing else would ever repair it.
-                Err(PageIoError::Unreadable(reason)) => {
-                    eprintln!("Index page {page} is corrupt ({reason}); resetting it");
-                    Vec::new()
-                }
-                Err(error) => {
-                    eprintln!("Skipping index page {page}: {error}");
-                    return;
-                }
-            };
+        let mut state: Vec<Document> = match self.read(page, None) {
+            Ok(existing) => existing,
+            // This thread is the page's only writer, so this is real damage rather than a
+            // write caught half-done. Nothing else would ever repair it.
+            Err(PageIoError::Unreadable(reason)) => {
+                eprintln!("Index page {page} is corrupt ({reason}); resetting it");
+                Vec::new()
+            }
+            Err(error) => {
+                eprintln!("Skipping index page {page}: {error}");
+                return;
+            }
+        };
         let ranker = HeuristicRanker::new(f32::NEG_INFINITY);
         let mut packed = None;
         let mut replies = Vec::with_capacity(merges.len());
@@ -328,7 +329,7 @@ mod tests {
             vec![
                 vec![document("https://rust-lang.org/", "Rust", 1)],
                 vec![
-                    document("https://rust-lang.org/", "Rust", 1),
+                    document("https://rust-lang.org/", "Rust", 3),
                     document("https://other.example/", "Other", 2),
                 ],
             ]
