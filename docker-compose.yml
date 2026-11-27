@@ -20,8 +20,10 @@ services:
       # See `mwmbl-crawl --help`. Each has the crawler's own default.
       # Threads running the crawl.
       - CRAWL_THREADS=${CRAWL_THREADS:-8}
-      # Threads parsing pages and writing the local index.
+      # Threads parsing pages.
       - BLOCKING_THREADS=${BLOCKING_THREADS:-4}
+      # Threads reading and writing the local index.
+      - INDEX_THREADS=${INDEX_THREADS:-2}
       # Pages fetched at once.
       - CRAWL_MAX_TASKS=${CRAWL_MAX_TASKS:-16}
       # Batches of results submitted at once.

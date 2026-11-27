@@ -21,7 +21,9 @@ Optional:
   never used, since hostnames routinely carry their owner's name.
 - `CRAWL_MAX_TASKS` (default 64) - pages fetched at once.
 - `CRAWL_THREADS` (default 32) - threads running the crawl.
-- `BLOCKING_THREADS` (default 8) - threads parsing pages and writing the local index.
+- `BLOCKING_THREADS` (default 8) - threads parsing pages.
+- `INDEX_THREADS` (default 2) - threads reading and writing the local index, each owning a
+  share of its pages.
 - `SUBMIT_MAX_TASKS` (default 16) - batches of results submitted at once.
 - `CRAWL_DELAY_SECONDS` (default 0) - seconds between starting one fetch and the next, with
   10% random fuzz.

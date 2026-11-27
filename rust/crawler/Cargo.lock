@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "crawler_rs"
-version = "2.0.11"
+version = "2.0.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2306,16 +2306,6 @@ name = "fiat-crypto"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
-
-[[package]]
-name = "file-guard"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21ef72acf95ec3d7dbf61275be556299490a245f017cf084bd23b4f68cf9407c"
-dependencies = [
- "libc",
- "winapi",
-]
 
 [[package]]
 name = "filetime"
@@ -4920,13 +4910,11 @@ name = "mwmbl_core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "file-guard",
  "futures-util",
  "itertools 0.15.0",
  "murmurhash32",
  "ordered-float",
  "phf 0.14.0",
- "rayon",
  "regex",
  "regex-syntax",
  "reqwest 0.13.5",

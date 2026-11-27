@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -87,7 +88,7 @@ impl Drop for ScratchIndex {
 #[tokio::test]
 async fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
     let scratch = ScratchIndex::new(8);
-    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE).unwrap();
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 2).unwrap();
     let page = index.get_key_page_index("rust");
     let existing = vec![
         document("Rust", "https://rust-lang.org/", 10, 1),
@@ -106,7 +107,7 @@ async fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
         .index_pages(HashMap::from([(page, incoming)]), Some(&"rust".to_owned()))
         .await
         .unwrap();
-    let combined: Vec<Document> = index.retrieve("rust").await.unwrap();
+    let combined = index.retrieve("rust").await.unwrap();
 
     let urls: Vec<&str> = combined.iter().map(Document::url).collect();
     assert_eq!(urls.len(), 2, "{urls:?}");
@@ -126,4 +127,79 @@ async fn copies_of_a_url_merge_their_history_and_a_title_is_kept_once() {
         (other.last_crawled(), other.user_ids()),
         (Some(5), Some(&vec![4]))
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_writes_to_one_page_lose_no_documents() {
+    let scratch = ScratchIndex::new(4);
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 3).unwrap();
+    let page = index.get_key_page_index("rust");
+    let tasks: Vec<_> = (0..20)
+        .map(|n| {
+            let index = index.clone();
+            let doc = document(&format!("Rust {n}"), &format!("https://{n}.example/"), n, 1);
+            tokio::spawn(async move {
+                index
+                    .index_pages(HashMap::from([(page, vec![doc])]), None)
+                    .await
+            })
+        })
+        .collect();
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
+
+    let stored = index.retrieve("rust").await.unwrap();
+    assert_eq!(stored.len(), 20);
+}
+
+#[tokio::test]
+async fn a_corrupt_page_is_reset_by_the_next_write() {
+    let scratch = ScratchIndex::new(4);
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 2).unwrap();
+    let page = index.get_key_page_index("rust");
+    let offset = u64::try_from((page + 1) * 4096).unwrap();
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&scratch.path)
+        .unwrap();
+    file.write_all_at(&[0xff; 4096], offset).unwrap();
+    assert!(index.retrieve("rust").await.is_err());
+
+    let doc = document("Rust", "https://rust-lang.org/", 1, 1);
+    index
+        .index_pages(HashMap::from([(page, vec![doc])]), None)
+        .await
+        .unwrap();
+
+    let stored = index.retrieve("rust").await.unwrap();
+    assert_eq!(stored.len(), 1);
+}
+
+#[test]
+fn only_one_handle_may_write_an_index_at_a_time() {
+    let scratch = ScratchIndex::new(4);
+    let writer = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 1).unwrap();
+    let Err(error) = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 1) else {
+        panic!("a second writer opened the index");
+    };
+    assert!(
+        error.to_string().contains("already open for writing"),
+        "{error}"
+    );
+    TinyIndex::from_file(&scratch.path, IndexMode::READ, 1).unwrap();
+
+    drop(writer);
+    TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 1).unwrap();
+}
+
+#[tokio::test]
+async fn a_page_outside_the_index_is_an_error() {
+    let scratch = ScratchIndex::new(4);
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 1).unwrap();
+    let doc = document("Rust", "https://rust-lang.org/", 1, 1);
+    let result = index
+        .index_pages(HashMap::from([(4, vec![doc])]), None)
+        .await;
+    assert!(result.is_err());
 }

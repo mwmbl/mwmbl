@@ -39,7 +39,7 @@ Design decisions, from the issue thread:
 - **Python keeps the blacklist check.** It filters documents with the snapshot blacklist
   before sending them, so the server indexes with a provider that blocks nothing.
 
-## PR 1: Partitioned, lock-free TinyIndex in mwmbl_core
+## PR 1: Partitioned, lock-free TinyIndex in mwmbl_core (Done)
 **Estimated added lines:** ~450
 **Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/partition.rs, rust/mwmbl_core/Cargo.toml, rust/crawler/src/crawler.rs, rust/crawler/Cargo.toml
 
