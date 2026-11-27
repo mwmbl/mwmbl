@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use crate::{
     constants::METADATA_SIZE,
     index::{PageIoError, pack_page, read_index_page},
-    indexer::{Document, StoredPage, combine_documents, find_stored_copies},
+    indexer::{Document, PageItem, StoredPage, combine_documents, find_stored_copies},
     rank::HeuristicRanker,
 };
 
@@ -214,7 +214,8 @@ impl Owner {
                 merge.mark_term_synced.as_ref(),
                 &ranker,
             );
-            let (bytes, num_stored) = match pack_page(self.page_size, &combined) {
+            let items: Vec<PageItem> = combined.iter().map(PageItem).collect();
+            let (bytes, num_stored) = match pack_page(self.page_size, &items) {
                 Ok(page_bytes) => page_bytes,
                 Err(error) => {
                     eprintln!("Skipping a merge into index page {page}: {error}");

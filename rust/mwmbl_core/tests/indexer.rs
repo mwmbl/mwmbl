@@ -3,9 +3,11 @@ use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mwmbl_core::index::pack_page;
 use mwmbl_core::indexer::{
-    Document, DocumentSource, DocumentState, IndexMode, TinyIndex, create_index,
+    Document, DocumentSource, DocumentState, IndexMode, PageItem, TinyIndex, create_index,
 };
+use serde_json::json;
 
 #[test]
 fn state_and_source_are_their_integer_values_as_the_server_has_them() {
@@ -20,6 +22,65 @@ fn state_and_source_are_their_integer_values_as_the_server_has_them() {
     assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
     let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
     assert!(unknown.to_string().contains("5 is not a DocumentSource"));
+}
+
+#[test]
+fn pages_are_written_as_python_writes_them() {
+    let text = |title: &str| {
+        (
+            title.to_owned(),
+            "https://rust-lang.org/".to_owned(),
+            "ext".to_owned(),
+        )
+    };
+    let (title, url, extract) = text("Rust");
+    let organic = Document::new(
+        title,
+        url,
+        extract,
+        None,
+        Some("rust".to_owned()),
+        None,
+        None,
+        None,
+        None,
+    );
+    let (title, url, extract) = text("Curated");
+    let curated = Document::new(
+        title,
+        url,
+        extract,
+        Some(0.5),
+        Some("rust".to_owned()),
+        Some(DocumentState::OrganicApproved),
+        Some(vec![3]),
+        Some(10),
+        Some(DocumentSource::Widget),
+    );
+    let (title, url, extract) = text("Bare");
+    let bare = Document::new(title, url, extract, None, None, None, None, None, None);
+    // What Document.as_tuple() gives for each, as Python packs it.
+    let from_python = [
+        json!(["Rust", "https://rust-lang.org/", "ext", null, "rust"]),
+        json!([
+            "Curated",
+            "https://rust-lang.org/",
+            "ext",
+            0.5,
+            "rust",
+            7,
+            [3],
+            10,
+            4
+        ]),
+        json!(["Bare", "https://rust-lang.org/", "ext"]),
+    ];
+
+    let items = [PageItem(&organic), PageItem(&curated), PageItem(&bare)];
+    assert_eq!(
+        pack_page(4096, &items).unwrap(),
+        pack_page(4096, &from_python).unwrap()
+    );
 }
 
 #[test]

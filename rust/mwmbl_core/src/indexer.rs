@@ -13,7 +13,7 @@ use anyhow::{Context, bail};
 use futures_util::future::join_all;
 use itertools::Itertools;
 use reqwest::Url;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeSeq};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -604,6 +604,52 @@ impl IndexedDocuments {
     #[must_use]
     pub fn stored_urls(&self) -> &HashSet<String> {
         &self.stored_urls
+    }
+}
+
+/// A document as a page holds it: the array Python's `Document.as_tuple` makes, in the same
+/// field order with the trailing Nones cut off, so Python reads the pages Rust writes. Field
+/// names would also cost page bytes, so a page would hold fewer documents.
+pub struct PageItem<'a>(pub &'a Document);
+
+impl Serialize for PageItem<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let document = self.0;
+        let present = [
+            document.score.is_some(),
+            document.term.is_some(),
+            document.state.is_some(),
+            document.user_ids.is_some(),
+            document.last_crawled.is_some(),
+            document.source.is_some(),
+        ];
+        let num_optional = present
+            .iter()
+            .rposition(|is_some| *is_some)
+            .map_or(0, |last| last + 1);
+        let mut items = serializer.serialize_seq(Some(3 + num_optional))?;
+        items.serialize_element(&document.title)?;
+        items.serialize_element(&document.url)?;
+        items.serialize_element(&document.extract)?;
+        if num_optional > 0 {
+            items.serialize_element(&document.score)?;
+        }
+        if num_optional > 1 {
+            items.serialize_element(&document.term)?;
+        }
+        if num_optional > 2 {
+            items.serialize_element(&document.state)?;
+        }
+        if num_optional > 3 {
+            items.serialize_element(&document.user_ids)?;
+        }
+        if num_optional > 4 {
+            items.serialize_element(&document.last_crawled)?;
+        }
+        if num_optional > 5 {
+            items.serialize_element(&document.source)?;
+        }
+        items.end()
     }
 }
 
