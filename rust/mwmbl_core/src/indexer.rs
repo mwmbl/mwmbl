@@ -58,15 +58,39 @@ macro_rules! integer_enum {
     };
 }
 
-/// A state or source this build does not know, as an older crawler sees one added since,
-/// reads as None rather than failing the page or the whole API response it is in.
-fn known_or_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: TryFrom<i64>,
-{
-    let value: Option<i64> = Option::deserialize(deserializer)?;
-    Ok(value.and_then(|value| T::try_from(value).ok()))
+/// A state or source as the integer a page holds, kept as it is when this build doesn't know
+/// it, as an older build sees one added since. It reads as None from `Document`'s accessors,
+/// and is written back unchanged, so a merge never erases a newer state or source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Coded<T> {
+    Known(T),
+    Unknown(i64),
+}
+
+impl<T> Coded<T> {
+    fn known(&self) -> Option<&T> {
+        match self {
+            Coded::Known(value) => Some(value),
+            Coded::Unknown(_) => None,
+        }
+    }
+}
+
+impl<T: Clone + Into<i64>> Serialize for Coded<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let value = match self {
+            Coded::Known(known) => known.clone().into(),
+            Coded::Unknown(value) => *value,
+        };
+        serializer.serialize_i64(value)
+    }
+}
+
+impl<'de, T: TryFrom<i64>> Deserialize<'de> for Coded<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = i64::deserialize(deserializer)?;
+        Ok(T::try_from(value).map_or(Coded::Unknown(value), Coded::Known))
+    }
 }
 
 integer_enum!(
@@ -113,14 +137,14 @@ pub struct Document {
     score: Option<f32>,
     #[serde(default)]
     term: Option<String>,
-    #[serde(default, deserialize_with = "known_or_none")]
-    state: Option<DocumentState>,
+    #[serde(default)]
+    state: Option<Coded<DocumentState>>,
     #[serde(default)]
     user_ids: Option<Vec<i32>>,
     #[serde(default)]
     last_crawled: Option<i64>,
-    #[serde(default, deserialize_with = "known_or_none")]
-    source: Option<DocumentSource>,
+    #[serde(default)]
+    source: Option<Coded<DocumentSource>>,
 }
 
 #[derive(Debug, Clone)]
@@ -149,10 +173,10 @@ impl Document {
             extract,
             score,
             term,
-            state,
+            state: state.map(Coded::Known),
             user_ids,
             last_crawled,
-            source,
+            source: source.map(Coded::Known),
         }
     }
 
@@ -183,7 +207,7 @@ impl Document {
 
     #[must_use]
     pub fn state(&self) -> Option<&DocumentState> {
-        self.state.as_ref()
+        self.state.as_ref().and_then(Coded::known)
     }
 
     #[must_use]
@@ -198,7 +222,7 @@ impl Document {
 
     #[must_use]
     pub fn source(&self) -> Option<&DocumentSource> {
-        self.source.as_ref()
+        self.source.as_ref().and_then(Coded::known)
     }
 }
 
@@ -445,7 +469,7 @@ impl TinyIndex {
 
         for page in self.store_pages(page_documents, None).await? {
             for stored in page.stored {
-                if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
+                if !matches!(stored.state(), Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
                 {
                     *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
@@ -521,7 +545,7 @@ impl TinyIndex {
 
         for page in self.store_pages(page_documents, mark_term_synced).await? {
             for stored in page.stored {
-                if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
+                if !matches!(stored.state(), Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
                 {
                     *new_page_doc_counts.entry(term.to_owned()).or_default() += 1;
@@ -653,6 +677,27 @@ impl Serialize for PageItem<'_> {
     }
 }
 
+/// A document as a page holds it, read from either form a page may hold: the array Python
+/// writes, or the object older crawlers wrote. An array may have more elements than this
+/// build knows, written by a newer one; they are dropped rather than failing the page, which
+/// a merge would then reset.
+pub struct PageDocument(pub Document);
+
+/// The number of elements of a page item's array that this build reads.
+const DOCUMENT_FIELDS: usize = 9;
+
+impl<'de> Deserialize<'de> for PageDocument {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(deserializer)?;
+        if let Value::Array(items) = &mut value {
+            items.truncate(DOCUMENT_FIELDS);
+        }
+        Document::deserialize(value)
+            .map(PageDocument)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Default)]
 pub struct StoredPage {
     pub(crate) stored: Vec<Document>,
@@ -665,22 +710,24 @@ where
     I: IntoIterator<Item = &'b Document>,
     J: IntoIterator<Item = &'a Document>,
 {
-    let submitters_by_url = incoming
-        .into_iter()
-        .filter_map(|v| v.user_ids.clone().map(|user_ids| (v.url.clone(), user_ids)))
-        .flat_map(|(url, user_ids)| user_ids.into_iter().map(move |id| (url.clone(), id)))
-        .collect::<HashSet<_>>();
+    let mut submitters_by_url: HashMap<&str, HashSet<i32>> = HashMap::new();
+    for document in incoming {
+        let submitters = submitters_by_url.entry(&document.url).or_default();
+        submitters.extend(document.user_ids.iter().flatten());
+    }
     let mut stored_copies = Vec::new();
     for document in existing {
-        let attributed: bool = !document
-            .state
-            .as_ref()
-            .is_some_and(DocumentState::is_curated)
-            && document.source.is_none();
+        // A curated copy or a copy of Staan's has no author of its own, yet takes on the
+        // user_ids of the copies it beats, so its last id names one of them.
+        let attributed =
+            !document.state().is_some_and(DocumentState::is_curated) && document.source.is_none();
+        // Another crawler's copy: the stored text may be this crawler's own, from an earlier
+        // submission, and comparing that with itself says nothing.
         if attributed
-            && let Some(author_ids) = &document.user_ids
-            && let Some(author_id) = author_ids.last()
-            && submitters_by_url.contains(&(document.url.clone(), *author_id))
+            && let Some(&author_id) = document.user_ids.iter().flatten().last()
+            && let Some(submitters) = submitters_by_url.get(document.url.as_str())
+            && !submitters.is_empty()
+            && !submitters.contains(&author_id)
         {
             stored_copies.push(document.clone());
         }
@@ -737,7 +784,7 @@ where
                 && doc.state.is_none()
                 && doc.term.as_ref() == mark_term_synced
             {
-                doc.state = Some(DocumentState::SyncedWithMainIndex);
+                doc.state = Some(Coded::Known(DocumentState::SyncedWithMainIndex));
             }
             doc
         })
@@ -781,9 +828,9 @@ where
     let mut existing_other = Vec::new();
 
     for doc in existing_documents {
-        if doc.state.as_ref().is_some_and(DocumentState::is_curated) {
+        if doc.state().is_some_and(DocumentState::is_curated) {
             curated.push(doc);
-        } else if matches!(&doc.source, Some(DocumentSource::Widget)) {
+        } else if matches!(doc.source(), Some(DocumentSource::Widget)) {
             widgets_urls.insert(doc.url.clone());
             widgets.push(doc);
         } else {
@@ -794,7 +841,7 @@ where
     let mut other_documents = Vec::new();
 
     for doc in documents {
-        if matches!(doc.source, Some(DocumentSource::Widget)) {
+        if matches!(doc.source(), Some(DocumentSource::Widget)) {
             if !widgets_urls.contains(&doc.url) {
                 widgets.push(doc);
             }
