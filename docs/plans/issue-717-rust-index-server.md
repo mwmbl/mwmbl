@@ -102,7 +102,7 @@ with the GIL released. Copy `rust/index_server` in the Dockerfile builder stage.
   exits, and then applies the queued ones.
 - SIGTERM with writes queued applies them before exit.
 
-## PR 4: Conditional page reads and writes
+## PR 4: Conditional page reads and writes (Done)
 **Estimated added lines:** ~350
 **Files:** rust/mwmbl_core/src/indexer.rs, rust/index_server/src/api.rs, test/…
 

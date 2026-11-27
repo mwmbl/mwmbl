@@ -39,7 +39,15 @@ fn document() -> Value {
 }
 
 async fn post(router: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
-    let request = Request::post(uri)
+    send(router, Request::post(uri), body).await
+}
+
+async fn send(
+    router: &Router,
+    request: axum::http::request::Builder,
+    body: Value,
+) -> (StatusCode, Value) {
+    let request = request
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap();
@@ -214,4 +222,89 @@ async fn response(stream: &mut UnixStream) -> String {
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
     response
+}
+
+async fn read_page(router: &Router, page: usize) -> (Vec<Value>, String) {
+    let (status, body) = send(
+        router,
+        Request::get(format!("/v1/main/page/{page}")),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let documents = body["documents"].as_array().unwrap().clone();
+    (documents, body["version"].as_str().unwrap().to_owned())
+}
+
+async fn write_page(
+    router: &Router,
+    page: usize,
+    version: &str,
+    documents: &[Value],
+) -> (StatusCode, Value) {
+    let uri = format!("/v1/main/page/{page}?if_version={version}");
+    send(router, Request::put(uri), json!({"documents": documents})).await
+}
+
+fn page_bytes(path: &Path, page: usize) -> Vec<u8> {
+    let bytes = std::fs::read(path).unwrap();
+    bytes[(page + 1) * 4096..(page + 2) * 4096].to_vec()
+}
+
+#[tokio::test]
+async fn racing_conditional_writes_both_land_after_a_retry() {
+    let path = index_path("conditional");
+    let router = router(&path);
+    // An unknown state and the elements a newer build adds survive the round trip.
+    let mut first_document = document();
+    first_document["state"] = json!(99);
+    first_document["extra"] = json!([1, "newer"]);
+    let second_document =
+        json!({"title": "Other", "url": "https://other.example/", "extract": "x"});
+
+    let (first_read, first_version) = read_page(&router, 3).await;
+    let (second_read, second_version) = read_page(&router, 3).await;
+    assert_eq!(first_version, second_version);
+    let first_write = [first_read, vec![first_document.clone()]].concat();
+    let (status, body) = write_page(&router, 3, &first_version, &first_write).await;
+    assert_eq!((status, body), (StatusCode::OK, json!({"num_stored": 1})));
+
+    let written = page_bytes(&path, 3);
+    let stale_write = [second_read, vec![second_document.clone()]].concat();
+    let (status, _) = write_page(&router, 3, &second_version, &stale_write).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        page_bytes(&path, 3),
+        written,
+        "The stale write changed the page"
+    );
+
+    let (retry_read, retry_version) = read_page(&router, 3).await;
+    let retry_write = [retry_read, vec![second_document.clone()]].concat();
+    let (status, _) = write_page(&router, 3, &retry_version, &retry_write).await;
+    assert_eq!(status, StatusCode::OK);
+    let (documents, _) = read_page(&router, 3).await;
+    assert_eq!(documents.len(), 2);
+    assert_eq!(documents[0]["state"], json!(99));
+    assert_eq!(documents[0]["extra"], json!([1, "newer"]));
+    assert_eq!(documents[1]["url"], second_document["url"]);
+}
+
+#[tokio::test]
+async fn a_corrupt_page_reads_as_empty_and_a_conditional_write_resets_it() {
+    let path = index_path("corrupt_page");
+    let router = router(&path);
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.write_all_at(&[0xff; 4096], 5 * 4096).unwrap();
+
+    let (documents, version) = read_page(&router, 4).await;
+    assert!(documents.is_empty());
+    let (status, _) = write_page(&router, 4, &version, &[document()]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read_page(&router, 4).await.0.len(), 1);
+
+    let (status, _) = send(&router, Request::get("/v1/main/page/16"), json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = write_page(&router, 16, &version, &[]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

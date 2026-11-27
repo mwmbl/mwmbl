@@ -17,6 +17,7 @@ use std::os::unix::fs::FileExt;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use xxhash_rust::xxh3::xxh3_64;
 use zstd::bulk::{Compressor, Decompressor};
 use zstd::zstd_safe;
 
@@ -71,7 +72,11 @@ fn read_error(error: io::Error) -> PageIoError {
     PageIoError::Io(error)
 }
 
-fn read_page_bytes(file: &File, offset: u64, page_size: usize) -> Result<Vec<u8>, PageIoError> {
+pub(crate) fn read_page_bytes(
+    file: &File,
+    offset: u64,
+    page_size: usize,
+) -> Result<Vec<u8>, PageIoError> {
     let mut page = vec![0u8; page_size];
     // read_exact_at rather than read_at, which can stop short and doesn't retry a read a
     // signal interrupted.
@@ -138,7 +143,7 @@ fn zstd_error(code: usize) -> PageIoError {
     PageIoError::unreadable(zstd_safe::get_error_name(code))
 }
 
-fn decode_page<T: DeserializeOwned>(
+pub(crate) fn decode_page<T: DeserializeOwned>(
     page: &[u8],
     term: Option<&str>,
 ) -> Result<Vec<T>, PageIoError> {
@@ -166,6 +171,17 @@ fn has_term(document: &Value, term: &str) -> bool {
         Some(Value::String(document_term)) => document_term == term,
         Some(_) => false,
     }
+}
+
+/// The version of a page: a hash of its bytes as stored, so identical bytes are the same
+/// version and the owner thread keeps no state to compare it with.
+///
+/// xxh3 is fast (a page hashes in well under a microsecond) and well known, and unlike std's
+/// `DefaultHasher`, whose algorithm may change between Rust releases, it gives the same hash
+/// in every build, so a version a client holds survives a server upgrade. The clients are
+/// trusted local processes, so it needn't resist deliberate collisions.
+pub(crate) fn page_version(page: &[u8]) -> u64 {
+    xxh3_64(page)
 }
 
 /// The first `count` of the serialised documents, as a compressed JSON array.
