@@ -250,7 +250,11 @@ async fn a_newer_builds_page_items_survive_a_merge() {
     let stored: Vec<Value> = read_index_page(&file, offset, 4096, None).unwrap();
     assert_eq!(stored.len(), 2, "{stored:?}");
     let kept = stored.iter().find(|item| item[0] == "New").unwrap();
-    assert_eq!((&kept[5], &kept[8]), (&json!(99), &json!(98)));
+    assert_eq!(
+        (&kept[5], &kept[8], &kept[9]),
+        (&json!(99), &json!(98), &json!("x"))
+    );
+    assert_eq!(kept.as_array().unwrap().len(), 10);
 }
 
 #[tokio::test]
