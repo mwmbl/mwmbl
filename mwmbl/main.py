@@ -1,11 +1,15 @@
+import ctypes
 import logging
 import multiprocessing
 import os
+import signal
 from time import sleep
 
 import django
 from django.core.management import call_command
 from gunicorn.app.base import BaseApplication
+
+from mwmbl_rank import serve_index
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,47 @@ def run_seed_crawls():
         sleep(TASK_QUEUE_RESTART_SECONDS)
 
 
+PR_SET_PDEATHSIG = 1
+
+
+def run_index_server(parent_pid: int, socket_path: str, index_paths: list[tuple[str, str]], num_threads: int):
+    """Run the Rust index server until SIGTERM. Entry point for the child process.
+
+    SIGTERM is also what it gets if this process dies without forwarding it, so it still
+    applies its queued writes and releases the index lock for the next container.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM) != 0:
+        raise OSError(ctypes.get_errno(), "Could not set the index server's parent death signal")
+    # The parent may have died before the signal was set, when nothing would deliver it.
+    if os.getppid() != parent_pid:
+        return
+    serve_index(socket_path, index_paths, num_threads)
+
+
+def start_index_server(settings) -> multiprocessing.Process:
+    os.makedirs(os.path.dirname(settings.INDEX_SERVER_SOCKET), exist_ok=True)
+    index_paths = [
+        ("main", f"{settings.DATA_PATH}/{settings.INDEX_NAME}"),
+        ("external_cache", f"{settings.DATA_PATH}/{settings.EXTERNAL_CACHE_INDEX_NAME}"),
+    ]
+    args = (os.getpid(), settings.INDEX_SERVER_SOCKET, index_paths, settings.INDEX_SERVER_THREADS)
+    process = multiprocessing.get_context("spawn").Process(target=run_index_server, args=args, name="index-server")
+    process.start()
+    logger.info("Started the index server (pid %d)", process.pid)
+    return process
+
+
+def stop_index_server(process: multiprocessing.Process, timeout_seconds: float):
+    """Forward the SIGTERM, and wait for the server to apply the writes queued for it."""
+    process.terminate()
+    process.join(timeout_seconds)
+    if process.exitcode is None:
+        process.kill()
+        raise RuntimeError(f"The index server did not stop within {timeout_seconds}s; writes queued for it are lost")
+    logger.info("The index server stopped with exit code %d", process.exitcode)
+
+
 def run():
     django.setup()
 
@@ -105,6 +150,10 @@ def run():
             seed_crawl_process.start()
             logger.info("Started the seed crawl worker (pid %d)", seed_crawl_process.pid)
 
+        # Before gunicorn, like the task queue. Not a daemon: it is stopped below, once
+        # gunicorn's workers have finished the requests that write through it.
+        index_server = start_index_server(settings) if settings.RUN_INDEX_SERVER else None
+
         workers = multiprocessing.cpu_count() * 2 + 1
 
         class GunicornApp(BaseApplication):
@@ -114,13 +163,21 @@ def run():
                 self.cfg.set("worker_class", "uvicorn.workers.UvicornWorker")
                 self.cfg.set("loglevel", "warning")
                 self.cfg.set("timeout", 120)
+                # Explicit, since the container's stop timeout must cover it and
+                # INDEX_SERVER_STOP_SECONDS - see settings_common.
+                self.cfg.set("graceful_timeout", 30)
 
             def load(self):
                 from mwmbl.asgi import application
 
                 return application
 
-        GunicornApp().run()
+        try:
+            # Returns, by SystemExit, once a SIGTERM has stopped gunicorn gracefully.
+            GunicornApp().run()
+        finally:
+            if index_server is not None:
+                stop_index_server(index_server, settings.INDEX_SERVER_STOP_SECONDS)
     else:
         raise ValueError(f"Unknown MWMBL_APP: {mwmbl_app}")
 
