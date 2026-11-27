@@ -29,6 +29,13 @@ Design decisions, from the issue thread:
   calls `mwmbl_rank.serve_index(...)`, which runs the server with the GIL released. The
   server code is in its own crate (`rust/index_server`) and `mwmbl_rank` links it, so the
   Dockerfile and the test setup (`maturin develop`) gain no new build.
+- **High level for indexing, low level for everything else.** `index_documents` is a
+  server operation, because it is the throughput bottleneck and only the server can
+  group the updates to one page. Curation, purge, the external cache and widgets keep
+  their Python logic, on a generic conditional page read and write (compare-and-swap,
+  PR 3). The server knows pages, terms and documents and nothing of mwmbl's curation
+  rules, so other projects, such as social, can build on it. The `Document` schema stays
+  as it is until another project needs something different.
 - **Python keeps the blacklist check.** It filters documents with the snapshot blacklist
   before sending them, so the server indexes with a provider that blocks nothing.
 
@@ -78,34 +85,28 @@ with the GIL released. Copy `rust/index_server` in the Dockerfile builder stage.
   exits, and then applies the queued ones.
 - SIGTERM with writes queued applies them before exit.
 
-## PR 3: Curation and purge operations
-**Estimated added lines:** ~400
-**Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/edits.rs, rust/index_server/src/api.rs
-
-New `PageRequest` variants and endpoints, each a port of the Python read-modify-write it
-replaces:
-- `curate(term, documents, states)`: `views._save_to_index`, including `add_term_infos`,
-  which infers a missing term from the document's tokens and the page index.
-- `replace_term(term, documents)`: `views._revert_curation`.
-- `purge(urls)`: `purge_blacklisted.purge_documents`. It computes each URL's pages from
-  its tokens, rewrites only the pages that change, and returns the removed URLs.
-
-- Each operation has a Rust test ported from the Python test of the code it replaces.
-- A purge that changes nothing on a page doesn't rewrite it.
-
-## PR 4: External cache and widget operations
+## PR 3: Conditional page reads and writes
 **Estimated added lines:** ~350
-**Files:** rust/mwmbl_core/src/edits.rs, rust/index_server/src/api.rs
+**Files:** rust/mwmbl_core/src/indexer.rs, rust/index_server/src/api.rs, test/…
 
-- `cache_store(term, source, entries, now, ttl)`: the `external_cache` write. It drops
-  this source's old entries for the term and any stale entries, then orders newest-first,
-  so that eviction falls on the oldest.
-- `remove_widgets(keys, wanted)`: `index_widgets.remove_stale_widgets`. Only documents
-  whose source is a widget are touched.
+Low-volume edits (curation, purge, the external cache, widgets) stay in Python, on two
+generic primitives:
+- `GET /v1/{index}/page/{i}` returns the page's documents and its version: a hash of the
+  page's bytes as stored.
+- `PUT /v1/{index}/page/{i}?if_version=v` writes the documents only if the page's current
+  bytes still hash to `v`. It returns how many documents fit, or 409 with nothing
+  written. The owner thread re-reads the page and compares the hash itself, so the
+  server keeps no per-page state. Identical bytes mean identical contents, so there's no
+  ABA problem.
 
-- Ported tests cover eviction order, expiry, and the case where providers share a term.
+An undecodable page reads as empty, with a version that is the hash of its corrupt
+bytes. A caller's write therefore resets it, as Python's locked `page()` does today.
 
-## PR 5: Python client; batch indexing through the server
+- Two clients racing a read-modify-write on one page both land: one gets 409, retries
+  and succeeds.
+- A write against a stale version changes nothing on disk.
+
+## PR 4: Python client; batch indexing through the server
 **Estimated added lines:** ~450
 **Files:** mwmbl/indexer/index_client.py, mwmbl/main.py, mwmbl/settings_common.py, mwmbl/indexer/index_batches.py, mwmbl/crawler/app.py, test/conftest.py, test/test_index_client.py, test/test_index_server_parity.py
 
@@ -123,29 +124,37 @@ the blacklist filter and text cleaning in Python. A pytest fixture starts
   difference is fixed in Rust here, or written down as intended.
 - `make check` and `make test` pass.
 
-## PR 6: Curation, purge, external cache and widgets through the server
-**Estimated added lines:** ~300
-**Files:** mwmbl/views.py, mwmbl/background.py, mwmbl/indexer/purge_blacklisted.py, mwmbl/indexer/external_cache.py, mwmbl/management/commands/index_widgets.py, test/…
+## PR 5: Curation, purge, external cache and widgets through the server
+**Estimated added lines:** ~250
+**Files:** mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_client.py, mwmbl/views.py, mwmbl/background.py, mwmbl/indexer/purge_blacklisted.py, mwmbl/indexer/external_cache.py, mwmbl/management/commands/index_widgets.py, test/…
 
-Each caller swaps `with index.page(...)` for its client operation. The external cache
-keeps "never raises": a server error is logged and the search goes on.
+Rebuild `page()` on the client as a compare-and-swap loop. It reads the page and version,
+runs the caller's block, and writes with `if_version`. On a 409 it runs the block again
+on a fresh read, up to a bounded number of attempts, and then raises. The callers'
+read-modify-write code and tests stay as they are; they change from a locked file to
+the client. The external cache keeps "never raises": a server error is logged and the
+search goes on. The block may run more than once, so it must have no side effects
+beyond the page. Check each caller for this (for example, purge's removal counts must
+come from the final attempt).
 
 - Nothing on the server opens the index in `"w"` mode any more, except offline tools
   (`restore_index`, `create_index`).
+- A test races two `page()` edits on one page through the server and keeps both.
 
-## PR 7: Delete Python page locking
+## PR 6: Delete Python page locking
 **Estimated added lines:** ~50 (mostly deletions)
 **Files:** mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_batches.py, mwmbl/tinysearchengine/copy_index.py, test/…
 
 Remove `_locked_page`, the OFD constants and `_set_page_lock`, the fallbacks for running
-unlocked, `_OpenPage` and `page()`, and the Python `combine_documents` and `_store_pages`
-once nothing calls them. `copy_index` is deprecated: delete it, or point it at the
+unlocked, the file-backed write path (`"w"` mode, `store_in_page`, `_write_page`), and
+the Python `combine_documents` and `_store_pages` once nothing calls them. `page()` stays,
+on the client. `copy_index` is deprecated: delete it, or point it at the
 client. Search keeps its lock-free direct reads, which treat a `PageError` as an empty
 term, as now.
 
 - No `fcntl` page locking is left in the codebase.
 
-## PR 8: Search reads through the server
+## PR 7: Search reads through the server
 **Estimated added lines:** ~250
 **Files:** mwmbl/search_setup.py, mwmbl/tinysearchengine/rank.py, mwmbl/indexer/index_client.py, scripts/bench_retrieve.py, test/…
 
