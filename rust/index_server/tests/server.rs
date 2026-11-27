@@ -18,6 +18,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     sync::oneshot,
+    task::JoinHandle,
     time::{sleep, timeout},
 };
 use tower::ServiceExt;
@@ -131,36 +132,86 @@ async fn shutting_down_before_the_lock_is_taken_fails_the_queued_writes() {
     let path = index_path("shutdown");
     let socket = path.with_extension("sock");
     let first = TinyIndex::from_file(&path, IndexMode::WRITE, 1).unwrap();
-    let (stop, stopped) = oneshot::channel::<()>();
-    let server = tokio::spawn({
-        let (socket, path) = (socket.clone(), path.clone());
-        async move {
-            let paths = [("main".to_owned(), path)];
-            serve(&socket, &paths, 2, async move { stopped.await.unwrap() }).await
-        }
-    });
+    let (stop, server) = start(&path, &socket).await;
+
+    let mut stream = send_documents(&socket, document()).await;
+    sleep(Duration::from_millis(100)).await;
+    stop.send(()).unwrap();
+
+    assert!(response(&mut stream).await.starts_with("HTTP/1.1 503"));
+    stopped(server).await;
+    drop(first);
+    let index = TinyIndex::from_file(&path, IndexMode::READ, 1).unwrap();
+    assert_eq!(index.retrieve("rust").await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn shutting_down_with_the_lock_applies_the_writes_already_sent() {
+    let path = index_path("drain");
+    let socket = path.with_extension("sock");
+    let (stop, server) = start(&path, &socket).await;
+    let mut streams = Vec::new();
+    for n in 0..8 {
+        let url = format!("https://{n}.rust-lang.org/");
+        let doc = json!({"title": format!("Rust {n}"), "url": url, "extract": "rust"});
+        streams.push(send_documents(&socket, doc).await);
+    }
+    // Long enough for the server to read the requests: one sent after shutdown begins is
+    // never read, and its connection is closed.
     sleep(Duration::from_millis(100)).await;
 
-    let body = json!({"documents": [document()]}).to_string();
-    let mut stream = UnixStream::connect(&socket).await.unwrap();
+    stop.send(()).unwrap();
+
+    for stream in &mut streams {
+        assert!(response(stream).await.starts_with("HTTP/1.1 200"));
+    }
+    stopped(server).await;
+    let index = TinyIndex::from_file(&path, IndexMode::READ, 1).unwrap();
+    assert_eq!(index.retrieve("rust").await.unwrap().len(), 8);
+}
+
+async fn start(
+    path: &Path,
+    socket: &Path,
+) -> (oneshot::Sender<()>, JoinHandle<anyhow::Result<()>>) {
+    let (stop, stopped) = oneshot::channel::<()>();
+    let paths = [("main".to_owned(), path.to_owned())];
+    let socket_path = socket.to_owned();
+    let server = tokio::spawn(async move {
+        serve(
+            &socket_path,
+            &paths,
+            2,
+            async move { stopped.await.unwrap() },
+        )
+        .await
+    });
+    sleep(Duration::from_millis(100)).await;
+    (stop, server)
+}
+
+async fn stopped(server: JoinHandle<anyhow::Result<()>>) {
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+async fn send_documents(socket: &Path, document: Value) -> UnixStream {
+    let body = json!({"documents": [document]}).to_string();
+    let mut stream = UnixStream::connect(socket).await.unwrap();
     let request = format!(
         "POST /v1/main/documents HTTP/1.1\r\nhost: index\r\ncontent-type: application/json\r\n\
          content-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).await.unwrap();
-    sleep(Duration::from_millis(100)).await;
-    stop.send(()).unwrap();
+    stream
+}
 
+async fn response(stream: &mut UnixStream) -> String {
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
-    assert!(response.starts_with("HTTP/1.1 503"), "{response}");
-    timeout(Duration::from_secs(5), server)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    drop(first);
-    let index = TinyIndex::from_file(&path, IndexMode::READ, 1).unwrap();
-    assert_eq!(index.retrieve("rust").await.unwrap().len(), 0);
+    response
 }
