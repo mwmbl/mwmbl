@@ -779,6 +779,7 @@ dependencies = [
  "itertools",
  "murmurhash32",
  "ordered-float",
+ "percent-encoding",
  "phf",
  "rayon",
  "regex",
