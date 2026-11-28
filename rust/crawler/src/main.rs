@@ -44,7 +44,7 @@ struct Cli {
     /// number of async workers
     #[arg(env = "CRAWL_THREADS", long, default_value = "8")]
     crawler_workers: usize,
-    /// number of blocking workers (used for html parsing and updating local index)
+    /// number of blocking workers (used for html parsing)
     #[arg(env = "BLOCKING_THREADS", long, default_value = "4")]
     blocking_workers: usize,
 }
@@ -80,6 +80,9 @@ pub struct CrawlerParams {
     /// maximum amount of simultaneous crawling task that can run at any point.
     #[arg(env = "CRAWL_MAX_TASKS", long, default_value = "16")]
     max_crawl_task: usize,
+    /// number of threads that read and write the local index, each owning a share of its pages.
+    #[arg(env = "INDEX_THREADS", long, default_value = "2")]
+    index_threads: usize,
     /// user home directory, used to derive data path
     #[arg(env = "HOME", long)]
     home: PathBuf,

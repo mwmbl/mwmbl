@@ -96,7 +96,7 @@ impl Crawler {
         let url_queue = SharedURLQueue::new(blacklist.clone(), curated_domains);
         let domainlinkdb = BloomDatabase::new(&params.home).await?;
         let index_path = index_path(&params.home);
-        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE)?;
+        let index = TinyIndex::from_file(&index_path, IndexMode::WRITE, params.index_threads)?;
         let device_name = get_device_name(&params.home, params.device_name.clone()).await;
 
         Ok(Crawler {
@@ -280,7 +280,7 @@ impl Crawler {
         let mut result_items: Vec<SendResult> = Vec::new();
 
         for (term, _) in term_new_doc_count.into_iter().take(SUBMIT_TOP_N) {
-            let Ok(docs) = self.index.retrieve::<Document>(term).await else {
+            let Ok(docs) = self.index.retrieve(term).await else {
                 continue;
             };
             let mut items: Vec<SendResult> = docs

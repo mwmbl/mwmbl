@@ -39,7 +39,7 @@ Design decisions, from the issue thread:
 - **Python keeps the blacklist check.** It filters documents with the snapshot blacklist
   before sending them, so the server indexes with a provider that blocks nothing.
 
-## PR 1: Partitioned, lock-free TinyIndex in mwmbl_core
+## PR 1: Partitioned, lock-free TinyIndex in mwmbl_core (Done)
 **Estimated added lines:** ~450
 **Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/partition.rs, rust/mwmbl_core/Cargo.toml, rust/crawler/src/crawler.rs, rust/crawler/Cargo.toml
 
@@ -63,7 +63,7 @@ Dropping the handle closes the channels and joins the threads. Raise the crawler
 
 ## PR 2: Index server crate with the indexing operations
 **Estimated added lines:** ~450
-**Files:** rust/index_server/{Cargo.toml,src/lib.rs,src/api.rs,src/ownership.rs}, mwmbl_rank/Cargo.toml, mwmbl_rank/src/lib.rs, Dockerfile
+**Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/partition.rs, rust/index_server/{Cargo.toml,src/lib.rs,src/api.rs,src/ownership.rs}, mwmbl_rank/Cargo.toml, mwmbl_rank/src/lib.rs, Dockerfile
 
 An axum app on a Unix socket with `POST /v1/{index}/documents` (`index_documents`, which
 returns `stored_urls`, `new_urls`, `new_page_doc_counts` and `agreements`),
@@ -71,11 +71,15 @@ returns `stored_urls`, `new_urls`, `new_page_doc_counts` and `agreements`),
 `POST /v1/{index}/retrieve` (several terms in one call) and `GET /v1/health`. `{index}` is
 `main` or `external_cache`; both paths are given at startup.
 
+`from_file` gains a lock policy. With `Fail`, which the crawler uses, a second writer is
+an error as now. With `Wait`, which the server uses, the channels exist at once and the
+owner threads block on the `flock` before their receive loop.
+
 `ownership.rs` handles the deploy handover. The server binds and answers at once (health
-never waits for the lock), while a background thread blocks on the `flock`. Requests
-queue in the partition channels until the lock is taken and the owner threads start. On
-SIGTERM it stops accepting, drains its queues and exits, which releases the lock to the
-new container.
+never waits for the lock), and requests queue in the partition channels until the lock is
+taken. On SIGTERM it stops accepting, drops its index handles and joins the owner threads
+off the runtime (`spawn_blocking`), so their queues drain, and then exits. That releases
+the lock to the new container.
 
 Expose `mwmbl_rank.serve_index(socket_path, index_paths, num_threads)`, which runs it
 with the GIL released. Copy `rust/index_server` in the Dockerfile builder stage.
@@ -113,7 +117,11 @@ bytes. A caller's write therefore resets it, as Python's locked `page()` does to
 `IndexClient` wraps the endpoints and returns the same `IndexedDocuments` and `Counter`
 types as today. Writes retry with backoff for a bounded time, which covers restarts and
 the handover, and then raise. POST /crawler/results answers 503, and the crawler
-retries. `main.py` starts the server before gunicorn when `RUN_INDEX_SERVER` is set. The
+retries. `main.py` starts the server before gunicorn when `RUN_INDEX_SERVER` is set. It
+defaults off, and must not be turned on in production until PR 5 has landed. Until then,
+Python still writes the same file under OFD locks that the owner threads don't take, and
+an owner thread that reads a page while Python is writing it would see an undecodable
+page and reset it. The
 socket goes in `INDEX_SERVER_SOCKET`, a directory local to the container.
 `index_documents` and `index_pages` in `index_batches.py` call the client, and they keep
 the blacklist filter and text cleaning in Python. A pytest fixture starts
@@ -122,6 +130,8 @@ the blacklist filter and text cleaning in Python. A pytest fixture starts
 - A parity test runs the same fixture batches through the old Python path and through
   the server, and compares the pages, `new_page_doc_counts`, URLs and agreements. Any
   difference is fixed in Rust here, or written down as intended.
+- `RUN_INDEX_SERVER` defaults off, and its setting says it must stay off in production
+  until PR 5 has landed.
 - `make check` and `make test` pass.
 
 ## PR 5: Curation, purge, external cache and widgets through the server

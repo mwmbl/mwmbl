@@ -1,7 +1,7 @@
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},
-    fs::{self, File},
+    fs::{self, File, TryLockError},
     io::{Read, Write},
     path::Path,
     str::FromStr,
@@ -10,25 +10,20 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use file_guard::Lock;
 use futures_util::future::join_all;
-use itertools::{Either, Itertools};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use itertools::Itertools;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::{
-    runtime::Handle,
-    sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
-    task::spawn_blocking,
-};
+use tokio::sync::oneshot;
 
 use crate::{
     agreement::Agreement,
     blacklist_providers::BlacklistProvider,
     constants::{INDEX_VERSION, ITEM_FACTORY, METADATA_CONSTANT, METADATA_SIZE, PAGE_SIZE},
-    index::{PageIoError, pack_page, read_index_page, tokenize_document, write_index_page},
-    rank::{HeuristicRanker, Ranker},
+    index::{PageIoError, pack_page, tokenize_document},
+    partition::{PageRequest, Partitions},
+    rank::Ranker,
     tokenizer::clean_unicode,
 };
 
@@ -265,26 +260,31 @@ impl TinyIndexMetadata {
     }
 }
 
-struct ReadPageLock {
-    process_lock: file_guard::FileGuard<Arc<File>>,
-    _task_lock: OwnedRwLockReadGuard<()>,
-}
-
-struct WritePageLock {
-    process_lock: file_guard::FileGuard<Arc<File>>,
-    _task_lock: OwnedRwLockWriteGuard<()>,
-}
-
-#[derive(Debug, Clone)]
+/// A handle on an index file. Each page belongs to one of the index's owner threads, which
+/// does every read and write of it, so pages need no locks. Clones share the threads, which
+/// stop when the last clone is dropped.
+#[derive(Clone)]
 pub struct TinyIndex {
-    index_file: Arc<File>,
     mode: IndexMode,
     metadata: Arc<TinyIndexMetadata>,
-    page_locks: Arc<Vec<Arc<RwLock<()>>>>,
+    partitions: Arc<Partitions>,
 }
 
 impl TinyIndex {
-    pub fn from_file(path: &Path, mode: IndexMode) -> anyhow::Result<TinyIndex> {
+    /// Opens the index at `path`, with `num_threads` owner threads for its pages.
+    ///
+    /// In `WRITE` mode it takes an exclusive `flock` on the whole file, held while any clone
+    /// is alive, so only one process ever writes the index.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file can't be read, isn't an index, `num_threads` is zero, or, in `WRITE`
+    /// mode, another process has the index open for writing.
+    pub fn from_file(
+        path: &Path,
+        mode: IndexMode,
+        num_threads: usize,
+    ) -> anyhow::Result<TinyIndex> {
         let mut file = File::open(path)?;
         let mut metadata_bytes: [u8; 4096] = [0; METADATA_SIZE!()];
         file.read_exact(&mut metadata_bytes)?;
@@ -297,31 +297,33 @@ impl TinyIndex {
                 ITEM_FACTORY
             );
         }
-        let file = match mode {
-            IndexMode::READ => File::options()
-                .read(true)
-                .write(false)
-                .create(false)
-                .truncate(false)
-                .open(path),
-            IndexMode::WRITE => File::options()
-                .read(true)
-                .write(true)
-                .create(false)
-                .truncate(false)
-                .open(path),
-        }?;
-
-        let mut page_locks = Vec::new();
-        for _ in 0..metadata.num_pages {
-            page_locks.push(Arc::new(RwLock::new(())));
+        let file = File::options()
+            .read(true)
+            .write(matches!(mode, IndexMode::WRITE))
+            .open(path)?;
+        if matches!(mode, IndexMode::WRITE) {
+            match file.try_lock() {
+                Ok(()) => {}
+                Err(TryLockError::WouldBlock) => bail!(
+                    "Index file '{}' is already open for writing by another process",
+                    path.display()
+                ),
+                Err(TryLockError::Error(error)) => {
+                    return Err(error).context("Could not lock the index file");
+                }
+            }
         }
+        let partitions = Partitions::start(
+            &Arc::new(file),
+            metadata.page_size,
+            metadata.num_pages,
+            num_threads,
+        )?;
 
         Ok(Self {
-            index_file: Arc::new(file),
             mode,
             metadata: Arc::new(metadata),
-            page_locks: Arc::new(page_locks),
+            partitions: Arc::new(partitions),
         })
     }
     fn create(path: &Path, num_pages: usize, overwrite: bool) -> anyhow::Result<TinyIndex> {
@@ -340,7 +342,7 @@ impl TinyIndex {
         }
         file.flush()?;
         drop(file);
-        Self::from_file(path, IndexMode::READ)
+        Self::from_file(path, IndexMode::READ, 1)
     }
     fn validate(&self, num_pages: usize, page_size: usize) -> anyhow::Result<()> {
         if self.metadata.num_pages != num_pages || self.metadata.page_size != page_size {
@@ -353,71 +355,21 @@ impl TinyIndex {
         Ok(())
     }
 
-    async fn lock_page_read_only(&self, page: usize) -> anyhow::Result<ReadPageLock> {
-        let start: usize = page * self.metadata.page_size + METADATA_SIZE!();
-        let process_lock = file_guard::lock(
-            self.index_file.clone(),
-            Lock::Shared,
-            start,
-            self.metadata.page_size,
-        )?;
-        let Some(task_lock) = self.page_locks.get(page) else {
-            bail!("Invalid page number");
-        };
-        let task_lock = task_lock.clone().read_owned().await;
-        Ok(ReadPageLock {
-            _task_lock: task_lock,
-            process_lock,
-        })
-    }
-
-    async fn lock_page_write(&self, page: usize) -> anyhow::Result<WritePageLock> {
-        if matches!(self.mode, IndexMode::READ) {
-            bail!("Index is in read only mode");
-        }
-        let start: usize = page * self.metadata.page_size + METADATA_SIZE!();
-        let process_lock = file_guard::lock(
-            self.index_file.clone(),
-            Lock::Exclusive,
-            start,
-            self.metadata.page_size,
-        )?;
-        let Some(task_lock) = self.page_locks.get(page) else {
-            bail!("Invalid page number");
-        };
-        let task_lock = task_lock.clone().write_owned().await;
-        Ok(WritePageLock {
-            _task_lock: task_lock,
-            process_lock,
-        })
-    }
-
-    fn get_page<T: for<'a> Deserialize<'a>>(
-        lock: Either<&ReadPageLock, &WritePageLock>,
-        term: Option<&str>,
-    ) -> anyhow::Result<Vec<T>> {
-        let process_lock = lock.either(|r| &r.process_lock, |w| &w.process_lock);
-        Ok(read_index_page(
-            process_lock,
-            process_lock.offset() as u64,
-            process_lock.len(),
-            term,
-        )?)
-    }
-
-    pub async fn retrieve<T: for<'a> Deserialize<'a>>(&self, term: &str) -> anyhow::Result<Vec<T>> {
+    /// The documents on `term`'s page that belong to it.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the page can't be read or doesn't decode, or its owner thread has stopped.
+    pub async fn retrieve(&self, term: &str) -> anyhow::Result<Vec<Document>> {
         let page = self.get_key_page_index(term);
-        let lock = self.lock_page_read_only(page).await?;
-        Self::get_page(Either::Left(&lock), Some(term))
-    }
-
-    fn store_in_page<T: Serialize>(lock: &WritePageLock, values: &[T]) -> anyhow::Result<usize> {
-        Ok(write_index_page(
-            &lock.process_lock,
-            lock.process_lock.offset() as u64,
-            lock.process_lock.len(),
-            values,
-        )?)
+        let (reply, receiver) = oneshot::channel();
+        self.partitions.send(PageRequest::Retrieve {
+            page,
+            term: term.to_owned(),
+            reply,
+        })?;
+        let documents = receiver.await.context("The index owner thread stopped")??;
+        Ok(documents)
     }
 
     #[must_use]
@@ -425,67 +377,34 @@ impl TinyIndex {
         murmurhash32::murmurhash3_with_seed::<0>(key.as_bytes()) as usize % self.metadata.num_pages
     }
 
-    /// Merges each page's new documents into it and writes it back. Each page has its own
-    /// lock and is read and written independently, so the pages are done in parallel.
+    /// Merges each page's new documents into it and writes it back. The pages' owner threads
+    /// do the work, so the pages are done in parallel. A page that can't be written is
+    /// skipped, and its owner says why.
     async fn store_pages(
         &self,
         page_documents: HashMap<usize, Vec<Document>>,
         mark_term_synced: Option<&String>,
-    ) -> Vec<StoredPage> {
-        let stored: Vec<_> = join_all(
-            page_documents
-                .into_par_iter()
-                .map(|(page, docs)| (page, docs, self.clone()))
-                .map(|(page, docs, index)| {
-                    let mark_term_synced = mark_term_synced.map(std::borrow::ToOwned::to_owned);
-                    async move {
-                        spawn_blocking(move || {
-                            Handle::current().block_on(async move {
-                                index
-                                    .store_page(page, &docs, mark_term_synced.as_ref())
-                                    .await
-                            })
-                        })
-                        .await
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
-        stored.into_iter().flatten_ok().flatten().collect()
-    }
-
-    async fn store_page(
-        &self,
-        page: usize,
-        docs: &[Document],
-        mark_term_synced: Option<&String>,
-    ) -> Option<StoredPage> {
-        let Ok(lock) = self.lock_page_write(page).await else {
-            eprintln!("Skipping index page {page}");
-            return None;
-        };
-        let Ok(existing_documents) = TinyIndex::get_page(Either::Right(&lock), None) else {
-            eprintln!("Skipping index page {page}");
-            return None;
-        };
-        let stored_copy = find_stored_copies(docs, &existing_documents);
-        let mut combined_documents = combine_documents(
-            &existing_documents,
-            docs,
-            mark_term_synced,
-            &HeuristicRanker::new(f32::NEG_INFINITY),
-        );
-        let Ok(num_stored) = TinyIndex::store_in_page(&lock, &combined_documents) else {
-            eprintln!("Skipping index page {page}");
-            return None;
-        };
-        combined_documents.truncate(num_stored);
-        Some(StoredPage {
-            stored: combined_documents,
-            existing: existing_documents,
-            stored_copies: stored_copy,
-        })
+    ) -> anyhow::Result<Vec<StoredPage>> {
+        if matches!(self.mode, IndexMode::READ) {
+            bail!("Index is in read only mode");
+        }
+        let num_pages = self.metadata.num_pages;
+        if let Some(page) = page_documents.keys().find(|page| **page >= num_pages) {
+            bail!("Page {page} is not in an index of {num_pages} pages");
+        }
+        let mut receivers = Vec::with_capacity(page_documents.len());
+        for (page, docs) in page_documents {
+            let (reply, receiver) = oneshot::channel();
+            self.partitions.send(PageRequest::Merge {
+                page,
+                docs,
+                mark_term_synced: mark_term_synced.cloned(),
+                reply,
+            })?;
+            receivers.push(receiver);
+        }
+        let replies = join_all(receivers).await;
+        Ok(replies.into_iter().filter_map(Result::ok).collect())
     }
 
     pub async fn index_documents<I, T: BlacklistProvider>(
@@ -496,9 +415,6 @@ impl TinyIndex {
     where
         I: IntoIterator<Item = Document>,
     {
-        if matches!(self.mode, IndexMode::READ) {
-            bail!("index_documents can only be done with IndexMode::WRITE");
-        }
         let mut page_documents = Vec::new();
         let mut submitted_by_url: HashMap<String, Document> = HashMap::new();
 
@@ -527,7 +443,7 @@ impl TinyIndex {
         let mut held_urls: HashSet<String> = HashSet::new();
         let mut copies: HashMap<String, Vec<Document>> = HashMap::new();
 
-        for page in self.store_pages(page_documents, None).await {
+        for page in self.store_pages(page_documents, None).await? {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -603,7 +519,7 @@ impl TinyIndex {
     ) -> anyhow::Result<HashMap<String, usize>> {
         let mut new_page_doc_counts: HashMap<String, usize> = HashMap::new();
 
-        for page in self.store_pages(page_documents, mark_term_synced).await {
+        for page in self.store_pages(page_documents, mark_term_synced).await? {
             for stored in page.stored {
                 if !matches!(stored.state, Some(DocumentState::SyncedWithMainIndex))
                     && let Some(term) = stored.term()
@@ -631,7 +547,7 @@ pub fn create_index(
         return Ok(());
     }
 
-    match TinyIndex::from_file(index_path, IndexMode::READ) {
+    match TinyIndex::from_file(index_path, IndexMode::READ, 1) {
         Ok(index) => {
             println!("======================================");
             println!("Found existing index at {}", index_path.display());
@@ -693,12 +609,12 @@ impl IndexedDocuments {
 
 #[derive(Default)]
 pub struct StoredPage {
-    stored: Vec<Document>,
-    existing: Vec<Document>,
-    stored_copies: Vec<Document>,
+    pub(crate) stored: Vec<Document>,
+    pub(crate) existing: Vec<Document>,
+    pub(crate) stored_copies: Vec<Document>,
 }
 
-fn find_stored_copies<'b, 'a, I, J>(incoming: I, existing: J) -> Vec<Document>
+pub(crate) fn find_stored_copies<'b, 'a, I, J>(incoming: I, existing: J) -> Vec<Document>
 where
     I: IntoIterator<Item = &'b Document>,
     J: IntoIterator<Item = &'a Document>,
@@ -742,7 +658,7 @@ impl DocumentState {
 /// Ranks and deduplicates a page's documents. Everything up to the end works on borrowed
 /// documents, so each document that is kept is cloned once, and only a document merged
 /// from several copies is built anew.
-fn combine_documents<'a, I, J, R: Ranker>(
+pub(crate) fn combine_documents<'a, I, J, R: Ranker>(
     existing_documents: J,
     documents: I,
     mark_term_synced: Option<&String>,

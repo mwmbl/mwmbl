@@ -21,6 +21,7 @@ pub mod constants;
 pub mod hn_top_domains_filtered;
 pub mod index;
 pub mod indexer;
+mod partition;
 pub mod rank;
 pub mod term_matcher;
 pub mod tokenizer;

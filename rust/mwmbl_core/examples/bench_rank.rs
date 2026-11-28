@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
         .step_by(37)
         .filter_map(|docs| docs.first())
         .collect();
-    let index = TinyIndex::from_file(Path::new(&path), IndexMode::WRITE)?;
+    let index = TinyIndex::from_file(Path::new(&path), IndexMode::WRITE, 4)?;
     let blacklist = BuiltInRulesBlacklistProvider::new();
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     let mut total = Duration::ZERO;
