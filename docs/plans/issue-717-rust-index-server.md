@@ -195,6 +195,14 @@ cleaning. The old Python path stays until PR 9 deletes it; a setting chooses bet
 POST /crawler/results answers 503 when the server is unavailable after the retries, and
 the crawler retries.
 
+Calling the client from the web workers:
+- Never synchronously on uvicorn's event loop: an async caller runs it in a thread.
+- Create it per process, after gunicorn forks, never in the master.
+- Its worst case, 180 s of retries or a 180 s timeout, exceeds gunicorn's 120 s worker
+  timeout, so a request waiting that long would have its worker killed. Choose the retry
+  and timeout budgets for web requests so that the whole request fits inside the worker
+  timeout, with a 503 rather than a killed worker when they run out.
+
 - A parity test runs the same fixture batches through the old Python path and through
   the server, and compares the pages, `new_page_doc_counts`, URLs and agreements. It
   covers URLs with no domain (IP hosts, unparseable URLs). Any difference left after PR 6

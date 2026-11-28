@@ -59,13 +59,41 @@ def test_a_page_write_keeps_extra_and_conflicts_on_a_stale_version(client):
     assert (stored["url"], stored["extra"]) == ("https://rust-lang.org/", [1, "x"])
 
 
+def _mock_client(*outcomes) -> tuple[IndexClient, list[httpx.Request]]:
+    """A client whose requests meet the outcomes in turn: a response, or an error to raise."""
+    remaining = iter(outcomes)
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        outcome = next(remaining)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    client = IndexClient("/nonexistent.sock")
+    client.client = httpx.Client(transport=httpx.MockTransport(handle), base_url="http://x")
+    return client, requests
+
+
 def test_requests_are_retried_while_the_server_is_unavailable(monkeypatch):
     monkeypatch.setattr(index_client, "FIRST_BACKOFF_SECONDS", 0.01)
-    responses = iter([httpx.Response(503, text="no lock yet"), httpx.Response(200, json={"results": {"rust": []}})])
-    client = IndexClient("/nonexistent.sock")
-    client.client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)), base_url="http://x")
+    client, requests = _mock_client(
+        httpx.Response(503, text="no lock yet"),
+        httpx.ReadError("stale pooled connection"),
+        httpx.Response(200, json={"results": {"rust": []}}),
+    )
 
     assert client.retrieve("main", ["rust"]) == {"rust": []}
+    assert len(requests) == 3
+
+
+def test_a_timeout_is_not_retried():
+    client, requests = _mock_client(httpx.ReadTimeout("no answer"))
+
+    with pytest.raises(IndexServerUnavailable):
+        client.index_documents("main", [Document("Rust", "https://rust-lang.org/", "rust")])
+    assert len(requests) == 1
 
 
 def test_requests_fail_once_the_retries_run_out(tmp_path, monkeypatch):

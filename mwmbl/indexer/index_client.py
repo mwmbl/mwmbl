@@ -76,7 +76,9 @@ class IndexClient:
 
         A connection dropped mid-request may follow a write the server applied, and the
         retry applies it again. Merging the same documents twice leaves the pages as once,
-        but the second answer counts their URLs as held, so new_urls can be undercounted.
+        but the second answer counts their URLs as held, so new_urls can be undercounted,
+        and a retried PUT whose first attempt landed comes back as a false 409. A timeout
+        is not retried, since the write may still be queued.
         """
         deadline = time.monotonic() + RETRY_SECONDS
         backoff = FIRST_BACKOFF_SECONDS
@@ -87,7 +89,10 @@ class IndexClient:
                     response.raise_for_status()
                     return response
                 failure = response.text
-            except (httpx.ConnectError, httpx.RemoteProtocolError) as error:
+            except httpx.TimeoutException as error:
+                raise IndexServerUnavailable(f"{method} {path}: {error!r}") from error
+            # ReadError and WriteError include a pooled connection the server had closed.
+            except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as error:
                 failure = repr(error)
             if time.monotonic() + backoff > deadline:
                 raise IndexServerUnavailable(f"{method} {path}: {failure}")
