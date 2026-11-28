@@ -3,9 +3,12 @@ use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mwmbl_core::blacklist_providers::StaticBlacklistProvider;
+use mwmbl_core::index::{pack_page, read_index_page, write_index_page};
 use mwmbl_core::indexer::{
-    Document, DocumentSource, DocumentState, IndexMode, TinyIndex, create_index,
+    Document, DocumentSource, DocumentState, IndexMode, PageItem, TinyIndex, create_index,
 };
+use serde_json::{Value, json};
 
 #[test]
 fn state_and_source_are_their_integer_values_as_the_server_has_them() {
@@ -20,6 +23,65 @@ fn state_and_source_are_their_integer_values_as_the_server_has_them() {
     assert_eq!((&value["state"], &value["source"]), (&7.into(), &4.into()));
     let unknown = serde_json::from_str::<DocumentSource>("5").unwrap_err();
     assert!(unknown.to_string().contains("5 is not a DocumentSource"));
+}
+
+#[test]
+fn pages_are_written_as_python_writes_them() {
+    let text = |title: &str| {
+        (
+            title.to_owned(),
+            "https://rust-lang.org/".to_owned(),
+            "ext".to_owned(),
+        )
+    };
+    let (title, url, extract) = text("Rust");
+    let organic = Document::new(
+        title,
+        url,
+        extract,
+        None,
+        Some("rust".to_owned()),
+        None,
+        None,
+        None,
+        None,
+    );
+    let (title, url, extract) = text("Curated");
+    let curated = Document::new(
+        title,
+        url,
+        extract,
+        Some(0.5),
+        Some("rust".to_owned()),
+        Some(DocumentState::OrganicApproved),
+        Some(vec![3]),
+        Some(10),
+        Some(DocumentSource::Widget),
+    );
+    let (title, url, extract) = text("Bare");
+    let bare = Document::new(title, url, extract, None, None, None, None, None, None);
+    // What Document.as_tuple() gives for each, as Python packs it.
+    let from_python = [
+        json!(["Rust", "https://rust-lang.org/", "ext", null, "rust"]),
+        json!([
+            "Curated",
+            "https://rust-lang.org/",
+            "ext",
+            0.5,
+            "rust",
+            7,
+            [3],
+            10,
+            4
+        ]),
+        json!(["Bare", "https://rust-lang.org/", "ext"]),
+    ];
+
+    let items = [PageItem(&organic), PageItem(&curated), PageItem(&bare)];
+    assert_eq!(
+        pack_page(4096, &items).unwrap(),
+        pack_page(4096, &from_python).unwrap()
+    );
 }
 
 #[test]
@@ -151,6 +213,73 @@ async fn concurrent_writes_to_one_page_lose_no_documents() {
 
     let stored = index.retrieve("rust").await.unwrap();
     assert_eq!(stored.len(), 20);
+}
+
+#[tokio::test]
+async fn a_newer_builds_page_items_survive_a_merge() {
+    let scratch = ScratchIndex::new(4);
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 2).unwrap();
+    let page = index.get_key_page_index("rust");
+    let offset = u64::try_from((page + 1) * 4096).unwrap();
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&scratch.path)
+        .unwrap();
+    // A state and a source this build doesn't know, and a field after them.
+    let newer = json!([[
+        "New",
+        "https://new.example/",
+        "ext",
+        null,
+        "rust",
+        99,
+        null,
+        null,
+        98,
+        "x"
+    ]]);
+    write_index_page(&file, offset, 4096, newer.as_array().unwrap()).unwrap();
+
+    let doc = document("Rust", "https://rust-lang.org/", 1, 1);
+    index
+        .index_pages(HashMap::from([(page, vec![doc])]), None)
+        .await
+        .unwrap();
+
+    let stored: Vec<Value> = read_index_page(&file, offset, 4096, None).unwrap();
+    assert_eq!(stored.len(), 2, "{stored:?}");
+    let kept = stored.iter().find(|item| item[0] == "New").unwrap();
+    assert_eq!(
+        (&kept[5], &kept[8], &kept[9]),
+        (&json!(99), &json!(98), &json!("x"))
+    );
+    assert_eq!(kept.as_array().unwrap().len(), 10);
+}
+
+#[tokio::test]
+async fn only_another_crawlers_stored_copy_makes_an_agreement() {
+    let scratch = ScratchIndex::new(64);
+    let index = TinyIndex::from_file(&scratch.path, IndexMode::WRITE, 2).unwrap();
+    let no_blacklist = StaticBlacklistProvider::new(std::collections::HashSet::new());
+    let submit =
+        |user_id, crawled| vec![document("Rust", "https://rust-lang.org/", crawled, user_id)];
+    index
+        .index_documents(submit(1, 1), &no_blacklist)
+        .await
+        .unwrap();
+
+    let other = index
+        .index_documents(submit(2, 2), &no_blacklist)
+        .await
+        .unwrap();
+    let own = index
+        .index_documents(submit(2, 3), &no_blacklist)
+        .await
+        .unwrap();
+
+    assert_eq!(other.agreements().len(), 1);
+    assert_eq!(own.agreements().len(), 0);
 }
 
 #[tokio::test]
