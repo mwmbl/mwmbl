@@ -74,6 +74,7 @@ pub static DOMAIN_BLACKLIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 pub static NUMBERS_ONLY_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+$").unwrap());
 
 pub static NUM_FIRST_TOKENS: usize = 10;
+pub static NUM_BIGRAMS: usize = 10;
 pub static DOCUMENT_STATE_CURATED_THRESHOLD: u8 = 7;
 
 pub static MATCH_EXPONENT: f32 = 2.0;

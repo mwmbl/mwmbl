@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from mwmbl.models import Curation, DomainSubmission, FlagCuration, MwmblUser
 from mwmbl.tinysearchengine.indexer import Document, DocumentState
-from mwmbl.views import _get_document_state, _insert_document, switch_state
+from mwmbl.views import _curation_term, _get_document_state, _insert_document, switch_state
 
 
 @pytest.fixture
@@ -208,6 +208,17 @@ def test_reverting_a_curation_deletes_it_and_shows_the_original_results(client, 
     assert response.status_code == 200
     assert not Curation.objects.filter(id=curation.id).exists()
     assert "Orig" in response.content.decode()
+
+
+def test_a_curation_is_reverted_under_the_term_its_results_were_filed_under():
+    """A curation saved before the tokenizer stripped punctuation is filed under "python?",
+    and reverting it must not replace the results for "python"."""
+    filed_before_the_change = Curation(query="Python?", new_results=[{"url": "https://python.org", "term": "python?"}])
+    assert _curation_term(filed_before_the_change) == "python?"
+
+
+def test_a_curation_without_stored_terms_is_reverted_under_its_tokenized_query():
+    assert _curation_term(Curation(query="Python?", new_results=[])) == "python"
 
 
 @pytest.mark.django_db
