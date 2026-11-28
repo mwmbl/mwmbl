@@ -8,11 +8,13 @@ Django Background Tasks for periodic maintenance:
   - purge_blacklisted_from_queue: removes retrieval-filtered documents from the index
   - count_index_urls: counts the unique URLs and domains in the index once a week
   - summarise_search_callers: replaces last week's per-caller counts with totals
+  - check_reported_pages: re-checks search results reported as broken a day after the report
 """
 
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
 from logging import basicConfig, getLogger
 from pathlib import Path
 from time import sleep
@@ -25,13 +27,16 @@ from django.db import transaction
 from redis import Redis
 
 from mwmbl import pricing, traffic
+from mwmbl.blocked_urls import url_block_key
 from mwmbl.count_urls import count_urls_step, get_redis
 from mwmbl.crawler.agreement import prune_agreements
+from mwmbl.crawler.retrieve import crawl_url
 from mwmbl.crawler.stats import StatsManager
 from mwmbl.indexer.blacklist_snapshot import get_snapshot_blacklist, refresh_snapshot
+from mwmbl.indexer.index_batches import index_new_documents
 from mwmbl.indexer.purge_blacklisted import purge_documents
 from mwmbl.indexer.purge_queue import drain_purge_queue, queue_size
-from mwmbl.models import DomainEvidence, DomainSubmission, OldIndex, UsageBucket
+from mwmbl.models import BlockedUrl, BrokenPageReport, DomainEvidence, DomainSubmission, OldIndex, UsageBucket
 from mwmbl.moderation.evidence import crawl_domain, store_evidence, store_failure
 from mwmbl.moderation.model import reset_model_cache
 from mwmbl.moderation.suggest import refresh_suggestion
@@ -46,6 +51,8 @@ from mwmbl.tinysearchengine.copy_index import copy_pages
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 NUM_PAGES_TO_COPY = 1024
+BROKEN_REPORT_RECHECK_AGE = timedelta(hours=24)
+GONE_STATUSES = {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}
 
 
 basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -321,6 +328,38 @@ def enrich_domain_submission(domain: str):
         evidence = store_evidence(domain, crawl)
         refresh_suggestion(evidence)
     logger.info("Enriched %s: %s (%.2f)", domain, evidence.suggested_action, evidence.confidence or 0.0)
+
+
+@background(schedule=0)
+def check_reported_pages():
+    """Re-check search results reported as broken once they are a day old.
+
+    A page that is gone (404 or 410) is blocked, which takes it out of search the same way a
+    moderator's block does. A page that answers is crawled again and its copy in the index is
+    refreshed. Anything else, such as a timeout or a robots.txt refusal, is left alone: an
+    outage should not remove a page.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - BROKEN_REPORT_RECHECK_AGE
+    due_reports = BrokenPageReport.objects.filter(checked_at__isnull=True, created_at__lte=cutoff)
+    due_urls = due_reports.values_list("url", flat=True).distinct()
+    redis = Redis.from_url(settings.REDIS_URL)
+    index_path = str(Path(settings.DATA_PATH) / settings.INDEX_NAME)
+    for url in due_urls:
+        result = crawl_url(url, redis)
+        status = result["status"]
+        content = result["content"]
+        if status in GONE_STATUSES:
+            BlockedUrl.objects.get_or_create(
+                key=url_block_key(url),
+                defaults={"url": url, "reason": "Reported as broken, and still gone a day later"},
+            )
+            logger.info("Blocked %s, still gone after being reported", url)
+        elif status == HTTPStatus.OK and content and content["title"]:
+            document = Document(content["title"], url, content["extract"], last_crawled=result["timestamp"] // 1000)
+            index_new_documents([document], index_path)
+            logger.info("Re-indexed %s after it was reported", url)
+        BrokenPageReport.objects.filter(url=url, checked_at__isnull=True, created_at__lte=cutoff).update(checked_at=now)
 
 
 @background(schedule=0)

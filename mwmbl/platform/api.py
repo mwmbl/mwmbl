@@ -38,6 +38,7 @@ from mwmbl.models import (
     SEED_CRAWLER_USERNAME,
     AgreementType,
     ApiKey,
+    BrokenPageReport,
     CrawlerError,
     Device,
     DomainEvidence,
@@ -747,22 +748,24 @@ def _index_stats(domain: str) -> dict:
         logger.warning("Could not read index stats for %s", domain, exc_info=True)
         return {}
 
+
 @router.post(
     "/search-results/broken",
     auth=JWTAuth(),
     summary="Report a page in a search result as missing or broken",
-    description=(
-        "Report a page in a search result as missing or broken. "
-        "Requires a verified account."
-    ),
+    description=("Report a page in a search result as missing or broken. Requires a verified account."),
     tags=["Search Result Voting"],
 )
 def report_broken_search_result(request, broken_request: BrokenRequest):
     check_email_verified(request)
 
-    # Implement the logic to handle the broken search result report here
-    # For now, just return a success message
+    BrokenPageReport.objects.get_or_create(
+        user=request.user,
+        url=broken_request.url,
+        query=broken_request.query,
+    )
     return {"status": "ok", "message": "Reported broken search result successfully."}
+
 
 @router.post(
     "/search-results/vote",
