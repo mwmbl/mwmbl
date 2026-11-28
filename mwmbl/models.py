@@ -449,6 +449,24 @@ class SearchResultVote(models.Model):
         ]
 
 
+class BrokenPageReport(models.Model):
+    """A user's report that a search result is missing or broken, checked once it is a day old.
+
+    The check is what decides, not the report: a page that still answers after that day is
+    left alone, however many users reported it.
+    """
+
+    user = models.ForeignKey(MwmblUser, on_delete=models.CASCADE)
+    url = models.URLField(max_length=500)
+    query = models.CharField(max_length=300)
+    created_at = models.DateTimeField(auto_now_add=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ["user", "url", "query"]
+        indexes = [models.Index(fields=["checked_at", "created_at"])]
+
+
 class SuperSearchImpression(models.Model):
     """One Super Search request: which sources were available, which were queried,
     the features they were selected on, and the implicit reward each earned.
