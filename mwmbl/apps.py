@@ -151,6 +151,7 @@ class MwmblConfig(AppConfig):
             from background_task.models import Task
 
             from mwmbl.background import (
+                check_reported_pages,
                 count_index_urls,
                 flush_expired_tokens,
                 prune_crawler_agreements,
@@ -171,6 +172,7 @@ class MwmblConfig(AppConfig):
             FLUSH_TOKENS_TASK = "mwmbl.background.flush_expired_tokens"
             PRUNE_AGREEMENTS_TASK = "mwmbl.background.prune_crawler_agreements"
             SUMMARISE_CALLERS_TASK = "mwmbl.background.summarise_search_callers"
+            BROKEN_REPORTS_TASK = "mwmbl.background.check_reported_pages"
 
             # Sync search counts once per hour (3600 seconds)
             if not Task.objects.filter(task_name=SYNC_TASK).exists():
@@ -222,6 +224,9 @@ class MwmblConfig(AppConfig):
             # inside the grace day before they expire - see mwmbl.search_callers.
             if not Task.objects.filter(task_name=SUMMARISE_CALLERS_TASK).exists():
                 summarise_search_callers(repeat=Task.HOURLY, repeat_until=None)
+
+            if not Task.objects.filter(task_name=BROKEN_REPORTS_TASK).exists():
+                check_reported_pages(repeat=Task.HOURLY, repeat_until=None)
 
         except Exception:
             # Don't prevent startup if background task scheduling fails
