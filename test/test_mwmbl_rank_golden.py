@@ -25,6 +25,7 @@ import pytest
 from zstandard import ZstdCompressor, ZstdDecompressor
 
 import mwmbl_rank
+from mwmbl.tokenizer import tokenize
 from mwmbl_rank import PageError, pack_index_page, read_index_page, write_index_page
 
 GOLDEN_PATH = Path(__file__).with_name("mwmbl_rank_golden.json")
@@ -135,7 +136,7 @@ def test_extracted_features(golden):
 
 def test_get_features_py_matches_extract_features_and_ignores_is_complete_and_term_case(golden):
     rows = [
-        mwmbl_rank.get_features_py(r["query"].split(), r["title"], r["url"], r["extract"], r["score"], is_complete)
+        mwmbl_rank.get_features_py(tokenize(r["query"]), r["title"], r["url"], r["extract"], r["score"], is_complete)
         for r, is_complete in zip(RECORDS, [True, False] * 5)
     ]
     assert_same_floats(rows, [row[:50] for row in golden["provider_features"]])
