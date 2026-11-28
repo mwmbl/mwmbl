@@ -8,7 +8,10 @@ A document is filed under every token that tokenize_document() derives from it -
 token hashes to one page - so a document typically lives on a dozen or more pages, and
 removing it from just the page you happened to find it on leaves it retrievable by every
 other term. tokenize_document() is a pure function of the url/title/extract/score stored
-in the index, so recomputing it recovers that full token set exactly.
+in the index, so recomputing it recovers that full token set - except for copies indexed
+before a change to the tokenizer, under terms it no longer produces. Those are left behind:
+retrieval still filters them out, and they are only reachable through terms like
+"wikipedia," that no query produces any more.
 
 Not every copy of a document comes from its own tokens, though. index_results_against_query
 files documents under the *query's* unigrams and bigrams, and curation files them under the

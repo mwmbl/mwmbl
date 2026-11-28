@@ -349,9 +349,22 @@ def revert_current_curation(request):
     )
 
 
+def _curation_term(curation) -> str:
+    """The term a curation's results are filed under.
+
+    Read from the results rather than re-tokenizing the query: a curation saved before a
+    change to the tokenizer is filed under the old term, and reverting it under the new
+    one would replace another term's results, like "python" for a curation of "python?".
+    """
+    stored_terms = [document["term"] for document in curation.new_results if document.get("term")]
+    if stored_terms:
+        return stored_terms[0]
+    return " ".join(tokenize(curation.query))
+
+
 def _revert_curation(curation):
     with TinyIndex(Document, index_path, "w") as indexer:
-        term = " ".join(tokenize(curation.query))
+        term = _curation_term(curation)
         documents = [Document(**doc) for doc in curation.original_index_results]
 
         page_index = indexer.get_key_page_index(term)
