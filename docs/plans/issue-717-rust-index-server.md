@@ -141,10 +141,17 @@ shared volume, or the old and new containers' servers would share it. A pytest f
 starts the server in a spawned process on a temporary socket, as `main.py` does.
 
 Lifecycle and failure handling:
-- `main.py` forwards SIGTERM to the server child once gunicorn has stopped, and waits for
-  it to drain within `INDEX_SERVER_STOP_SECONDS`. gunicorn's graceful timeout is set
-  explicitly, and the container's stop timeout must cover both. The child exits if its
-  parent dies (`PR_SET_PDEATHSIG`, set with `prctl` in the child before it serves).
+- `main.py` forwards SIGTERM to the server child from gunicorn's `on_exit` hook, which
+  runs in the master alone once the workers have stopped, and waits for it to drain within
+  `INDEX_SERVER_STOP_SECONDS`. gunicorn's graceful timeout is set explicitly, and the
+  container's stop timeout must cover both. The child gets SIGTERM if its parent dies
+  (`PR_SET_PDEATHSIG`, set with `prctl` in the child before it serves).
+- gunicorn's master reaps every child of its own, the server among them, so the master
+  waits on the process's sentinel rather than its exit code. Starting waits for the socket
+  and fails if the child exits first, and a server that exits unasked stops gunicorn with
+  an error, so the container restarts.
+- Workers clear multiprocessing's inherited record of the master's children after fork,
+  or a worker's exit handlers would terminate the task queue and seed crawl processes.
 - Client timeouts exceed the handover window. A retried write can be applied twice, so
   the stats from a retried request may undercount `new_urls`; the client documents this.
 - Batches are chunked to the server's 32 MiB body limit.

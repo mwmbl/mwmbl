@@ -11,9 +11,7 @@ callback that runs longer than 100 ms triggers a warning. Combined with
 accidental sync calls leaking into async paths.
 """
 
-import multiprocessing
 import os
-import time
 from typing import NamedTuple
 
 import pytest
@@ -21,7 +19,7 @@ from django.conf import settings
 from django_redis import get_redis_connection
 
 from mwmbl.apps import create_index
-from mwmbl.main import run_index_server, stop_index_server
+from mwmbl.main import IndexServerProcess
 from mwmbl.tinysearchengine.indexer import Document, TinyIndex
 
 INDEX_SERVER_NUM_PAGES = 64
@@ -86,13 +84,7 @@ def index_server(tmp_path):
     index_path = str(tmp_path / "index.tinysearch")
     socket_path = str(tmp_path / "index.sock")
     TinyIndex.create(Document, index_path, num_pages=INDEX_SERVER_NUM_PAGES, page_size=INDEX_SERVER_PAGE_SIZE)
-    args = (os.getpid(), socket_path, [("main", index_path)], 2)
-    process = multiprocessing.get_context("spawn").Process(target=run_index_server, args=args)
-    process.start()
-    deadline = time.monotonic() + 30
-    while not os.path.exists(socket_path):
-        assert process.is_alive() and time.monotonic() < deadline, "The index server did not start"
-        time.sleep(0.05)
+    process = IndexServerProcess(socket_path, [("main", index_path)], 2)
     yield IndexServer(socket_path, index_path)
-    stop_index_server(process, 10)
-    assert process.exitcode == 0
+    process.stop(10)
+    assert process.process.exitcode == 0
