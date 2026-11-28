@@ -18,6 +18,7 @@ murmurhash32 = "0.4.0"
 itertools = "0.15.0"
 ordered-float = "5.5.1"
 futures-util = "0.3.34"
+percent-encoding = "2.3.2"
 
 [build-dependencies]
 # The same features as the runtime dependency, so both parse numbers identically.
