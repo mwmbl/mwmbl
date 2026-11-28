@@ -123,44 +123,93 @@ bytes. A caller's write therefore resets it, as Python's locked `page()` does to
   and succeeds.
 - A write against a stale version changes nothing on disk.
 
-## PR 5: Python client; batch indexing through the server
-**Estimated added lines:** ~450
-**Files:** mwmbl/indexer/index_client.py, mwmbl/main.py, mwmbl/settings_common.py, mwmbl/indexer/index_batches.py, mwmbl/crawler/app.py, test/conftest.py, test/test_index_client.py, test/test_index_server_parity.py
+## PR 5: Python client and server startup (Done)
+**Estimated added lines:** ~390
+**Files:** mwmbl/indexer/index_client.py, mwmbl/main.py, mwmbl/settings_common.py, test/conftest.py, test/test_index_client.py, test/test_index_server.py
 
 `IndexClient` wraps the endpoints and returns the same `IndexedDocuments` and `Counter`
-types as today. Writes retry with backoff for a bounded time, which covers restarts and
-the handover, and then raise. POST /crawler/results answers 503, and the crawler
-retries. `main.py` starts the server before gunicorn when `RUN_INDEX_SERVER` is set. It
-defaults off, and must not be turned on in production until PR 6 has landed. Until then,
-Python still writes the same file under OFD locks that the owner threads don't take, and
-an owner thread that reads a page while Python is writing it would see an undecodable
-page and reset it. The socket goes in `INDEX_SERVER_SOCKET`, which must be a directory
-local to the container, never on a shared volume, or the old and new containers' servers
-would share it. `index_documents` and `index_pages` in `index_batches.py` call the
-client, and `/documents` is only called after `filter_blacklisted_documents` and text
-cleaning. A pytest fixture starts `serve_index` in a spawned process on a temporary
-socket.
+types as today. `stored_urls` and `new_urls` map to `IndexedURLs`. The page read and write
+are thin, and pass documents through as the server sends them, `extra` included, for
+PR 8 to build on. Requests retry with backoff for a bounded time, which covers restarts
+and the handover, and then raise `IndexServerUnavailable`. `main.py` starts the server
+before gunicorn when `RUN_INDEX_SERVER` is set. It defaults off, and must not be turned on
+in production until PR 8 has landed. Until then, Python still writes the same file under
+OFD locks that the owner threads don't take, and an owner thread that reads a page while
+Python is writing it would see an undecodable page and reset it. The socket goes in
+`INDEX_SERVER_SOCKET`, which must be in a directory local to the container, never on a
+shared volume, or the old and new containers' servers would share it. A pytest fixture
+starts the server in a spawned process on a temporary socket, as `main.py` does.
 
 Lifecycle and failure handling:
-- `main.py` forwards SIGTERM to the server child and waits for it to drain, within the
-  container's stop timeout, which is set explicitly. The child exits if its parent dies
-  (`PR_SET_PDEATHSIG`, set from Rust).
+- `main.py` forwards SIGTERM to the server child from gunicorn's `on_exit` hook, which
+  runs in the master alone once the workers have stopped, and waits for it to drain within
+  `INDEX_SERVER_STOP_SECONDS`. gunicorn's graceful timeout is set explicitly, and the
+  container's stop timeout must cover both. The child gets SIGTERM if its parent dies
+  (`PR_SET_PDEATHSIG`, set with `prctl` in the child before it serves).
+- gunicorn's master reaps every child of its own, the server among them, so the master
+  waits on the process's sentinel rather than its exit code. Starting waits for the socket
+  and fails if the child exits first, and a server that exits unasked stops gunicorn with
+  an error, so the container restarts.
+- Workers clear multiprocessing's inherited record of the master's children after fork,
+  or a worker's exit handlers would terminate the task queue and seed crawl processes.
 - Client timeouts exceed the handover window. A retried write can be applied twice, so
-  the stats from a retried request may undercount `new_urls`: document this, or add a
-  request id.
+  the stats from a retried request may undercount `new_urls`; the client documents this.
 - Batches are chunked to the server's 32 MiB body limit.
-- `stored_urls` and `new_urls` map to `IndexedURLs`.
+
+## PR 6: Make Rust indexing match Python
+**Estimated added lines:** ~300
+**Files:** rust/mwmbl_core/src/indexer.rs, rust/mwmbl_core/src/agreement.rs, rust/mwmbl_core/src/index.rs, rust/mwmbl_core/tests/…, rust/crawler/Cargo.toml
+
+Indexing the same batches through the old Python path and through the server gives
+different pages, counts and agreements. Each difference is a change to the crawler's own
+indexing too, so raise the crawler version.
+- URLs with no domain (IP hosts, unparseable URLs): Rust's `index_documents` drops them
+  and Python keeps them. Check the blacklist only for a URL with a domain.
+- `trigram_similarity` gives NaN for two empty strings, where Python gives 1.0, and is
+  wrong for strings shorter than a trigram (it counts bytes, and `len() - 2` underflows).
+  A string shorter than a trigram is its own only gram, as in Python.
+- user_ids: Rust merges them ordered by crawl time and keeps all of them. Python merges
+  them in rank order with the kept text's author last, and keeps `MAX_USER_IDS` (2). The
+  agreements rely on the last id being the author.
+- Title dedup: Rust merges the user_ids of a document with the same title and another URL
+  into the one it keeps. Python drops the later one.
+- Page order: documents of different terms come out in HashMap order, so a page's order
+  isn't deterministic. Break ties as Python does, by the order the terms were first met.
+- Tokenization, **pending a decision from the maintainer**: Rust indexes every token and
+  splits a URL on every character but an ASCII letter or digit. Python takes the first 10
+  tokens and 10 bigrams of each field, splits a URL only on `/._`, and unquotes it first.
+  Matching Python keeps production's terms as they are; the alternative is to write down
+  Rust's as intended.
+
+- Once these are fixed, any difference left in which copy of a URL a page keeps is
+  explained by ranking, or fixed.
+- `make rust-core` passes.
+
+## PR 7: Batch indexing through the server
+**Estimated added lines:** ~180
+**Files:** mwmbl/indexer/index_batches.py, mwmbl/indexer/index_client.py, mwmbl/crawler/app.py, test/test_index_client.py, test/test_index_server_parity.py
+
+With `RUN_INDEX_SERVER` on, `index_documents` and `index_pages` in `index_batches.py` call
+the client, and `/documents` is only called after `filter_blacklisted_documents` and text
+cleaning. The old Python path stays until PR 9 deletes it; a setting chooses between them.
+POST /crawler/results answers 503 when the server is unavailable after the retries, and
+the crawler retries.
+
+Calling the client from the web workers:
+- Never synchronously on uvicorn's event loop: an async caller runs it in a thread.
+- Create it per process, after gunicorn forks, never in the master.
+- Its worst case, 180 s of retries or a 180 s timeout, exceeds gunicorn's 120 s worker
+  timeout, so a request waiting that long would have its worker killed. Choose the retry
+  and timeout budgets for web requests so that the whole request fits inside the worker
+  timeout, with a 503 rather than a killed worker when they run out.
 
 - A parity test runs the same fixture batches through the old Python path and through
-  the server, and compares the pages, `new_page_doc_counts`, URLs and agreements. Any
-  difference is fixed in Rust here, or written down as intended. It covers URLs with no
-  domain (IP hosts, unparseable URLs), which Rust's `index_documents` drops and Python
-  keeps.
-- `RUN_INDEX_SERVER` defaults off, and its setting says it must stay off in production
-  until PR 6 has landed.
+  the server, and compares the pages, `new_page_doc_counts`, URLs and agreements. It
+  covers URLs with no domain (IP hosts, unparseable URLs). Any difference left after PR 6
+  is fixed in Rust, or written down as intended.
 - `make check` and `make test` pass.
 
-## PR 6: Curation, purge, external cache and widgets through the server
+## PR 8: Curation, purge, external cache and widgets through the server
 **Estimated added lines:** ~250
 **Files:** mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_client.py, mwmbl/views.py, mwmbl/background.py, mwmbl/indexer/purge_blacklisted.py, mwmbl/indexer/external_cache.py, mwmbl/management/commands/index_widgets.py, test/…
 
@@ -188,7 +237,7 @@ Carrying documents through the client:
   (`restore_index`, `create_index`).
 - A test races two `page()` edits on one page through the server and keeps both.
 
-## PR 7: Delete Python page locking
+## PR 9: Delete Python page locking
 **Estimated added lines:** ~50 (mostly deletions)
 **Files:** mwmbl/tinysearchengine/indexer.py, mwmbl/indexer/index_batches.py, mwmbl/tinysearchengine/copy_index.py, test/…
 
@@ -201,7 +250,7 @@ term, as now.
 
 - No `fcntl` page locking is left in the codebase.
 
-## PR 8: Search reads through the server
+## PR 10: Search reads through the server
 **Estimated added lines:** ~250
 **Files:** mwmbl/search_setup.py, mwmbl/tinysearchengine/rank.py, mwmbl/indexer/index_client.py, scripts/bench_retrieve.py, test/…
 

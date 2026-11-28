@@ -212,6 +212,24 @@ HAS_DATABASE = True
 # `dokku config:set <app> RUN_BACKGROUND_TASKS=true`.
 RUN_BACKGROUND_TASKS = os.environ.get("RUN_BACKGROUND_TASKS", "false").lower() == "true"
 
+# Whether this container runs the Rust index server (rust/index_server, started by
+# mwmbl.main). See docs/plans/issue-717-rust-index-server.md: PR 7 of that plan sends
+# batch indexing through it.
+#
+# It MUST stay off in production until PR 8 of that plan has landed. Until then curation,
+# purge, the external cache and widgets still write the same files from Python, under OFD
+# page locks the server's owner threads don't take, and an owner thread reading a page
+# while Python writes it sees an undecodable page and resets it.
+RUN_INDEX_SERVER = os.environ.get("RUN_INDEX_SERVER", "false").lower() == "true"
+# Must be in a directory local to the container, never on a shared volume, or the servers
+# of the old and new containers in a deploy would share it.
+INDEX_SERVER_SOCKET = os.environ.get("INDEX_SERVER_SOCKET", "/tmp/mwmbl-index-server/index.sock")
+INDEX_SERVER_THREADS = 8  # owner threads per index
+# How long main.py waits for the server to apply its queued writes on SIGTERM, after
+# gunicorn's 30 s graceful stop. The container's stop timeout must exceed both:
+# `dokku ps:set <app> stop-timeout-seconds 75`.
+INDEX_SERVER_STOP_SECONDS = 30
+
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
 

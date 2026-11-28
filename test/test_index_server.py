@@ -1,42 +1,20 @@
 """The Rust index server, started as the server will start it, through mwmbl_rank."""
 
-import multiprocessing
-import os
-import signal
-import time
-
 import httpx
 import pytest
 
 from mwmbl.tinysearchengine.indexer import Document, DocumentState, TinyIndex
-from mwmbl_rank import serve_index
-
-
-def _serve(socket_path: str, index_path: str):
-    serve_index(socket_path, [("main", index_path)], 2)
 
 
 @pytest.fixture
-def index_server(tmp_path):
-    index_path = str(tmp_path / "index.tinysearch")
-    socket_path = str(tmp_path / "index.sock")
-    TinyIndex.create(Document, index_path, num_pages=64, page_size=4096)
-    process = multiprocessing.get_context("spawn").Process(target=_serve, args=(socket_path, index_path))
-    process.start()
-    client = httpx.Client(transport=httpx.HTTPTransport(uds=socket_path), base_url="http://index-server")
-    deadline = time.monotonic() + 30
-    while not os.path.exists(socket_path):
-        assert process.is_alive() and time.monotonic() < deadline, "The index server did not start"
-        time.sleep(0.05)
-    yield client, index_path
-    client.close()
-    os.kill(process.pid, signal.SIGTERM)
-    process.join(10)
-    assert process.exitcode == 0
+def server(index_server):
+    transport = httpx.HTTPTransport(uds=index_server.socket_path)
+    with httpx.Client(transport=transport, base_url="http://index-server") as client:
+        yield client, index_server.index_path
 
 
-def test_python_reads_the_pages_the_server_writes(index_server):
-    client, index_path = index_server
+def test_python_reads_the_pages_the_server_writes(server):
+    client, index_path = server
     document = {"title": "Rust", "url": "https://rust-lang.org/", "extract": "rust is a language"}
     with TinyIndex(Document, index_path) as index:
         page = index.get_key_page_index("rust")
@@ -55,8 +33,8 @@ def test_python_reads_the_pages_the_server_writes(index_server):
     }
 
 
-def test_a_conditional_write_lands_once_and_python_reads_it(index_server):
-    client, index_path = index_server
+def test_a_conditional_write_lands_once_and_python_reads_it(server):
+    client, index_path = server
     document = {"title": "Rust", "url": "https://rust-lang.org/", "extract": "rust is a language", "term": "rust"}
     with TinyIndex(Document, index_path) as index:
         page = index.get_key_page_index("rust")
