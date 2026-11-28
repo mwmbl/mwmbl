@@ -39,8 +39,9 @@ RUN uv venv /venv
 COPY pyproject.toml uv.lock /app/
 COPY mwmbl /app/mwmbl
 COPY mwmbl_rank /app/mwmbl_rank
-RUN mkdir -p /app/rust/mwmbl_core
+RUN mkdir -p /app/rust/mwmbl_core /app/rust/index_server
 COPY rust/mwmbl_core /app/rust/mwmbl_core
+COPY rust/index_server /app/rust/index_server
 
 # Working directory is /app
 # Install from uv.lock so the image ships the versions the tests ran against: uv pip

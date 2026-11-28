@@ -1,0 +1,18 @@
+[package]
+name = "index_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8"
+futures-util = "0.3.34"
+mwmbl_core = { version = "0.1.0", path = "../mwmbl_core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tower = { version = "0.5", features = ["limit"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["limit", "util"] }

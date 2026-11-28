@@ -31,7 +31,7 @@ REDIS_URL      ?= redis://127.0.0.1:6379
 TEST_REDIS_URL ?= redis://127.0.0.1:6379/15
 # Python tests that cross into the mwmbl_rank extension, run against the instrumented build.
 RUST_COVERAGE_TESTS ?= test/test_mwmbl_rank_golden.py test/test_rust_features.py test/test_rust_pipeline.py test/test_indexer.py \
-	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py
+	test/test_index_page_api.py test/test_index_page_writes.py test/test_copy_index.py test/test_index_server.py
 CARGO_HOME     ?= $(HOME)/.cargo
 
 DJANGO_SETTINGS_MODULE ?= mwmbl.settings_dev
@@ -107,16 +107,19 @@ test-file:
 	DATABASE_URL="$(DATABASE_URL)" REDIS_URL="$(REDIS_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 		uv run pytest $(FILE) -v $(PYTEST_ARGS)
 
-# The Rust crates under rust/: mwmbl_core, which mwmbl_rank links into the server, and the
-# crawler volunteers run. Their tests are Rust ones, so they run here rather than through
+# The Rust crates under rust/: mwmbl_core, which mwmbl_rank links into the server, the
+# index server, which mwmbl_rank links too, and the crawler volunteers run. Their tests are Rust ones, so they run here rather than through
 # pytest.
 rust-core:
 	cargo fmt --manifest-path rust/mwmbl_core/Cargo.toml --check
 	cargo fmt --manifest-path rust/crawler/Cargo.toml --check
+	cargo fmt --manifest-path rust/index_server/Cargo.toml --check
 	cargo clippy --manifest-path rust/mwmbl_core/Cargo.toml --all-targets --locked -- -D warnings
 	cargo clippy --manifest-path rust/crawler/Cargo.toml --all-targets --locked -- -D warnings
+	cargo clippy --manifest-path rust/index_server/Cargo.toml --all-targets --locked -- -D warnings
 	cargo test --manifest-path rust/mwmbl_core/Cargo.toml --locked
 	cargo test --manifest-path rust/crawler/Cargo.toml --locked
+	cargo test --manifest-path rust/index_server/Cargo.toml --locked
 
 # The server's Python extension. pyo3 needs a Python to build against, so this runs after
 # the venv exists; its tests cross into Python and run under coverage-rust and pytest.

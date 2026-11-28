@@ -157,6 +157,16 @@ pub enum IndexMode {
     WRITE,
 }
 
+/// What opening an index for writing does when another process holds its lock.
+#[derive(Debug, Clone, Copy)]
+pub enum LockPolicy {
+    /// Fail at once, as the crawler does: two crawlers must not share an index.
+    Fail,
+    /// Accept requests at once and apply them once the lock is taken, as the index server
+    /// does while the container it replaces finishes its writes.
+    Wait,
+}
+
 impl Document {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
@@ -314,6 +324,30 @@ impl TinyIndex {
         mode: IndexMode,
         num_threads: usize,
     ) -> anyhow::Result<TinyIndex> {
+        Self::open(path, mode, num_threads, LockPolicy::Fail)
+    }
+
+    /// Opens the index at `path` for writing, as `from_file` does in `WRITE` mode, but with
+    /// `policy` deciding what happens while another process holds its lock. With `Wait`,
+    /// requests queue until the owner threads have taken it.
+    ///
+    /// # Errors
+    ///
+    /// Fails as `from_file` does.
+    pub fn open_writer(
+        path: &Path,
+        num_threads: usize,
+        policy: LockPolicy,
+    ) -> anyhow::Result<TinyIndex> {
+        Self::open(path, IndexMode::WRITE, num_threads, policy)
+    }
+
+    fn open(
+        path: &Path,
+        mode: IndexMode,
+        num_threads: usize,
+        policy: LockPolicy,
+    ) -> anyhow::Result<TinyIndex> {
         let mut file = File::open(path)?;
         let mut metadata_bytes: [u8; 4096] = [0; METADATA_SIZE!()];
         file.read_exact(&mut metadata_bytes)?;
@@ -330,7 +364,8 @@ impl TinyIndex {
             .read(true)
             .write(matches!(mode, IndexMode::WRITE))
             .open(path)?;
-        if matches!(mode, IndexMode::WRITE) {
+        let wait_for_lock = matches!(mode, IndexMode::WRITE) && matches!(policy, LockPolicy::Wait);
+        if matches!(mode, IndexMode::WRITE) && matches!(policy, LockPolicy::Fail) {
             match file.try_lock() {
                 Ok(()) => {}
                 Err(TryLockError::WouldBlock) => bail!(
@@ -347,6 +382,7 @@ impl TinyIndex {
             metadata.page_size,
             metadata.num_pages,
             num_threads,
+            wait_for_lock,
         )?;
 
         Ok(Self {
@@ -402,6 +438,24 @@ impl TinyIndex {
     }
 
     #[must_use]
+    pub fn num_pages(&self) -> usize {
+        self.metadata.num_pages
+    }
+
+    /// Whether this handle's owner threads may touch the index's pages: always, unless it
+    /// was opened with `LockPolicy::Wait` and the lock isn't held yet.
+    #[must_use]
+    pub fn holds_lock(&self) -> bool {
+        self.partitions.holds_lock()
+    }
+
+    /// Stops waiting for the index's lock if it isn't held yet, failing the requests queued
+    /// meanwhile, so a server told to stop before the old one released the lock can exit.
+    pub fn abandon_lock_wait(&self) {
+        self.partitions.abandon_lock_wait();
+    }
+
+    #[must_use]
     pub fn get_key_page_index(&self, key: &str) -> usize {
         murmurhash32::murmurhash3_with_seed::<0>(key.as_bytes()) as usize % self.metadata.num_pages
     }
@@ -433,6 +487,11 @@ impl TinyIndex {
             receivers.push(receiver);
         }
         let replies = join_all(receivers).await;
+        // Owners that stopped waiting for the lock drop their requests unanswered, as they do
+        // a page they skip, but this time nothing at all was written.
+        if !self.partitions.holds_lock() {
+            bail!("The index's lock was never taken, so nothing was written");
+        }
         Ok(replies.into_iter().filter_map(Result::ok).collect())
     }
 
