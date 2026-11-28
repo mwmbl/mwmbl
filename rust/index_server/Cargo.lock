@@ -823,6 +823,7 @@ dependencies = [
  "itertools",
  "murmurhash32",
  "ordered-float",
+ "percent-encoding",
  "phf",
  "regex",
  "regex-syntax",
