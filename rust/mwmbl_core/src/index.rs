@@ -14,13 +14,14 @@ use std::io;
 use std::iter::zip;
 use std::os::unix::fs::FileExt;
 
+use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use zstd::bulk::{Compressor, Decompressor};
 use zstd::zstd_safe;
 
-use crate::constants::NUM_FIRST_TOKENS;
+use crate::constants::{NUM_BIGRAMS, NUM_FIRST_TOKENS};
 use crate::tokenizer::{get_bigrams, tokenize};
 
 /// Where the term sits in a document written as a tuple. Python's `Document.as_tuple` drops
@@ -284,8 +285,9 @@ pub fn write_index_page<T: Serialize>(
     Ok(num_stored)
 }
 
-/// The tokens to index a document under, with no repeats and in no particular order: every
-/// token of its title, URL and extract, and the bigrams of the first tokens of each.
+/// The tokens to index a document under, with no repeats and in no particular order: the
+/// first tokens of its title, URL and extract, and the bigrams of the first tokens of each.
+/// The same as `tokenize_document` in `mwmbl/indexer/index.py`.
 #[must_use]
 pub fn tokenize_document(url: &str, title: &str, extract: &str) -> Vec<String> {
     let token_lists = [
@@ -293,33 +295,33 @@ pub fn tokenize_document(url: &str, title: &str, extract: &str) -> Vec<String> {
         tokenize(&prepare_url_for_tokenizing(url)),
         tokenize(extract),
     ];
-    let bigrams: Vec<String> = token_lists
+    let tokens: HashSet<String> = token_lists
         .iter()
-        .flat_map(|tokens| first_bigrams(tokens))
-        .collect();
-    let tokens: HashSet<String> = bigrams
-        .into_iter()
-        .chain(token_lists.into_iter().flatten())
+        .flat_map(|tokens| first_tokens_and_bigrams(tokens))
         .collect();
     tokens.into_iter().collect()
 }
 
-fn first_bigrams(tokens: &[String]) -> Vec<String> {
+fn first_tokens_and_bigrams(tokens: &[String]) -> Vec<String> {
     let first_tokens = tokens.get(..NUM_FIRST_TOKENS).unwrap_or(tokens);
-    get_bigrams(NUM_FIRST_TOKENS, first_tokens)
+    let mut index_tokens = first_tokens.to_vec();
+    index_tokens.extend(get_bigrams(NUM_BIGRAMS, tokens));
+    index_tokens
 }
 
-/// `url` with each character but an ASCII letter or digit replaced by a space, for
-/// `tokenize`.
-///
-/// An `http://` or `https://` prefix is removed first, so the scheme is not a token.
+/// `url` percent-decoded, without its scheme or query string, and with each `/`, `.` and
+/// `_` replaced by a space, for `tokenize`. The same as `prepare_url_for_tokenizing` in
+/// `mwmbl/indexer/index.py`.
 #[must_use]
 pub fn prepare_url_for_tokenizing(url: &str) -> String {
-    let url = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .unwrap_or(url);
-    url.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
-        .collect()
+    let decoded = percent_decode_str(url).decode_utf8_lossy();
+    let without_scheme = decoded
+        .strip_prefix("http://")
+        .or_else(|| decoded.strip_prefix("https://"))
+        .unwrap_or(&decoded);
+    // A query string's tokens are ids and parameters nobody searches for.
+    let without_query = without_scheme
+        .split_once('?')
+        .map_or(without_scheme, |(path, _)| path);
+    without_query.replace(['/', '.', '_'], " ")
 }

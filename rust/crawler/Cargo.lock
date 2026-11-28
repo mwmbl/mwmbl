@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "crawler_rs"
-version = "2.0.11"
+version = "2.0.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4925,6 +4925,7 @@ dependencies = [
  "itertools 0.15.0",
  "murmurhash32",
  "ordered-float",
+ "percent-encoding",
  "phf 0.14.0",
  "rayon",
  "regex",

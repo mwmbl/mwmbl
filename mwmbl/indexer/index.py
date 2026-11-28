@@ -41,6 +41,8 @@ def prepare_url_for_tokenizing(url: str):
         url = url[len(HTTP_START) :]
     elif url.startswith(HTTPS_START):
         url = url[len(HTTPS_START) :]
+    # A query string's tokens are ids and parameters nobody searches for.
+    url = url.split("?")[0]
     for c in "/._":
         if c in url:
             url = url.replace(c, " ")
