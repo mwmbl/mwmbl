@@ -569,6 +569,11 @@ class ModerationHistory(Schema):
     items: list[ModeratedDomainSchema]
     count: int
 
+class BrokenRequest(Schema):
+    """Request schema for reporting a broken or missing search result."""
+
+    url: str = Field(description="The URL of the search result being reported as broken or missing", example="https://example.com/article")
+    query: str = Field(description="The search query that returned this result", example="python tutorial")
 
 class VoteRequest(Schema):
     """Request schema for voting on search results."""

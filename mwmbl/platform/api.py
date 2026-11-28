@@ -65,6 +65,7 @@ from mwmbl.platform.schemas import (
     AgreementResponse,
     ApiKeyCreatedResponse,
     ApiKeyListItem,
+    BrokenRequest,
     BulkDecisionRequest,
     ChangeEmailRequest,
     ChangeUsernameRequest,
@@ -746,6 +747,22 @@ def _index_stats(domain: str) -> dict:
         logger.warning("Could not read index stats for %s", domain, exc_info=True)
         return {}
 
+@router.post(
+    "/search-results/broken",
+    auth=JWTAuth(),
+    summary="Report a page in a search result as missing or broken",
+    description=(
+        "Report a page in a search result as missing or broken. "
+        "Requires a verified account."
+    ),
+    tags=["Search Result Voting"],
+)
+def report_broken_search_result(request, broken_request: BrokenRequest):
+    check_email_verified(request)
+
+    # Implement the logic to handle the broken search result report here
+    # For now, just return a success message
+    return {"status": "ok", "message": "Reported broken search result successfully."}
 
 @router.post(
     "/search-results/vote",
