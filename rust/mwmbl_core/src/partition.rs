@@ -20,9 +20,13 @@ use tokio::sync::oneshot;
 
 use crate::{
     constants::METADATA_SIZE,
-    index::{PageIoError, pack_page, read_index_page},
+    index::{
+        PageIoError, decode_page, pack_page, page_version, read_index_page, read_page_bytes,
+        write_index_page,
+    },
     indexer::{
-        Document, PageDocument, PageItem, StoredPage, combine_documents, find_stored_copies,
+        ConditionalWrite, Document, PageDocument, PageItem, StoredPage, VersionedPage,
+        combine_documents, find_stored_copies,
     },
     rank::HeuristicRanker,
 };
@@ -45,12 +49,26 @@ pub(crate) enum PageRequest {
         mark_term_synced: Option<String>,
         reply: oneshot::Sender<StoredPage>,
     },
+    ReadPage {
+        page: usize,
+        reply: oneshot::Sender<Result<VersionedPage, PageIoError>>,
+    },
+    /// Writes `docs` over the page only if its bytes still hash to `if_version`.
+    WritePage {
+        page: usize,
+        docs: Vec<Document>,
+        if_version: u64,
+        reply: oneshot::Sender<Result<ConditionalWrite, PageIoError>>,
+    },
 }
 
 impl PageRequest {
     fn page(&self) -> usize {
         match self {
-            PageRequest::Retrieve { page, .. } | PageRequest::Merge { page, .. } => *page,
+            PageRequest::Retrieve { page, .. }
+            | PageRequest::Merge { page, .. }
+            | PageRequest::ReadPage { page, .. }
+            | PageRequest::WritePage { page, .. } => *page,
         }
     }
 }
@@ -218,10 +236,21 @@ impl Owner {
             for request in round {
                 match request {
                     PageRequest::Retrieve { page, term, reply } => {
-                        if let Some(group) = pending.remove(&page) {
-                            self.merge(page, group);
-                        }
+                        self.flush(&mut pending, page);
                         respond(reply, self.read(page, Some(&term)));
+                    }
+                    PageRequest::ReadPage { page, reply } => {
+                        self.flush(&mut pending, page);
+                        respond(reply, self.read_versioned(page));
+                    }
+                    PageRequest::WritePage {
+                        page,
+                        docs,
+                        if_version,
+                        reply,
+                    } => {
+                        self.flush(&mut pending, page);
+                        respond(reply, self.write_if(page, &docs, if_version));
                     }
                     PageRequest::Merge {
                         page,
@@ -243,6 +272,13 @@ impl Owner {
         }
     }
 
+    /// Applies the merges queued for `page` so far, so a request after them sees them.
+    fn flush(&self, pending: &mut HashMap<usize, Vec<Merge>>, page: usize) {
+        if let Some(group) = pending.remove(&page) {
+            self.merge(page, group);
+        }
+    }
+
     fn offset(&self, page: usize) -> u64 {
         (page * self.page_size + METADATA_SIZE!()) as u64
     }
@@ -251,6 +287,42 @@ impl Owner {
         let documents: Vec<PageDocument> =
             read_index_page(&self.file, self.offset(page), self.page_size, term)?;
         Ok(documents.into_iter().map(|document| document.0).collect())
+    }
+
+    /// The page's documents and version. A page that doesn't decode reads as empty, with the
+    /// version of its corrupt bytes, so a write against that version resets it, as a merge
+    /// would.
+    fn read_versioned(&self, page: usize) -> Result<VersionedPage, PageIoError> {
+        let bytes = read_page_bytes(&self.file, self.offset(page), self.page_size)?;
+        let version = page_version(&bytes);
+        let documents = match decode_page::<PageDocument>(&bytes, None) {
+            Ok(documents) => documents.into_iter().map(|document| document.0).collect(),
+            Err(PageIoError::Unreadable(reason)) => {
+                eprintln!("Index page {page} is corrupt ({reason}); reading it as empty");
+                Vec::new()
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(VersionedPage { documents, version })
+    }
+
+    /// Re-reads the page and writes `docs` over it only if it is still at `if_version`.
+    /// Identical bytes are identical contents, so a page changed and changed back is
+    /// rightly the same version.
+    fn write_if(
+        &self,
+        page: usize,
+        docs: &[Document],
+        if_version: u64,
+    ) -> Result<ConditionalWrite, PageIoError> {
+        let offset = self.offset(page);
+        let current = read_page_bytes(&self.file, offset, self.page_size)?;
+        if page_version(&current) != if_version {
+            return Ok(ConditionalWrite::Conflict);
+        }
+        let items: Vec<PageItem> = docs.iter().map(PageItem).collect();
+        let num_stored = write_index_page(&self.file, offset, self.page_size, &items)?;
+        Ok(ConditionalWrite::Stored(num_stored))
     }
 
     /// Applies the merges to the page in order, each to the page as the one before left it,
@@ -419,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn a_retrieve_in_the_same_round_as_a_merge_sees_it() {
+    fn reads_in_the_same_round_as_a_merge_see_it() {
         let (owner, path) = owner("round");
         let (sender, receiver) = mpsc::channel();
         let (mut queued, _merge_receivers) =
@@ -441,10 +513,82 @@ mod tests {
                 reply,
             })
             .unwrap();
+        let (reply, read) = oneshot::channel();
+        sender
+            .send(PageRequest::ReadPage { page: 0, reply })
+            .unwrap();
         drop(sender);
         owner.run(&receiver);
 
         assert_eq!(retrieved.blocking_recv().unwrap().unwrap().len(), 1);
+        assert_eq!(read.blocking_recv().unwrap().unwrap().documents.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn merge_request(docs: Vec<Document>) -> (PageRequest, oneshot::Receiver<StoredPage>) {
+        let (reply, receiver) = oneshot::channel();
+        let request = PageRequest::Merge {
+            page: 0,
+            docs,
+            mark_term_synced: None,
+            reply,
+        };
+        (request, receiver)
+    }
+
+    type WriteReceiver = oneshot::Receiver<Result<ConditionalWrite, PageIoError>>;
+
+    fn write_request(docs: Vec<Document>, if_version: u64) -> (PageRequest, WriteReceiver) {
+        let (reply, receiver) = oneshot::channel();
+        let request = PageRequest::WritePage {
+            page: 0,
+            docs,
+            if_version,
+            reply,
+        };
+        (request, receiver)
+    }
+
+    fn run_round(owner: &Owner, requests: Vec<PageRequest>) {
+        let (sender, receiver) = mpsc::channel();
+        for request in requests {
+            sender.send(request).unwrap();
+        }
+        drop(sender);
+        owner.run(&receiver);
+    }
+
+    #[test]
+    fn a_conditional_write_after_a_merge_in_its_round_conflicts() {
+        let (owner, path) = owner("merge_then_write");
+        let version = owner.read_versioned(0).unwrap().version;
+        let (merge, _merged) = merge_request(vec![document("https://rust-lang.org/", "Rust", 1)]);
+        let (write, written) = write_request(Vec::new(), version);
+
+        run_round(&owner, vec![merge, write]);
+
+        let written = written.blocking_recv().unwrap().unwrap();
+        assert_eq!(written, ConditionalWrite::Conflict);
+        assert_eq!(owner.read_versioned(0).unwrap().documents.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_merge_after_a_conditional_write_in_its_round_applies_on_top_of_it() {
+        let (owner, path) = owner("write_then_merge");
+        let version = owner.read_versioned(0).unwrap().version;
+        let written_document = document("https://rust-lang.org/", "Rust", 1);
+        let (write, written) = write_request(vec![written_document], version);
+        let (merge, _merged) = merge_request(vec![document("https://other.example/", "Other", 2)]);
+
+        run_round(&owner, vec![write, merge]);
+
+        let written = written.blocking_recv().unwrap().unwrap();
+        assert_eq!(written, ConditionalWrite::Stored(1));
+        let documents = owner.read_versioned(0).unwrap().documents;
+        let mut urls: Vec<&str> = documents.iter().map(Document::url).collect();
+        urls.sort_unstable();
+        assert_eq!(urls, ["https://other.example/", "https://rust-lang.org/"]);
         std::fs::remove_file(path).unwrap();
     }
 }

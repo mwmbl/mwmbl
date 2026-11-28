@@ -153,6 +153,21 @@ def test_a_document_with_an_unreadable_state_keeps_its_other_values():
     assert documents[0].last_crawled == 123
 
 
+def test_a_page_item_with_more_elements_than_document_reads_its_known_fields():
+    """The Rust index server writes back the elements a newer build added to an item."""
+    with TemporaryDirectory() as temp_dir:
+        index_path = str(Path(temp_dir) / "temp-index.tinysearch")
+        TinyIndex.create(Document, index_path, num_pages=2, page_size=4096)
+        item = ["Title", "https://example.com", "Extract", 1.0, "term", None, None, 123, None, "newer"]
+        with TinyIndex(Document, index_path, "w") as index:
+            index._write_page([item], 0)
+
+        with TinyIndex(Document, index_path, "r") as index:
+            documents = index.get_page(0)
+
+    assert [(document.url, document.last_crawled) for document in documents] == [("https://example.com", 123)]
+
+
 def test_a_write_through_another_handle_is_visible_without_reopening():
     """Search and the external cache keep one read handle open for the life of the worker
     while writers come and go on short-lived 'w' handles, so a read has to see a write made

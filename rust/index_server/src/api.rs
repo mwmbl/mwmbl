@@ -8,7 +8,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -17,7 +17,7 @@ use futures_util::future::join_all;
 use mwmbl_core::{
     agreement::Agreement,
     blacklist_providers::StaticBlacklistProvider,
-    indexer::{Document, TinyIndex},
+    indexer::{ConditionalWrite, Document, TinyIndex},
 };
 use serde::{Deserialize, Serialize};
 use tower::limit::GlobalConcurrencyLimitLayer;
@@ -38,6 +38,7 @@ pub fn router(indexes: Indexes) -> Router {
         .route("/v1/{index}/documents", post(index_documents))
         .route("/v1/{index}/pages", post(index_pages))
         .route("/v1/{index}/retrieve", post(retrieve))
+        .route("/v1/{index}/page/{page}", get(read_page).put(write_page))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(GlobalConcurrencyLimitLayer::new(MAX_CONCURRENT_REQUESTS))
         .with_state(indexes)
@@ -46,6 +47,8 @@ pub fn router(indexes: Indexes) -> Router {
 pub enum ApiError {
     UnknownIndex(String),
     BadRequest(String),
+    /// A conditional write found the page changed, and wrote nothing.
+    Conflict,
     /// The server stopped before it could take the index's lock.
     Unavailable(anyhow::Error),
     Failed(anyhow::Error),
@@ -74,6 +77,11 @@ impl IntoResponse for ApiError {
                 (StatusCode::NOT_FOUND, format!("No index named {name}")).into_response()
             }
             ApiError::BadRequest(reason) => (StatusCode::BAD_REQUEST, reason).into_response(),
+            ApiError::Conflict => (
+                StatusCode::CONFLICT,
+                "The page has changed since that version",
+            )
+                .into_response(),
             ApiError::Unavailable(error) => {
                 (StatusCode::SERVICE_UNAVAILABLE, format!("{error:#}")).into_response()
             }
@@ -199,4 +207,79 @@ async fn retrieve(
         results.insert(term, documents);
     }
     Ok(Json(RetrieveResponse { results }))
+}
+
+/// The index, if `page` is one of its pages.
+fn index_with_page<'a>(
+    indexes: &'a Indexes,
+    name: &str,
+    page: usize,
+) -> Result<&'a TinyIndex, ApiError> {
+    let index = index(indexes, name)?;
+    let num_pages = index.num_pages();
+    if page >= num_pages {
+        return Err(ApiError::BadRequest(format!(
+            "Page {page} is not in an index of {num_pages} pages"
+        )));
+    }
+    Ok(index)
+}
+
+#[derive(Serialize)]
+struct PageResponse {
+    documents: Vec<Document>,
+    /// The page's version, a hash of its bytes, to pass back as `if_version`.
+    version: String,
+}
+
+/// A page's documents and version, for a read-modify-write with a conditional write.
+async fn read_page(
+    State(indexes): State<Indexes>,
+    Path((name, page)): Path<(String, usize)>,
+) -> Result<Json<PageResponse>, ApiError> {
+    let index = index_with_page(&indexes, &name, page)?;
+    let read = index
+        .read_page(page)
+        .await
+        .map_err(|error| ApiError::of(index, error))?;
+    Ok(Json(PageResponse {
+        documents: read.documents,
+        version: format!("{:016x}", read.version),
+    }))
+}
+
+#[derive(Deserialize)]
+struct WriteCondition {
+    if_version: String,
+}
+
+#[derive(Serialize)]
+struct WriteResponse {
+    num_stored: usize,
+}
+
+/// Writes the documents over the page, best first, only if it is still at `if_version`;
+/// otherwise 409 with nothing written. The page's owner thread compares, so a client that
+/// gets a 409 reads the page again and retries.
+async fn write_page(
+    State(indexes): State<Indexes>,
+    Path((name, page)): Path<(String, usize)>,
+    Query(condition): Query<WriteCondition>,
+    Json(request): Json<DocumentsRequest>,
+) -> Result<Json<WriteResponse>, ApiError> {
+    let index = index_with_page(&indexes, &name, page)?;
+    let Ok(if_version) = u64::from_str_radix(&condition.if_version, 16) else {
+        return Err(ApiError::BadRequest(format!(
+            "{} is not a page version",
+            condition.if_version
+        )));
+    };
+    let written = index
+        .write_page_if(page, request.documents, if_version)
+        .await
+        .map_err(|error| ApiError::of(index, error))?;
+    match written {
+        ConditionalWrite::Stored(num_stored) => Ok(Json(WriteResponse { num_stored })),
+        ConditionalWrite::Conflict => Err(ApiError::Conflict),
+    }
 }

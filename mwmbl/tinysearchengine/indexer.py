@@ -4,7 +4,7 @@ import json
 import os
 import struct
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from enum import IntEnum
 from io import UnsupportedOperation
 from logging import getLogger
@@ -178,6 +178,11 @@ class Document:
         while values[-1] is None:
             values = values[:-1]
         return tuple(values)
+
+
+# A page item can have more elements than Document has fields: the Rust index server keeps
+# the ones a newer build added and writes them back, so this build reads only its own.
+NUM_DOCUMENT_FIELDS = len(fields(Document))
 
 
 def cleaned_document(document: Document) -> Document:
@@ -411,7 +416,8 @@ class TinyIndex(Generic[T]):
         """
         results = self._get_page_tuples(i, term)
         items = []
-        for item in results:
+        for page_item in results:
+            item = page_item[:NUM_DOCUMENT_FIELDS]
             try:
                 items.append(self.item_factory(*item))
             except ValueError as e:

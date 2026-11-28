@@ -146,8 +146,9 @@ pub struct Document {
     #[serde(default)]
     source: Option<Coded<DocumentSource>>,
     /// The elements a page item from a newer build has after the nine this one knows, kept
-    /// to be written back unchanged.
-    #[serde(skip)]
+    /// to be written back unchanged. The API carries them as `extra`, so a client's
+    /// conditional write of a page it read keeps them too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     extra: Vec<Value>,
 }
 
@@ -435,6 +436,47 @@ impl TinyIndex {
         })?;
         let documents = receiver.await.context("The index owner thread stopped")??;
         Ok(documents)
+    }
+
+    /// The documents on page `page`, and its version for `write_page_if`. A page that
+    /// doesn't decode reads as empty, so a write against its version resets it.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the page isn't in the index, can't be read, or its owner thread has stopped.
+    pub async fn read_page(&self, page: usize) -> anyhow::Result<VersionedPage> {
+        let (reply, receiver) = oneshot::channel();
+        self.partitions
+            .send(PageRequest::ReadPage { page, reply })?;
+        let page = receiver.await.context("The index owner thread stopped")??;
+        Ok(page)
+    }
+
+    /// Writes as many of `documents` as fit over page `page`, best first, if it is still at
+    /// `if_version`. Otherwise nothing is written and it returns `Conflict`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the index is read only, the page isn't in it, can't be read or written, or
+    /// the documents won't pack, or if its owner thread has stopped.
+    pub async fn write_page_if(
+        &self,
+        page: usize,
+        documents: Vec<Document>,
+        if_version: u64,
+    ) -> anyhow::Result<ConditionalWrite> {
+        if matches!(self.mode, IndexMode::READ) {
+            bail!("Index is in read only mode");
+        }
+        let (reply, receiver) = oneshot::channel();
+        self.partitions.send(PageRequest::WritePage {
+            page,
+            docs: documents,
+            if_version,
+            reply,
+        })?;
+        let written = receiver.await.context("The index owner thread stopped")??;
+        Ok(written)
     }
 
     #[must_use]
@@ -771,6 +813,21 @@ impl<'de> Deserialize<'de> for PageDocument {
         document.extra = extra;
         Ok(PageDocument(document))
     }
+}
+
+/// A page's documents, and its version: a hash of its bytes as stored.
+pub struct VersionedPage {
+    pub documents: Vec<Document>,
+    pub version: u64,
+}
+
+/// What a conditional page write did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConditionalWrite {
+    /// The page was still at the version given, and this many documents fit on it.
+    Stored(usize),
+    /// The page had changed, so nothing was written.
+    Conflict,
 }
 
 #[derive(Default)]

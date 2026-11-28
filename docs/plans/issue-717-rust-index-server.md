@@ -102,7 +102,7 @@ with the GIL released. Copy `rust/index_server` in the Dockerfile builder stage.
   exits, and then applies the queued ones.
 - SIGTERM with writes queued applies them before exit.
 
-## PR 4: Conditional page reads and writes
+## PR 4: Conditional page reads and writes (Done)
 **Estimated added lines:** ~350
 **Files:** rust/mwmbl_core/src/indexer.rs, rust/index_server/src/api.rs, test/…
 
@@ -172,6 +172,17 @@ the client. The external cache keeps "never raises": a server error is logged an
 search goes on. The block may run more than once, so it must have no side effects
 beyond the page. Check each caller for this (for example, purge's removal counts must
 come from the final attempt).
+
+Carrying documents through the client:
+- The server returns a page item's elements beyond the nine it knows as `extra`. The
+  client keeps them on the documents it read, as a field on `Document` or alongside it,
+  and sends them back, or a write would drop what a newer build stored.
+- A write stores only the documents that fit and returns `num_stored`, dropping the tail
+  as `store()` does today. A caller that prepends to a page checks it.
+- When the attempts run out, `page()` logs the page and the number of attempts before it
+  raises.
+- Scores round-trip through the server as `f32`. Curated scores are small integers, which
+  survive exactly; other scores may lose precision past seven digits.
 
 - Nothing on the server opens the index in `"w"` mode any more, except offline tools
   (`restore_index`, `create_index`).

@@ -53,3 +53,19 @@ def test_python_reads_the_pages_the_server_writes(index_server):
         ("https://rust-lang.org/", "rust", None),
         ("https://doc.rust-lang.org/", "rust", DocumentState.ORGANIC_APPROVED),
     }
+
+
+def test_a_conditional_write_lands_once_and_python_reads_it(index_server):
+    client, index_path = index_server
+    document = {"title": "Rust", "url": "https://rust-lang.org/", "extract": "rust is a language", "term": "rust"}
+    with TinyIndex(Document, index_path) as index:
+        page = index.get_key_page_index("rust")
+    version = client.get(f"/v1/main/page/{page}").json()["version"]
+
+    written = client.put(f"/v1/main/page/{page}", params={"if_version": version}, json={"documents": [document]})
+    stale = client.put(f"/v1/main/page/{page}", params={"if_version": version}, json={"documents": []})
+
+    assert written.json() == {"num_stored": 1}, written.text
+    assert stale.status_code == 409
+    with TinyIndex(Document, index_path) as index:
+        assert [document.url for document in index.retrieve("rust")] == ["https://rust-lang.org/"]
