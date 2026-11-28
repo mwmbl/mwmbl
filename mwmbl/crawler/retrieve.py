@@ -349,11 +349,32 @@ def get_new_links(paragraphs: list[Paragraph], current_url):
     return new_links, extra_links
 
 
+# The same control characters crawl_url strips from the raw response bytes.
+# Numeric character references such as &#1; are ASCII on the wire, so they
+# only appear once the HTML parser decodes them into text, tails or attribute
+# values, which lxml then refuses to move around while cleaning.
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def strip_dom_control_chars(dom) -> None:
+    """Remove control characters decoded from numeric character references."""
+    for element in dom.iter():
+        if element.text:
+            element.text = CONTROL_CHARS_RE.sub("", element.text)
+        if element.tail:
+            element.tail = CONTROL_CHARS_RE.sub("", element.tail)
+        for name, value in element.attrib.items():
+            cleaned = CONTROL_CHARS_RE.sub("", value)
+            if cleaned != value:
+                element.attrib[name] = cleaned
+
+
 def extract_from_html_text(html_text: str) -> str:
     """Extract a clean plain-text snippet from an HTML fragment using the justext pipeline."""
     html_bytes = f"<html><body>{html_text}</body></html>".encode(DEFAULT_ENCODING)
     try:
         dom = html_to_dom(html_bytes, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
+        strip_dom_control_chars(dom)
         paragraphs = core.justext_from_dom(dom, utils.get_stoplist("English"))
     except Exception:
         return ""
@@ -459,6 +480,7 @@ def crawl_url(url, redis: Redis):
 
     try:
         dom = html_to_dom(content, DEFAULT_ENCODING, None, DEFAULT_ENC_ERRORS)
+        strip_dom_control_chars(dom)
     except Exception as e:
         logger.exception(f"Error parsing dom: {url}")
         return {
