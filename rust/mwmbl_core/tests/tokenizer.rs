@@ -48,6 +48,8 @@ fn tokens_lose_their_sentence_punctuation_but_not_their_own() {
             vec!["std::vector", "re", "ça", "quoted"],
         ),
         ("... ?! ()", vec!["...", "?!", "()"]),
+        ("cut…", vec![]),
+        ("a\u{1c}b c\u{1f}d", vec!["a", "b", "c", "d"]),
     ];
     for (text, expected) in cases {
         assert_eq!(tokenize(text), expected, "{text}");

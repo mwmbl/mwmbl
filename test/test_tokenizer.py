@@ -17,6 +17,8 @@ from mwmbl.tokenizer import tokenize
         (".NET - Node.js -- U.S.", [".net", "-", "node.js", "--", "u.s"]),
         ("std::vector re: «ça» “quoted”", ["std::vector", "re", "ça", "quoted"]),
         ("... ?! ()", ["...", "?!", "()"]),
+        ("cut…", []),
+        ("a\x1cb c\x1fd", ["a", "b", "c", "d"]),
     ],
 )
 def test_tokenize_strips_sentence_punctuation(text, tokens):
